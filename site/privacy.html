@@ -39,7 +39,7 @@
         <li>iOS push notifications use Apple Push Notification service.</li>
         <li>If the operator enables optional Twilio SMS, Twilio receives the destination phone number and the alert share link.</li>
       </ul>
-      <p>OpenFamily includes no advertising, analytics, or crash-reporting SDK. Use an HTTPS server address to protect traffic in transit. The publisher does not control security or data practices of services selected by a server operator.</p>
+      <p>OpenFamily requires an HTTPS server address and will not connect to a server over unencrypted HTTP. This encrypts network traffic in transit. Map tile requests and other optional services still go to the providers selected by the server operator, whose security and data practices the publisher does not control.</p>
 
       <h2>Your choices and deletion</h2>
       <p>Turn off Location sharing in the app or revoke location permission to stop this device reporting. You may manage your profile and delete your account in Settings. Deleting an account removes its account and associated location and device data from the server, subject to shared family records, audit records, and backups described by the operator. Shared places may remain for other family members.</p>

@@ -16,6 +16,7 @@ import 'profile_screen.dart';
 import 'families_screen.dart';
 import 'server_config_screen.dart';
 import 'welcome_screen.dart';
+import 'privacy_policy_screen.dart';
 
 /// Build-time device-preview override. The device-frame preview is served by
 /// the web engine but exists to rehearse mobile builds we cannot run (e.g.
@@ -534,6 +535,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           const Divider(height: 1),
           const _SectionHeader('About'),
+          ListTile(
+            leading: const Icon(Icons.privacy_tip_outlined, color: AppColors.purple),
+            title: const Text('Privacy policy'),
+            trailing: const Icon(Icons.chevron_right, color: AppColors.textMuted),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(builder: (_) => const PrivacyPolicyScreen()),
+            ),
+          ),
           const ListTile(
             leading: Icon(Icons.info_outline, color: AppColors.purple),
             title: Text('OpenFamily'),

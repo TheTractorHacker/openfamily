@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 
 import '../services/api_client.dart';
+import '../services/secure_url.dart';
 import '../services/server_config.dart';
 import '../services/tile_config.dart';
 import '../theme/app_theme.dart';
 import '../widgets/openfamily_brand.dart';
 import 'welcome_screen.dart';
+import 'privacy_policy_screen.dart';
 
 /// Server URL screen (first launch, or Settings → change server).
 ///
@@ -46,12 +48,8 @@ class _ServerConfigScreenState extends State<ServerConfigScreen> {
       setState(() => _error = 'Please enter your server URL.');
       return;
     }
-    final parsed = Uri.tryParse(url);
-    if (parsed == null ||
-        parsed.scheme.isEmpty ||
-        parsed.host.isEmpty ||
-        !(parsed.scheme == 'http' || parsed.scheme == 'https')) {
-      setState(() => _error = "That doesn't look like a valid URL.");
+    if (normalizeHttpsBaseUrl(url) == null) {
+      setState(() => _error = 'Enter a valid HTTPS server URL.');
       return;
     }
     setState(() {
@@ -108,7 +106,8 @@ class _ServerConfigScreenState extends State<ServerConfigScreen> {
               ),
               const SizedBox(height: 8),
               const Text(
-                'Enter your server address to get started.',
+                'Requires a self-hosted OpenFamily server with HTTPS.\n'
+                'Ask your family administrator for its secure address.',
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 16, color: AppColors.textMuted),
               ),
@@ -142,8 +141,15 @@ class _ServerConfigScreenState extends State<ServerConfigScreen> {
                 ),
               ),
               const Spacer(),
+              TextButton(
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                      builder: (_) => const PrivacyPolicyScreen()),
+                ),
+                child: const Text('Privacy policy'),
+              ),
               const Text(
-                'Your server URL is stored on this device only.\n'
+                'Your HTTPS server URL is stored on this device only.\n'
                 'It is sent nowhere except your own server.',
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 12, color: AppColors.textMuted),

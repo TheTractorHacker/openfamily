@@ -2,12 +2,13 @@
 //
 // The API base URL comes from:
 //   1. A value the user saved in `shared_preferences` (generic APK / Settings).
-//   2. An optional compile-time `--dart-define=OPENFAMILY_API_URL` hint when
-//      nothing is stored yet. A dart-define never locks the URL.
+//   2. An optional HTTPS compile-time `--dart-define=OPENFAMILY_API_URL` hint
+//      when nothing is stored yet. A dart-define never locks the URL.
 
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app_config.dart';
+import 'secure_url.dart';
 
 const String _kPrefKey = 'wb_api_base_url';
 
@@ -26,22 +27,29 @@ class ServerConfig {
   /// Whether a non-empty URL is configured.
   bool get isConfigured => _apiBaseUrl.isNotEmpty;
 
-  /// Loads the stored URL. A dart-define is only a first-launch hint.
+  /// Loads a stored HTTPS URL. A dart-define is only a secure first-launch hint.
   Future<void> load() async {
     if (_loaded) return;
     _loaded = true;
     final prefs = await SharedPreferences.getInstance();
     final stored = prefs.getString(_kPrefKey) ?? '';
-    if (stored.isNotEmpty) {
-      _apiBaseUrl = stored;
+    final String? secureStored = normalizeHttpsBaseUrl(stored);
+    if (secureStored != null) {
+      _apiBaseUrl = secureStored;
       return;
     }
-    _apiBaseUrl = kApiBaseUrl;
+    if (stored.isNotEmpty) {
+      await prefs.remove(_kPrefKey);
+    }
+    _apiBaseUrl = normalizeHttpsBaseUrl(kApiBaseUrl) ?? '';
   }
 
   /// Persists a user-entered URL and updates the live value.
   Future<void> setUrl(String url) async {
-    final cleaned = url.trim().replaceAll(RegExp(r'/+$'), '');
+    final String? cleaned = normalizeHttpsBaseUrl(url);
+    if (cleaned == null) {
+      throw ArgumentError.value(url, 'url', 'A valid HTTPS URL is required.');
+    }
     _apiBaseUrl = cleaned;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_kPrefKey, cleaned);

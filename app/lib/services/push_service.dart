@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'api_client.dart';
 import 'device_service.dart';
 import 'location_refresh_service.dart';
+import 'secure_url.dart';
 import 'unifiedpush_bridge.dart';
 
 /// Registers this device for push (UnifiedPush/ntfy on Android, APNs on iOS)
@@ -126,8 +127,9 @@ class PushService {
     } catch (_) {}
     try {
       await registerUnifiedPush(
-        ntfyBaseUrl:
-            (ntfyBaseUrl == null || ntfyBaseUrl.isEmpty) ? null : ntfyBaseUrl,
+        ntfyBaseUrl: (ntfyBaseUrl != null && isHttpsUrl(ntfyBaseUrl))
+            ? ntfyBaseUrl.trim()
+            : null,
       );
     } catch (_) {}
   }

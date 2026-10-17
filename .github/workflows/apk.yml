@@ -1,4 +1,4 @@
-name: Build Android APK
+name: Build Android APK and Play bundle
 
 # Builds a signed release APK on merges that touch the Flutter app (and on
 # manual dispatch) and publishes it as a GitHub Release tagged apk-<run_number>
@@ -69,6 +69,17 @@ jobs:
       - name: Build release APK
         working-directory: app
         run: flutter build apk --release --build-number=${{ github.run_number }}
+
+      - name: Build Google Play App Bundle
+        working-directory: app
+        run: flutter build appbundle --release --build-number=${{ github.run_number }}
+
+      - name: Keep Google Play bundle for manual upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: openfamily-play-bundle-${{ github.run_number }}
+          path: app/build/app/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
 
       - name: Stage APK
         run: |

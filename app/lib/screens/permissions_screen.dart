@@ -73,10 +73,14 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
           permission: OnboardingPermission.location,
           icon: Icons.location_on,
           title: 'Location access',
-          why: 'OpenFamily shows your family where you are on the map. Choose '
-              '"Always Allow" so it keeps working in the background — even when '
-              'the app is closed — so your family can see you\'re safe.',
-          consequence: 'Without "Always Allow", background tracking won\'t work '
+          why: 'OpenFamily collects and sends your precise location to your '
+              'configured server to enable family location sharing, location '
+              'history, and arrival and departure alerts, even when the app '
+              'is closed or not in use. Your family members and server '
+              'administrator can view shared locations. Choose "Always Allow" '
+              'to enable background location sharing.',
+          consequence:
+              'Without "Always Allow", background tracking won\'t work '
               '— your family won\'t see your location when the app is closed.',
           buttonLabel: 'Allow Location',
         ),
@@ -348,85 +352,95 @@ class _PermissionStepView extends StatelessWidget {
     final bool denied = state != null && !granted;
     final bool permanentlyDenied = state == PermissionState.permanentlyDenied;
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 32),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Container(
-            width: 96,
-            height: 96,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: granted
-                  ? AppColors.statusGreen.withValues(alpha: 0.12)
-                  : AppColors.surfaceTint,
-            ),
-            child: Icon(
-              granted ? Icons.check_circle : step.icon,
-              size: 48,
-              color: granted ? AppColors.statusGreen : AppColors.purple,
-            ),
+    return LayoutBuilder(builder: (context, constraints) {
+      return SingleChildScrollView(
+        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            minHeight: (constraints.maxHeight - 48).clamp(0, double.infinity),
           ),
-          const SizedBox(height: 24),
-          Row(
+          child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Text(
-                step.title,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.w700,
+              Container(
+                width: 96,
+                height: 96,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: granted
+                      ? AppColors.statusGreen.withValues(alpha: 0.12)
+                      : AppColors.surfaceTint,
+                ),
+                child: Icon(
+                  granted ? Icons.check_circle : step.icon,
+                  size: 48,
+                  color: granted ? AppColors.statusGreen : AppColors.purple,
                 ),
               ),
-              if (step.optional) ...[
-                const SizedBox(width: 8),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: AppColors.purple.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: const Text(
-                    'Optional',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.purple,
+              const SizedBox(height: 24),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Flexible(
+                    child: Text(
+                      step.title,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ),
+                  if (step.optional) ...[
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: AppColors.purple.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Text(
+                        'Optional',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.purple,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+              const SizedBox(height: 12),
+              Text(
+                step.why,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 15,
+                  height: 1.4,
+                  color: AppColors.textMuted,
+                ),
+              ),
+              if (denied) ...[
+                const SizedBox(height: 16),
+                Text(
+                  permanentlyDenied
+                      ? 'This permission is permanently denied. Tap "Open Settings" '
+                          'below to enable it.'
+                      : needsManualSettings
+                          ? 'On iOS, choose "Always Allow" in Settings to enable '
+                              'background tracking. Tap "Open Settings" below.'
+                          : 'You can enable this later in Settings.',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                      fontSize: 13, color: AppColors.statusOrange),
                 ),
               ],
             ],
           ),
-          const SizedBox(height: 12),
-          Text(
-            step.why,
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              fontSize: 15,
-              height: 1.4,
-              color: AppColors.textMuted,
-            ),
-          ),
-          if (denied) ...[
-            const SizedBox(height: 16),
-            Text(
-              permanentlyDenied
-                  ? 'This permission is permanently denied. Tap "Open Settings" '
-                      'below to enable it.'
-                  : needsManualSettings
-                      ? 'On iOS, choose "Always Allow" in Settings to enable '
-                          'background tracking. Tap "Open Settings" below.'
-                      : 'You can enable this later in Settings.',
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 13, color: AppColors.statusOrange),
-            ),
-          ],
-        ],
-      ),
-    );
+        ),
+      );
+    });
   }
 }

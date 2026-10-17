@@ -1,4 +1,5 @@
 import 'api_client.dart';
+import 'secure_url.dart';
 import 'server_features.dart';
 
 /// Public OSM street tiles. Used until [GET /config] supplies an override.
@@ -28,11 +29,11 @@ class TileConfig {
       final Map<String, dynamic> cfg = await ApiClient.getPushConfig();
       final String? street = cfg['tile_url'] as String?;
       final String? satellite = cfg['satellite_tile_url'] as String?;
-      if (street != null && street.isNotEmpty) {
-        streetUrl = street;
+      if (street != null && isHttpsUrl(street)) {
+        streetUrl = street.trim();
       }
-      if (satellite != null && satellite.isNotEmpty) {
-        satelliteUrl = satellite;
+      if (satellite != null && isHttpsUrl(satellite)) {
+        satelliteUrl = satellite.trim();
       }
       ServerFeatures.instance.apply(cfg);
     } catch (_) {
