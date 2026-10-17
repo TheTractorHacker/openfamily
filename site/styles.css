@@ -78,6 +78,13 @@ img { display: block; max-width: 100%; height: auto; }
 p { text-wrap: pretty; }
 h1, h2, h3 { text-wrap: balance; }
 .shell { width: min(1180px, calc(100% - 40px)); margin-inline: auto; }
+.legal-main { max-width: 850px; padding-top: 150px; padding-bottom: 96px; }
+.legal-main h1 { margin: 14px 0 24px; font-size: clamp(42px, 7vw, 68px); line-height: 1; letter-spacing: -.055em; }
+.legal-main h2 { margin: 44px 0 12px; font-size: 23px; letter-spacing: -.025em; }
+.legal-main p, .legal-main li { color: var(--text-muted); font-size: 16px; line-height: 1.75; }
+.legal-main li + li { margin-top: 8px; }
+.legal-main a { color: var(--accent-ink); text-decoration: underline; text-underline-offset: 3px; }
+.legal-lede { color: var(--text) !important; font-size: 19px !important; }
 .section { padding: 126px 0; }
 .skip-link { position: fixed; left: 16px; top: -80px; z-index: 100; padding: 12px 16px; color: var(--on-accent); background: var(--accent); border-radius: 8px; font-weight: 800; }
 .skip-link:focus { top: 16px; }

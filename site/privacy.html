@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'" />
+    <meta name="description" content="OpenFamily privacy policy: what a self-hosted family location server stores, who can access it, and how to request deletion." />
+    <meta name="theme-color" content="#eef2f6" />
+    <link rel="canonical" href="https://openfamily.app/privacy.html" />
+    <link rel="icon" type="image/svg+xml" href="assets/brand/openfamily-icon.svg" />
+    <link rel="stylesheet" href="styles.css" />
+    <title>Privacy policy — OpenFamily</title>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header is-scrolled">
+      <div class="shell header-inner">
+        <a class="brand" href="/" aria-label="OpenFamily home"><img class="brand-logo brand-logo-light" src="assets/brand/openfamily-logo-horizontal.svg" alt="OpenFamily" /><img class="brand-logo brand-logo-dark" src="assets/brand/openfamily-logo-horizontal-dark.svg" alt="" /></a>
+        <nav aria-label="Primary navigation"><a href="/">Home</a><a href="delete-account.html">Delete account</a></nav>
+      </div>
+    </header>
+    <main id="main" class="legal-main shell">
+      <p class="section-kicker">Effective October 17, 2026</p>
+      <h1>OpenFamily privacy policy</h1>
+      <p class="legal-lede">OpenFamily is self-hosted family location software. Each server is operated independently. This policy explains what the software handles and which parties may receive information. The person or organization operating your OpenFamily server controls the data stored on that server; the software publisher does not run a hosted location service and cannot access your server’s database.</p>
+
+      <h2>Information handled by your server</h2>
+      <p>Depending on features you and your server operator use, an OpenFamily server stores account email, display name, password hash, optional phone number and avatar; family membership and role; device name, platform and push endpoint; precise location, time, accuracy, battery level and movement information; saved places and geofence settings; SOS, Help and Check-in notes and short-lived share tokens; optional emergency contact names and phone numbers; and authentication or administrator audit events.</p>
+      <p>When location sharing is enabled, the phone sends precise location to the configured server, including while the app is closed or not in use. The live map, history, and arrival or departure alerts use this information. Detailed history is normally retained for 90 days. The last known position remains until the account is deleted. SOS share links expire after 24 hours.</p>
+
+      <h2>Who can access information</h2>
+      <p>Members of the same family can view shared locations. A platform administrator for the server can access location information through the administration tools. Emergency contacts may receive an SOS share link if the server operator enables optional SMS. OpenFamily does not send an SOS to emergency services.</p>
+      <p>The server operator chooses hosting, backups, disk security, retention settings, and who receives administrator access. The operator may be able to read information stored on the server. Location data is not end-to-end encrypted.</p>
+
+      <h2>Information sent to other services</h2>
+      <ul>
+        <li>Map providers receive map tile requests for the area viewed and may receive the device IP address. OpenFamily defaults to OpenStreetMap street tiles and Esri satellite tiles; the operator can configure other or self-hosted tile services.</li>
+        <li>Android push notifications use the operator’s ntfy server or another UnifiedPush distributor.</li>
+        <li>iOS push notifications use Apple Push Notification service.</li>
+        <li>If the operator enables optional Twilio SMS, Twilio receives the destination phone number and the alert share link.</li>
+      </ul>
+      <p>OpenFamily includes no advertising, analytics, or crash-reporting SDK. Use an HTTPS server address to protect traffic in transit. The publisher does not control security or data practices of services selected by a server operator.</p>
+
+      <h2>Your choices and deletion</h2>
+      <p>Turn off Location sharing in the app or revoke location permission to stop this device reporting. You may manage your profile and delete your account in Settings. Deleting an account removes its account and associated location and device data from the server, subject to shared family records, audit records, and backups described by the operator. Shared places may remain for other family members.</p>
+      <p>For deletion or another request about information on a particular server, contact that server’s administrator, who controls the data and can carry out the request. If you cannot reach the administrator or need help identifying the right steps, contact OpenFamily support at <a href="mailto:contact@openfamily.app">contact@openfamily.app</a> and include the server address. Do not send passwords or precise location history by email. See the <a href="delete-account.html">account deletion instructions</a>.</p>
+
+      <h2>Children and families</h2>
+      <p>OpenFamily is designed for family groups, which can include children. A parent or guardian and the server operator should set up a child’s account, explain who can view the location, and use the location-sharing controls appropriate to the family. The app does not include advertising or analytics SDKs. The server operator remains responsible for lawful collection, parental consent where required, and responding to access or deletion requests for that server.</p>
+
+      <h2>Contact and updates</h2>
+      <p>For questions about the OpenFamily software or this policy, contact the publisher at <a href="mailto:contact@openfamily.app">contact@openfamily.app</a>. The publisher cannot directly access, change, or delete information on a self-hosted server. This policy may be updated when the software’s data handling changes; the effective date above identifies the current version.</p>
+    </main>
+    <footer class="site-footer"><div class="shell footer-grid"><div class="footer-brand"><img class="footer-icon footer-icon-light" src="assets/brand/openfamily-icon.svg" alt="" /><img class="footer-icon footer-icon-dark" src="assets/brand/openfamily-icon-dark.svg" alt="" /><div><strong>OpenFamily</strong><span>Your family. Your server.</span></div></div><div class="footer-links"><a href="/">Home</a><a href="delete-account.html">Delete account</a><a href="https://github.com/wheresfrank/openfamily">Source code</a></div><p>© <span data-year></span> OpenFamily. Open source under AGPL-3.0.</p></div></footer>
+    <script src="script.js"></script>
+  </body>
+</html>
