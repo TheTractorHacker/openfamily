@@ -30,7 +30,7 @@ RUN resolved_ref="${GIT_COMMIT}"; \
       -o /out/server ./cmd/server
 
 # Runtime stage
-FROM alpine:3.20
+FROM alpine:3.22
 RUN apk add --no-cache ca-certificates tzdata
 COPY --from=build /out/server /usr/local/bin/server
 EXPOSE 8080
