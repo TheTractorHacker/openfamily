@@ -1,0 +1,26 @@
+name: CA trust
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  trust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Regression tests with public CA fixtures
+        run: node --test scripts/ca-trust.test.mjs
+      - run: docker build --pull --target build -f backend/Dockerfile -t ca-api-build .
+      - run: docker build --pull -f backend/Dockerfile -t ca-api .
+      - run: docker build --pull --target build -t ca-updater-build updater
+      - run: docker build --pull -t ca-updater updater
+      - name: Verify all four image trust stores
+        run: |
+          for image in ca-api-build ca-api ca-updater-build ca-updater; do
+            docker run --rm --entrypoint sh -v "$PWD/scripts:/checks:ro" "$image" /checks/check-ca-trust.sh /checks/ca-fixtures
+          done
