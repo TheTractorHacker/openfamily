@@ -1,6 +1,6 @@
 module github.com/wheresfrank/openfamily/backend
 
-go 1.25.0
+go 1.27.3
 
 require (
 	github.com/coder/websocket v1.8.15
