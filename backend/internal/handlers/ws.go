@@ -12,6 +12,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/jackc/pgx/v5"
 	"github.com/wheresfrank/openfamily/backend/internal/auth"
+	"github.com/wheresfrank/openfamily/backend/internal/circles"
 	"github.com/wheresfrank/openfamily/backend/internal/models"
 )
 
@@ -101,14 +102,15 @@ func (s *Server) Stream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Resolve the caller's current family from the database (the JWT family
-	// claim can go stale when a user joins or creates a family).
-	familyID, err := s.familyIDForUser(r.Context(), claims.UserID)
+	// Resolve the caller's circles from the database (the JWT family claim
+	// can go stale when a user joins or creates a family). A legacy family is
+	// one circle, so a single-circle user behaves exactly as before.
+	circleIDs, err := circles.New(s.Pool).CircleIDs(r.Context(), claims.UserID)
 	if err != nil {
 		http.Error(w, "failed to load family", http.StatusInternalServerError)
 		return
 	}
-	if familyID == "" {
+	if len(circleIDs) == 0 {
 		http.Error(w, "no family", http.StatusNotFound)
 		return
 	}
@@ -136,12 +138,12 @@ func (s *Server) Stream(w http.ResponseWriter, r *http.Request) {
 		send: make(chan []byte, clientSendBuffer),
 		done: make(chan struct{}),
 	}
-	s.hub.register(familyID, claims.UserID, c)
+	s.hub.registerCircles(circleIDs, claims.UserID, c)
 	go s.hub.watch(c, wsRevalidateInterval, func(ctx context.Context) (bool, error) {
-		return s.familyStreamAuthorized(ctx, claims.UserID, claims.TokenVersion, familyID)
+		return s.circleStreamAuthorized(ctx, c, claims.UserID, claims.TokenVersion)
 	})
 	defer func() {
-		s.hub.unregister(familyID, c)
+		s.hub.unregister(c.familyID, c)
 		c.close()
 	}()
 
@@ -156,7 +158,7 @@ func (s *Server) Stream(w http.ResponseWriter, r *http.Request) {
 
 	// Members snapshot: full family member list with each member's latest
 	// location. Sent once, after welcome, before any live updates.
-	members, err := s.familyMembersSnapshot(ctx, familyID, claims.UserID)
+	members, err := s.circleMembersSnapshot(ctx, circleIDs, claims.UserID)
 	if err != nil {
 		slog.Warn("members snapshot failed", "err", err, "user_id", claims.UserID)
 		return
@@ -174,7 +176,7 @@ func (s *Server) Stream(w http.ResponseWriter, r *http.Request) {
 	// whose devices have gone quiet for one fresh fix (rate-limited per member
 	// inside MaybeRequestStaleLocations). Runs in the background; never blocks
 	// or fails the stream.
-	s.MaybeRequestStaleLocations(familyID, members)
+	s.MaybeRequestStaleLocations(circleIDs[0], members)
 
 	// Start the writer goroutine only after the welcome and snapshot frames
 	// are written, so there is a single writer at any time (coder/websocket
@@ -220,33 +222,55 @@ func (s *Server) Stream(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// familyStreamAuthorized re-checks, against the database, that the socket
+// circleStreamAuthorized re-checks, against the database, that the socket
 // owner still exists, still holds the token version the socket was opened
-// with (logout / password change bump it) and is still in the family the
-// socket is registered under.
-func (s *Server) familyStreamAuthorized(ctx context.Context, userID string, version int, familyID string) (bool, error) {
+// with (logout / password change bump it) and still belongs to at least one
+// circle. It also re-syncs the socket's circle subscriptions to current
+// membership, a backstop for any membership change that did not notify the hub
+// directly. A transient error leaves the socket as is.
+func (s *Server) circleStreamAuthorized(ctx context.Context, c *wsClient, userID string, version int) (bool, error) {
 	var current int
-	var fid *string
 	err := s.Pool.QueryRow(ctx,
-		`SELECT token_version, family_id FROM users WHERE id = $1`, userID,
-	).Scan(&current, &fid)
+		`SELECT token_version FROM users WHERE id = $1`, userID,
+	).Scan(&current)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
 	if err != nil {
 		return false, err
 	}
-	return current == version && fid != nil && *fid == familyID, nil
+	if current != version {
+		return false, nil
+	}
+	ids, err := circles.New(s.Pool).CircleIDs(ctx, userID)
+	if err != nil {
+		return false, err
+	}
+	if len(ids) == 0 {
+		return false, nil
+	}
+	s.hub.syncUserCircles(c, ids)
+	return true, nil
 }
 
-// familyMembersSnapshot returns every member of the family joined to their
-// last-known position (users -> member_positions). A member with no position
-// has null lat/lon/ts. Children (role != admin/member) do not see any email
-// addresses, matching ListMembers.
-func (s *Server) familyMembersSnapshot(ctx context.Context, familyID, callerID string) ([]wsMember, error) {
+// circleMembersSnapshot returns every co-member of the caller across circleIDs
+// joined to their last-known position (users -> member_positions). A member
+// with no position, or who has location sharing off in every circle they share
+// with the caller, has null location fields (the caller always sees
+// themselves). Children (role != admin/member) do not see any email addresses,
+// matching ListMembers. For a single-circle user this is the family list.
+func (s *Server) circleMembersSnapshot(ctx context.Context, circleIDs []string, callerID string) ([]wsMember, error) {
 	canManage, err := s.userCanManage(ctx, callerID)
 	if err != nil {
 		return nil, err
+	}
+	visible, err := circles.New(s.Pool).LocationVisibility(ctx, callerID, circleIDs)
+	if err != nil {
+		return nil, err
+	}
+	memberIDs := make([]string, 0, len(visible))
+	for id := range visible {
+		memberIDs = append(memberIDs, id)
 	}
 
 	rows, err := s.Pool.Query(ctx, `
@@ -260,8 +284,8 @@ func (s *Server) familyMembersSnapshot(ctx context.Context, familyID, callerID s
 			SELECT user_id, MAX(last_seen) AS last_seen
 			FROM devices GROUP BY user_id
 		) d ON d.user_id = u.id
-		WHERE u.family_id = $1
-		ORDER BY u.name`, familyID)
+		WHERE u.id = ANY($1::uuid[])
+		ORDER BY u.name`, memberIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -302,6 +326,9 @@ func (s *Server) familyMembersSnapshot(ctx context.Context, familyID, callerID s
 			AccuracyMeters:  accuracy,
 			LastSeenAt:      lastSeenAt,
 		}
+		if !visible[id] {
+			m.redactLocation()
+		}
 		// Redact email for non-manager (child) viewers, matching ListMembers.
 		if canManage {
 			m.Email = &email
@@ -312,6 +339,12 @@ func (s *Server) familyMembersSnapshot(ctx context.Context, familyID, callerID s
 		return nil, rows.Err()
 	}
 	return members, nil
+}
+
+// redactLocation clears every location-derived field (the member stays listed).
+func (m *wsMember) redactLocation() {
+	m.Lat, m.Lon, m.TS, m.BatteryPct, m.SpeedMPS, m.MotionState, m.AccuracyMeters, m.LastSeenAt =
+		nil, nil, nil, nil, nil, nil, nil, nil
 }
 
 // broadcastLocation fans out a live location update to the owner's family AND
@@ -327,9 +360,9 @@ func (s *Server) broadcastLocation(ownerID string, loc wsLocation) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	familyID, err := s.familyIDForUser(ctx, ownerID)
+	shared, err := circles.New(s.Pool).SharingCircles(ctx, ownerID)
 	if err != nil {
-		slog.Warn("location broadcast: resolve family failed", "err", err, "user_id", ownerID)
+		slog.Warn("location broadcast: resolve circles failed", "err", err, "user_id", ownerID)
 		return
 	}
 	msg, err := json.Marshal(loc)
@@ -337,10 +370,10 @@ func (s *Server) broadcastLocation(ownerID string, loc wsLocation) {
 		slog.Warn("location broadcast: marshal failed", "err", err)
 		return
 	}
-	// Family-scoped clients (unchanged behavior).
-	if familyID != "" {
-		s.hub.broadcast(familyID, msg)
-	}
+	// Only circles where the owner currently shares are fanned out to, plus
+	// the owner's own sockets. Membership and sharing are read per message, so
+	// a revocation takes effect on the very next update.
+	s.hub.broadcastCircles(shared, ownerID, msg)
 	// Platform admin clients see every live update regardless of family.
 	s.hub.broadcastAdmin(msg)
 }
@@ -358,9 +391,9 @@ func (s *Server) broadcastPresence(ownerID string, ts time.Time, batteryPct *flo
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	familyID, err := s.familyIDForUser(ctx, ownerID)
+	shared, err := circles.New(s.Pool).SharingCircles(ctx, ownerID)
 	if err != nil {
-		slog.Warn("presence broadcast: resolve family failed", "err", err, "user_id", ownerID)
+		slog.Warn("presence broadcast: resolve circles failed", "err", err, "user_id", ownerID)
 		return
 	}
 	msg, err := json.Marshal(wsPresence{
@@ -373,9 +406,7 @@ func (s *Server) broadcastPresence(ownerID string, ts time.Time, batteryPct *flo
 		slog.Warn("presence broadcast: marshal failed", "err", err)
 		return
 	}
-	if familyID != "" {
-		s.hub.broadcast(familyID, msg)
-	}
+	s.hub.broadcastCircles(shared, ownerID, msg)
 	s.hub.broadcastAdmin(msg)
 }
 

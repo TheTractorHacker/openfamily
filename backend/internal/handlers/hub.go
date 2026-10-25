@@ -21,7 +21,10 @@ type wsClient struct {
 	done     chan struct{}
 	once     sync.Once
 	userID   string
-	familyID string
+	familyID string // first circle at registration (legacy field)
+	// circles is the set of circle ids this socket is subscribed to. Guarded
+	// by hub.mu.
+	circles map[string]struct{}
 }
 
 // close signals the writer goroutine to stop and closes the connection. It is
@@ -86,20 +89,25 @@ func newHub() *hub {
 	}
 }
 
-// register adds a family-scoped client and records the authenticated user it
-// belongs to. Admin clients use the separate registerAdmin path and are never
-// included in familyUsers.
+// register adds a client subscribed to a single circle (a legacy family).
 func (h *hub) register(familyID, userID string, c *wsClient) {
+	h.registerCircles([]string{familyID}, userID, c)
+}
+
+// registerCircles adds a client subscribed to every circle in circleIDs and
+// records the authenticated user it belongs to. Admin clients use the separate
+// registerAdmin path and are never included in familyUsers.
+func (h *hub) registerCircles(circleIDs []string, userID string, c *wsClient) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	c.familyID = familyID
 	c.userID = userID
-	m := h.families[familyID]
-	if m == nil {
-		m = make(map[*wsClient]struct{})
-		h.families[familyID] = m
+	c.circles = make(map[string]struct{}, len(circleIDs))
+	for i, id := range circleIDs {
+		if i == 0 {
+			c.familyID = id
+		}
+		h.addCircleLocked(id, c)
 	}
-	m[c] = struct{}{}
 	if userID == "" {
 		return
 	}
@@ -111,20 +119,42 @@ func (h *hub) register(familyID, userID string, c *wsClient) {
 	userClients[c] = struct{}{}
 }
 
-// unregister removes a client from a family.
+func (h *hub) addCircleLocked(circleID string, c *wsClient) {
+	m := h.families[circleID]
+	if m == nil {
+		m = make(map[*wsClient]struct{})
+		h.families[circleID] = m
+	}
+	m[c] = struct{}{}
+	if c.circles == nil {
+		c.circles = make(map[string]struct{})
+	}
+	c.circles[circleID] = struct{}{}
+}
+
+func (h *hub) removeCircleLocked(circleID string, c *wsClient) {
+	if m := h.families[circleID]; m != nil {
+		delete(m, c)
+		if len(m) == 0 {
+			delete(h.families, circleID)
+		}
+	}
+	delete(c.circles, circleID)
+}
+
+// unregister removes a client from every circle it is subscribed to.
 func (h *hub) unregister(familyID string, c *wsClient) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.unregisterFamilyClientLocked(familyID, c)
 }
 
+// unregisterFamilyClientLocked drops the whole client (all circles and the
+// per-user index). familyID is kept for call-site compatibility.
 func (h *hub) unregisterFamilyClientLocked(familyID string, c *wsClient) {
-	m := h.families[familyID]
-	if m != nil {
-		delete(m, c)
-		if len(m) == 0 {
-			delete(h.families, familyID)
-		}
+	h.removeCircleLocked(familyID, c)
+	for id := range c.circles {
+		h.removeCircleLocked(id, c)
 	}
 	if c.userID == "" {
 		return
@@ -136,6 +166,82 @@ func (h *hub) unregisterFamilyClientLocked(familyID string, c *wsClient) {
 	delete(userClients, c)
 	if len(userClients) == 0 {
 		delete(h.familyUsers, c.userID)
+	}
+}
+
+// subscribeUser adds circleID to every live socket of userID (the user just
+// joined or created that circle).
+func (h *hub) subscribeUser(userID, circleID string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for c := range h.familyUsers[userID] {
+		h.addCircleLocked(circleID, c)
+	}
+}
+
+// unsubscribeUser removes circleID from every live socket of userID, effective
+// immediately (the user was removed, left, or the circle was deleted). A socket
+// left with no circle is closed.
+func (h *hub) unsubscribeUser(userID, circleID string) {
+	h.mu.Lock()
+	var dead []*wsClient
+	for c := range h.familyUsers[userID] {
+		h.removeCircleLocked(circleID, c)
+		if len(c.circles) == 0 {
+			dead = append(dead, c)
+		}
+	}
+	for _, c := range dead {
+		h.unregisterFamilyClientLocked(circleID, c)
+	}
+	h.mu.Unlock()
+	for _, c := range dead {
+		c.close()
+	}
+}
+
+// unsubscribeCircle removes circleID from every socket (circle deleted).
+func (h *hub) unsubscribeCircle(circleID string) {
+	h.mu.Lock()
+	var dead []*wsClient
+	for c := range h.families[circleID] {
+		h.removeCircleLocked(circleID, c)
+		if len(c.circles) == 0 {
+			dead = append(dead, c)
+		}
+	}
+	for _, c := range dead {
+		h.unregisterFamilyClientLocked(circleID, c)
+	}
+	h.mu.Unlock()
+	for _, c := range dead {
+		c.close()
+	}
+}
+
+// syncUserCircles makes the subscriptions of one socket equal to circleIDs
+// (self-healing backstop run by the periodic revalidation).
+func (h *hub) syncUserCircles(c *wsClient, circleIDs []string) {
+	want := make(map[string]struct{}, len(circleIDs))
+	for _, id := range circleIDs {
+		want[id] = struct{}{}
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if c.userID != "" {
+		if _, live := h.familyUsers[c.userID][c]; !live {
+			return // already dropped; do not resurrect
+		}
+	}
+	for id := range c.circles {
+		if _, ok := want[id]; !ok {
+			h.removeCircleLocked(id, c)
+		}
+	}
+	for id := range want {
+		if _, ok := c.circles[id]; !ok {
+			h.addCircleLocked(id, c)
+		}
 	}
 }
 
@@ -192,15 +298,22 @@ func (h *hub) disconnectAdminUser(userID string) {
 // familyID (family deleted).
 func (h *hub) disconnectFamily(familyID string) {
 	h.mu.Lock()
-	clients := make([]*wsClient, 0, len(h.families[familyID]))
+	var clients []*wsClient
 	for c := range h.families[familyID] {
 		clients = append(clients, c)
 	}
+	var dead []*wsClient
 	for _, c := range clients {
+		h.removeCircleLocked(familyID, c)
+		if len(c.circles) == 0 {
+			dead = append(dead, c)
+		}
+	}
+	for _, c := range dead {
 		h.unregisterFamilyClientLocked(familyID, c)
 	}
 	h.mu.Unlock()
-	for _, c := range clients {
+	for _, c := range dead {
 		c.close()
 	}
 }
@@ -315,6 +428,39 @@ func (h *hub) broadcast(familyID string, msg []byte) {
 		case c.send <- msg:
 		default:
 			h.unregister(familyID, c)
+			c.close()
+		}
+	}
+}
+
+// broadcastCircles enqueues msg once to every client subscribed to any circle
+// in circleIDs, plus every client of alsoUser (the subject always sees their
+// own updates). A client in several of the circles gets one copy. Slow clients
+// are dropped like in broadcast.
+func (h *hub) broadcastCircles(circleIDs []string, alsoUser string, msg []byte) {
+	h.mu.Lock()
+	seen := make(map[*wsClient]struct{})
+	for _, id := range circleIDs {
+		for c := range h.families[id] {
+			seen[c] = struct{}{}
+		}
+	}
+	if alsoUser != "" {
+		for c := range h.familyUsers[alsoUser] {
+			seen[c] = struct{}{}
+		}
+	}
+	clients := make([]*wsClient, 0, len(seen))
+	for c := range seen {
+		clients = append(clients, c)
+	}
+	h.mu.Unlock()
+
+	for _, c := range clients {
+		select {
+		case c.send <- msg:
+		default:
+			h.unregister(c.familyID, c)
 			c.close()
 		}
 	}
