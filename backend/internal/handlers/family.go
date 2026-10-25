@@ -287,7 +287,8 @@ func (s *Server) ListMembers(w http.ResponseWriter, r *http.Request) {
 	// are only filled for members who share with the caller (the caller always
 	// sees themselves); a member who turned sharing off stays listed.
 	az := circles.New(s.Pool)
-	if _, err := az.RequireMember(r.Context(), claims.UserID, familyID); err != nil {
+	callerMembership, err := az.RequireMember(r.Context(), claims.UserID, familyID)
+	if err != nil {
 		if errors.Is(err, circles.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "no family")
 			return
@@ -309,7 +310,7 @@ func (s *Server) ListMembers(w http.ResponseWriter, r *http.Request) {
 		SELECT u.id, u.email, u.name, u.role, u.totp_enabled, u.created_at, u.updated_at,
 		       u.avatar_data IS NOT NULL, u.avatar_version, u.avatar_updated_at,
 		       mp.lat, mp.lon, mp.ts, mp.battery_pct, mp.speed_mps, mp.motion_state, mp.accuracy_meters,
-		       d.last_seen
+		       d.last_seen, u.phone, u.platform_admin
 		FROM users u
 		LEFT JOIN member_positions mp ON mp.user_id = u.id
 		LEFT JOIN (
@@ -327,10 +328,11 @@ func (s *Server) ListMembers(w http.ResponseWriter, r *http.Request) {
 	members := []models.MemberWithLocation{}
 	for rows.Next() {
 		var m models.MemberWithLocation
+		var memberIsPlatformAdmin bool
 		if err := rows.Scan(&m.ID, &m.Email, &m.Name, &m.Role, &m.TOTPEnabled, &m.CreatedAt, &m.UpdatedAt,
 			&m.HasAvatar, &m.AvatarVersion, &m.AvatarUpdatedAt,
 			&m.Lat, &m.Lon, &m.TS, &m.BatteryPct, &m.SpeedMPS, &m.MotionState, &m.AccuracyMeters,
-			&m.LastSeenAt); err != nil {
+			&m.LastSeenAt, &m.Phone, &memberIsPlatformAdmin); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to scan member")
 			return
 		}
@@ -340,6 +342,12 @@ func (s *Server) ListMembers(w http.ResponseWriter, r *http.Request) {
 		}
 		if !canManage {
 			m.Email = "" // redact email for non-manager (child) viewers
+		}
+		// Phone numbers go only to admins of this family (who can edit them),
+		// never to plain members, and never for platform-admin accounts other
+		// than the caller's own.
+		if callerMembership.Role != circles.RoleAdmin || (memberIsPlatformAdmin && m.ID != claims.UserID) {
+			m.Phone = nil
 		}
 		members = append(members, m)
 	}

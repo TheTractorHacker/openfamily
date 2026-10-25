@@ -204,6 +204,7 @@ func main() {
 		r.Get("/trips/{id}", srv.GetTrip)
 		r.Post("/family/members/{id}/location-request", srv.RequestMemberLocation)
 		r.Patch("/family/members/{id}/role", srv.UpdateMemberRole)
+		r.Patch("/family/members/{id}", srv.UpdateFamilyMember)
 		r.Post("/family/invites", srv.CreateFamilyInvite)
 		r.Post("/family/join", srv.JoinFamily)
 
