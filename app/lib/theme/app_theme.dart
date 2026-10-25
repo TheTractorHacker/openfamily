@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'tokens.dart';
+export 'tokens.dart';
+
 /// Brand tokens for OpenFamily.
 ///
 /// Light is Ice (lime on blue-grey paper). Dark is Night (brighter lime on
@@ -242,8 +245,37 @@ ThemeData _buildTheme({
       style: FilledButton.styleFrom(
         backgroundColor: primary,
         foregroundColor: AppColors.onAccent,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        minimumSize: const Size(64, kMinTarget),
+        shape: const StadiumBorder(),
       ),
+    ),
+    outlinedButtonTheme: OutlinedButtonThemeData(
+      style: OutlinedButton.styleFrom(
+        minimumSize: const Size(64, kMinTarget),
+        shape: const StadiumBorder(),
+        side: BorderSide(color: muted.withValues(alpha: 0.5)),
+      ),
+    ),
+    navigationBarTheme: NavigationBarThemeData(
+      backgroundColor: brand.sheet,
+      surfaceTintColor: Colors.transparent,
+      indicatorColor: primary.withValues(alpha: 0.28),
+      height: 68,
+      iconTheme: WidgetStateProperty.resolveWith((states) {
+        return IconThemeData(
+          size: 26,
+          color: states.contains(WidgetState.selected) ? onSurface : muted,
+        );
+      }),
+      labelTextStyle: WidgetStateProperty.resolveWith((states) {
+        return TextStyle(
+          fontSize: 12,
+          fontWeight: states.contains(WidgetState.selected)
+              ? FontWeight.w800
+              : FontWeight.w600,
+          color: states.contains(WidgetState.selected) ? onSurface : muted,
+        );
+      }),
     ),
     floatingActionButtonTheme: FloatingActionButtonThemeData(
       backgroundColor: primary,
