@@ -4,6 +4,7 @@ package config
 import (
 	"errors"
 	"log/slog"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -61,6 +62,11 @@ type Config struct {
 	// warning; do not use it to serve cleartext location data on the public
 	// internet.
 	InsecureHTTP bool
+
+	// DBSSLDisableOK (config: DB_SSL_DISABLE_OK) permits sslmode=disable in
+	// production. Only appropriate when Postgres is reachable solely over the
+	// private Docker network (the default docker-compose.yml layout).
+	DBSSLDisableOK bool
 
 	// VerbosePush controls push content. When false (default), pushes name the
 	// PLACE but omit the tracked USER's name ("A family member arrived at
@@ -128,23 +134,8 @@ type Config struct {
 	FlutterAppDir string
 
 	// BuildVersion is the git ref embedded at build time (ldflags -X). "dev"
-	// for source runs; the updater sidecar's DEPLOY_REF_FILE takes precedence
-	// at runtime when present.
+	// for source runs.
 	BuildVersion string
-
-	// DeployRefFile is the file where the updater sidecar records the deployed
-	// git ref (config: DEPLOY_REF_FILE). Read at request time so the admin
-	// panel shows which commit is running. Empty disables the lookup.
-	DeployRefFile string
-
-	// UpdaterURL is the base URL of the updater sidecar service that applies
-	// server updates (config: UPDATER_URL, e.g. http://updater:8081). Empty
-	// disables self-update: the admin button reports versions only.
-	UpdaterURL string
-
-	// UpdaterToken is the shared secret required by the updater sidecar
-	// (config: UPDATER_TOKEN). Must match the sidecar's value exactly.
-	UpdaterToken string
 
 	// Twilio credentials. Empty AccountSID, AuthToken, or From disables SMS;
 	// in-app push and WebSocket alerts still work.
@@ -185,7 +176,9 @@ func Load() Config {
 		TLSCertFile:           getenv("TLS_CERT_FILE", ""),
 		TLSKeyFile:            getenv("TLS_KEY_FILE", ""),
 		TLSBehindProxy:        getenvBool("TLS_BEHIND_PROXY", false),
+		DBSSLDisableOK:        getenvBool("DB_SSL_DISABLE_OK", false),
 		InsecureHTTP:          getenvBool("INSECURE_HTTP", false),
+		DBSSLDisableOK:        getenvBool("DB_SSL_DISABLE_OK", false),
 		VerbosePush:           getenvBool("VERBOSE_PUSH", false),
 		NtfyBaseURL:           strings.TrimRight(getenv("NTFY_BASE_URL", ""), "/"),
 		TileURL:               getenv("TILE_URL", DefaultTileURL),
@@ -202,9 +195,6 @@ func Load() Config {
 		APKGitHubToken:        getenv("APK_GITHUB_TOKEN", ""),
 		FlutterAppDir:         getenv("FLUTTER_APP_DIR", "./app"),
 		BuildVersion:          buildVersion,
-		DeployRefFile:         getenv("DEPLOY_REF_FILE", ""),
-		UpdaterURL:            strings.TrimRight(getenv("UPDATER_URL", ""), "/"),
-		UpdaterToken:          getenv("UPDATER_TOKEN", ""),
 		TwilioAccountSID:      getenv("TWILIO_ACCOUNT_SID", ""),
 		TwilioAuthToken:       getenv("TWILIO_AUTH_TOKEN", ""),
 		TwilioFrom:            getenv("TWILIO_FROM", ""),
@@ -224,8 +214,8 @@ func (c Config) Validate() error {
 	if c.AppEnv == "production" {
 		if c.DatabaseURL == "" || c.DatabaseURL == defaultDatabaseURL {
 			errs = append(errs, errors.New("DATABASE_URL must be explicitly configured in production"))
-		} else if strings.Contains(c.DatabaseURL, "sslmode=disable") {
-			errs = append(errs, errors.New("DATABASE_URL must not use sslmode=disable in production"))
+		} else if !c.DBSSLDisableOK && !dbSSLEnforced(c.DatabaseURL) {
+			errs = append(errs, errors.New("DATABASE_URL must use sslmode=require, verify-ca or verify-full in production (set DB_SSL_DISABLE_OK=true only if Postgres is reachable solely over a private network)"))
 		}
 	}
 	// TLS is required in every environment: cleartext lat/lon must never be
@@ -239,6 +229,27 @@ func (c Config) Validate() error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// dbSSLEnforced reports whether the connection string demands TLS to Postgres.
+// It rejects disable, allow, prefer and a missing sslmode (the driver default
+// is prefer), for both URL and key=value DSN forms.
+func dbSSLEnforced(dsn string) bool {
+	mode := ""
+	if u, err := url.Parse(dsn); err == nil && u.Scheme != "" {
+		mode = u.Query().Get("sslmode")
+	} else {
+		for _, f := range strings.Fields(dsn) {
+			if v, ok := strings.CutPrefix(f, "sslmode="); ok {
+				mode = v
+			}
+		}
+	}
+	switch mode {
+	case "require", "verify-ca", "verify-full":
+		return true
+	}
+	return false
 }
 
 func getenvBool(key string, fallback bool) bool {
