@@ -754,4 +754,59 @@ class ApiClient {
     }
     return false;
   }
+
+  // --- trips ---
+
+  static Future<dynamic> getTrips({
+    required String userId,
+    required DateTime from,
+    required DateTime to,
+    int limit = 200,
+  }) {
+    return get(
+      '/trips',
+      query: <String, String>{
+        'user_id': userId,
+        'from': from.toUtc().toIso8601String(),
+        'to': to.toUtc().toIso8601String(),
+        'limit': '$limit',
+      },
+    );
+  }
+
+  static Future<dynamic> getTrip(String id, {int maxPoints = 400}) {
+    return get(
+      '/trips/${Uri.encodeComponent(id)}',
+      query: <String, String>{'max_points': '$maxPoints'},
+    );
+  }
+
+  static Future<dynamic> getTripsSummary({
+    required String userId,
+    required String period,
+    DateTime? date,
+    double? speedThresholdMps,
+  }) {
+    final Map<String, String> q = <String, String>{
+      'user_id': userId,
+      'period': period,
+    };
+    if (date != null) {
+      String two(int n) => n.toString().padLeft(2, '0');
+      q['date'] = '${date.year}-${two(date.month)}-${two(date.day)}';
+    }
+    if (speedThresholdMps != null) {
+      q['speed_threshold_mps'] = speedThresholdMps.toStringAsFixed(2);
+    }
+    return get('/trips/summary', query: q);
+  }
+
+  static Future<dynamic> computeTrips({
+    required DateTime from,
+    required DateTime to,
+  }) {
+    final String f = Uri.encodeQueryComponent(from.toUtc().toIso8601String());
+    final String t = Uri.encodeQueryComponent(to.toUtc().toIso8601String());
+    return post('/trips/compute?from=$f&to=$t');
+  }
 }
