@@ -71,16 +71,17 @@ class _SignUpScreenState extends State<SignUpScreen> {
         inviteCode: inviteCode.isEmpty ? null : inviteCode,
       );
     } on AccountCreatedException catch (e) {
-      // The account was created but we couldn't establish a session. Send the
-      // user to log in rather than leaving them to re-submit (which would 409).
+      // We couldn't establish a session. The server answers a duplicate email
+      // with the same 201 as a new account, so this may mean the account
+      // already existed. Never claim either way; just point to sign-in.
       if (!mounted) return;
       _redirectToLogin(e.message);
       return;
     } on ApiException catch (e) {
       if (!mounted) return;
       if (e.status == 409) {
-        // Email already registered — offer to log in instead.
-        _redirectToLogin('This email is already registered. Please log in.');
+        // Older servers answer a duplicate with 409. Stay neutral either way.
+        _redirectToLogin(AccountCreatedException.neutralMessage);
         return;
       }
       setState(() {

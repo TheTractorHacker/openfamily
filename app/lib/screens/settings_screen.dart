@@ -17,6 +17,7 @@ import 'families_screen.dart';
 import 'server_config_screen.dart';
 import 'welcome_screen.dart';
 import 'privacy_policy_screen.dart';
+import 'security_screen.dart';
 
 /// Build-time device-preview override. The device-frame preview is served by
 /// the web engine but exists to rehearse mobile builds we cannot run (e.g.
@@ -330,64 +331,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  Future<void> _deleteAccount() async {
-    if (_deletingAccount) return;
-    final bool? confirmed = await showDialog<bool>(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: const Text('Delete account?'),
-          content: const Text(
-            'This permanently deletes your account, devices, and location '
-            'history on this server. If you are the last admin of a family '
-            'that still has other people, promote someone else first.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              style: FilledButton.styleFrom(backgroundColor: AppColors.sosRed),
-              onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('Delete'),
-            ),
-          ],
-        );
-      },
-    );
-    if (confirmed != true || !mounted) return;
-    setState(() => _deletingAccount = true);
-    try {
-      await ApiClient.deleteAccount();
-      await AuthService.logout(notifyServer: false);
-    } on ApiException catch (e) {
-      if (!mounted) return;
-      setState(() => _deletingAccount = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            e.status == 409
-                ? e.message
-                : e.status == 404
-                    ? 'This server cannot delete accounts yet. Ask the operator to update it.'
-                    : e.message,
-          ),
-        ),
-      );
-      return;
-    } catch (_) {
-      if (!mounted) return;
-      setState(() => _deletingAccount = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Could not delete the account. Try again.')),
-      );
-      return;
-    }
-    if (!mounted) return;
-    Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute<void>(builder: (_) => const WelcomeScreen()),
-      (route) => false,
+  /// Account deletion now needs step-up (password, plus a code with 2FA), so
+  /// it lives under Security.
+  void _deleteAccount() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => const SecurityScreen()),
     );
   }
 
@@ -434,6 +382,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const _AppearanceTile(),
             const Divider(height: 1),
             const _SectionHeader('Privacy & Security'),
+          ListTile(
+            leading: const Icon(Icons.shield_outlined, color: AppColors.purple),
+            title: const Text('Security'),
+            subtitle: const Text(
+              'Two-factor, sessions, password, your data',
+            ),
+            trailing:
+                const Icon(Icons.chevron_right, color: AppColors.textMuted),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(builder: (_) => const SecurityScreen()),
+            ),
+          ),
           SwitchListTile(
             secondary: const Icon(
               Icons.fingerprint,

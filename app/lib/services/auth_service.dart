@@ -20,9 +20,12 @@ class TotpRequiredException implements Exception {
 /// Thrown when sign-up created the account but the follow-up login could not
 /// establish a session (so the user has an account but no tokens).
 class AccountCreatedException implements Exception {
-  const AccountCreatedException([
-    this.message = 'Account created. Please log in.',
-  ]);
+  const AccountCreatedException([this.message = neutralMessage]);
+
+  /// Deliberately neutral: the server returns the same 201 for a new and an
+  /// already-registered email, so the app must not say which happened.
+  static const String neutralMessage =
+      'Check your details. If you already have an account, try signing in.';
 
   final String message;
 

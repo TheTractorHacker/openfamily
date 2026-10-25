@@ -7,6 +7,7 @@ import '../services/push_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/openfamily_brand.dart';
 import 'map_screen.dart';
+import 'reset_password_screen.dart';
 import 'sign_up_screen.dart';
 
 /// Log In for existing users. Accepts an email address OR phone number plus
@@ -25,6 +26,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController _totpCode = TextEditingController();
   bool _obscure = true;
   bool _totpRequired = false;
+  bool _useRecovery = false;
   bool _submitting = false;
   String? _error;
 
@@ -42,7 +44,9 @@ class _LoginScreenState extends State<LoginScreen> {
       return;
     }
     if (_totpRequired && _totpCode.text.trim().isEmpty) {
-      setState(() => _error = 'Enter your two-factor code.');
+      setState(() => _error = _useRecovery
+          ? 'Enter one of your recovery codes.'
+          : 'Enter your two-factor code.');
       return;
     }
     setState(() {
@@ -53,7 +57,7 @@ class _LoginScreenState extends State<LoginScreen> {
       await AuthService.login(
         identifier: _identifier.text.trim(),
         password: _password.text,
-        totpCode: _totpRequired ? _totpCode.text.trim() : null,
+        totpCode: _totpRequired ? _totpCode.text.trim().replaceAll(' ', '') : null,
       );
     } on TotpRequiredException catch (e) {
       if (!mounted) return;
@@ -139,6 +143,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         setState(() {
                           _totpRequired = false;
                           _totpCode.clear();
+                          _useRecovery = false;
                           _error = null;
                         });
                       }
@@ -168,13 +173,40 @@ class _LoginScreenState extends State<LoginScreen> {
                     const SizedBox(height: 16),
                     TextField(
                       controller: _totpCode,
-                      keyboardType: TextInputType.number,
+                      keyboardType: _useRecovery
+                          ? TextInputType.text
+                          : TextInputType.number,
+                      textCapitalization: TextCapitalization.characters,
                       autocorrect: false,
-                      decoration: const InputDecoration(
-                        labelText: 'Two-factor code',
-                        hintText: '6-digit code',
-                        prefixIcon: Icon(Icons.lock_outline),
-                        border: OutlineInputBorder(),
+                      enableSuggestions: false,
+                      autofillHints: const <String>[AutofillHints.oneTimeCode],
+                      decoration: InputDecoration(
+                        labelText:
+                            _useRecovery ? 'Recovery code' : 'Two-factor code',
+                        hintText:
+                            _useRecovery ? 'ABCDE-FGHJK' : '6-digit code',
+                        prefixIcon: const Icon(Icons.lock_outline),
+                        border: const OutlineInputBorder(),
+                      ),
+                    ),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton(
+                        style: TextButton.styleFrom(
+                          minimumSize: const Size(48, 48),
+                        ),
+                        onPressed: _submitting
+                            ? null
+                            : () => setState(() {
+                                  _useRecovery = !_useRecovery;
+                                  _totpCode.clear();
+                                  _error = null;
+                                }),
+                        child: Text(
+                          _useRecovery
+                              ? 'Use an authenticator code instead'
+                              : 'Lost your device? Use a recovery code',
+                        ),
                       ),
                     ),
                   ],
@@ -206,6 +238,21 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                   ),
                   const SizedBox(height: 8),
+                  Align(
+                    child: TextButton(
+                      style: TextButton.styleFrom(
+                        minimumSize: const Size(48, 48),
+                      ),
+                      onPressed: () => Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => ResetPasswordScreen(
+                            initialEmail: _identifier.text.trim(),
+                          ),
+                        ),
+                      ),
+                      child: const Text('Have a reset code?'),
+                    ),
+                  ),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
