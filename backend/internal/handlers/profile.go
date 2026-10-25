@@ -207,8 +207,9 @@ func (s *Server) ChangeMyPassword(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to hash password")
 		return
 	}
+	// One statement: the new hash and the session cut-off land together (BSEC-020).
 	command, err := s.Pool.Exec(r.Context(),
-		`UPDATE users SET password_hash = $1, updated_at = now() WHERE id = $2`,
+		`UPDATE users SET password_hash = $1, token_version = token_version + 1, updated_at = now() WHERE id = $2`,
 		newHash, claims.UserID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update password")
@@ -219,9 +220,7 @@ func (s *Server) ChangeMyPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := s.Pool.Exec(r.Context(),
-		`UPDATE users SET token_version = token_version + 1, updated_at = now() WHERE id = $1`,
-		claims.UserID); err != nil {
+	if err := s.revokeAllSessions(r.Context(), claims.UserID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to invalidate sessions")
 		return
 	}
@@ -249,6 +248,17 @@ func (s *Server) DeleteMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.allowKey(w, "deleteme:user:"+claims.UserID, deleteMePerUser, deleteMeWindow) {
+		return
+	}
+	// Step-up (BSEC-020): the password, and a TOTP/recovery code when enabled.
+	var req struct {
+		Password string `json:"password"`
+		TOTPCode string `json:"totp_code"`
+	}
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&req) // empty body falls through to "password is required"
+	}
+	if !s.stepUp(w, r, claims.UserID, req.Password, req.TOTPCode) {
 		return
 	}
 

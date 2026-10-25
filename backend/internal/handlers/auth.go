@@ -2,8 +2,10 @@ package handlers
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -107,7 +109,12 @@ func (s *Server) Register(w http.ResponseWriter, r *http.Request) {
 	).Scan(&user.ID, &user.FamilyID, &user.Email, &user.Name, &user.Role, &user.TOTPEnabled, &user.CreatedAt, &user.UpdatedAt)
 	if err != nil {
 		if isUniqueViolation(err) {
-			writeError(w, http.StatusConflict, "email already registered")
+			// BSEC-012: answer exactly as for a new account, so the response
+			// does not reveal that the email exists. Nothing was created (the
+			// transaction rolls back, so an invite is not consumed either);
+			// the person can sign in or ask an admin for a reset code.
+			s.logAudit(r.Context(), "", "", "auth.register_duplicate", "registration for an existing email", clientIP(r))
+			writeJSON(w, http.StatusCreated, decoyRegistration(req.Email, req.Name, familyID, role))
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "failed to create user")
@@ -152,7 +159,9 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 	).Scan(&user.ID, &user.FamilyID, &user.Email, &user.Name, &user.Role,
 		&user.PasswordHash, &user.TOTPSecret, &user.TOTPEnabled, &user.TokenVersion, &user.CreatedAt, &user.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
-		// Avoid leaking which emails exist — same HTTP body and audit text.
+		// Avoid leaking which emails exist: same HTTP body and audit text,
+		// and the same Argon2 cost as a real account (BSEC-012).
+		burnPasswordCheck(req.Password)
 		s.loginFailed(emailKey)
 		s.logAudit(r.Context(), "", "", "auth.login_failed", "login failed", clientIP(r))
 		writeError(w, http.StatusUnauthorized, "invalid credentials")
@@ -172,7 +181,8 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if user.TOTPEnabled {
-		if req.TOTPCode == "" || !auth.ValidateTOTPWithSkew(user.TOTPSecret, req.TOTPCode, 1) {
+		// A 6-digit TOTP code (each time step usable once) or a recovery code.
+		if req.TOTPCode == "" || !s.verifySecondFactor(r.Context(), user.ID, user.TOTPSecret, req.TOTPCode) {
 			s.loginFailed(emailKey)
 			s.logAudit(r.Context(), user.ID, "", "auth.login_failed", "login failed", clientIP(r))
 			writeError(w, http.StatusUnauthorized, "invalid totp code")
@@ -195,6 +205,7 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to issue refresh token")
 		return
 	}
+	s.tagSession(r, jti)
 	// Opportunistic cleanup of long-expired rows; never blocks login.
 	go func() { _ = s.refreshSessions().Purge(context.Background()) }()
 	s.issueTokens(w, user, jti)
@@ -265,6 +276,10 @@ func (s *Server) Logout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.bumpTokenVersion(r.Context(), claims.UserID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to log out")
+		return
+	}
+	if err := s.revokeAllSessions(r.Context(), claims.UserID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to log out")
 		return
 	}
@@ -344,4 +359,16 @@ func (s *Server) issueTokens(w http.ResponseWriter, user models.User, refreshJTI
 func isUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
+}
+
+// decoyRegistration is the 201 body for a registration whose email already
+// exists. It has the shape of a real new user but a random id.
+func decoyRegistration(email, name string, familyID *string, role models.Role) models.User {
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
+	b[6] = b[6]&0x0f | 0x40 // UUID v4 layout
+	b[8] = b[8]&0x3f | 0x80
+	id := fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
+	now := time.Now()
+	return models.User{ID: id, FamilyID: familyID, Email: email, Name: name, Role: role, CreatedAt: now, UpdatedAt: now}
 }

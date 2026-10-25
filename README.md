@@ -511,8 +511,14 @@ For a fully private map, host your own tiles. The simplest option is
 
 ## Security
 
-- Passwords are hashed with **Argon2id**. TOTP is verified at login when
-  enabled on the account.
+- Passwords are hashed with **Argon2id**. TOTP (RFC 6238) can be enrolled via
+  `/auth/totp/*`; the secret is encrypted at rest with a key derived from
+  `JWT_SECRET` (HKDF), so **rotating `JWT_SECRET` makes enrolled TOTP secrets
+  unreadable** (affected users must be cleared and re-enroll). Legacy
+  plaintext secrets keep working. Recovery codes and password reset codes are
+  stored only as HMACs. Password reset has no email: an admin issues a code.
+- Sensitive actions (change password, disable TOTP, delete account) require the
+  current password, plus a TOTP/recovery code when TOTP is on.
 - Access tokens are short-lived; refresh tokens rotate via `/auth/refresh`.
 - Production (`APP_ENV=production`) refuses to boot on a default `JWT_SECRET`
   or an insecure `DATABASE_URL`.
@@ -549,12 +555,23 @@ For a fully private map, host your own tiles. The simplest option is
 |---|---|---|
 | GET | `/healthz` | Health check |
 | GET | `/config` | Public ntfy, tile URLs, and whether APNs / SMS are configured |
-| POST | `/auth/register` | Create account |
-| POST | `/auth/login` | Password + optional TOTP → token pair |
+| GET | `/` | 302 redirect to `/admin/` |
+| POST | `/auth/register` | Create account. An already-registered email gets the same 201 shape (nothing is created), so responses do not reveal which emails exist |
+| POST | `/auth/login` | Password + TOTP or recovery code (when enabled) → token pair. Unknown emails cost the same Argon2 work and get the same 401; each TOTP time step works once per user |
 | POST | `/auth/refresh` | Rotate refresh token |
+| POST | `/auth/password/reset` | Redeem an admin-issued reset code `{email, code, new_password}`. Single use, 30 min, rate-limited per IP and per email; every failure is the same 400; revokes all sessions and device keys |
+| POST | `/auth/password/change` | Change password `{current_password, new_password, totp_code?}`; revokes all other sessions and returns a fresh token pair |
+| POST | `/auth/totp/setup` | Start TOTP enrollment `{password}` → secret + otpauth URI. Secret is stored AES-256-GCM sealed (key derived from `JWT_SECRET` with HKDF), not active until confirmed |
+| POST | `/auth/totp/enable` | Confirm with a code `{code}` → 10 one-time recovery codes, shown once, stored as HMACs |
+| POST | `/auth/totp/disable` | `{password, code}` (TOTP or recovery code) |
+| GET | `/auth/sessions` | Active sign-ins (id, created, last used, expiry, user agent) |
+| DELETE | `/auth/sessions/{id}` | Revoke one sign-in. Its refresh token dies now; an access token already issued lives until it expires (15 min default) |
+| POST | `/auth/logout-all` | End every session, revoke device keys, drop sockets |
 | GET | `/me` | Signed-in profile |
 | PATCH | `/me` | Update display name and/or phone |
-| PATCH | `/me/password` | Change password (requires current password) |
+| PATCH | `/me/password` | Change password (requires current password; throttled; revokes all sessions) |
+| DELETE | `/me` | Delete the account and its data `{password, totp_code?}`. Refused (409) for the last admin of a family that still has other members: promote someone first. A sole member's family is dissolved. Audit-logged |
+| GET | `/me/export` | Stream your profile, devices, places you created and stored location history as JSON (ends with `"complete":true`; 2 per hour; audit-logged; no push tokens or keys) |
 | GET | `/me/contacts` | List emergency contacts |
 | POST | `/me/contacts` | Add an emergency contact |
 | DELETE | `/me/contacts/{id}` | Remove an emergency contact |
@@ -570,6 +587,7 @@ For a fully private map, host your own tiles. The simplest option is
 | POST | `/family/leave` | Leave (last admin cannot) |
 | GET | `/family/members` | List members |
 | PATCH | `/family/members/{id}/role` | Change a member's role |
+| POST | `/family/members/{id}/reset-code` | Family admin issues a password reset code for a same-family member (not for platform admins or yourself) |
 | POST | `/family/invites` | Create an invite code (admin) |
 | POST | `/family/join` | Join by invite code |
 | GET / POST | `/family/places` | List / create places |
@@ -609,6 +627,7 @@ All routes require a platform admin. The SPA at `/admin` calls these under
 | PATCH | `/api/admin/users/{id}/family` | Assign or unassign a family |
 | PATCH | `/api/admin/users/{id}/role` | Change family role |
 | PATCH | `/api/admin/users/{id}/password` | Reset password |
+| POST | `/api/admin/users/{id}/reset-code` | Issue a 30-minute single-use reset code for a user (returned once, stored hashed, 10/hour per issuer). Body `{"send_sms":true}` optionally texts it via the configured Twilio provider |
 | GET | `/api/admin/places` | Every saved place |
 | GET / POST | `/api/admin/invites` | List / create invite codes |
 | GET | `/api/admin/apk` | Download the latest Android APK (GitHub Release, cached in `APK_DIR`) |
