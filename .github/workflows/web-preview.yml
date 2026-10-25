@@ -12,6 +12,9 @@ on:
       - 'app/**'
       - '.github/workflows/web-preview.yml'
 
+permissions:
+  contents: read
+
 jobs:
   web:
     runs-on: ubuntu-latest
