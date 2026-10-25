@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 
+import '../models/alert.dart';
+import '../services/alert_service.dart';
 import '../services/api_client.dart';
+import 'alert_status_screen.dart';
 import '../services/location_service.dart';
 import '../theme/app_theme.dart';
 
@@ -15,6 +18,7 @@ class CheckInScreen extends StatefulWidget {
 class _CheckInScreenState extends State<CheckInScreen> {
   final TextEditingController _note = TextEditingController();
   bool _sent = false;
+  String? _alertId;
   bool _sending = false;
   String? _error;
   String _locationLabel = 'Finding your location…';
@@ -62,7 +66,11 @@ class _CheckInScreenState extends State<CheckInScreen> {
         body['lat'] = _lat;
         body['lon'] = _lon;
       }
-      await ApiClient.post('/alerts/check-in', body: body);
+      final dynamic response =
+          await ApiClient.post('/alerts/check-in', body: body);
+      if (response is Map && response['id'] is String) {
+        _alertId = response['id'] as String;
+      }
       if (!mounted) return;
       setState(() {
         _sent = true;
@@ -74,13 +82,13 @@ class _CheckInScreenState extends State<CheckInScreen> {
       if (!mounted) return;
       setState(() {
         _sending = false;
-        _error = e.message;
+        _error = 'Not sent. ${alertErrorMessage(e)}';
       });
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       setState(() {
         _sending = false;
-        _error = 'Couldn\'t check in. Please try again.';
+        _error = 'Not sent. ${alertErrorMessage(e)}';
       });
     }
   }
@@ -92,7 +100,21 @@ class _CheckInScreenState extends State<CheckInScreen> {
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(24),
-          child: _sent ? _buildSent() : _buildForm(),
+          child: _sent && _alertId != null
+              ? AlertStatusBody(
+                  alertId: _alertId!,
+                  kind: AlertKind.checkIn,
+                  title: 'Checked in',
+                  footer: [
+                    TextButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      child: const Text('Done'),
+                    ),
+                  ],
+                )
+              : _sent
+                  ? _buildSent()
+                  : _buildForm(),
         ),
       ),
     );
@@ -193,7 +215,7 @@ class _CheckInScreenState extends State<CheckInScreen> {
         ),
         const SizedBox(height: 8),
         const Text(
-          'Your family can now see your location.',
+          'Your family was notified. Emergency services were NOT contacted.',
           textAlign: TextAlign.center,
           style: TextStyle(fontSize: 15, color: AppColors.textMuted),
         ),

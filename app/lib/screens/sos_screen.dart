@@ -3,11 +3,14 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../models/alert.dart';
+import '../services/alert_service.dart';
 import '../services/api_client.dart';
 import '../services/location_reporter.dart';
 import '../services/location_service.dart';
 import '../services/server_features.dart';
 import '../theme/app_theme.dart';
+import 'alert_status_screen.dart';
 import 'safety_screen.dart';
 
 /// The SOS flow: a first-run explainer, tap-to-send (with confirm),
@@ -20,7 +23,15 @@ import 'safety_screen.dart';
 /// * **I'm safe** resolves the last real SOS, including after leaving
 ///   and coming back.
 class SosScreen extends StatefulWidget {
-  const SosScreen({super.key, this.smsConfigured});
+  const SosScreen({
+    super.key,
+    this.smsConfigured,
+    this.alertService = const AlertService(),
+    this.dialer = const EmergencyDialer(),
+  });
+
+  final AlertService alertService;
+  final EmergencyDialer dialer;
 
   /// When null, uses [ServerFeatures.smsConfigured].
   final bool? smsConfigured;
@@ -292,7 +303,8 @@ class _SosScreenState extends State<SosScreen> {
       if (!mounted) return;
       setState(() {
         _phase = _SosPhase.idle;
-        _error = 'Couldn\'t send SOS. Please try again.';
+        _error = 'SOS was not sent. Could not reach the server. Check your '
+            'connection and try again, or call emergency services.';
       });
     }
   }
@@ -308,9 +320,11 @@ class _SosScreenState extends State<SosScreen> {
   String _sendErrorMessage(ApiException e) {
     if (e.status == 429) {
       return 'An SOS was already sent recently. Wait a couple of minutes, '
-          'or tap I\'m safe if that alert is still active.';
+          'or tap I\'m safe if that alert is still active. If you need help '
+          'right now, call emergency services.';
     }
-    return e.message;
+    return 'SOS was not sent. ${alertErrorMessage(e, action: 'send SOS')} '
+        'You can try again, or call emergency services.';
   }
 
   void _cancel() {
@@ -386,11 +400,13 @@ class _SosScreenState extends State<SosScreen> {
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const Spacer(),
-              _buildBody(),
-              const Spacer(),
-            ],
+            children: _phase == _SosPhase.sent
+                ? [Expanded(child: _buildBody())]
+                : [
+                    const Spacer(),
+                    _buildBody(),
+                    const Spacer(),
+                  ],
           ),
         ),
       ),
@@ -463,20 +479,31 @@ class _SosScreenState extends State<SosScreen> {
           ],
         );
       case _SosPhase.sent:
-        return _ResultCard(
-          icon: Icons.check_circle,
-          color: AppColors.statusGreen,
+        return AlertStatusBody(
+          alertId: _alertId!,
+          kind: AlertKind.sos,
+          service: widget.alertService,
+          dialer: widget.dialer,
           title: 'SOS sent',
-          subtitle: _error ??
-              (_smsConfigured
-                  ? 'Your family and emergency contacts have been alerted with your location. '
-                      'Tap I\'m safe when you are.'
-                  : 'Your family has been alerted with your location. '
-                      'Tap I\'m safe when you are.'),
-          actionLabel: 'I\'m safe',
-          onAction: _imSafe,
-          secondaryLabel: 'Done',
-          onSecondary: () => Navigator.of(context).pop(),
+          footer: [
+            if (_error != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Text(_error!),
+              ),
+            SizedBox(
+              height: 48,
+              child: FilledButton(
+                onPressed: _imSafe,
+                child: const Text('I\'m safe'),
+              ),
+            ),
+            const SizedBox(height: 8),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Done'),
+            ),
+          ],
         );
       case _SosPhase.practiceDone:
         return _ResultCard(
