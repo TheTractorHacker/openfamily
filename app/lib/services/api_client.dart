@@ -878,4 +878,12 @@ class ApiClient {
     final String tail = json.length > 64 ? json.substring(json.length - 64) : json;
     return RegExp(r'"complete"\s*:\s*true').hasMatch(tail);
   }
+
+  // --- circles ---
+  // Helpers for the multi-circle API (see docs/design/CIRCLES.md).
+
+  /// Generic PUT (used by PUT /circles/{id}/sharing).
+  static Future<dynamic> putJson(String path, {Object? body}) {
+    return _send('PUT', _uri(path), body: body);
+  }
 }

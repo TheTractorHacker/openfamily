@@ -13,6 +13,7 @@ import '../services/theme_preference.dart';
 import '../theme/app_theme.dart';
 import '../widgets/dot_grid.dart';
 import 'profile_screen.dart';
+import 'circles_screen.dart';
 import 'families_screen.dart';
 import 'server_config_screen.dart';
 import 'welcome_screen.dart';
@@ -363,6 +364,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 const Icon(Icons.chevron_right, color: AppColors.textMuted),
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute<void>(builder: (_) => const FamiliesScreen()),
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.groups_outlined, color: AppColors.purple),
+            title: const Text('Circles'),
+            subtitle: const Text('All your circles and location sharing'),
+            trailing:
+                const Icon(Icons.chevron_right, color: AppColors.textMuted),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(builder: (_) => const CirclesScreen()),
             ),
           ),
           ListTile(
