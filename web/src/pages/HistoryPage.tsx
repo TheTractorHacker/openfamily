@@ -7,7 +7,7 @@
 // /family/members/{id}/history endpoint the app's day-detail screen uses.
 
 import React from 'react'
-import { CircleMarker, MapContainer, Polyline, TileLayer, useMap } from 'react-leaflet'
+import { CircleMarker, MapContainer, Polyline, useMap } from 'react-leaflet'
 import {
   getFamilyMemberHistory,
   getMemberHistory,
@@ -19,7 +19,7 @@ import {
 import { useAsync } from '../lib/useAsync'
 import { useMe } from '../lib/me'
 import { Badge, EmptyState, ErrorState, Spinner } from '../components/primitives'
-import { DEFAULT_TILE_URL } from '../map/MapView'
+import { BaseMapLayer } from '../map/BaseMapLayer'
 import type { AdminMember, Family, HistoryVisit, Member, MemberHistory, MyFamily } from '../lib/types'
 import './pages.css'
 import './HistoryPage.css'
@@ -330,9 +330,10 @@ function HistoryMap({ history }: { history: MemberHistory }) {
       className="wb-history-leaflet"
       center={center}
       zoom={13}
+      minZoom={3}
       scrollWheelZoom
     >
-      <TileLayer url={DEFAULT_TILE_URL} attribution="© OpenStreetMap" />
+      <BaseMapLayer />
       {trail.length >= 2 && (
         <>
           {/* White casing drawn under the colored stroke (Leaflet stacks

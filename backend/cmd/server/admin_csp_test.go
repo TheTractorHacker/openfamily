@@ -35,3 +35,29 @@ func TestAdminCSPCoversInlineScripts(t *testing.T) {
 		}
 	}
 }
+
+func TestAdminCSPMapDirectives(t *testing.T) {
+	csp := buildAdminCSP("")
+	for _, want := range []string{
+		"connect-src 'self' https://tiles.openfreemap.org;",
+		"worker-src 'self' blob:;",
+		"child-src blob:;",
+		"img-src 'self' data: blob: https:;",
+		"object-src 'none'",
+		"frame-ancestors 'none'",
+	} {
+		if !strings.Contains(csp, want) {
+			t.Errorf("CSP missing %q:\n%s", want, csp)
+		}
+	}
+	if strings.Contains(csp, "unsafe-eval") || strings.Contains(csp, "script-src 'self' 'unsafe") {
+		t.Errorf("script-src must stay strict: %s", csp)
+	}
+	custom := buildAdminCSP("https://maps.example.com/styles/x.json")
+	if !strings.Contains(custom, "connect-src 'self' https://tiles.openfreemap.org https://maps.example.com;") {
+		t.Errorf("custom style origin not added: %s", custom)
+	}
+	if strings.Contains(buildAdminCSP("http://insecure.example/s.json"), "insecure.example") {
+		t.Error("non-https style origin must not be allowed")
+	}
+}

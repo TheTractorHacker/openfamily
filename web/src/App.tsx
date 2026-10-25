@@ -11,10 +11,8 @@ import React from 'react'
 import { Sidebar } from './components/Sidebar'
 import { TopBar } from './components/TopBar'
 import { LoginPage } from './pages/LoginPage'
-import { DashboardPage } from './pages/DashboardPage'
 import { FamiliesPage } from './pages/FamiliesPage'
 import { UsersPage } from './pages/UsersPage'
-import { HistoryPage } from './pages/HistoryPage'
 import { BuildsPage } from './pages/BuildsPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { ROUTES, DEFAULT_ROUTE, routeFromHash, type RouteKey } from './lib/routes'
@@ -22,6 +20,15 @@ import { clearTokens, getEmail, isAuthenticated, subscribeAuth } from './lib/aut
 import { useMe } from './lib/me'
 import { AccessDenied, Spinner } from './components/primitives'
 import './shell.css'
+
+// Map pages pull in Leaflet/MapLibre; load them on demand so login and the
+// other pages stay light.
+const DashboardPage = React.lazy(() =>
+  import('./pages/DashboardPage').then((m) => ({ default: m.DashboardPage })),
+)
+const HistoryPage = React.lazy(() =>
+  import('./pages/HistoryPage').then((m) => ({ default: m.HistoryPage })),
+)
 
 export default function App() {
   // Re-render when auth changes (login, logout, cross-tab, failed refresh).
@@ -74,7 +81,19 @@ export default function App() {
               <Spinner /> Loading your account…
             </div>
           </div>
-        ) : renderPage(route, email, logout, isPlatformAdmin)}
+        ) : (
+          <React.Suspense
+            fallback={
+              <div className="wb-page">
+                <div className="wb-page-loading">
+                  <Spinner /> Loading…
+                </div>
+              </div>
+            }
+          >
+            {renderPage(route, email, logout, isPlatformAdmin)}
+          </React.Suspense>
+        )}
       </main>
     </div>
   )
