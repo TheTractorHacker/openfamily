@@ -37,4 +37,4 @@ apk/.apk-release.json
 app/android/build/
 
 # Local backups (database dumps)
-backups/
+backups
