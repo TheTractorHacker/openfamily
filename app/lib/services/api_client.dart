@@ -243,24 +243,45 @@ class ApiClient {
     }
   }
 
-  /// PATCH /me/password.
+  /// POST /auth/password/change. Requires the current password (and a TOTP or
+  /// recovery code when two-factor is on). The server revokes every other
+  /// session and returns a fresh token pair, which is stored so this device
+  /// stays signed in.
   static Future<void> changePassword({
     required String currentPassword,
     required String newPassword,
+    String? totpCode,
   }) async {
-    await _send(
-      'PATCH',
-      _uri('/me/password'),
-      body: <String, dynamic>{
-        'current_password': currentPassword,
-        'new_password': newPassword,
-      },
-    );
+    final Map<String, dynamic> body = <String, dynamic>{
+      'current_password': currentPassword,
+      'new_password': newPassword,
+    };
+    if (totpCode != null && totpCode.trim().isNotEmpty) {
+      body['totp_code'] = totpCode.trim();
+    }
+    final dynamic data =
+        await _send('POST', _uri('/auth/password/change'), body: body);
+    if (data is Map<String, dynamic> &&
+        data['access_token'] is String &&
+        data['refresh_token'] is String) {
+      await TokenStorage.saveTokens(
+        access: data['access_token'] as String,
+        refresh: data['refresh_token'] as String,
+      );
+    }
   }
 
-  /// DELETE /me → wipe this account. 409 means last admin of a shared family.
-  static Future<void> deleteAccount() async {
-    await _send('DELETE', _uri('/me'));
+  /// DELETE /me with step-up `{password, totp_code?}`. 409 means last admin
+  /// of a family that still has other members.
+  static Future<void> deleteAccount({
+    required String password,
+    String? totpCode,
+  }) async {
+    final Map<String, dynamic> body = <String, dynamic>{'password': password};
+    if (totpCode != null && totpCode.trim().isNotEmpty) {
+      body['totp_code'] = totpCode.trim();
+    }
+    await _send('DELETE', _uri('/me'), body: body);
   }
 
   /// POST /devices/{id}/ingest-key → a fresh ingest key for the background
@@ -753,5 +774,108 @@ class ApiClient {
           bytes[7] == 0x0a;
     }
     return false;
+  }
+
+  // --- account security ---
+
+  /// GET /me → profile including `totp_enabled`.
+  static Future<Map<String, dynamic>> getAccount() async {
+    final dynamic data = await _send('GET', _uri('/me'));
+    return data as Map<String, dynamic>;
+  }
+
+  /// POST /auth/totp/setup → `{secret, otpauth_uri}`.
+  static Future<Map<String, dynamic>> totpSetup(String password) async {
+    final dynamic data = await _send(
+      'POST',
+      _uri('/auth/totp/setup'),
+      body: <String, dynamic>{'password': password},
+    );
+    return data as Map<String, dynamic>;
+  }
+
+  /// POST /auth/totp/enable → `{enabled, recovery_codes}` (shown once).
+  static Future<Map<String, dynamic>> totpEnable(String code) async {
+    final dynamic data = await _send(
+      'POST',
+      _uri('/auth/totp/enable'),
+      body: <String, dynamic>{'code': code},
+    );
+    return data as Map<String, dynamic>;
+  }
+
+  /// POST /auth/totp/disable with the password and a TOTP/recovery code.
+  static Future<void> totpDisable({
+    required String password,
+    required String code,
+  }) async {
+    await _send(
+      'POST',
+      _uri('/auth/totp/disable'),
+      body: <String, dynamic>{'password': password, 'code': code},
+    );
+  }
+
+  /// GET /auth/sessions → list of session objects.
+  static Future<List<dynamic>> listSessions() async {
+    final dynamic data = await _send('GET', _uri('/auth/sessions'));
+    return data as List<dynamic>;
+  }
+
+  /// DELETE /auth/sessions/{id}.
+  static Future<void> revokeSession(String id) async {
+    await _send('DELETE', _uri('/auth/sessions/${Uri.encodeComponent(id)}'));
+  }
+
+  /// POST /auth/logout-all.
+  static Future<void> logoutAll() async {
+    await _send('POST', _uri('/auth/logout-all'));
+  }
+
+  /// POST /auth/password/reset (no auth) with an admin-issued code.
+  static Future<void> resetPasswordWithCode({
+    required String email,
+    required String code,
+    required String newPassword,
+  }) async {
+    await _send(
+      'POST',
+      _uri('/auth/password/reset'),
+      body: <String, dynamic>{
+        'email': email,
+        'code': code,
+        'new_password': newPassword,
+      },
+      auth: false,
+    );
+  }
+
+  /// POST /family/members/{id}/reset-code (family admin) →
+  /// `{code, expires_at, sms_sent, sms_note?}`.
+  static Future<Map<String, dynamic>> issueMemberResetCode(
+    String memberId, {
+    bool sendSms = false,
+  }) async {
+    final dynamic data = await _send(
+      'POST',
+      _uri('/family/members/${Uri.encodeComponent(memberId)}/reset-code'),
+      body: <String, dynamic>{'send_sms': sendSms},
+    );
+    return data as Map<String, dynamic>;
+  }
+
+  /// GET /me/export → the raw JSON document text. The server ends a complete
+  /// export with `"complete":true`; callers must check [isCompleteExport].
+  static Future<String> exportMyData() async {
+    final http.Response response =
+        await _sendResponse('GET', _uri('/me/export'));
+    _ensureSuccess(response);
+    return response.body;
+  }
+
+  /// Whether an export document ends with the server's completion marker.
+  static bool isCompleteExport(String json) {
+    final String tail = json.length > 64 ? json.substring(json.length - 64) : json;
+    return RegExp(r'"complete"\s*:\s*true').hasMatch(tail);
   }
 }
