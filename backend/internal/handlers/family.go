@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
+	"github.com/wheresfrank/openfamily/backend/internal/circles"
 	"github.com/wheresfrank/openfamily/backend/internal/middleware"
 	"github.com/wheresfrank/openfamily/backend/internal/models"
 )
@@ -282,6 +283,28 @@ func (s *Server) ListMembers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The legacy family list is the caller's primary circle. Location fields
+	// are only filled for members who share with the caller (the caller always
+	// sees themselves); a member who turned sharing off stays listed.
+	az := circles.New(s.Pool)
+	if _, err := az.RequireMember(r.Context(), claims.UserID, familyID); err != nil {
+		if errors.Is(err, circles.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "no family")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to load family")
+		return
+	}
+	visible, err := az.LocationVisibility(r.Context(), claims.UserID, []string{familyID})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list members")
+		return
+	}
+	memberIDs := make([]string, 0, len(visible))
+	for id := range visible {
+		memberIDs = append(memberIDs, id)
+	}
+
 	rows, err := s.Pool.Query(r.Context(), `
 		SELECT u.id, u.email, u.name, u.role, u.totp_enabled, u.created_at, u.updated_at,
 		       u.avatar_data IS NOT NULL, u.avatar_version, u.avatar_updated_at,
@@ -293,8 +316,8 @@ func (s *Server) ListMembers(w http.ResponseWriter, r *http.Request) {
 			SELECT user_id, MAX(last_seen) AS last_seen
 			FROM devices GROUP BY user_id
 		) d ON d.user_id = u.id
-		WHERE u.family_id = $1
-		ORDER BY u.name`, familyID)
+		WHERE u.id = ANY($1::uuid[])
+		ORDER BY u.name`, memberIDs)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list members")
 		return
@@ -310,6 +333,10 @@ func (s *Server) ListMembers(w http.ResponseWriter, r *http.Request) {
 			&m.LastSeenAt); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to scan member")
 			return
+		}
+		if !visible[m.ID] {
+			m.Lat, m.Lon, m.TS, m.BatteryPct, m.SpeedMPS, m.MotionState, m.AccuracyMeters, m.LastSeenAt =
+				nil, nil, nil, nil, nil, nil, nil, nil
 		}
 		if !canManage {
 			m.Email = "" // redact email for non-manager (child) viewers
