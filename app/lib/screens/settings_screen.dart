@@ -12,6 +12,7 @@ import '../services/server_config.dart';
 import '../services/theme_preference.dart';
 import '../theme/app_theme.dart';
 import '../widgets/dot_grid.dart';
+import '../widgets/units_setting_tile.dart';
 import 'profile_screen.dart';
 import 'families_screen.dart';
 import 'server_config_screen.dart';
@@ -432,6 +433,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const Divider(height: 1),
             const _SectionHeader('Appearance'),
             const _AppearanceTile(),
+            const UnitsSettingTile(),
             const Divider(height: 1),
             const _SectionHeader('Privacy & Security'),
           SwitchListTile(

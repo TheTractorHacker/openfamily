@@ -10,6 +10,7 @@ import '../theme/app_theme.dart';
 import '../widgets/member_avatar_bubble.dart';
 import '../widgets/movement_icon.dart';
 import 'day_detail_screen.dart';
+import '../widgets/trips_entry_button.dart';
 
 /// A full-screen member profile: battery, location, and driving data, with a
 /// purple location-pin "Day Detail" entry point at the bottom that opens the
@@ -112,6 +113,8 @@ class MemberProfileScreen extends StatelessWidget {
           const SizedBox(height: 12),
           // Day Detail (location history) entry point.
           _DayDetailButton(member: member),
+          const SizedBox(height: 12),
+          TripsEntryButton(member: member),
         ],
       ),
     );
