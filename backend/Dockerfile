@@ -29,7 +29,7 @@ RUN resolved_ref="${GIT_COMMIT}"; \
     short_ref="$(printf '%s' "${resolved_ref}" | cut -c1-7)"; \
     test -n "${short_ref}"; \
     CGO_ENABLED=0 GOOS=linux go build -trimpath \
-      -ldflags="-s -w -X github.com/wheresfrank/openfamily/backend/internal/config.buildVersion=${short_ref}" \
+      -ldflags="-s -w -X github.com/TheTractorHacker/openfamily/backend/internal/config.buildVersion=${short_ref}" \
       -o /out/server ./cmd/server
 
 # Runtime stage

@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/wheresfrank/openfamily/backend/internal/middleware"
+	"github.com/TheTractorHacker/openfamily/backend/internal/middleware"
 )
 
 func (s *Server) bumpTokenVersion(ctx context.Context, userID string) error {

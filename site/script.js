@@ -123,7 +123,7 @@
     }
 
     var defaultCommands = [
-      "git clone https://github.com/wheresfrank/openfamily.git openfamily",
+      "git clone https://github.com/TheTractorHacker/openfamily.git openfamily",
       "cd openfamily",
       "cp .env.example .env",
       "docker compose up -d --build"

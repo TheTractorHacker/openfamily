@@ -12,7 +12,7 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/wheresfrank/openfamily/backend/internal/models"
+	"github.com/TheTractorHacker/openfamily/backend/internal/models"
 )
 
 func TestNormalizeProfileName(t *testing.T) {

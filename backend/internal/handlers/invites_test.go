@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/wheresfrank/openfamily/backend/internal/models"
+	"github.com/TheTractorHacker/openfamily/backend/internal/models"
 )
 
 func TestNormalizeInviteParamsDefaultsAndBounds(t *testing.T) {

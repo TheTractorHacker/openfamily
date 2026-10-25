@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/wheresfrank/openfamily/backend/internal/apkrelease"
-	"github.com/wheresfrank/openfamily/backend/internal/middleware"
+	"github.com/TheTractorHacker/openfamily/backend/internal/apkrelease"
+	"github.com/TheTractorHacker/openfamily/backend/internal/middleware"
 )
 
 // apkBuildStatus is the lifecycle state of an APK build job.

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/wheresfrank/openfamily/backend/internal/auth"
+	"github.com/TheTractorHacker/openfamily/backend/internal/auth"
 )
 
 func TestGenerateDeviceIngestKey(t *testing.T) {

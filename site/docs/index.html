@@ -3,21 +3,21 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self' https://stats.subwiz.ai; connect-src 'self' https://stats.subwiz.ai; object-src 'none'; base-uri 'none'; form-action 'none'" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'" />
     <meta name="description" content="Production self-hosting guide for OpenFamily, the family GPS location tracker. Docker, TLS, ntfy, map tiles, backups, and custom domains." />
     <meta name="theme-color" media="(prefers-color-scheme: light)" content="#eef2f6" />
     <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#1c1e22" />
     <meta property="og:title" content="OpenFamily production self-hosting guide" />
     <meta property="og:description" content="Operator checklist before you invite a family onto a public VPS or NAS: secrets, TLS, Android push, tiles, SMS, backups." />
-    <meta property="og:image" content="https://openfamily.app/assets/brand/openfamily-social-card.png" />
-    <meta property="og:url" content="https://openfamily.app/docs/" />
+    <meta property="og:image" content="https://foleyit.com/assets/brand/openfamily-social-card.png" />
+    <meta property="og:url" content="https://foleyit.com/docs/" />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="OpenFamily" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="OpenFamily production self-hosting guide" />
     <meta name="twitter:description" content="Production checklist for the self-hosted family location tracker." />
-    <meta name="twitter:image" content="https://openfamily.app/assets/brand/openfamily-social-card.png" />
-    <link rel="canonical" href="https://openfamily.app/docs/" />
+    <meta name="twitter:image" content="https://foleyit.com/assets/brand/openfamily-social-card.png" />
+    <link rel="canonical" href="https://foleyit.com/docs/" />
     <link rel="icon" type="image/svg+xml" href="../assets/brand/openfamily-icon.svg" />
     <link rel="apple-touch-icon" href="../assets/brand/openfamily-app-icon.png" />
     <script src="../script.js"></script>
@@ -46,7 +46,7 @@
             <span class="theme-icon" aria-hidden="true" data-theme-icon>◐</span>
             <span class="theme-text" data-theme-text>Theme</span>
           </button>
-          <a class="nav-cta" href="https://github.com/wheresfrank/openfamily"><span class="github-mark" aria-hidden="true">⌘</span> GitHub</a>
+          <a class="nav-cta" href="https://github.com/TheTractorHacker/openfamily"><span class="github-mark" aria-hidden="true">⌘</span> GitHub</a>
         </nav>
       </div>
     </header>
@@ -57,7 +57,7 @@
         <div class="shell">
           <span class="section-kicker">Production guide</span>
           <h1>Self-host the family GPS tracker on a server you trust.</h1>
-          <p class="page-lede">The <a href="../quick-start/">quick start</a> is enough for a laptop. Use this checklist before you invite a family onto a VPS or NAS that is reachable from the internet. It restates <a href="https://github.com/wheresfrank/openfamily/blob/main/docs/self-hosting.md">docs/self-hosting.md</a> — it does not invent a different architecture.</p>
+          <p class="page-lede">The <a href="../quick-start/">quick start</a> is enough for a laptop. Use this checklist before you invite a family onto a VPS or NAS that is reachable from the internet. It restates <a href="https://github.com/TheTractorHacker/openfamily/blob/main/docs/self-hosting.md">docs/self-hosting.md</a> — it does not invent a different architecture.</p>
         </div>
       </section>
 
@@ -73,7 +73,7 @@
             <li>Set <code>PLATFORM_ADMIN_EMAIL</code> and <code>PLATFORM_ADMIN_PASSWORD</code>. This creates the first admin and <strong>closes open registration</strong> (invite codes required).</li>
             <li>Set <code>TLS_BEHIND_PROXY=true</code> (Compose default) so the API accepts HTTP from Caddy on the private network.</li>
           </ol>
-          <p>Step 5 in detail — DNS records, certificate behavior, and troubleshooting — is covered in <a href="https://github.com/wheresfrank/openfamily/blob/main/docs/custom-domain.md">custom-domain.md</a>. The admin panel's <strong>Settings → Custom domain</strong> card runs live DNS and HTTPS checks against your setup.</p>
+          <p>Step 5 in detail — DNS records, certificate behavior, and troubleshooting — is covered in <a href="https://github.com/TheTractorHacker/openfamily/blob/main/docs/custom-domain.md">custom-domain.md</a>. The admin panel's <strong>Settings → Custom domain</strong> card runs live DNS and HTTPS checks against your setup.</p>
 
           <h2>Android push (ntfy)</h2>
           <p>Do <strong>not</strong> publish ntfy on <code>0.0.0.0:2586</code>. Current Compose binds loopback only.</p>
@@ -105,7 +105,7 @@ SATELLITE_TILE_URL=</code></pre>
 ALLOWED_ORIGIN=https://openfamily.example.com
 PUBLIC_BASE_URL=https://openfamily.example.com
 APP_ENV=production</code></pre>
-          <p>Then <code>docker compose up -d</code>. Point the apps at <code>https://your-domain</code>. Full DNS and NAT-loopback notes: <a href="https://github.com/wheresfrank/openfamily/blob/main/docs/custom-domain.md">docs/custom-domain.md</a>.</p>
+          <p>Then <code>docker compose up -d</code>. Point the apps at <code>https://your-domain</code>. Full DNS and NAT-loopback notes: <a href="https://github.com/TheTractorHacker/openfamily/blob/main/docs/custom-domain.md">docs/custom-domain.md</a>.</p>
 
           <h2>Family setup</h2>
           <ol>
@@ -115,10 +115,10 @@ APP_ENV=production</code></pre>
             <li>Allow <strong>Always</strong> location, notifications, and the battery exemption.</li>
             <li>Install <strong>ntfy</strong> so alerts arrive when the app is closed.</li>
           </ol>
-          <p>More operator detail lives in the <a href="https://github.com/wheresfrank/openfamily">canonical README</a>. Privacy boundaries: <a href="../privacy/">privacy</a>.</p>
+          <p>More operator detail lives in the <a href="https://github.com/TheTractorHacker/openfamily">canonical README</a>. Privacy boundaries: <a href="../privacy/">privacy</a>.</p>
           <div class="page-actions">
             <a class="button button-primary" href="../quick-start/">Docker quick start <span aria-hidden="true">→</span></a>
-            <a class="button button-secondary" href="https://github.com/wheresfrank/openfamily">GitHub repository</a>
+            <a class="button button-secondary" href="https://github.com/TheTractorHacker/openfamily">GitHub repository</a>
           </div>
         </div>
       </section>
@@ -131,7 +131,7 @@ APP_ENV=production</code></pre>
           <div><strong>OpenFamily</strong><span>Self-hosted family location tracker</span></div>
         </div>
         <div class="footer-links">
-          <a href="https://github.com/wheresfrank/openfamily">GitHub</a><a href="../compare/">Compare</a><a href="../privacy/">Privacy</a><a href="../quick-start/">Quick start</a><a href="./">Docs</a><a href="https://github.com/wheresfrank/openfamily/blob/main/SECURITY.md">Security</a><a href="https://github.com/wheresfrank/openfamily/blob/main/LICENSE">License</a>
+          <a href="https://github.com/TheTractorHacker/openfamily">GitHub</a><a href="../compare/">Compare</a><a href="../privacy/">Privacy</a><a href="../quick-start/">Quick start</a><a href="./">Docs</a><a href="https://github.com/TheTractorHacker/openfamily/blob/main/SECURITY.md">Security</a><a href="https://github.com/TheTractorHacker/openfamily/blob/main/LICENSE">License</a>
         </div>
         <p>© <span data-year></span> OpenFamily. Open source under AGPL-3.0. This website uses Plausible Analytics — cookieless, no personal data; the OpenFamily software itself contains no analytics.</p>
       </div>

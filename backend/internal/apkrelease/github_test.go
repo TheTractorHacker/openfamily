@@ -452,8 +452,8 @@ func TestPickAPKAsset(t *testing.T) {
 }
 
 func TestParseRepo(t *testing.T) {
-	owner, name, err := parseRepo("  wheresfrank/openfamily ")
-	if err != nil || owner != "wheresfrank" || name != "openfamily" {
+	owner, name, err := parseRepo("  TheTractorHacker/openfamily ")
+	if err != nil || owner != "TheTractorHacker" || name != "openfamily" {
 		t.Fatalf("parseRepo = %s/%s (%v)", owner, name, err)
 	}
 	if _, _, err := parseRepo("nopath"); err == nil {

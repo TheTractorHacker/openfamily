@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/wheresfrank/openfamily/backend/internal/auth"
+	"github.com/TheTractorHacker/openfamily/backend/internal/auth"
 )
 
 const (

@@ -68,10 +68,10 @@ class PrivacyPolicyScreen extends StatelessWidget {
       'For access, correction or deletion of server data, contact the '
           'administrator who provided your server address or invitation. '
           'The OpenFamily software publisher can be reached at '
-          'contact@openfamily.app for app support, but cannot directly access '
+          'info@foleyit.com for app support, but cannot directly access '
           'or erase data on a self-hosted server. Public privacy policy and '
-          'account deletion instructions: https://openfamily.app/privacy.html '
-          'and https://openfamily.app/delete-account.html. Do not post private '
+          'account deletion instructions: https://foleyit.com/privacy.html '
+          'and https://foleyit.com/delete-account.html. Do not post private '
           'locations, passwords or account details in public project discussions.'
     ),
   ];

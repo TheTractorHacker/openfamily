@@ -11,9 +11,9 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/wheresfrank/openfamily/backend/internal/middleware"
-	"github.com/wheresfrank/openfamily/backend/internal/push"
-	"github.com/wheresfrank/openfamily/backend/internal/sms"
+	"github.com/TheTractorHacker/openfamily/backend/internal/middleware"
+	"github.com/TheTractorHacker/openfamily/backend/internal/push"
+	"github.com/TheTractorHacker/openfamily/backend/internal/sms"
 )
 
 // Delivery channels and states (see docs/safety.md).

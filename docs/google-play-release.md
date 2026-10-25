@@ -18,10 +18,10 @@ Console. The reviewer sign-in details point to the isolated review family on
 `https://openfamily.frankjohnette.xyz`; credentials are stored only in Play
 Console and must never be copied into this file.
 
-Lifestyle category, support email `contact@openfamily.app`, closed-test
-feedback contact `contact@openfamily.app`, privacy policy URL
-`https://openfamily.app/privacy.html`, and account deletion URL
-`https://openfamily.app/delete-account.html` are saved. Both public legal pages
+Lifestyle category, support email `info@foleyit.com`, closed-test
+feedback contact `info@foleyit.com`, privacy policy URL
+`https://foleyit.com/privacy.html`, and account deletion URL
+`https://foleyit.com/delete-account.html` are saved. Both public legal pages
 now load. Data safety is saved in Publishing overview and reports that data
 is encrypted in transit, matching the HTTPS-only app behavior. The Play
 listing states that the app rejects HTTP server addresses and directs users

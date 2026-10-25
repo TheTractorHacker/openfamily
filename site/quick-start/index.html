@@ -3,21 +3,21 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self' https://stats.subwiz.ai; connect-src 'self' https://stats.subwiz.ai; object-src 'none'; base-uri 'none'; form-action 'none'" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'" />
     <meta name="description" content="Docker quick start for OpenFamily, the self-hosted family GPS location tracker. Clone, compose up, create an account, point the app at your server." />
     <meta name="theme-color" media="(prefers-color-scheme: light)" content="#eef2f6" />
     <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#1c1e22" />
     <meta property="og:title" content="OpenFamily Docker quick start" />
     <meta property="og:description" content="Run the self-hosted family location tracker with Docker Compose. Life360-style live map on a server you control." />
-    <meta property="og:image" content="https://openfamily.app/assets/brand/openfamily-social-card.png" />
-    <meta property="og:url" content="https://openfamily.app/quick-start/" />
+    <meta property="og:image" content="https://foleyit.com/assets/brand/openfamily-social-card.png" />
+    <meta property="og:url" content="https://foleyit.com/quick-start/" />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="OpenFamily" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="OpenFamily Docker quick start" />
     <meta name="twitter:description" content="Clone the repo, start Docker Compose, and point the family GPS app at your server." />
-    <meta name="twitter:image" content="https://openfamily.app/assets/brand/openfamily-social-card.png" />
-    <link rel="canonical" href="https://openfamily.app/quick-start/" />
+    <meta name="twitter:image" content="https://foleyit.com/assets/brand/openfamily-social-card.png" />
+    <link rel="canonical" href="https://foleyit.com/quick-start/" />
     <link rel="icon" type="image/svg+xml" href="../assets/brand/openfamily-icon.svg" />
     <link rel="apple-touch-icon" href="../assets/brand/openfamily-app-icon.png" />
     <script src="../script.js"></script>
@@ -46,7 +46,7 @@
             <span class="theme-icon" aria-hidden="true" data-theme-icon>◐</span>
             <span class="theme-text" data-theme-text>Theme</span>
           </button>
-          <a class="nav-cta" href="https://github.com/wheresfrank/openfamily"><span class="github-mark" aria-hidden="true">⌘</span> GitHub</a>
+          <a class="nav-cta" href="https://github.com/TheTractorHacker/openfamily"><span class="github-mark" aria-hidden="true">⌘</span> GitHub</a>
         </nav>
       </div>
     </header>
@@ -65,10 +65,10 @@
       <section class="page-section">
         <div class="shell">
           <h2>1. Start the stack</h2>
-          <p>Clone <a href="https://github.com/wheresfrank/openfamily">wheresfrank/openfamily</a>, copy the example env, set a strong <code>POSTGRES_PASSWORD</code> and <code>JWT_SECRET</code>, then compose up.</p>
+          <p>Clone <a href="https://github.com/TheTractorHacker/openfamily">TheTractorHacker/openfamily</a>, copy the example env, set a strong <code>POSTGRES_PASSWORD</code> and <code>JWT_SECRET</code>, then compose up.</p>
           <div class="terminal-card page-terminal">
             <div class="terminal-header"><span><i></i><i></i><i></i></span><span>openfamily / setup</span><button type="button" data-copy-command aria-label="Copy setup commands">Copy</button></div>
-            <pre><code><span class="prompt">$</span> git clone https://github.com/wheresfrank/openfamily.git openfamily
+            <pre><code><span class="prompt">$</span> git clone https://github.com/TheTractorHacker/openfamily.git openfamily
 <span class="prompt">$</span> cd openfamily
 <span class="prompt">$</span> cp .env.example .env
 <span class="comment"># Set a strong POSTGRES_PASSWORD and JWT_SECRET</span>
@@ -119,7 +119,7 @@ curl -X POST http://localhost/auth/login \
           <div class="stack-row" aria-label="OpenFamily technology stack"><span>Docker Compose</span><i></i><span>Go</span><i></i><span>Flutter</span><i></i><span>PostgreSQL</span><i></i><span>PostGIS</span><i></i><span>TimescaleDB</span><i></i><span>Caddy</span><i></i><span>ntfy</span></div>
           <div class="page-actions">
             <a class="button button-primary" href="../docs/">Production guide <span aria-hidden="true">→</span></a>
-            <a class="button button-secondary" href="https://github.com/wheresfrank/openfamily#quick-start">Full README quick start</a>
+            <a class="button button-secondary" href="https://github.com/TheTractorHacker/openfamily#quick-start">Full README quick start</a>
           </div>
         </div>
       </section>
@@ -132,7 +132,7 @@ curl -X POST http://localhost/auth/login \
           <div><strong>OpenFamily</strong><span>Self-hosted family location tracker</span></div>
         </div>
         <div class="footer-links">
-          <a href="https://github.com/wheresfrank/openfamily">GitHub</a><a href="../compare/">Compare</a><a href="../privacy/">Privacy</a><a href="./">Quick start</a><a href="../docs/">Docs</a><a href="https://github.com/wheresfrank/openfamily/blob/main/SECURITY.md">Security</a><a href="https://github.com/wheresfrank/openfamily/blob/main/LICENSE">License</a>
+          <a href="https://github.com/TheTractorHacker/openfamily">GitHub</a><a href="../compare/">Compare</a><a href="../privacy/">Privacy</a><a href="./">Quick start</a><a href="../docs/">Docs</a><a href="https://github.com/TheTractorHacker/openfamily/blob/main/SECURITY.md">Security</a><a href="https://github.com/TheTractorHacker/openfamily/blob/main/LICENSE">License</a>
         </div>
         <p>© <span data-year></span> OpenFamily. Open source under AGPL-3.0. This website uses Plausible Analytics — cookieless, no personal data; the OpenFamily software itself contains no analytics.</p>
       </div>

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/wheresfrank/openfamily/backend/internal/sms"
+	"github.com/TheTractorHacker/openfamily/backend/internal/sms"
 )
 
 func TestPrepareStoredSMSSettingsRequiresSIDAndFrom(t *testing.T) {

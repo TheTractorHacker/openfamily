@@ -11,9 +11,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
-	"github.com/wheresfrank/openfamily/backend/internal/circles"
-	"github.com/wheresfrank/openfamily/backend/internal/middleware"
-	"github.com/wheresfrank/openfamily/backend/internal/models"
+	"github.com/TheTractorHacker/openfamily/backend/internal/circles"
+	"github.com/TheTractorHacker/openfamily/backend/internal/middleware"
+	"github.com/TheTractorHacker/openfamily/backend/internal/models"
 )
 
 // Circle API (stage 1). Every handler authorizes through internal/circles;

@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/wheresfrank/openfamily/backend/internal/auth"
+	"github.com/TheTractorHacker/openfamily/backend/internal/auth"
 )
 
 type fakeIngestStore struct {
