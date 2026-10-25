@@ -4,8 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 
+import '../widgets/openfamily_map_layers.dart';
 import '../models/place.dart';
-import '../services/app_config.dart';
 import '../services/geocoding_service.dart';
 import '../services/location_service.dart';
 import '../theme/app_theme.dart';
@@ -234,10 +234,7 @@ class _PlacePickerScreenState extends State<PlacePickerScreen> {
                     },
                   ),
                   children: [
-                    TileLayer(
-                      urlTemplate: kTileUrl,
-                      userAgentPackageName: 'app.openfamily',
-                    ),
+                    const OpenFamilyTileLayer(),
                     // The geofence radius, drawn live around the pin.
                     CircleLayer(
                       circles: [

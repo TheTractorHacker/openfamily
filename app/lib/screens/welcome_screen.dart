@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 
-import '../services/app_config.dart';
+import '../widgets/openfamily_map_layers.dart';
 import '../theme/app_theme.dart';
 import '../widgets/openfamily_brand.dart';
 import 'login_screen.dart';
@@ -40,10 +40,7 @@ class WelcomeScreen extends StatelessWidget {
                 ),
               ),
               children: [
-                TileLayer(
-                  urlTemplate: kTileUrl,
-                  userAgentPackageName: 'app.openfamily',
-                ),
+                const OpenFamilyTileLayer(),
               ],
             ),
           ),

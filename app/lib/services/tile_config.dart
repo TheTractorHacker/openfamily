@@ -22,6 +22,9 @@ class TileConfig {
   String streetUrl = kDefaultStreetTileUrl;
   String satelliteUrl = kDefaultSatelliteTileUrl;
 
+  /// Operator MAP_STYLE_URL (vector style JSON). Empty = built-in OpenFreeMap.
+  String mapStyleUrl = '';
+
   /// Pulls `tile_url` / `satellite_tile_url` from the configured server.
   /// Missing or empty fields keep the current values.
   Future<void> refresh() async {
@@ -35,6 +38,12 @@ class TileConfig {
       if (satellite != null && isHttpsUrl(satellite)) {
         satelliteUrl = satellite.trim();
       }
+      final String? style = cfg['map_style_url'] as String?;
+      if (style != null && style.trim().isNotEmpty && isHttpsUrl(style)) {
+        mapStyleUrl = style.trim();
+      } else if (style != null) {
+        mapStyleUrl = '';
+      }
       ServerFeatures.instance.apply(cfg);
     } catch (_) {
       // Keep whatever we already have (defaults or a previous successful fetch).
@@ -44,5 +53,6 @@ class TileConfig {
   void resetToDefaults() {
     streetUrl = kDefaultStreetTileUrl;
     satelliteUrl = kDefaultSatelliteTileUrl;
+    mapStyleUrl = '';
   }
 }

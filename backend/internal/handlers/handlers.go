@@ -59,6 +59,7 @@ type Server struct {
 	// TileURL and SatelliteTileURL are raster templates advertised on GET /config.
 	TileURL          string
 	SatelliteTileURL string
+	MapStyleURL string
 
 	// PublicBaseURL is the https origin used to build SMS share links.
 	PublicBaseURL string

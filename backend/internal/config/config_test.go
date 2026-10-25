@@ -28,6 +28,17 @@ func TestLoadTileOverride(t *testing.T) {
 	}
 }
 
+func TestLoadMapStyleURL(t *testing.T) {
+	t.Setenv("MAP_STYLE_URL", "")
+	if got := Load().MapStyleURL; got != "" {
+		t.Fatalf("default=%q", got)
+	}
+	t.Setenv("MAP_STYLE_URL", "https://maps.example.com/style.json")
+	if got := Load().MapStyleURL; got != "https://maps.example.com/style.json" {
+		t.Fatalf("override=%q", got)
+	}
+}
+
 func TestValidateProductionDBSSL(t *testing.T) {
 	base := Config{AppEnv: "production", JWTSecret: "0123456789abcdef0123456789abcdef", TLSBehindProxy: true}
 	cases := []struct {
