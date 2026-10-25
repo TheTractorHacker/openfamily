@@ -16,12 +16,12 @@ import (
 	"github.com/TheTractorHacker/openfamily/backend/internal/sms"
 )
 
-// UpdateFamilyMember lets the admin of a circle/family edit a member's name
-// and phone: PATCH /family/members/{id} {name?, phone?}. Email, role,
-// password and 2FA are deliberately out of scope. A caller who shares no
-// circle with the target gets 404 (existence is not leaked); a plain member of
-// a shared circle gets 403. Platform-admin accounts can only be edited by
-// themselves here.
+// UpdateFamilyMember lets the admin of a member's own family edit that
+// member's name and phone: PATCH /family/members/{id} {name?, phone?}. Email,
+// role, password and 2FA are deliberately out of scope. A caller who shares no
+// circle with the target gets 404 (existence is not leaked); anyone else who
+// is not an admin of the target's own family gets 403, and admins cannot edit
+// other admins. Platform-admin accounts can only be edited by themselves here.
 func (s *Server) UpdateFamilyMember(w http.ResponseWriter, r *http.Request) {
 	claims := middleware.ClaimsFromContext(r.Context())
 	if claims == nil {
@@ -67,6 +67,27 @@ func (s *Server) UpdateFamilyMember(w http.ResponseWriter, r *http.Request) {
 	}
 	if !adminOf {
 		writeError(w, http.StatusForbidden, "admin only")
+		return
+	}
+	// Name and phone are the person's own account fields, so being an admin of
+	// some circle you merely share with them is not enough (a "Friends" circle
+	// admin must not rewrite a user's account). Require admin rights over the
+	// member's own family, and never over another admin; admins edit
+	// themselves here too.
+	var allowed bool
+	if err := s.Pool.QueryRow(r.Context(), `
+		SELECT EXISTS (
+			SELECT 1
+			FROM users t
+			JOIN circle_members cm ON cm.circle_id = t.family_id AND cm.user_id = $1 AND cm.role = 'admin'
+			JOIN circle_members tm ON tm.circle_id = t.family_id AND tm.user_id = t.id
+			WHERE t.id = $2 AND ($1 = $2 OR tm.role <> 'admin')
+		)`, claims.UserID, targetID).Scan(&allowed); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load member")
+		return
+	}
+	if !allowed {
+		writeError(w, http.StatusForbidden, "only an admin of the member's own family can edit them, and not another admin")
 		return
 	}
 
