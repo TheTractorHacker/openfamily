@@ -163,27 +163,6 @@ export interface DomainStatus {
   https?: DomainCheck
 }
 
-/** One updater-sidecar update job, as reported by the admin status endpoint. */
-export interface UpdateJob {
-  status: 'idle' | 'running' | 'success' | 'failed' | 'interrupted'
-  started_at: string
-  finished_at?: string
-  previous_ref?: string
-  new_ref?: string
-  error?: string
-}
-
-/** Server self-update status from GET /api/admin/update/status. */
-export interface UpdateStatus {
-  deployed_ref?: string
-  latest_ref?: string
-  update_available: boolean
-  can_update: boolean
-  busy: boolean
-  job?: UpdateJob
-  check_error?: string
-}
-
 export interface ApkReleaseInfo {
   tag_name: string
   name?: string

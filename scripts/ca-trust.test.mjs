@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
-const script = join(here, "../updater/distrust-compromised-cas.sh");
+const script = join(here, "./distrust-compromised-cas.sh");
 const fixture = (name) => readFileSync(join(here, "ca-fixtures", name + ".pem"), "utf8");
 const run = (cmd, args) => spawnSync(cmd, args, { encoding: "utf8" });
 

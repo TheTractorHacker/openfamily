@@ -17,7 +17,7 @@ import { useMe } from '../lib/me'
 import type { Profile } from '../lib/types'
 import { ThemeToggle } from '../components/ThemeToggle'
 import { Button, Card, CopyButton, Mono, Spinner } from '../components/primitives'
-import { ServerUpdateCard } from './ServerUpdateCard'
+import { ServerVersionCard } from './ServerVersionCard'
 import { TwilioSettingsCard } from './TwilioSettingsCard'
 import { DomainSettingsCard } from './DomainSettingsCard'
 import './pages.css'
@@ -338,7 +338,7 @@ export function SettingsPage({ email, onLogout }: SettingsPageProps) {
 
           {/* Self-update lives here too: it restarts the server the panel is
               served from, so only platform admins see the card. */}
-          {isPlatformAdmin && <ServerUpdateCard />}
+          {isPlatformAdmin && <ServerVersionCard />}
         </div>
 
         <Card>

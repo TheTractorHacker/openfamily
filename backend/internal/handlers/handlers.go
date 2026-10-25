@@ -10,7 +10,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/wheresfrank/openfamily/backend/internal/auth"
 	"github.com/wheresfrank/openfamily/backend/internal/push"
-	"github.com/wheresfrank/openfamily/backend/internal/serverupdate"
 	"github.com/wheresfrank/openfamily/backend/internal/sms"
 )
 
@@ -91,19 +90,8 @@ type Server struct {
 	FlutterAppDir string
 
 	// BuildVersion is the git ref this binary was built from (ldflags; "dev" in
-	// source runs). Fallback when DeployRefFile has not been stamped yet.
+	// source runs). Shown read-only in the admin panel.
 	BuildVersion string
-	// DeployRefFile is read at request time for the deployed git ref, stamped by
-	// the updater sidecar after each pull (config: DEPLOY_REF_FILE).
-	DeployRefFile string
-	// UpdaterURL is the base URL of the updater sidecar that applies server
-	// updates (config: UPDATER_URL). Empty disables self-update.
-	UpdaterURL string
-	// UpdaterToken authenticates calls to the updater sidecar (config:
-	// UPDATER_TOKEN; both sides must match).
-	UpdaterToken string
-	// UpdateCheck compares the deployed ref with the upstream default branch.
-	UpdateCheck *serverupdate.Checker
 
 	// apk tracks the platform APK build job state (at most one concurrent build).
 	apk apkManager
