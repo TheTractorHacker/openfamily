@@ -5,11 +5,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' hide Circle;
 
+import '../models/circle.dart';
 import '../models/member.dart';
 import '../services/api_client.dart';
 import '../services/app_config.dart';
 import '../services/background_location_service.dart';
 import '../services/battery_optimization_service.dart';
+import '../services/circle_service.dart';
 import '../services/device_service.dart';
 import '../services/family_service.dart';
 import '../services/location_reporter.dart';
@@ -17,22 +19,20 @@ import '../services/location_outbox.dart';
 import '../services/location_service.dart';
 import '../services/location_sharing_service.dart';
 import '../services/permission_service.dart';
+import '../services/place_service.dart';
 import '../services/push_service.dart';
-import '../services/server_features.dart';
 import '../services/tile_config.dart';
 import '../theme/app_theme.dart';
 import '../utils/member_clustering.dart';
-import '../widgets/circle_switcher.dart';
-import '../widgets/map_bottom_bar.dart';
+import '../widgets/location_tab_view.dart';
 import '../widgets/member_avatar_bubble.dart';
 import 'check_in_screen.dart';
-import 'help_alert_screen.dart';
 import 'invite_screen.dart';
 import 'join_circle_screen.dart';
 import 'member_profile_screen.dart';
-import 'people_screen.dart';
+import 'circle_detail_screen.dart';
+import 'circles_screen.dart';
 import 'places_screen.dart';
-import 'safety_screen.dart';
 import 'settings_screen.dart';
 import 'sos_screen.dart';
 
@@ -54,7 +54,22 @@ const double kApproxZoneRadiusMeters = 300.0;
 /// (no drawer overlapping these controls). A `+` FAB floats above the bar and
 /// offers the Check In / Help Alert / Invite quick actions.
 class MapScreen extends StatefulWidget {
-  const MapScreen({super.key});
+  const MapScreen({
+    super.key,
+    this.membersSink,
+    this.userIdSink,
+    this.circleService,
+    this.placesLoader,
+  });
+
+  /// When hosted in the app shell, the live roster is published here so the
+  /// other tabs (Driving, Circle) share the map's single subscription.
+  final ValueNotifier<List<Member>>? membersSink;
+  final ValueNotifier<String?>? userIdSink;
+
+  /// Injected in tests; defaults to [CircleService.instance].
+  final CircleService? circleService;
+  final PlacesLoader? placesLoader;
 
   @override
   State<MapScreen> createState() => _MapScreenState();
@@ -79,8 +94,11 @@ class _MapScreenState extends State<MapScreen>
 
   /// Live roster exposed to the pushed People screen so its status chips stay
   /// live off the map's single WebSocket subscription (no second connection).
-  final ValueNotifier<List<Member>> _membersListenable =
-      ValueNotifier<List<Member>>(const <Member>[]);
+  late final ValueNotifier<List<Member>> _membersListenable =
+      widget.membersSink ?? ValueNotifier<List<Member>>(const <Member>[]);
+
+  /// Circles for the switcher pill. The map itself shows the primary circle.
+  List<Circle> _circles = const <Circle>[];
 
   /// OS connectivity watcher for this screen: coming back online must recover
   /// the map on its own (see [_onConnectivityChanged]).
@@ -122,6 +140,7 @@ class _MapScreenState extends State<MapScreen>
     _connectivitySub =
         Connectivity().onConnectivityChanged.listen(_onConnectivityChanged);
     _load();
+    unawaited(_loadCircles());
     _checkLocation();
     _initLocationSharing();
     PushService.sync();
@@ -147,6 +166,7 @@ class _MapScreenState extends State<MapScreen>
   void _onUserId(String userId) {
     if (!mounted) return;
     setState(() => _userId = userId);
+    widget.userIdSink?.value = userId;
   }
 
   /// Retries the initial family load automatically when the network returns
@@ -295,7 +315,7 @@ class _MapScreenState extends State<MapScreen>
     _reporter.stop();
     _familyService.dispose();
     _cameraAnim?.dispose();
-    _membersListenable.dispose();
+    if (widget.membersSink == null) _membersListenable.dispose();
     super.dispose();
   }
 
@@ -338,6 +358,7 @@ class _MapScreenState extends State<MapScreen>
   }
 
   void _onSharingChanged() {
+    if (mounted) setState(() {});
     _applyLocationSharing(startBackgroundAfterFrame: false);
   }
 
@@ -492,23 +513,50 @@ class _MapScreenState extends State<MapScreen>
     );
   }
 
-  /// Opens the dedicated full-screen family member roster (the People
-  /// destination in the bottom bar). It consumes the map's single live member
-  /// subscription so statuses stay fresh without a second WebSocket.
-  void _openPeople() {
+  void _openSos() {
+    Navigator.of(context)
+        .push(MaterialPageRoute<void>(builder: (_) => const SosScreen()));
+  }
+
+  /// Loads the user's circles for the switcher pill; failures leave the pill
+  /// showing just the family name.
+  Future<void> _loadCircles() async {
+    try {
+      final List<Circle> circles =
+          await (widget.circleService ?? CircleService.instance).listCircles();
+      if (!mounted) return;
+      setState(() => _circles = circles);
+    } catch (_) {
+      // Keep the family-name-only pill.
+    }
+  }
+
+  void _openCircles() {
+    Navigator.of(context)
+        .push(MaterialPageRoute<void>(builder: (_) => const CirclesScreen()))
+        .then((_) {
+      if (mounted) {
+        _loadCircles();
+        _load();
+      }
+    });
+  }
+
+  void _openCircle(Circle c) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => PeopleScreen(
-          circleName: _familyName,
-          members: _membersListenable,
+        builder: (_) => CircleDetailScreen(
+          circle: c,
+          service: widget.circleService,
         ),
       ),
     );
   }
 
-  void _openSos() {
-    Navigator.of(context)
-        .push(MaterialPageRoute<void>(builder: (_) => const SosScreen()));
+  /// Centers the map on a member picked from the People list.
+  void _focusMember(Member m) {
+    final LatLng? p = m.position;
+    if (p != null && _mapReady) _animateTo(p, 16);
   }
 
   void _openPlaces() {
@@ -519,11 +567,6 @@ class _MapScreenState extends State<MapScreen>
   Future<void> _refreshServerFeatures() async {
     await TileConfig.instance.refresh();
     if (mounted) setState(() {});
-  }
-
-  void _openSafety() {
-    Navigator.of(context)
-        .push(MaterialPageRoute<void>(builder: (_) => const SafetyScreen()));
   }
 
   void _openSettings() {
@@ -551,61 +594,6 @@ class _MapScreenState extends State<MapScreen>
         .push(MaterialPageRoute<void>(builder: (_) => const CheckInScreen()));
   }
 
-  void _openHelpAlert() {
-    Navigator.of(context)
-        .push(MaterialPageRoute<void>(builder: (_) => const HelpAlertScreen()));
-  }
-
-  void _showAddActions() {
-    final ColorScheme colors = Theme.of(context).colorScheme;
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: colors.surface,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (BuildContext context) {
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _AddActionTile(
-                  icon: Icons.check_circle_outline,
-                  title: 'Check In',
-                  subtitle: 'Share your location with your family',
-                  onTap: () {
-                    Navigator.of(context).pop();
-                    _openCheckIn();
-                  },
-                ),
-                _AddActionTile(
-                  icon: Icons.campaign_outlined,
-                  title: 'Help Alert',
-                  subtitle: 'Ask your family for help',
-                  onTap: () {
-                    Navigator.of(context).pop();
-                    _openHelpAlert();
-                  },
-                ),
-                _AddActionTile(
-                  icon: Icons.person_add_alt_1,
-                  title: 'Invite',
-                  subtitle: 'Send a code to invite someone to your family',
-                  onTap: () {
-                    Navigator.of(context).pop();
-                    _openAddPerson();
-                  },
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
   void _toggleSatellite() {
     setState(() => _satellite = !_satellite);
   }
@@ -613,18 +601,34 @@ class _MapScreenState extends State<MapScreen>
   @override
   Widget build(BuildContext context) {
     final List<Member> members = _liveMembers();
-    final MediaQueryData media = MediaQuery.of(context);
-    final double safeBottom = media.padding.bottom;
-    // Space reserved at the very bottom for the fixed control bar (its own
-    // height plus the system safe-area inset it sits above), so the `+` FAB
-    // docks clear of it.
-    final double controlBarReserved = MapBottomBar.height + safeBottom;
 
-    return Scaffold(
-      body: Stack(
-        children: [
-          // Full-bleed live map — extends behind every control.
-          FlutterMap(
+    return LocationTabView(
+      circleName: _familyName,
+      circles: _circles,
+      members: members,
+      selfId: _userId,
+      sharingPaused: !LocationSharingService.enabled.value,
+      loading: _loading,
+      error: _error,
+      hasFamily: _hasFamily,
+      locationOff: _locationOff,
+      satellite: _satellite,
+      placesLoader: widget.placesLoader ?? PlaceService.fetchPlaces,
+      onRetry: _load,
+      onEnableLocation: _enableLocation,
+      onToggleSatellite: _toggleSatellite,
+      onLocate: _centerOnUser,
+      onOpenSettings: _openSettings,
+      onInvite: _openAddPerson,
+      onCheckIn: _openCheckIn,
+      onSos: _openSos,
+      onSelectMember: _focusMember,
+      onOpenMember: _openMemberDetails,
+      onManageCircles: _openCircles,
+      onOpenCircle: _openCircle,
+      onJoinCircle: _openJoinCircle,
+      onOpenPlaces: _openPlaces,
+      map: FlutterMap(
             mapController: _mapController,
             options: MapOptions(
               initialCenter: const LatLng(37.7749, -122.4194),
@@ -680,173 +684,6 @@ class _MapScreenState extends State<MapScreen>
               ),
             ],
           ),
-
-          // Loading / error overlays for the initial fetch.
-          if (_loading)
-            const Positioned.fill(
-              child: ColoredBox(
-                color: Color(0x66000000),
-                child: Center(
-                  child: CircularProgressIndicator(color: AppColors.purple),
-                ),
-              ),
-            ),
-          if (_error != null)
-            Positioned.fill(
-              child: _LoadErrorCard(message: _error!, onRetry: _load),
-            ),
-
-          // Top: family name, with a location-off re-prompt banner below it
-          // when the user skipped location during onboarding.
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            child: SafeArea(
-              bottom: false,
-              child: Column(
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8, left: 12, right: 76),
-                    child: CircleSwitcher(
-                      circles: [_familyName],
-                      selectedIndex: 0,
-                      onSelected: (_) {},
-                      onJoinCircle: _hasFamily ? null : _openJoinCircle,
-                      alignment: Alignment.centerLeft,
-                    ),
-                  ),
-                  if (_locationOff)
-                    Padding(
-                      padding: const EdgeInsets.only(
-                        top: 8,
-                        left: 12,
-                        right: 12,
-                      ),
-                      child: _LocationOffBanner(onEnable: _enableLocation),
-                    ),
-                ],
-              ),
-            ),
-          ),
-
-          // Top-right: satellite / standard layer toggle, with a "center on
-          // me" button stacked beneath it.
-          Positioned(
-            top: 0,
-            right: 12,
-            child: SafeArea(
-              bottom: false,
-              child: Column(
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: _LayerToggle(
-                      isSatellite: _satellite,
-                      onToggle: _toggleSatellite,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  _LocateButton(onTap: _centerOnUser),
-                ],
-              ),
-            ),
-          ),
-
-          // Bottom-center `+` FAB for the Check In / Help Alert / Invite quick
-          // actions, docked just above the fixed control bar.
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: controlBarReserved + 12,
-            child: Center(
-              child: FloatingActionButton(
-                onPressed: _showAddActions,
-                tooltip: 'Add — Check In / Help Alert / Invite',
-                child: const Icon(Icons.add),
-              ),
-            ),
-          ),
-
-          // Fixed bottom control bar (SOS + People / Places / Safety
-          // destinations + Settings gear), pinned to the very bottom and always
-          // visible. Drawn last so it sits above the map.
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
-            child: SafeArea(
-              top: false,
-              child: MapBottomBar(
-                onSos: _openSos,
-                onPeople: _openPeople,
-                onPlaces: _openPlaces,
-                onSafety: ServerFeatures.instance.smsConfigured
-                    ? _openSafety
-                    : null,
-                onSettings: _openSettings,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// One row in the map `+` sheet. Icon and copy share a vertical center so
-/// a two-line subtitle does not leave the glyph hanging on the title.
-class _AddActionTile extends StatelessWidget {
-  const _AddActionTile({
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final String title;
-  final String subtitle;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final ColorScheme colors = Theme.of(context).colorScheme;
-    return InkWell(
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            Icon(icon, color: BrandTheme.of(context).accentInk, size: 28),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                      color: colors.onSurface,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    subtitle,
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: colors.onSurfaceVariant,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
     );
   }
 }
@@ -861,70 +698,6 @@ class _LatLngTween extends Tween<LatLng> {
         begin!.latitude + (end!.latitude - begin!.latitude) * t,
         begin!.longitude + (end!.longitude - begin!.longitude) * t,
       );
-}
-
-/// A small floating button that toggles between standard and satellite tiles.
-class _LayerToggle extends StatelessWidget {
-  const _LayerToggle({required this.isSatellite, required this.onToggle});
-
-  final bool isSatellite;
-  final VoidCallback onToggle;
-
-  @override
-  Widget build(BuildContext context) {
-    return Tooltip(
-      message: isSatellite ? 'Switch to standard map' : 'Switch to satellite',
-      child: Material(
-        color: BrandTheme.of(context).sheet,
-        shape: const CircleBorder(),
-        elevation: 3,
-        child: InkWell(
-          customBorder: const CircleBorder(),
-          onTap: onToggle,
-          child: Padding(
-            padding: const EdgeInsets.all(10),
-            child: Icon(
-              isSatellite ? Icons.map : Icons.satellite_alt,
-              size: 22,
-              color: BrandTheme.of(context).accentInk,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// A small circular "center on me" button that recenters the map on the
-/// caller's current location.
-class _LocateButton extends StatelessWidget {
-  const _LocateButton({required this.onTap});
-
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Tooltip(
-      message: 'Center on my location',
-      child: Material(
-        color: BrandTheme.of(context).sheet,
-        shape: const CircleBorder(),
-        elevation: 3,
-        child: InkWell(
-          customBorder: const CircleBorder(),
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.all(10),
-            child: Icon(
-              Icons.my_location,
-              size: 22,
-              color: BrandTheme.of(context).accentInk,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
 }
 
 /// Builds the member [MarkerLayer] from the current camera, clustering by
@@ -990,91 +763,3 @@ class _MemberMarkerLayer extends StatelessWidget {
   }
 }
 
-/// A gentle banner shown on the map when location sharing is off (the user
-/// skipped it during onboarding). Explains the degraded state and offers a
-/// one-tap re-prompt so they can enable it without digging through Settings.
-class _LocationOffBanner extends StatelessWidget {
-  const _LocationOffBanner({required this.onEnable});
-
-  final VoidCallback onEnable;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: BrandTheme.of(context).sheet,
-      elevation: 3,
-      borderRadius: BorderRadius.circular(16),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        child: Row(
-          children: [
-            const Icon(Icons.location_off, color: AppColors.statusOrange),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                'Location sharing is off, so your family can\'t see where you '
-                'are.',
-                style: TextStyle(
-                  fontSize: 13,
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            TextButton(onPressed: onEnable, child: const Text('Enable')),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// A centered error card shown when the initial family fetch fails, with a
-/// retry button that re-runs [_MapScreenState._load].
-class _LoadErrorCard extends StatelessWidget {
-  const _LoadErrorCard({required this.message, required this.onRetry});
-
-  final String message;
-  final VoidCallback onRetry;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Material(
-        color: BrandTheme.of(context).sheet,
-        elevation: 4,
-        borderRadius: BorderRadius.circular(16),
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(
-                Icons.cloud_off,
-                size: 40,
-                color: AppColors.statusOrange,
-              ),
-              const SizedBox(height: 12),
-              Text(
-                message,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 14,
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
-              ),
-              const SizedBox(height: 16),
-              FilledButton(
-                onPressed: onRetry,
-                style: FilledButton.styleFrom(
-                  backgroundColor: AppColors.purple,
-                ),
-                child: const Text('Retry'),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
