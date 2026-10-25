@@ -38,3 +38,9 @@ app/android/build/
 
 # Local backups (database dumps)
 backups
+
+# Android signing material (never commit)
+key.properties
+*.jks
+*.keystore
+app/android/release.jks
