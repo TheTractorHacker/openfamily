@@ -12,6 +12,7 @@ import '../services/place_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/member_avatar_bubble.dart';
 import '../widgets/movement_icon.dart';
+import '../widgets/trips_entry_button.dart';
 
 /// Location-history timeline for a member: a map trail plus named family
 /// places and unnamed stops for a chosen day.
@@ -150,7 +151,10 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Day Detail')),
+      appBar: AppBar(
+        title: const Text('Day Detail'),
+        actions: <Widget>[TripsAppBarAction(member: widget.member)],
+      ),
       body: Column(
         children: [
           _Header(
