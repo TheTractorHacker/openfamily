@@ -1,6 +1,7 @@
 import Flutter
 import UIKit
 import UserNotifications
+import background_locator_2
 
 @main
 @objc class AppDelegate: FlutterAppDelegate {
