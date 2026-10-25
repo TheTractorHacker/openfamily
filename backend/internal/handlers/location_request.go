@@ -182,6 +182,14 @@ func (s *Server) RequestMemberLocation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Audit every request that actually woke a device (BSEC-013): the family's
+	// admins can see who asked for whom. The pushed command itself stays free
+	// of requester information.
+	if familyID, err := s.familyIDForUser(r.Context(), claims.UserID); err == nil {
+		s.logAudit(r.Context(), claims.UserID, familyID, "family.location_request",
+			"requested a fresh location from member "+targetID, clientIP(r))
+	}
+
 	writeJSON(w, http.StatusAccepted, map[string]any{
 		"status":     "queued",
 		"request_id": requestID,

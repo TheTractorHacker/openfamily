@@ -88,6 +88,7 @@ func (s *Server) AdminStream(w http.ResponseWriter, r *http.Request) {
 		done: make(chan struct{}),
 	}
 	c.userID = claims.UserID
+	s.auditAdminView(r.Context(), claims.UserID, "", "opened live location stream for all families", clientIP(r))
 	s.hub.registerAdmin(c)
 	go s.hub.watch(c, wsRevalidateInterval, func(ctx context.Context) (bool, error) {
 		return s.adminStreamAuthorized(ctx, claims.UserID, claims.TokenVersion)

@@ -133,7 +133,8 @@ func (s *Server) GetMemberHistory(w http.ResponseWriter, r *http.Request) {
 // AdminGetMemberHistory returns any member's location trail and visits.
 // RequireAuth + RequirePlatformAdmin are enforced by the route group.
 func (s *Server) AdminGetMemberHistory(w http.ResponseWriter, r *http.Request) {
-	if middleware.ClaimsFromContext(r.Context()) == nil {
+	claims := middleware.ClaimsFromContext(r.Context())
+	if claims == nil {
 		writeError(w, http.StatusUnauthorized, "unauthenticated")
 		return
 	}
@@ -163,6 +164,7 @@ func (s *Server) AdminGetMemberHistory(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to load history")
 		return
 	}
+	s.auditAdminView(r.Context(), claims.UserID, targetFamily, "viewed location history of member "+memberID, clientIP(r))
 	writeJSON(w, http.StatusOK, out)
 }
 

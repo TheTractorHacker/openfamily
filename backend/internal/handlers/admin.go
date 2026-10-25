@@ -147,7 +147,8 @@ type adminMember struct {
 // same liveness freshness as the family map. Requires RequireAuth +
 // RequirePlatformAdmin.
 func (s *Server) AdminListMembers(w http.ResponseWriter, r *http.Request) {
-	if middleware.ClaimsFromContext(r.Context()) == nil {
+	claims := middleware.ClaimsFromContext(r.Context())
+	if claims == nil {
 		writeError(w, http.StatusUnauthorized, "unauthenticated")
 		return
 	}
@@ -190,6 +191,7 @@ func (s *Server) AdminListMembers(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to read members")
 		return
 	}
+	s.auditAdminView(r.Context(), claims.UserID, "", "listed last known locations of all members", clientIP(r))
 	writeJSON(w, http.StatusOK, members)
 }
 
