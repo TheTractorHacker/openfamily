@@ -120,26 +120,23 @@ func (s *Server) IngestLocation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Load the stored last-known position: used for the per-user monotonicity
+	// check and for stationary dedup (below). member_positions is a one-row-
+	// per-user table kept in step with every stored point, so this replaces a
+	// MAX(ts) scan across every locations chunk (PERF-001/002). Its ts only
+	// moves forward when a point is stored, the same value MAX(locations.ts)
+	// returned, and it survives retention purges of old chunks.
+	var mpLat, mpLon *float64
 	var lastTS *time.Time
-	if err := tx.QueryRow(r.Context(), `
-		SELECT MAX(l.ts) FROM locations l
-		JOIN devices d ON d.id = l.device_id
-		WHERE d.user_id = $1`, ownerID).Scan(&lastTS); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to check last location")
+	err = tx.QueryRow(r.Context(), `
+		SELECT lat, lon, ts FROM member_positions WHERE user_id = $1`, ownerID,
+	).Scan(&mpLat, &mpLon, &lastTS)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusInternalServerError, "failed to check last position")
 		return
 	}
 	if lastTS != nil && !ts.After(*lastTS) {
 		writeError(w, http.StatusBadRequest, "ts is not newer than the user's last location")
-		return
-	}
-
-	// Load the stored last-known position for stationary dedup (below).
-	var mpLat, mpLon *float64
-	err = tx.QueryRow(r.Context(), `
-		SELECT lat, lon FROM member_positions WHERE user_id = $1`, ownerID,
-	).Scan(&mpLat, &mpLon)
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		writeError(w, http.StatusInternalServerError, "failed to check last position")
 		return
 	}
 
@@ -170,14 +167,14 @@ func (s *Server) IngestLocation(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		go func() {
+		postCommitRunner.Submit(func() {
 			evalCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 			s.evaluateGeofences(evalCtx, ownerID, req.Lon, req.Lat, ts)
-		}()
+		})
 		// Presence is liveness, so use server receipt time rather than the GPS
 		// fix timestamp. A delayed fix must never move "last seen" backwards.
-		go s.broadcastPresence(ownerID, time.Now().UTC(), req.BatteryPct)
+		postCommitRunner.Submit(func() { s.broadcastPresence(ownerID, time.Now().UTC(), req.BatteryPct) })
 
 		writeJSON(w, http.StatusOK, map[string]any{
 			"status": "deduplicated",
@@ -186,13 +183,25 @@ func (s *Server) IngestLocation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := tx.Exec(r.Context(), `
+	// ON CONFLICT DO NOTHING: (device_id, ts) is unique. A conflict here means a
+	// concurrent batch upload stored this exact timestamp first.
+	tag, err := tx.Exec(r.Context(), `
 		INSERT INTO locations (device_id, ts, geom, accuracy_meters, altitude_meters, speed_mps, heading_deg, battery_pct, motion_state, source)
-		VALUES ($1, $2, ST_SetSRID(ST_MakePoint($3, $4), 4326), $5, $6, $7, $8, $9, $10, $11)`,
+		VALUES ($1, $2, ST_SetSRID(ST_MakePoint($3, $4), 4326), $5, $6, $7, $8, $9, $10, $11)
+		ON CONFLICT (device_id, ts) DO NOTHING`,
 		req.DeviceID, ts, req.Lon, req.Lat, req.AccuracyMeters, req.AltitudeMeters,
 		req.SpeedMPS, req.HeadingDeg, req.BatteryPct, nullIfEmpty(req.MotionState), nullIfEmpty(req.Source),
-	); err != nil {
+	)
+	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to store location")
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		// Already stored: acknowledge idempotently, like the stationary dedup.
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status": "deduplicated",
+			"ts":     ts,
+		})
 		return
 	}
 
@@ -240,15 +249,15 @@ func (s *Server) IngestLocation(w http.ResponseWriter, r *http.Request) {
 	// goroutine so the client's ack is not delayed by evaluation. A background
 	// context (with a timeout) also means a client disconnect after the commit
 	// cannot cancel the evaluation and silently drop the transition.
-	go func() {
+	postCommitRunner.Submit(func() {
 		evalCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		s.evaluateGeofences(evalCtx, ownerID, req.Lon, req.Lat, ts)
-	}()
+	})
 
 	// Fan out the live location update to the owner's family in a goroutine so
 	// the ack is not delayed and a client disconnect cannot cancel it.
-	go func() {
+	postCommitRunner.Submit(func() {
 		var motionState *string
 		if req.MotionState != "" {
 			motionState = &req.MotionState
@@ -265,7 +274,7 @@ func (s *Server) IngestLocation(w http.ResponseWriter, r *http.Request) {
 			MotionState:    motionState,
 			AccuracyMeters: req.AccuracyMeters,
 		})
-	}()
+	})
 
 	writeJSON(w, http.StatusCreated, models.Location{
 		DeviceID:       req.DeviceID,

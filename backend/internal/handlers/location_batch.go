@@ -100,8 +100,10 @@ func filterBatchPoints(points []batchPoint, now time.Time) (kept []batchPoint, r
 }
 
 // batchKept filters out points already stored (previous deliveries of the
-// same timestamp — the locations table deliberately has no unique index, so
-// idempotency is enforced here) and duplicates within the batch itself.
+// same timestamp) and duplicates within the batch itself. The locations table
+// has a unique (device_id, ts) index (000025) and the INSERT uses ON CONFLICT
+// DO NOTHING as the race-proof backstop; this pre-filter keeps the common retry
+// path cheap and the stored/skipped counts exact.
 // Pure — no database — so it is unit-testable without a pool.
 func batchKept(points []batchPoint, existing map[string]struct{}) (kept []batchPoint, skipped int) {
 	seen := make(map[string]struct{}, len(points))
@@ -274,7 +276,8 @@ func (s *Server) storeBackfill(ctx context.Context, deviceID, ownerID string, po
 		for _, p := range storable {
 			b.Queue(`
 				INSERT INTO locations (device_id, ts, geom, accuracy_meters, altitude_meters, speed_mps, heading_deg, battery_pct, motion_state, source)
-				VALUES ($1, $2, ST_SetSRID(ST_MakePoint($3, $4), 4326), $5, $6, $7, $8, $9, $10, $11)`,
+				VALUES ($1, $2, ST_SetSRID(ST_MakePoint($3, $4), 4326), $5, $6, $7, $8, $9, $10, $11)
+				ON CONFLICT (device_id, ts) DO NOTHING`,
 				p.DeviceID, *p.TS, p.Lon, p.Lat, p.AccuracyMeters,
 				p.AltitudeMeters, p.SpeedMPS, p.HeadingDeg, p.BatteryPct,
 				nullIfEmpty(p.MotionState), nullIfEmpty(p.Source),
@@ -293,12 +296,21 @@ func (s *Server) storeBackfill(ctx context.Context, deviceID, ownerID string, po
 			)
 		}
 		br := tx.SendBatch(ctx, b)
+		inserted := 0
 		for i := 0; i < len(storable)*2; i++ {
-			if _, err := br.Exec(); err != nil {
+			tag, err := br.Exec()
+			if err != nil {
 				br.Close()
 				return 0, 0, fmt.Errorf("ingest exec: %w", err)
 			}
+			// Even statements are the locations INSERTs; zero rows means a
+			// concurrent delivery stored that timestamp first (ON CONFLICT).
+			if i%2 == 0 {
+				inserted += int(tag.RowsAffected())
+			}
 		}
+		dupes += len(storable) - inserted
+		stored = inserted
 		if err := br.Close(); err != nil {
 			return 0, 0, fmt.Errorf("ingest batch: %w", err)
 		}
@@ -307,5 +319,5 @@ func (s *Server) storeBackfill(ctx context.Context, deviceID, ownerID string, po
 	if err := tx.Commit(ctx); err != nil {
 		return 0, 0, fmt.Errorf("commit: %w", err)
 	}
-	return len(storable), dupes, nil
+	return stored, dupes, nil
 }
