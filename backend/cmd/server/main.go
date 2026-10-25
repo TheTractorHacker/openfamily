@@ -23,6 +23,7 @@ import (
 	mid "github.com/wheresfrank/openfamily/backend/internal/middleware"
 	"github.com/wheresfrank/openfamily/backend/internal/push"
 	"github.com/wheresfrank/openfamily/backend/internal/sms"
+	"github.com/wheresfrank/openfamily/backend/internal/trips"
 	web "github.com/wheresfrank/openfamily/backend/web"
 )
 
@@ -105,6 +106,9 @@ func main() {
 	// Background reconciliation self-heals any geofence evaluation that failed
 	// or was interrupted during ingest.
 	go srv.ReconcileGeofences(ctx)
+
+	// Segment new locations into trips (bounded, cancelled with ctx).
+	go (&trips.Worker{Store: trips.NewStore(pool)}).Run(ctx)
 
 	trustedProxies, err := resolveTrustedProxies(cfg)
 	if err != nil {
@@ -194,6 +198,10 @@ func main() {
 		r.Get("/family/members", srv.ListMembers)
 		r.Get("/family/members/{id}/avatar", srv.GetFamilyMemberAvatar)
 		r.Get("/family/members/{id}/history", srv.GetMemberHistory)
+		r.Get("/trips", srv.ListTrips)
+		r.Get("/trips/summary", srv.TripsSummary)
+		r.Post("/trips/compute", srv.ComputeTrips)
+		r.Get("/trips/{id}", srv.GetTrip)
 		r.Post("/family/members/{id}/location-request", srv.RequestMemberLocation)
 		r.Patch("/family/members/{id}/role", srv.UpdateMemberRole)
 		r.Post("/family/invites", srv.CreateFamilyInvite)

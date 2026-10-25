@@ -1,0 +1,2 @@
+DROP TABLE IF EXISTS trip_watermarks;
+DROP TABLE IF EXISTS trips;
