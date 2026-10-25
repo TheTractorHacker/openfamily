@@ -1,9 +1,14 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <!-- The INTERNET permission is required for development. Specifically,
          the Flutter tool needs it to communicate with the running application
          to allow setting breakpoints, to provide hot reload, etc.
     -->
     <uses-permission android:name="android.permission.INTERNET"/>
-    <!-- Local emulator talks to the host via http://10.0.2.2 (cleartext). -->
-    <application android:usesCleartextTraffic="true"/>
+    <!-- Local emulator talks to the host via http://10.0.2.2 (cleartext).
+         Debug only; main sets usesCleartextTraffic=false, so the debug
+         overlay must explicitly replace it or the manifest merger fails. -->
+    <application
+        android:usesCleartextTraffic="true"
+        tools:replace="android:usesCleartextTraffic"/>
 </manifest>
