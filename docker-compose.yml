@@ -48,6 +48,9 @@ services:
       APP_ENV: ${APP_ENV:-development}
       # TLS is terminated in front of the API (Caddy or your own proxy).
       TLS_BEHIND_PROXY: ${TLS_BEHIND_PROXY:-true}
+      # Comma-separated CIDRs of reverse proxies whose X-Forwarded-For is trusted.
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
+      INGEST_KEY_TTL: ${INGEST_KEY_TTL:-2160h}
       INSECURE_HTTP: ${INSECURE_HTTP:-false}
       VERBOSE_PUSH: ${VERBOSE_PUSH:-false}
       PLATFORM_ADMIN_EMAIL: ${PLATFORM_ADMIN_EMAIL:-}
@@ -82,7 +85,7 @@ services:
       postgres:
         condition: service_healthy
     ports:
-      - "127.0.0.1:${API_PORT:-8080}:8080"
+      - "${API_BIND:-127.0.0.1}:${API_PORT:-8080}:8080"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- \"http://127.0.0.1$${HTTP_ADDR}/healthz\" >/dev/null"]
       interval: 10s
