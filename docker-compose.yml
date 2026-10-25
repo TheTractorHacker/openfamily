@@ -50,6 +50,15 @@ services:
       TLS_BEHIND_PROXY: ${TLS_BEHIND_PROXY:-true}
       # Comma-separated CIDRs of reverse proxies whose X-Forwarded-For is trusted.
       TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
+      # SOS / alert limits and share-link lifetime (see docs/safety.md).
+      ALERT_SOS_COOLDOWN: ${ALERT_SOS_COOLDOWN:-}
+      ALERT_COOLDOWN: ${ALERT_COOLDOWN:-}
+      ALERT_FAMILY_MAX_PER_HOUR: ${ALERT_FAMILY_MAX_PER_HOUR:-}
+      ALERT_SMS_MAX_RECIPIENTS: ${ALERT_SMS_MAX_RECIPIENTS:-}
+      ALERT_SMS_SENDER_PER_DAY: ${ALERT_SMS_SENDER_PER_DAY:-}
+      ALERT_SMS_FAMILY_PER_HOUR: ${ALERT_SMS_FAMILY_PER_HOUR:-}
+      ALERT_SMS_ON_CHECKIN: ${ALERT_SMS_ON_CHECKIN:-}
+      ALERT_SHARE_TTL: ${ALERT_SHARE_TTL:-}
       INGEST_KEY_TTL: ${INGEST_KEY_TTL:-2160h}
       INSECURE_HTTP: ${INSECURE_HTTP:-false}
       VERBOSE_PUSH: ${VERBOSE_PUSH:-false}
