@@ -2,7 +2,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:local_auth/local_auth.dart' show BiometricType;
 
-import '../services/api_client.dart';
 import '../services/auth_service.dart';
 import '../services/battery_optimization_service.dart';
 import '../services/biometric_service.dart';

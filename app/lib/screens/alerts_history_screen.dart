@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import '../models/alert.dart';
 import '../services/alert_service.dart';
 import '../services/api_client.dart';
-import '../services/alert_router.dart';
 import '../theme/app_theme.dart';
 import 'alert_received_screen.dart';
 import 'alert_status_screen.dart';

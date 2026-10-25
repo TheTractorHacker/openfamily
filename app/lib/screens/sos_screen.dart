@@ -756,8 +756,6 @@ class _ResultCard extends StatelessWidget {
     required this.subtitle,
     required this.actionLabel,
     required this.onAction,
-    this.secondaryLabel,
-    this.onSecondary,
   });
 
   final IconData icon;
@@ -766,8 +764,6 @@ class _ResultCard extends StatelessWidget {
   final String subtitle;
   final String actionLabel;
   final VoidCallback onAction;
-  final String? secondaryLabel;
-  final VoidCallback? onSecondary;
 
   @override
   Widget build(BuildContext context) {
@@ -791,10 +787,6 @@ class _ResultCard extends StatelessWidget {
         ),
         const SizedBox(height: 24),
         FilledButton(onPressed: onAction, child: Text(actionLabel)),
-        if (secondaryLabel != null && onSecondary != null) ...[
-          const SizedBox(height: 8),
-          TextButton(onPressed: onSecondary, child: Text(secondaryLabel!)),
-        ],
       ],
     );
   }
