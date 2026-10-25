@@ -1,4 +1,5 @@
 # Production Caddyfile: API + ntfy UnifiedPush, both with automatic HTTPS.
+# Requires compose profiles "proxy" and "push" (COMPOSE_PROFILES=proxy,push).
 #
 # Set in .env:
 #   SITE_ADDRESS=openfamily.example.com
@@ -6,12 +7,25 @@
 #   NTFY_BASE_URL=https://push.example.com
 #   CADDYFILE=Caddyfile.with-push
 
+(security_headers) {
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		Permissions-Policy "geolocation=(), camera=(), microphone=()"
+		-Server
+	}
+}
+
 {$SITE_ADDRESS:localhost} {
+	import security_headers
 	encode gzip
 	reverse_proxy api:8080
 }
 
 {$PUSH_ADDRESS} {
+	import security_headers
 	encode gzip
 	reverse_proxy ntfy:80
 }

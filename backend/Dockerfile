@@ -1,11 +1,11 @@
 # Build stage
 FROM golang:1.27.3-alpine AS build
 RUN apk add --no-cache ca-certificates openssl
-COPY updater/distrust-compromised-cas.sh /usr/local/bin/distrust-compromised-cas
+COPY scripts/distrust-compromised-cas.sh /usr/local/bin/distrust-compromised-cas
 RUN sh /usr/local/bin/distrust-compromised-cas && update-ca-certificates --fresh
 WORKDIR /src
 
-# An explicit ref is used by the updater. For ordinary `docker compose up
+# An explicit ref may be passed by scripts/upgrade.sh. For ordinary `docker compose up
 # --build`, resolve HEAD from the small .git metadata included in the build
 # context so the API never falls back to a misleading "dev" version.
 ARG GIT_COMMIT=
@@ -35,9 +35,13 @@ RUN resolved_ref="${GIT_COMMIT}"; \
 # Runtime stage
 FROM alpine:3.22
 RUN apk add --no-cache ca-certificates openssl tzdata
-COPY updater/distrust-compromised-cas.sh /usr/local/bin/distrust-compromised-cas
+COPY scripts/distrust-compromised-cas.sh /usr/local/bin/distrust-compromised-cas
 RUN sh /usr/local/bin/distrust-compromised-cas && update-ca-certificates --fresh
 COPY --from=build /out/server /usr/local/bin/server
+# Run as an unprivileged user; /data/apk is the (volume-backed) APK cache.
+RUN adduser -D -H -u 10001 openfamily \
+ && mkdir -p /data/apk && chown -R openfamily /data
+USER 10001
 EXPOSE 8080
 ENTRYPOINT ["server"]
 
