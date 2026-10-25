@@ -7,6 +7,7 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../models/member.dart';
 import '../models/place.dart';
+import 'alert_service.dart';
 import 'api_client.dart';
 import 'member_avatar_cache.dart';
 import 'member_mapper.dart';
@@ -321,6 +322,7 @@ class FamilyService {
         final String? id = map['user_id'] as String?;
         if (id != null) {
           _userId = id;
+          AlertEvents.selfUserId = id;
           onUserId?.call(id);
         }
         break;
@@ -342,6 +344,10 @@ class FamilyService {
         break;
       case 'avatar':
         _applyAvatar(map);
+        break;
+      case 'alert':
+      case 'alert_ack':
+        AlertEvents.handleFrame(map);
         break;
     }
   }
