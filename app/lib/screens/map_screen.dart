@@ -312,18 +312,9 @@ class _MapScreenState extends State<MapScreen>
     }
   }
 
-  /// Reconciles tokens the background isolate may have rotated while we were
-  /// backgrounded, then restarts the foreground reporter and refreshes family
+  /// Restarts the foreground reporter and refreshes family
   /// data.
   Future<void> _onResumed() async {
-    // Pick up any tokens the background isolate rotated (and wrote only to
-    // shared_preferences) so the foreground reporter uses the current,
-    // non-revoked refresh token instead of racing the background isolate.
-    try {
-      await TokenStorage.syncFromBackgroundStore();
-    } catch (_) {
-      // Ignore sync failures; the reporter's own 401→refresh path recovers.
-    }
     if (LocationSharingService.enabled.value) {
       _reporter.start();
     }

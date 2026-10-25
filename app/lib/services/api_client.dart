@@ -600,26 +600,10 @@ class ApiClient {
     return _recoverOrClear();
   }
 
-  /// Handles a failed foreground refresh.
-  ///
-  /// The backend rotates refresh tokens, so a foreground refresh can fail with
-  /// 401 because the background isolate already used (and rotated) the refresh
-  /// token. Before destroying everything, try to recover the tokens the
-  /// background wrote to shared_preferences. If found, return true so the
-  /// caller retries with the recovered token; otherwise clear and return false.
+  /// Handles a failed foreground refresh: the background isolate no longer
+  /// holds or rotates account tokens (MOB-002), so a definitive failure tears
+  /// the session down.
   static Future<bool> _recoverOrClear() async {
-    try {
-      await TokenStorage.syncFromBackgroundStore();
-      final String? recoveredAccess = await TokenStorage.readAccessToken();
-      if (recoveredAccess != null && recoveredAccess.isNotEmpty) {
-        // The background isolate refreshed; use its tokens.
-        return true;
-      }
-    } catch (_) {
-      // syncFromBackgroundStore or readAccessToken threw (platform-channel
-      // failure). Fall through to clear so the session is torn down safely
-      // rather than leaving a dead session with no redirect.
-    }
     await TokenStorage.clear();
     return false;
   }

@@ -55,7 +55,7 @@ void main() {
     test('drops records older than the age cap', () async {
       SharedPreferences.setMockInitialValues(<String, Object>{});
       await LocationOutbox.enqueue(
-        point(now.subtract(const Duration(hours: 49)).toIso8601String()),
+        point(now.subtract(const Duration(hours: 13)).toIso8601String()),
       );
       await LocationOutbox.enqueue(point(now.toIso8601String()));
       final List<Map<String, dynamic>> queue = await readQueue();
@@ -67,7 +67,7 @@ void main() {
       SharedPreferences.setMockInitialValues(<String, Object>{});
       for (int i = 0; i < 730; i++) {
         await LocationOutbox.enqueue(
-          point(now.subtract(Duration(minutes: 730 - i)).toIso8601String()),
+          point(now.subtract(Duration(seconds: 730 - i)).toIso8601String()),
         );
       }
       final List<Map<String, dynamic>> queue = await readQueue();
@@ -75,7 +75,7 @@ void main() {
       // The ten oldest were evicted; the newest record survives.
       expect(
         queue.map((p) => p['ts']),
-        contains(now.subtract(const Duration(minutes: 1)).toIso8601String()),
+        contains(now.subtract(const Duration(seconds: 1)).toIso8601String()),
       );
     }, timeout: const Timeout(Duration(minutes: 2)));
   });
@@ -139,6 +139,38 @@ void main() {
       );
     });
 
+    test('preserves points enqueued while the send is in flight', () async {
+      await prefsWith(<Map<String, dynamic>>[
+        point(now.subtract(const Duration(minutes: 5)).toIso8601String()),
+      ]);
+      final String lateTs =
+          now.subtract(const Duration(minutes: 1)).toIso8601String();
+      final int removed = await LocationOutbox.drain(
+        send: (batch) async {
+          await LocationOutbox.enqueue(point(lateTs));
+          return true;
+        },
+      );
+      expect(removed, 1);
+      final List<Map<String, dynamic>> queue = await readQueue();
+      expect(queue.length, 1);
+      expect(queue.single['ts'], lateTs);
+    });
+
+    test('quarantines a batch that keeps failing so it cannot pin the queue',
+        () async {
+      final String badTs =
+          now.subtract(const Duration(minutes: 5)).toIso8601String();
+      await prefsWith(<Map<String, dynamic>>[point(badTs)]);
+      for (int i = 0; i < LocationOutbox.maxAttempts - 1; i++) {
+        expect(await LocationOutbox.drain(send: (batch) async => false), 0);
+        expect(await LocationOutbox.size(), 1);
+      }
+      // The final strike drops the poisoned point.
+      expect(await LocationOutbox.drain(send: (batch) async => false), 1);
+      expect(await LocationOutbox.size(), 0);
+    });
+
     test('removes the storage entry entirely when the queue empties',
         () async {
       // Exactly one record + maxPerCall large enough: one send, all removed.
@@ -175,7 +207,7 @@ void main() {
   group('pure helpers', () {
     test('locationOutboxPruneList drops expired and evicts oldest', () {
       final List<Map<String, dynamic>> points = <Map<String, dynamic>>[
-        point(now.subtract(const Duration(hours: 49)).toIso8601String()),
+        point(now.subtract(const Duration(hours: 13)).toIso8601String()),
         point(now.subtract(const Duration(hours: 1)).toIso8601String()),
         point(now.toIso8601String()),
       ];
@@ -188,11 +220,25 @@ void main() {
       final List<Map<String, dynamic>> over = <Map<String, dynamic>>[
         for (int i = 0; i < 750; i++)
           point(
-            now.subtract(Duration(minutes: 750 - i)).toIso8601String(),
+            now.subtract(Duration(seconds: 750 - i)).toIso8601String(),
             lat: i,
           ),
       ];
       expect(locationOutboxPruneList(over, now: now).length, 720);
+    });
+
+    test('locationOutboxRegisterFailure drops points at the attempt cap', () {
+      final Map<String, int> attempts = <String, int>{};
+      expect(
+        locationOutboxRegisterFailure(attempts, <Object?>['a'], maxAttempts: 2),
+        isEmpty,
+      );
+      expect(attempts['a'], 1);
+      expect(
+        locationOutboxRegisterFailure(attempts, <Object?>['a'], maxAttempts: 2),
+        <String>{'a'},
+      );
+      expect(attempts.containsKey('a'), isFalse);
     });
 
     test('locationOutboxSelectBatch sorts newest first and slices', () {

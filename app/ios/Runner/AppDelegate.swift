@@ -15,6 +15,15 @@ import UserNotifications
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
     GeneratedPluginRegistrant.register(with: self)
+    // background_locator_2 starts a headless Flutter engine for the background
+    // isolate (also on relaunch after termination via significant-change
+    // monitoring). Plugins used there (secure storage, http-adjacent channels,
+    // battery_plus, shared_preferences) must be registered with that engine or
+    // the plugin hits an assertion / silently fails (MOB-001). The callback is
+    // invoked by the plugin with the headless engine.
+    BackgroundLocatorPlugin.setPluginRegistrantCallback { registry in
+      GeneratedPluginRegistrant.register(with: registry)
+    }
     let ok = super.application(application, didFinishLaunchingWithOptions: launchOptions)
 
     if let registrar = self.registrar(forPlugin: "OpenFamilyApns") {

@@ -6,6 +6,7 @@ import 'screens/server_config_screen.dart';
 import 'screens/welcome_screen.dart';
 import 'services/api_client.dart';
 import 'services/auth_service.dart';
+import 'services/background_credential_store.dart';
 import 'services/background_location_service.dart';
 import 'services/push_service.dart';
 import 'services/server_config.dart';
@@ -116,6 +117,9 @@ class _SessionGateState extends State<_SessionGate> {
     // Load the runtime server URL (shared_preferences → ServerConfig).
     await ServerConfig.instance.load();
 
+    // Drop plaintext background credentials left by older builds (MOB-002).
+    await BackgroundCredentialStore.migrateLegacyPrefs();
+
     // Remove the path-only local photo pointer used by an older avatar
     // implementation. Current avatars are private authenticated bytes and are
     // never persisted as a device file path.
@@ -132,10 +136,15 @@ class _SessionGateState extends State<_SessionGate> {
 
     await TileConfig.instance.refresh();
 
+    // Keep the background isolate's secure copy of the base URL and device id
+    // current.
     try {
-      await TokenStorage.syncFromBackgroundStore();
+      await BackgroundCredentialStore.sync(
+        apiBaseUrl: ServerConfig.instance.apiBaseUrl,
+        deviceId: await TokenStorage.readDeviceId() ?? '',
+      );
     } catch (_) {
-      // Ignore sync failures; the reporter's auth path recovers.
+      // Secure-storage hiccup: the next login/start retries.
     }
     // The gate refreshes the session through the 30-day refresh token when
     // the 15-minute access token has expired, and it never destroys the

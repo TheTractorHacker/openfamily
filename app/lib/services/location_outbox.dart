@@ -35,7 +35,7 @@ List<Map<String, dynamic>> locationOutboxPruneList(
   List<Map<String, dynamic>> points, {
   required DateTime now,
   int maxPoints = 720,
-  Duration maxAge = const Duration(hours: 48),
+  Duration maxAge = const Duration(hours: 12),
 }) {
   final List<Map<String, dynamic>> kept = <Map<String, dynamic>>[];
   for (final Map<String, dynamic> p in points) {
@@ -62,6 +62,30 @@ List<Map<String, dynamic>> locationOutboxSelectBatch(
       List<Map<String, dynamic>>.of(points)..sort(_compareTsDesc);
   if (sorted.length <= maxPerCall) return sorted;
   return sorted.sublist(0, maxPerCall);
+}
+
+/// Records one failed send for every point in [batchTs] and returns the set
+/// of timestamps that reached [maxAttempts] failures and must be dropped
+/// (quarantined) so a permanently-rejected batch cannot pin the queue. Updates
+/// [attempts] in place (dropped entries are removed from it). Pure function,
+/// exported for tests.
+Set<String> locationOutboxRegisterFailure(
+  Map<String, int> attempts,
+  Iterable<Object?> batchTs, {
+  int maxAttempts = 8,
+}) {
+  final Set<String> dropped = <String>{};
+  for (final Object? raw in batchTs) {
+    if (raw is! String) continue;
+    final int count = (attempts[raw] ?? 0) + 1;
+    if (count >= maxAttempts) {
+      attempts.remove(raw);
+      dropped.add(raw);
+    } else {
+      attempts[raw] = count;
+    }
+  }
+  return dropped;
 }
 
 int _compareTsDesc(Map<String, dynamic> a, Map<String, dynamic> b) {
@@ -105,9 +129,12 @@ DateTime? _parseTs(Object? raw) {
 ///
 /// Storage is one JSON list under a `shared_preferences` key: small enough
 /// for the cap (≤720 records ≈ low hundreds of KB), readable from both
-/// isolates with no extra plugins, and last-write-wins. The failure mode of a
-/// same-instant cross-isolate race is a lost or duplicated point — never a
-/// wrong or replayed-with-forgery point, and the backend dedupes duplicates.
+/// isolates with no extra plugins, and last-write-wins. The queue is
+/// plaintext (encrypting it needs a new dependency, so it is bounded to 12h /
+/// 720 points instead; MOB-004). Drain re-reads the queue after the network
+/// call, so points enqueued during a send are not lost; only a same-instant
+/// cross-isolate write inside the final read-modify-write (microseconds) can
+/// still lose or duplicate a point, and the backend dedupes duplicates.
 /// Cross-isolate staleness of the per-isolate prefs cache is mitigated by
 /// reloading before every read; the residual race window is milliseconds
 /// wide and self-healing.
@@ -118,16 +145,26 @@ class LocationOutbox {
   LocationOutbox._();
 
   static const String _key = 'location_outbox_v1';
+  static const String _attemptsKey = 'location_outbox_attempts_v1';
+
+  /// A point whose batch failed this many times is dropped so one bad batch
+  /// (e.g. a record the server rejects with 4xx) cannot pin the queue.
+  static const int maxAttempts = 8;
+
+  /// In-process guard so two drains in the same isolate never send the same
+  /// batch concurrently.
+  static bool _draining = false;
 
   /// Hard cap on queued records (~12h of 60s background fixes). Keeps prefs
-  /// writes small; a multi-day trip backfills its most recent day only with
-  /// the default sampling cadence.
+  /// writes small and limits the amount of plaintext location history kept on
+  /// disk (MOB-004).
   static const int maxPoints = 720;
 
-  /// Hard age limit: records older than this are dropped on enqueue and on
-  /// drain. Beyond ~2 days the battery/bandwidth value of a coarse 60s track
-  /// fades fast, and the server accepts up to 7 days.
-  static const Duration maxAge = Duration(hours: 48);
+  /// Hard age limit, consistent with [maxPoints] at the 60s cadence (720 x
+  /// 60s = 12h): records older than this are dropped on enqueue and on drain
+  /// (MOB-017). The server accepts up to 7 days, so this is purely a
+  /// client-side privacy/size bound.
+  static const Duration maxAge = Duration(hours: 12);
 
   static const int defaultMaxPerCall = 100;
 
@@ -154,28 +191,63 @@ class LocationOutbox {
   }
 
   /// Drains up to [maxPerCall] records through [send], newest first. Returns
-  /// the number of records removed. Removal happens only after [send]
-  /// resolves `true`; a later crash re-sends a duplicate that the backend
-  /// drops idempotently.
+  /// the number of records removed (delivered or quarantined as undeliverable).
+  ///
+  /// Removal happens only after [send] resolves `true`, and it is applied to a
+  /// FRESH read of the queue taken after the send: points enqueued (by this or
+  /// the other isolate) during the network call are preserved (MOB-007). A
+  /// later crash re-sends a duplicate that the backend drops idempotently.
+  ///
+  /// On failure each point in the batch gets a strike; after [maxAttempts]
+  /// strikes it is dropped so a poisoned batch cannot block newer data.
   static Future<int> drain({
     required OutboxSend send,
     int maxPerCall = defaultMaxPerCall,
   }) async {
+    if (_draining) return 0;
+    _draining = true;
     try {
       final SharedPreferences prefs = await SharedPreferences.getInstance();
       await prefs.reload();
-      final List<Map<String, dynamic>> points = _decode(prefs.getString(_key));
+      final List<Map<String, dynamic>> points = locationOutboxPruneList(
+        _decode(prefs.getString(_key)),
+        now: DateTime.now().toUtc(),
+      );
       if (points.isEmpty) return 0;
       final List<Map<String, dynamic>> batch =
           locationOutboxSelectBatch(points, maxPerCall);
       final bool ok = await send(batch);
-      if (!ok) return 0;
-      final Set<Object?> sentTs = batch
-          .map((Map<String, dynamic> p) => p['ts'])
-          .toSet();
-      final List<Map<String, dynamic>> remaining = points
-          .where((Map<String, dynamic> p) => !sentTs.contains(p['ts']))
+      final Set<Object?> batchTs =
+          batch.map((Map<String, dynamic> p) => p['ts']).toSet();
+
+      // Re-read: the queue may have changed while the request was in flight.
+      await prefs.reload();
+      final Map<String, int> attempts = _decodeAttempts(
+        prefs.getString(_attemptsKey),
+      );
+      final Set<Object?> removeTs;
+      if (ok) {
+        removeTs = batchTs;
+        for (final Object? t in batchTs) {
+          attempts.remove(t);
+        }
+      } else {
+        removeTs = locationOutboxRegisterFailure(
+          attempts,
+          batchTs,
+          maxAttempts: maxAttempts,
+        ).cast<Object?>();
+      }
+      final List<Map<String, dynamic>> current = locationOutboxPruneList(
+        _decode(prefs.getString(_key)),
+        now: DateTime.now().toUtc(),
+      );
+      final List<Map<String, dynamic>> remaining = current
+          .where((Map<String, dynamic> p) => !removeTs.contains(p['ts']))
           .toList();
+      final Set<Object?> liveTs =
+          remaining.map((Map<String, dynamic> p) => p['ts']).toSet();
+      attempts.removeWhere((String k, int _) => !liveTs.contains(k));
       if (remaining.isEmpty) {
         // Remove the storage entry entirely rather than leaving a tombstone
         // JSON list: a fully-delivered queue occupies no space at all.
@@ -183,9 +255,16 @@ class LocationOutbox {
       } else {
         await prefs.setString(_key, jsonEncode(remaining));
       }
-      return batch.length;
+      if (attempts.isEmpty) {
+        await prefs.remove(_attemptsKey);
+      } else {
+        await prefs.setString(_attemptsKey, jsonEncode(attempts));
+      }
+      return current.length - remaining.length;
     } catch (_) {
       return 0; // Network/backend failures keep the queue untouched.
+    } finally {
+      _draining = false;
     }
   }
 
@@ -213,6 +292,7 @@ class LocationOutbox {
     try {
       final SharedPreferences prefs = await SharedPreferences.getInstance();
       await prefs.remove(_key);
+      await prefs.remove(_attemptsKey);
     } catch (_) {
       // Storage failure must never break the teardown path.
     }
@@ -221,6 +301,21 @@ class LocationOutbox {
   /// Builds the batch endpoint request body.
   static Map<String, dynamic> batchBody(List<Map<String, dynamic>> points) =>
       <String, dynamic>{'points': points};
+
+  static Map<String, int> _decodeAttempts(String? raw) {
+    if (raw == null || raw.isEmpty) return <String, int>{};
+    try {
+      final Object? decoded = jsonDecode(raw);
+      if (decoded is! Map) return <String, int>{};
+      final Map<String, int> out = <String, int>{};
+      decoded.forEach((Object? k, Object? v) {
+        if (k is String && v is int) out[k] = v;
+      });
+      return out;
+    } catch (_) {
+      return <String, int>{};
+    }
+  }
 
   static List<Map<String, dynamic>> _decode(String? raw) {
     if (raw == null || raw.isEmpty) return <Map<String, dynamic>>[];

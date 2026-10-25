@@ -13,6 +13,9 @@ if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(FileInputStream(keystorePropertiesFile))
 }
 
+val allowDebugSigning =
+    (project.findProperty("OPENFAMILY_ALLOW_DEBUG_SIGNING") as String?) == "true"
+
 android {
     namespace = "app.openfamily"
     compileSdk = flutter.compileSdkVersion
@@ -60,15 +63,46 @@ android {
 
     buildTypes {
         release {
-            // CI writes key.properties from GitHub secrets so every APK shares
-            // one upload key. Local `flutter run --release` still works without
-            // it by falling back to the debug keystore.
-            signingConfig = if (keystorePropertiesFile.exists()) {
-                signingConfigs.getByName("release")
-            } else {
-                signingConfigs.getByName("debug")
+            // Release builds MUST be signed with the real upload key supplied
+            // through android/key.properties (CI writes it from secrets).
+            // There is no silent fallback to the debug key (MOB-006): without
+            // key.properties the release build fails (see the taskGraph check
+            // below). A local, non-distributable release test build can opt in
+            // explicitly with -POPENFAMILY_ALLOW_DEBUG_SIGNING=true.
+            signingConfig = when {
+                keystorePropertiesFile.exists() ->
+                    signingConfigs.getByName("release")
+                allowDebugSigning -> {
+                    logger.warn(
+                        "WARNING: signing the release build with the DEBUG " +
+                            "key (OPENFAMILY_ALLOW_DEBUG_SIGNING). Do not distribute it.",
+                    )
+                    signingConfigs.getByName("debug")
+                }
+                else -> null
             }
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
         }
+    }
+}
+
+gradle.taskGraph.whenReady {
+    val releaseRequested = allTasks.any {
+        it.project == project &&
+            it.name in setOf("assembleRelease", "bundleRelease", "packageRelease")
+    }
+    if (releaseRequested && !keystorePropertiesFile.exists() && !allowDebugSigning) {
+        throw GradleException(
+            "Release signing is not configured: android/key.properties is missing. " +
+                "Create it with storePassword, keyPassword, keyAlias and storeFile " +
+                "(see .github/workflows/apk.yml), or pass " +
+                "-POPENFAMILY_ALLOW_DEBUG_SIGNING=true for a local, non-distributable build.",
+        )
     }
 }
 
