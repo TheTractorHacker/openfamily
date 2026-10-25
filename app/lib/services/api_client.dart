@@ -754,4 +754,12 @@ class ApiClient {
     }
     return false;
   }
+
+  // --- circles ---
+  // Helpers for the multi-circle API (see docs/design/CIRCLES.md).
+
+  /// Generic PUT (used by PUT /circles/{id}/sharing).
+  static Future<dynamic> putJson(String path, {Object? body}) {
+    return _send('PUT', _uri(path), body: body);
+  }
 }
