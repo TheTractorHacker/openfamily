@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"html"
-	"log/slog"
 	"math"
 	"net/http"
 	"strings"
@@ -17,7 +16,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/wheresfrank/openfamily/backend/internal/middleware"
-	"github.com/wheresfrank/openfamily/backend/internal/push"
 )
 
 const (
@@ -25,11 +23,12 @@ const (
 	alertHelp         = "help"
 	alertSOS          = "sos"
 	alertStatusActive = "active"
-	shareTTL          = 24 * time.Hour
 	maxAlertNote      = 280
-	checkInRateWindow = time.Minute
-	sosRateWindow     = 2 * time.Minute
 )
+
+// alertNotifiedMessage is returned to the sender. It states what the server
+// actually did. OpenFamily never contacts emergency services.
+const alertNotifiedMessage = "Your family has been notified. Emergency services were not contacted; call your local emergency number if you need them."
 
 type alertRow struct {
 	ID         string
@@ -43,6 +42,9 @@ type alertRow struct {
 	ShareToken string
 	CreatedAt  time.Time
 	SenderName string
+
+	ShareExpiresAt *time.Time
+	ShareRevokedAt *time.Time
 }
 
 type alertJSON struct {
@@ -53,38 +55,22 @@ type alertJSON struct {
 	Lon       *float64  `json:"lon,omitempty"`
 	Note      string    `json:"note,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
+	Message   string    `json:"message,omitempty"`
 }
 
 // PostCheckIn records a family check-in and fans it out (WS, push, SMS).
 func (s *Server) PostCheckIn(w http.ResponseWriter, r *http.Request) {
-	s.postAlert(w, r, alertCheckIn, false, checkInRateWindow)
+	s.postAlert(w, r, alertCheckIn, false)
 }
 
 // PostHelp records a non-emergency help alert. Family only (no emergency contacts).
 func (s *Server) PostHelp(w http.ResponseWriter, r *http.Request) {
-	s.postAlert(w, r, alertHelp, false, checkInRateWindow)
+	s.postAlert(w, r, alertHelp, false)
 }
 
 // PostSOS records an emergency SOS. Family plus the sender's emergency contacts.
 func (s *Server) PostSOS(w http.ResponseWriter, r *http.Request) {
-	s.postAlert(w, r, alertSOS, true, sosRateWindow)
-}
-
-// GetAlert returns one of the caller's alerts. The SOS screen uses this to
-// drop a stale "SOS sent" state when the row is gone or already resolved.
-func (s *Server) GetAlert(w http.ResponseWriter, r *http.Request) {
-	claims := middleware.ClaimsFromContext(r.Context())
-	if claims == nil {
-		writeError(w, http.StatusUnauthorized, "unauthenticated")
-		return
-	}
-	a, ok := s.loadOwnAlert(w, r, claims.UserID)
-	if !ok {
-		return
-	}
-	writeJSON(w, http.StatusOK, alertJSON{
-		ID: a.ID, Type: a.Type, Status: a.Status, Lat: a.Lat, Lon: a.Lon, Note: a.Note, CreatedAt: a.CreatedAt,
-	})
+	s.postAlert(w, r, alertSOS, true)
 }
 
 func (s *Server) loadOwnAlert(w http.ResponseWriter, r *http.Request, userID string) (alertRow, bool) {
@@ -95,7 +81,7 @@ func (s *Server) loadOwnAlert(w http.ResponseWriter, r *http.Request, userID str
 	}
 	var a alertRow
 	err := s.Pool.QueryRow(r.Context(), `
-		SELECT a.id, a.user_id, COALESCE(a.family_id, ''), a.type, a.status, a.lat, a.lon, COALESCE(a.note, ''),
+		SELECT a.id, a.user_id, COALESCE(a.family_id::text, ''), a.type, a.status, a.lat, a.lon, COALESCE(a.note, ''),
 		       a.share_token, a.created_at, u.name
 		FROM alerts a JOIN users u ON u.id = a.user_id
 		WHERE a.id = $1 AND a.user_id = $2`, id, userID,
@@ -166,7 +152,7 @@ func decodeAlertRequest(r *http.Request) (req alertRequest, note, errMsg string)
 	return req, note, ""
 }
 
-func (s *Server) postAlert(w http.ResponseWriter, r *http.Request, typ string, includeContacts bool, window time.Duration) {
+func (s *Server) postAlert(w http.ResponseWriter, r *http.Request, typ string, includeContacts bool) {
 	claims := middleware.ClaimsFromContext(r.Context())
 	if claims == nil {
 		writeError(w, http.StatusUnauthorized, "unauthenticated")
@@ -181,14 +167,31 @@ func (s *Server) postAlert(w http.ResponseWriter, r *http.Request, typ string, i
 		writeError(w, http.StatusNotFound, "no family")
 		return
 	}
+	cfg := s.alertLimits()
+	window := cfg.CheckInCooldown
+	if typ == alertSOS {
+		window = cfg.SOSCooldown
+	}
 	if s.AlertLimit != nil && !s.AlertLimit.Allow("alert:"+typ+":"+claims.UserID, 1, window) {
 		if typ == alertSOS {
 			writeError(w, http.StatusTooManyRequests,
-				"an SOS was already sent recently; wait a couple of minutes")
+				"your family was already notified of an SOS a moment ago; wait a couple of minutes before sending another")
 			return
 		}
 		writeError(w, http.StatusTooManyRequests, "too many requests")
 		return
+	}
+	// Family-wide ceiling for check-in/help. SOS is never blocked by it: the
+	// family push/WebSocket fan-out always happens, only SMS is capped.
+	if typ != alertSOS && cfg.FamilyMaxPerHour > 0 {
+		var n int
+		if err := s.Pool.QueryRow(r.Context(), `
+			SELECT count(*) FROM alerts
+			WHERE family_id = $1 AND type <> 'sos' AND created_at > now() - interval '1 hour'`,
+			familyID).Scan(&n); err == nil && n >= cfg.FamilyMaxPerHour {
+			writeError(w, http.StatusTooManyRequests, "your family has sent too many check-ins or help requests in the last hour")
+			return
+		}
 	}
 
 	req, note, errMsg := decodeAlertRequest(r)
@@ -220,10 +223,10 @@ func (s *Server) postAlert(w http.ResponseWriter, r *http.Request, typ string, i
 
 	var a alertRow
 	err = s.Pool.QueryRow(r.Context(), `
-		INSERT INTO alerts (user_id, family_id, type, status, lat, lon, note, share_token)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		INSERT INTO alerts (user_id, family_id, type, status, lat, lon, note, share_token, share_expires_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		RETURNING id, user_id, family_id, type, status, lat, lon, note, share_token, created_at`,
-		claims.UserID, familyID, typ, alertStatusActive, lat, lon, note, token,
+		claims.UserID, familyID, typ, alertStatusActive, lat, lon, note, token, time.Now().Add(cfg.ShareTTL),
 	).Scan(&a.ID, &a.UserID, &a.FamilyID, &a.Type, &a.Status, &a.Lat, &a.Lon, &a.Note, &a.ShareToken, &a.CreatedAt)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create alert")
@@ -231,10 +234,12 @@ func (s *Server) postAlert(w http.ResponseWriter, r *http.Request, typ string, i
 	}
 	_ = s.Pool.QueryRow(r.Context(), `SELECT name FROM users WHERE id = $1`, claims.UserID).Scan(&a.SenderName)
 
+	s.logAudit(r.Context(), claims.UserID, familyID, "alert."+typ, "alert_id="+a.ID, clientIP(r))
 	go s.fanOutAlert(a, includeContacts)
 
 	writeJSON(w, http.StatusCreated, alertJSON{
 		ID: a.ID, Type: a.Type, Status: a.Status, Lat: a.Lat, Lon: a.Lon, Note: a.Note, CreatedAt: a.CreatedAt,
+		Message: alertNotifiedMessage,
 	})
 }
 
@@ -242,27 +247,29 @@ func (s *Server) fanOutAlert(a alertRow, includeContacts bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	title, body := alertCopy(a.Type, firstName(a.SenderName), a.Note)
-	s.broadcastAlert(a)
+	title, body := s.alertPushCopy(a.Type, a.SenderName, a.Note)
+	s.broadcastAlert(ctx, a)
 
+	var pushSent, pushFailed int
 	if s.Push != nil && a.FamilyID != "" {
-		s.pushFamilyAlert(ctx, a.FamilyID, a.UserID, title, body)
+		pushSent, pushFailed = s.pushFamilyAlert(ctx, a.FamilyID, a.UserID, a.ID, title, body)
 	}
 
-	loc := alertLocationText(s.shareURL(a.ShareToken), a.Lat, a.Lon)
-	smsBody := alertSMSBody(firstName(a.SenderName), a.Type, loc)
-	s.smsFamily(ctx, a.FamilyID, a.UserID, smsBody)
-	if includeContacts {
-		s.smsEmergencyContacts(ctx, a.UserID, smsBody)
+	var smsSent, smsFailed int
+	if includeContacts || s.alertLimits().SMSOnCheckIn {
+		loc := s.shareURL(a.ShareToken)
+		smsBody := alertSMSBody(firstName(a.SenderName), a.Type, loc)
+		smsSent, smsFailed = s.smsEmergencyContacts(ctx, a, smsBody)
 	}
+	s.logAudit(ctx, a.UserID, a.FamilyID, "alert.fanout",
+		fmt.Sprintf("alert_id=%s push_sent=%d push_failed=%d sms_sent=%d sms_failed=%d",
+			a.ID, pushSent, pushFailed, smsSent, smsFailed), "")
 }
 
 func (s *Server) fanOutResolved(a alertRow) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	name := firstName(a.SenderName)
-	title := name + " is safe"
-	body := title
 	if s.hub != nil {
 		payload, err := json.Marshal(map[string]any{
 			"type":       "alert",
@@ -280,114 +287,11 @@ func (s *Server) fanOutResolved(a alertRow) {
 		}
 	}
 	if s.Push != nil && a.FamilyID != "" {
-		s.pushFamilyAlert(ctx, a.FamilyID, a.UserID, title, body)
+		title := s.pushName(a.SenderName) + " is safe"
+		s.pushFamilyAlert(ctx, a.FamilyID, a.UserID, "", title, title)
 	}
-	smsBody := name + " is safe."
-	s.smsFamily(ctx, a.FamilyID, a.UserID, smsBody)
-	if a.Type == alertSOS {
-		s.smsEmergencyContacts(ctx, a.UserID, smsBody)
-	}
-}
-
-func (s *Server) broadcastAlert(a alertRow) {
-	if s.hub == nil {
-		return
-	}
-	payload, err := json.Marshal(map[string]any{
-		"type":       "alert",
-		"alert_type": a.Type,
-		"alert_id":   a.ID,
-		"user_id":    a.UserID,
-		"name":       a.SenderName,
-		"lat":        a.Lat,
-		"lon":        a.Lon,
-		"note":       a.Note,
-		"created_at": a.CreatedAt,
-	})
-	if err != nil {
-		return
-	}
-	if a.FamilyID != "" {
-		s.hub.broadcast(a.FamilyID, payload)
-	}
-	s.hub.broadcastAdmin(payload)
-}
-
-func (s *Server) pushFamilyAlert(ctx context.Context, familyID, senderID, title, body string) {
-	rows, err := s.Pool.Query(ctx, `
-		SELECT d.platform, d.push_token, d.unifiedpush_endpoint
-		FROM devices d
-		JOIN users u ON u.id = d.user_id
-		WHERE u.family_id = $1 AND u.id <> $2
-		  AND ((d.platform = 'ios' AND d.push_token IS NOT NULL AND d.push_token <> '')
-		       OR (d.platform = 'android' AND d.unifiedpush_endpoint IS NOT NULL AND d.unifiedpush_endpoint <> ''))`,
-		familyID, senderID)
-	if err != nil {
-		slog.Error("alert: list devices", "err", err)
-		return
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var platform string
-		var token, endpoint *string
-		if err := rows.Scan(&platform, &token, &endpoint); err != nil {
-			continue
-		}
-		n := push.Notification{
-			Title:               title,
-			Body:                body,
-			Platform:            platform,
-			PushToken:           derefOrEmpty(token),
-			UnifiedPushEndpoint: derefOrEmpty(endpoint),
-		}
-		_ = s.dispatchWithRetry(ctx, n)
-	}
-}
-
-func (s *Server) smsFamily(ctx context.Context, familyID, senderID, body string) {
-	if !s.SMSEnabled() || familyID == "" {
-		return
-	}
-	rows, err := s.Pool.Query(ctx, `
-		SELECT phone FROM users
-		WHERE family_id = $1 AND id <> $2 AND phone IS NOT NULL AND phone <> ''`,
-		familyID, senderID)
-	if err != nil {
-		slog.Error("alert: list family phones", "err", err)
-		return
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var phone string
-		if err := rows.Scan(&phone); err != nil {
-			continue
-		}
-		if err := s.sendSMS(ctx, phone, body); err != nil {
-			slog.Error("alert: sms family", "err", err)
-		}
-	}
-}
-
-func (s *Server) smsEmergencyContacts(ctx context.Context, senderID, body string) {
-	if !s.SMSEnabled() {
-		return
-	}
-	rows, err := s.Pool.Query(ctx, `
-		SELECT phone FROM emergency_contacts WHERE user_id = $1`, senderID)
-	if err != nil {
-		slog.Error("alert: list contacts", "err", err)
-		return
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var phone string
-		if err := rows.Scan(&phone); err != nil {
-			continue
-		}
-		if err := s.sendSMS(ctx, phone, body); err != nil {
-			slog.Error("alert: sms contact", "err", err)
-		}
-	}
+	// Only contacts who actually received the original SMS hear the follow-up.
+	s.smsResolvedContacts(ctx, a.ID, name+" marked themselves safe.")
 }
 
 func (s *Server) shareURL(token string) string {
@@ -420,22 +324,27 @@ func (s *Server) ShareAlert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	token := chi.URLParam(r, "token")
-	if token == "" {
+	if len(token) != shareTokenLen {
 		http.NotFound(w, r)
 		return
 	}
 	var a alertRow
 	err := s.Pool.QueryRow(r.Context(), `
-		SELECT a.id, a.user_id, COALESCE(a.family_id, ''), a.type, a.status, a.lat, a.lon, COALESCE(a.note, ''),
-		       a.share_token, a.created_at, u.name
+		SELECT a.id, a.user_id, COALESCE(a.family_id::text, ''), a.type, a.status, a.lat, a.lon, COALESCE(a.note, ''),
+		       a.share_token, a.created_at, u.name, a.share_expires_at, a.share_revoked_at
 		FROM alerts a JOIN users u ON u.id = a.user_id
 		WHERE a.share_token = $1`, token,
-	).Scan(&a.ID, &a.UserID, &a.FamilyID, &a.Type, &a.Status, &a.Lat, &a.Lon, &a.Note, &a.ShareToken, &a.CreatedAt, &a.SenderName)
+	).Scan(&a.ID, &a.UserID, &a.FamilyID, &a.Type, &a.Status, &a.Lat, &a.Lon, &a.Note, &a.ShareToken, &a.CreatedAt, &a.SenderName,
+		&a.ShareExpiresAt, &a.ShareRevokedAt)
 	if err != nil {
 		http.NotFound(w, r)
 		return
 	}
-	if shareExpired(a.CreatedAt, time.Now()) {
+	switch shareState(a, time.Now()) {
+	case shareRevoked:
+		http.Error(w, "this link was turned off by the sender", http.StatusGone)
+		return
+	case shareExpiredState:
 		http.Error(w, "this link has expired", http.StatusGone)
 		return
 	}
@@ -462,8 +371,29 @@ func firstName(name string) string {
 	return name
 }
 
-func shareExpired(created, now time.Time) bool {
-	return now.Sub(created) > shareTTL
+const (
+	shareOK = iota
+	shareExpiredState
+	shareRevoked
+)
+
+// shareTokenLen is the hex length of a share token (16 random bytes = 128 bits).
+const shareTokenLen = 32
+
+// shareState reports whether a share link may still be served. Rows from before
+// the expiry column existed fall back to the 24 h lifetime they had.
+func shareState(a alertRow, now time.Time) int {
+	if a.ShareRevokedAt != nil {
+		return shareRevoked
+	}
+	exp := a.CreatedAt.Add(24 * time.Hour)
+	if a.ShareExpiresAt != nil {
+		exp = *a.ShareExpiresAt
+	}
+	if !now.Before(exp) {
+		return shareExpiredState
+	}
+	return shareOK
 }
 
 func alertCopy(typ, name, note string) (title, body string) {
@@ -482,28 +412,40 @@ func alertCopy(typ, name, note string) (title, body string) {
 	return title, body
 }
 
-func alertSMSBody(name, typ, loc string) string {
+// pushName is the sender name allowed in a push payload: the push provider
+// (ntfy/APNs) only learns who it was when VERBOSE_PUSH is on (BSEC-022).
+func (s *Server) pushName(senderName string) string {
+	if s.VerbosePush {
+		return firstName(senderName)
+	}
+	return "A family member"
+}
+
+// alertPushCopy builds the push title/body. Without VERBOSE_PUSH it carries
+// neither the sender name nor the free-text note. It never carries coordinates.
+func (s *Server) alertPushCopy(typ, senderName, note string) (title, body string) {
+	if !s.VerbosePush {
+		note = ""
+	}
+	return alertCopy(typ, s.pushName(senderName), note)
+}
+
+// alertSMSBody is the text sent to an emergency contact. It never contains raw
+// coordinates: location travels only behind the short-lived share link, and is
+// omitted when no https PUBLIC_BASE_URL is configured.
+func alertSMSBody(name, typ, shareURL string) string {
 	action := "checked in"
 	switch typ {
 	case alertHelp:
 		action = "needs help"
 	case alertSOS:
-		action = "sent SOS"
+		action = "sent an SOS"
 	}
-	if loc == "" {
-		return fmt.Sprintf("%s %s.", name, action)
-	}
-	return fmt.Sprintf("%s %s. %s", name, action, loc)
-}
-
-func alertLocationText(shareURL string, lat, lon *float64) string {
+	msg := fmt.Sprintf("%s %s via OpenFamily and their family was notified. Emergency services have NOT been contacted.", name, action)
 	if shareURL != "" {
-		return shareURL
+		msg += " Location (temporary link): " + shareURL
 	}
-	if lat != nil && lon != nil {
-		return fmt.Sprintf("%.5f, %.5f", *lat, *lon)
-	}
-	return ""
+	return msg
 }
 
 // sharePageHTML renders the public share page. It contains no script and no

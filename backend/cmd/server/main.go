@@ -82,6 +82,7 @@ func main() {
 		os.Exit(1)
 	}
 	srv.AlertLimit = sms.NewLimiter()
+	srv.AlertCfg = handlers.AlertLimitsFromEnv()
 	srv.AuthLimit = sms.NewLimiter()
 	srv.LocationLimit = sms.NewLimiter()
 	srv.AllowedOrigin = cfg.AllowedOrigin
@@ -194,8 +195,11 @@ func main() {
 		r.Post("/alerts/check-in", srv.PostCheckIn)
 		r.Post("/alerts/help", srv.PostHelp)
 		r.Post("/alerts/sos", srv.PostSOS)
+		r.Get("/alerts", srv.ListAlerts)
 		r.Get("/alerts/{id}", srv.GetAlert)
 		r.Post("/alerts/{id}/resolve", srv.ResolveAlert)
+		r.Post("/alerts/{id}/ack", srv.AckAlert)
+		r.Post("/alerts/{id}/share/revoke", srv.RevokeAlertShare)
 	})
 
 	// Location ingest: accepts either a Bearer access token or the per-device
