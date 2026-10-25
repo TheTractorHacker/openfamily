@@ -15,3 +15,10 @@ Status: planning. Milestones M0 to M8, labels and 29 issues exist at https://git
 | M8 Quality and Public Release | Load, battery, accessibility | Physical-device test procedures |
 
 Optional: Dawarich export (design doc and issues first).
+
+## Added from the upstream author's roadmap
+- Adaptive, battery-aware tracking via activity recognition (#30, M4)
+- Driving reports and trip summaries (#31, M4)
+- Passkeys / WebAuthn (#32, M3)
+- Crash detection with cancelable check-in (#33, M5)
+- Design decision on end-to-end encryption vs server-side geofences (#34, M1)
