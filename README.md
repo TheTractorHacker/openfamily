@@ -564,6 +564,10 @@ For a fully private map, host your own tiles. The simplest option is
 | DELETE | `/api/profile/avatar` | Remove profile image |
 | GET | `/family/members/{id}/avatar` | Same-family member's private image |
 | GET | `/family/members/{id}/history?from&to` | One day of trail + visits |
+| GET | `/trips?user_id&from&to&limit` | Trips (movement legs) that started in the range, newest first. `user_id` defaults to you; another member only if in your family. Default last 7 days, max 31 days, limit 100 (max 500) |
+| GET | `/trips/{id}?max_points` | One trip plus a downsampled `route` (default 300 points, max 1000). Another family's trip returns 404 |
+| GET | `/trips/summary?user_id&period&date&tz&speed_threshold_mps` | Driving report for a `day`, `week` (Mon-Sun) or `month`: trip count, distance, drive time, max/avg speed, speed events above the threshold (default 31.3 m/s), stops between trips |
+| POST | `/trips/compute?from&to` | Recompute your own trips for a range of at most 7 days (replaces stored trips that started in it) |
 | POST | `/families` | Create a family (caller becomes admin) |
 | GET | `/family` | Get your family |
 | PATCH | `/family` | Rename (admin) |
@@ -619,6 +623,32 @@ All routes require a platform admin. The SPA at `/admin` calls these under
 | WS | `/api/admin/ws` | Live positions across all families |
 
 </details>
+
+
+### Trips and driving reports
+
+Trips are derived server-side from stored locations by a background job
+(every 5 minutes, bounded to 200 users per pass, 4 at a time, cancelled on
+shutdown) that keeps a per-user watermark, and can be recomputed on demand with
+`POST /trips/compute`. A movement ends after 3 minutes within 50 m (or at a
+data gap over 10 minutes); movements under 250 m or 2 minutes are dropped;
+fixes worse than 100 m accuracy, out-of-order or duplicate timestamps and
+GPS teleports are rejected. Each trip leg is classified `driving`, `walking`
+or `other` (cycling, running, slow transit) from its speed profile, and a
+sustained change of mode splits a trip into legs. Thresholds live in
+`backend/internal/trips/segment.go` (`DefaultParams`).
+
+- **Speeds are GPS estimates**, in meters per second (distance in meters,
+  durations in seconds; a `units` object is included in responses). Each trip
+  carries `speed_source`: `device_gps` (speed reported by the phone),
+  `derived` (distance / time) or `mixed`. Not suitable for enforcement.
+- Stops are the gaps of at least 3 minutes between consecutive trips; the
+  summary lists them, the trip that is still in progress is not returned.
+- The speed threshold is a request parameter; it is not stored and no alerts
+  are sent. There is no server-side units preference, so clients convert.
+- Trips older than `LOCATION_RETENTION_DAYS` are hidden and pruned.
+- Locations that arrive after the job has passed them (long offline replays)
+  are picked up by `POST /trips/compute`, not by the incremental job.
 
 ## Development
 
