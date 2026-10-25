@@ -508,6 +508,8 @@ For a fully private map, host your own tiles. The simplest option is
 | `TLS_CERT_FILE` / `TLS_KEY_FILE` | *(empty)* | Direct HTTPS (Caddy is the usual path) |
 | `TLS_BEHIND_PROXY` | `false` | `true` when a reverse proxy terminates TLS |
 | `INSECURE_HTTP` | `false` | Opt-out of TLS (trusted private networks only) |
+| `TRUSTED_PROXIES` | *(empty)* | Comma-separated CIDRs/IPs of reverse proxies whose `X-Forwarded-For` is believed (client IP for rate limits and the audit log). Empty: with `TLS_BEHIND_PROXY=true` loopback and private ranges (the Compose Caddy setup) are trusted, otherwise nobody; `none` trusts nobody. `X-Real-IP` and `True-Client-IP` are never trusted. Compose must pass the variable through to the `api` service to override |
+| `INGEST_KEY_TTL` | `2160h` | Sliding lifetime of a device ingest key (renewed by use); `0` disables expiry. Keys are also revoked on logout, password change and password reset |
 | `VERBOSE_PUSH` | `false` | Include the user's name in push payloads |
 | `NTFY_BASE_URL` | *(empty)* | Public ntfy origin advertised on `GET /config` |
 | `TILE_URL` | OSM public tiles | Street `{z}/{x}/{y}` template on `GET /config` |
