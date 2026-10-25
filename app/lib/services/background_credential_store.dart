@@ -1,78 +1,134 @@
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// Mirrors non-long-lived session credentials into [SharedPreferences] so the
-/// background location isolate can read them.
+/// Credentials the background location isolate needs: the API base URL, the
+/// device id and the **device ingest key**.
 ///
-/// The foreground app stores tokens in [TokenStorage] (flutter_secure_storage →
-/// iOS Keychain / Android Keystore). This store deliberately holds **only**
-/// short-lived values: the API base URL, the current access token (15-minute
-/// TTL), and the device id. The long-lived refresh token is NOT mirrored here:
-/// SharedPreferences is a plaintext XML file inside the app sandbox, and
-/// writing a 30-day credential to it would defeat the Keystore-backed
-/// protection the secure store provides (audit finding WB-002). The background
-/// isolate reads the refresh token directly from [TokenStorage] on the rare
-/// occasions it must refresh (see background_location_service.dart); when that
-/// read fails there, reporting pauses until the app is next opened.
+/// The ingest key is a write-only, device-scoped credential that authorizes
+/// only `POST /locations`, `POST /locations/batch` and `POST /devices/heartbeat`.
+/// It lives in the platform secure store (Android Keystore-backed
+/// EncryptedSharedPreferences / iOS Keychain), never in SharedPreferences
+/// (audit finding MOB-002). On iOS the item uses the
+/// `first_unlock_this_device` accessibility class so the headless isolate can
+/// read it while the phone is locked (after the first unlock since boot) and
+/// the item is excluded from backups / device migration.
 ///
-/// The foreground app calls [sync] whenever tokens or the device id change,
-/// and [clear] on logout.
+/// The background isolate does NOT receive the access token or the refresh
+/// token. If the ingest key is rejected or missing, background reporting
+/// pauses until the app is opened and re-provisions a key.
+///
+/// A dedicated secure-storage namespace (separate Android prefs file / iOS
+/// account name) keeps these values apart from the foreground [TokenStorage]
+/// entries.
 class BackgroundCredentialStore {
   BackgroundCredentialStore._();
 
-  static const String _apiBaseUrlKey = 'wb_api_base_url';
-  static const String _accessTokenKey = 'wb_access_token';
-  static const String _deviceIdKey = 'wb_device_id';
-  static const String _ingestKeyKey = 'wb_ingest_key';
+  static const FlutterSecureStorage _storage = FlutterSecureStorage(
+    aOptions: AndroidOptions(
+      encryptedSharedPreferences: true,
+      sharedPreferencesName: 'openfamily_bg_credentials',
+      preferencesKeyPrefix: 'bg_',
+    ),
+    iOptions: IOSOptions(
+      accountName: 'openfamily_bg_credentials',
+      accessibility: KeychainAccessibility.first_unlock_this_device,
+    ),
+  );
 
-  /// Writes the background-visible credentials to shared_preferences.
+  static const String _apiBaseUrlKey = 'api_base_url';
+  static const String _deviceIdKey = 'device_id';
+  static const String _ingestKeyKey = 'ingest_key';
+
+  // Legacy SharedPreferences keys written by older builds. The access-token,
+  // device-id and ingest-key entries are plaintext leftovers that
+  // [migrateLegacyPrefs] copies (device id / ingest key) and then deletes.
+  // `wb_api_base_url` is deliberately NOT listed: it now belongs exclusively
+  // to ServerConfig (the user's chosen server) and must never be removed here
+  // (MOB-005).
+  static const String _legacyAccessTokenKey = 'wb_access_token';
+  static const String _legacyDeviceIdKey = 'wb_device_id';
+  static const String _legacyIngestKeyKey = 'wb_ingest_key';
+
+  /// One-time migration from the plaintext SharedPreferences mirror used by
+  /// earlier builds. Copies the device id and ingest key into secure storage
+  /// (when not already present) and deletes every legacy plaintext key,
+  /// including the access token. Safe to call repeatedly and from either
+  /// isolate; never throws.
+  static Future<void> migrateLegacyPrefs() async {
+    try {
+      final SharedPreferences prefs = await SharedPreferences.getInstance();
+      await prefs.reload();
+      final String? legacyDevice = prefs.getString(_legacyDeviceIdKey);
+      final String? legacyKey = prefs.getString(_legacyIngestKeyKey);
+      final bool hasLegacy = prefs.containsKey(_legacyAccessTokenKey) ||
+          legacyDevice != null ||
+          legacyKey != null;
+      if (!hasLegacy) return;
+
+      if (legacyKey != null &&
+          legacyKey.isNotEmpty &&
+          (await readIngestKey() ?? '').isEmpty) {
+        await saveIngestKey(legacyKey);
+      }
+      if (legacyDevice != null &&
+          legacyDevice.isNotEmpty &&
+          (await readDeviceId() ?? '').isEmpty) {
+        await saveDeviceId(legacyDevice);
+      }
+      // Only delete plaintext once the secure copy is confirmed (or there was
+      // nothing to copy).
+      final bool keyOk = legacyKey == null ||
+          legacyKey.isEmpty ||
+          (await readIngestKey() ?? '').isNotEmpty;
+      final bool deviceOk = legacyDevice == null ||
+          legacyDevice.isEmpty ||
+          (await readDeviceId() ?? '').isNotEmpty;
+      // The access token is always removed: it is never needed any more.
+      await prefs.remove(_legacyAccessTokenKey);
+      if (keyOk && deviceOk) {
+        await prefs.remove(_legacyDeviceIdKey);
+        await prefs.remove(_legacyIngestKeyKey);
+      }
+    } catch (_) {
+      // Migration is best-effort; it retries on the next start.
+    }
+  }
+
+  /// Writes the background-visible, non-secret-ish values to secure storage.
   static Future<void> sync({
     required String apiBaseUrl,
-    required String accessToken,
     required String deviceId,
   }) async {
-    final SharedPreferences prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_apiBaseUrlKey, apiBaseUrl);
-    await prefs.setString(_accessTokenKey, accessToken);
-    await prefs.setString(_deviceIdKey, deviceId);
+    await _storage.write(key: _apiBaseUrlKey, value: apiBaseUrl);
+    if (deviceId.isNotEmpty) {
+      await _storage.write(key: _deviceIdKey, value: deviceId);
+    }
   }
 
-  /// Removes all credentials from shared_preferences.
+  /// Removes all background credentials. Does not touch ServerConfig's URL.
   static Future<void> clear() async {
+    await _storage.delete(key: _apiBaseUrlKey);
+    await _storage.delete(key: _deviceIdKey);
+    await _storage.delete(key: _ingestKeyKey);
+    // Also purge any plaintext leftovers from older builds.
     final SharedPreferences prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_apiBaseUrlKey);
-    await prefs.remove(_accessTokenKey);
-    await prefs.remove(_deviceIdKey);
-    await prefs.remove(_ingestKeyKey);
+    await prefs.remove(_legacyAccessTokenKey);
+    await prefs.remove(_legacyDeviceIdKey);
+    await prefs.remove(_legacyIngestKeyKey);
   }
 
-  static Future<String?> readApiBaseUrl() async =>
-      (await SharedPreferences.getInstance()).getString(_apiBaseUrlKey);
+  static Future<String?> readApiBaseUrl() => _storage.read(key: _apiBaseUrlKey);
 
-  static Future<String?> readAccessToken() async =>
-      (await SharedPreferences.getInstance()).getString(_accessTokenKey);
-
-  static Future<String?> readDeviceId() async =>
-      (await SharedPreferences.getInstance()).getString(_deviceIdKey);
-
-  /// Persists a refreshed access token (called from the background callback).
-  static Future<void> saveAccessToken(String token) async =>
-      (await SharedPreferences.getInstance()).setString(_accessTokenKey, token);
+  static Future<String?> readDeviceId() => _storage.read(key: _deviceIdKey);
 
   /// Persists the device id (called from the foreground app after registration).
-  static Future<void> saveDeviceId(String id) async =>
-      (await SharedPreferences.getInstance()).setString(_deviceIdKey, id);
+  static Future<void> saveDeviceId(String id) =>
+      _storage.write(key: _deviceIdKey, value: id);
 
   /// Persists the device ingest key (returned once at registration or after a
-  /// rotation). The key is a write-only, device-scoped credential: it only
-  /// authorizes POST /locations and POST /devices/heartbeat. It lives here
-  /// (not in secure storage) precisely because the background isolate cannot
-  /// rely on the Keystore-backed secure store in a headless engine; unlike
-  /// the refresh token it carries no read access to any user data, so its
-  /// exposure is limited to fabricated location reports for one device, which
-  /// server-side rotation can revoke.
-  static Future<void> saveIngestKey(String key) async =>
-      (await SharedPreferences.getInstance()).setString(_ingestKeyKey, key);
+  /// rotation).
+  static Future<void> saveIngestKey(String key) =>
+      _storage.write(key: _ingestKeyKey, value: key);
 
-  static Future<String?> readIngestKey() async =>
-      (await SharedPreferences.getInstance()).getString(_ingestKeyKey);
+  static Future<String?> readIngestKey() => _storage.read(key: _ingestKeyKey);
 }

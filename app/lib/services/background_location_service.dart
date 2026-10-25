@@ -12,32 +12,26 @@ import 'package:http/http.dart' as http;
 
 import 'background_credential_store.dart';
 import 'location_outbox.dart';
-import 'token_storage.dart';
 
 /// Background location reporting: keeps the device's GPS position flowing to
 /// the backend (`POST /locations`) even when the app is backgrounded or killed.
 ///
 /// `background_locator_2` runs [onLocationUpdate] in a **separate background
 /// isolate**, so it cannot touch the foreground app's [ApiClient] object. It
-/// instead reads short-lived credentials (API base URL, device id, ingest key,
-/// access token) from [BackgroundCredentialStore] (shared_preferences) and
-/// talks to the backend directly via `dart:http`.
+/// instead reads the API base URL, device id and ingest key from
+/// [BackgroundCredentialStore] (secure storage) and talks to the backend directly via `dart:http`.
 ///
-/// Authentication — preferred path is the **device ingest key**
+/// Authentication — the **device ingest key** only
 /// (`X-Device-Key: <device_id>.<key>` header): a write-only, device-scoped
 /// credential issued at registration and accepted by `POST /locations`,
 /// `POST /locations/batch`, and `POST /devices/heartbeat`. It never expires,
-/// so background reporting no longer depends on the Keystore-backed secure
-/// store being reachable from a headless isolate — that dependency (reading
-/// the refresh token there on a 401, WB-002) was production-proven to
-/// silently stop reporting at the first access-token expiry (~15 minutes
-/// after the app was last open).
+/// so background reporting does not depend on the account session.
 ///
-/// The legacy path — short-lived access JWT with refresh-on-401 — is kept as
-/// a fallback for devices whose server predates ingest keys, or whose ingest
-/// key was rejected (401/403). The refresh token itself is still never
-/// mirrored into shared_preferences (WB-002): it is read straight from
-/// [TokenStorage] only on that fallback path.
+/// This isolate authenticates with the device ingest key ONLY (MOB-002). It
+/// never reads or writes the access or refresh token and never calls
+/// `/auth/refresh`. If the key is missing or rejected (401/403) reporting
+/// pauses (fixes are queued) until the app is opened and provisions a new key
+/// via `DeviceService.ensureIngestKey`.
 ///
 /// Offline behavior: a fix that cannot be delivered is **queued** in the
 /// [LocationOutbox] (store-and-forward) and delivered via `POST
@@ -109,170 +103,91 @@ Future<void> onLocationUpdate(LocationDto location) async {
   }
 }
 
-/// The credentials the background isolate can see (shared_preferences mirror).
+/// The credentials the background isolate can see (secure storage).
 class _BackgroundCredentials {
   const _BackgroundCredentials({
     required this.apiBaseUrl,
     required this.deviceId,
-    this.accessToken,
-    this.ingestKey,
+    required this.ingestKey,
   });
 
   final String apiBaseUrl;
   final String deviceId;
-  final String? accessToken;
-  final String? ingestKey;
+  final String ingestKey;
 }
 
-/// Reads the credential set, requiring the base URL and device id plus at
-/// least one usable credential (ingest key or access token).
+bool _migrated = false;
+
+/// Reads the credential set; requires base URL, device id and ingest key.
 Future<_BackgroundCredentials?> _readCredentials() async {
+  if (!_migrated) {
+    _migrated = true;
+    // Moves a pre-update plaintext ingest key into secure storage and deletes
+    // the legacy prefs entries, in case this isolate runs before the app UI.
+    await BackgroundCredentialStore.migrateLegacyPrefs();
+  }
   final String? apiBaseUrl = await BackgroundCredentialStore.readApiBaseUrl();
   final String? deviceId = await BackgroundCredentialStore.readDeviceId();
+  final String? ingestKey = await BackgroundCredentialStore.readIngestKey();
   if (apiBaseUrl == null ||
       apiBaseUrl.isEmpty ||
       deviceId == null ||
-      deviceId.isEmpty) {
+      deviceId.isEmpty ||
+      ingestKey == null ||
+      ingestKey.isEmpty) {
     return null;
   }
-  final String? accessToken =
-      await BackgroundCredentialStore.readAccessToken();
-  final String? ingestKey = await BackgroundCredentialStore.readIngestKey();
-  final bool hasAccess = accessToken != null && accessToken.isNotEmpty;
-  final bool hasKey = ingestKey != null && ingestKey.isNotEmpty;
-  if (!hasKey && !hasAccess) return null;
   return _BackgroundCredentials(
     apiBaseUrl: apiBaseUrl,
     deviceId: deviceId,
-    accessToken: hasAccess ? accessToken : null,
-    ingestKey: hasKey ? ingestKey : null,
+    ingestKey: ingestKey,
   );
 }
 
-/// Delivers one report (location or heartbeat), trying the ingest key first
-/// and falling back to the access-token + refresh path.
+/// Delivers one report (location or heartbeat) with the ingest key.
 ///
 /// Returns true only when the backend accepted the report (2xx). Any other
-/// outcome — network failure, stale `ts` 400, auth dead end — returns false
-/// so [onLocationUpdate] can queue the fix for backfill. This function never
-/// throws to the caller's catch block for "expected" statuses.
+/// outcome (network failure, stale `ts` 400, key rejected) returns false so
+/// [onLocationUpdate] can queue the fix for backfill.
 Future<bool> _report(
   _BackgroundCredentials credentials,
   String path,
   Map<String, dynamic> body,
 ) async {
-  final String? ingestKey = credentials.ingestKey;
-  if (ingestKey != null) {
-    final http.Response response = await _post(
-      credentials.apiBaseUrl,
-      <String, String>{
-        'X-Device-Key': '${credentials.deviceId}.$ingestKey',
-        'Content-Type': 'application/json',
-      },
-      path,
-      body,
-    );
-    // 201 = stored; 200 = stationary-deduped (the server refreshed liveness
-    // and skipped the locations row); 204 = heartbeat ack.
-    if (response.statusCode == 201 ||
-        response.statusCode == 200 ||
-        response.statusCode == 204) {
-      return true;
-    }
-    if (response.statusCode != 401 && response.statusCode != 403) {
-      // 400 (stale ts / non-monotonic), 5xx, ...: terminal for this update.
-      return false;
-    }
-    // 401/403: key rejected (rotated or the device was re-registered
-    // elsewhere). Fall through to the legacy token path when available.
-  }
-
-  // Legacy path: the 15-minute access JWT, with a one-shot refresh on 401.
-  final String? accessToken = credentials.accessToken;
-  if (accessToken == null) return false;
-  http.Response response = await _post(
+  final http.Response response = await _post(
     credentials.apiBaseUrl,
-    <String, String>{
-      'Authorization': 'Bearer $accessToken',
-      'Content-Type': 'application/json',
-    },
+    _ingestHeaders(credentials),
     path,
     body,
   );
-  if (response.statusCode == 201 ||
+  // 201 = stored; 200 = stationary-deduped (the server refreshed liveness
+  // and skipped the locations row); 204 = heartbeat ack.
+  return response.statusCode == 201 ||
       response.statusCode == 200 ||
-      response.statusCode == 204) {
-    return true;
-  }
-  if (response.statusCode == 401) {
-    // Access token expired. Refresh and retry once, reading the refresh token
-    // straight from secure storage — it is never mirrored to
-    // shared_preferences (WB-002), so this fails gracefully when secure
-    // storage is unavailable in the background isolate.
-    final String? refreshToken = await _readRefreshToken();
-    if (refreshToken == null || refreshToken.isEmpty) return false;
-    final String? newAccess =
-        await _refresh(credentials.apiBaseUrl, refreshToken);
-    if (newAccess == null) return false; // Refresh failed; foreground re-logs in.
-    final http.Response retry = await _post(
-      credentials.apiBaseUrl,
-      <String, String>{
-        'Authorization': 'Bearer $newAccess',
-        'Content-Type': 'application/json',
-      },
-      path,
-      body,
-    );
-    return retry.statusCode == 201 ||
-        retry.statusCode == 200 ||
-        retry.statusCode == 204;
-  }
-  // All other statuses: not delivered.
-  return false;
+      response.statusCode == 204;
 }
 
-/// Sends one drained outbox batch to `POST /locations/batch`, ingest key
-/// first, with the same Bearer-token fallback as [_report]. Returns true only
-/// on 2xx (the endpoint answers with a stored/skipped/rejected summary and is
-/// idempotent for retried batches).
+/// Sends one drained outbox batch to `POST /locations/batch` with the ingest
+/// key. Returns true only on 2xx (the endpoint is idempotent for retries).
 Future<bool> _sendLocationBatch(
   _BackgroundCredentials credentials,
   List<Map<String, dynamic>> points,
 ) async {
   if (points.isEmpty) return true; // Nothing to send.
-  final Map<String, dynamic> body = LocationOutbox.batchBody(points);
-  final String? ingestKey = credentials.ingestKey;
-  if (ingestKey != null) {
-    final http.Response response = await _post(
-      credentials.apiBaseUrl,
-      <String, String>{
-        'X-Device-Key': '${credentials.deviceId}.$ingestKey',
-        'Content-Type': 'application/json',
-      },
-      '/locations/batch',
-      body,
-    );
-    if (response.statusCode >= 200 && response.statusCode < 300) {
-      return true;
-    }
-    if (response.statusCode != 401 && response.statusCode != 403) {
-      return false;
-    }
-    // 401/403: fall through to the legacy token path.
-  }
-  final String? accessToken = credentials.accessToken;
-  if (accessToken == null) return false;
   final http.Response response = await _post(
     credentials.apiBaseUrl,
-    <String, String>{
-      'Authorization': 'Bearer $accessToken',
-      'Content-Type': 'application/json',
-    },
+    _ingestHeaders(credentials),
     '/locations/batch',
-    body,
+    LocationOutbox.batchBody(points),
   );
   return response.statusCode >= 200 && response.statusCode < 300;
 }
+
+Map<String, String> _ingestHeaders(_BackgroundCredentials c) =>
+    <String, String>{
+      'X-Device-Key': '${c.deviceId}.${c.ingestKey}',
+      'Content-Type': 'application/json',
+    };
 
 /// Reads the battery level, or null if unavailable (e.g. web, or the method
 /// channel is not reachable from the background isolate). Bounded by a timeout
@@ -331,57 +246,6 @@ Future<http.Response> _post(
         body: jsonEncode(body),
       )
       .timeout(_httpTimeout);
-}
-
-/// Reads the refresh token from secure storage. Returns null when unavailable
-/// (e.g. web, or the method channel is not reachable from the background
-/// isolate) so callers treat refresh as impossible rather than crashing.
-Future<String?> _readRefreshToken() async {
-  try {
-    return await TokenStorage.readRefreshToken();
-  } catch (_) {
-    return null;
-  }
-}
-
-/// Refreshes the token pair via `POST /auth/refresh`, persisting the new
-/// access token to shared_preferences and the full pair best-effort to
-/// flutter_secure_storage. Returns the new access token, or null on failure.
-///
-/// Legacy fallback for installs without an ingest key. The rotated token pair
-/// reconciliation with the foreground is unchanged: best-effort secure-storage
-/// write plus foreground resume-sync.
-Future<String?> _refresh(String apiBaseUrl, String refreshToken) async {
-  try {
-    final http.Response response = await http
-        .post(
-          Uri.parse('$apiBaseUrl/auth/refresh'),
-          headers: <String, String>{'Content-Type': 'application/json'},
-          body: jsonEncode(<String, dynamic>{'refresh_token': refreshToken}),
-        )
-        .timeout(_httpTimeout);
-    if (response.statusCode == 200) {
-      final Map<String, dynamic> data =
-          jsonDecode(response.body) as Map<String, dynamic>;
-      final String access = data['access_token'] as String;
-      final String refresh = data['refresh_token'] as String;
-      // Persist to shared_preferences (always works in the background isolate).
-      // Only the short-lived access token goes there — never the refresh token.
-      await BackgroundCredentialStore.saveAccessToken(access);
-      // Best-effort persist to secure storage so the foreground app sees the
-      // rotated tokens. May fail in the background isolate; the resume-sync
-      // fallback covers that case.
-      try {
-        await TokenStorage.saveTokens(access: access, refresh: refresh);
-      } catch (_) {
-        // Secure storage unavailable in the background isolate.
-      }
-      return access;
-    }
-  } catch (_) {
-    // Fall through to returning null.
-  }
-  return null;
 }
 
 /// Foreground-facing control surface for the background location service.

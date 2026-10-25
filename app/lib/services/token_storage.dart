@@ -31,14 +31,11 @@ class TokenStorage {
   }) async {
     await _storage.write(key: _accessKey, value: access);
     await _storage.write(key: _refreshKey, value: refresh);
-    // Mirror only the short-lived values into shared_preferences for the
-    // background isolate. The refresh token is deliberately NOT mirrored: that
-    // store is plaintext, and a 30-day credential must stay in the Keystore-
-    // backed secure store (audit finding WB-002).
+    // The background isolate gets only the base URL and device id (plus its
+    // ingest key, stored separately); it never sees these tokens (MOB-002).
     final String? deviceId = await readDeviceId();
     await BackgroundCredentialStore.sync(
       apiBaseUrl: ServerConfig.instance.apiBaseUrl,
-      accessToken: access,
       deviceId: deviceId ?? '',
     );
   }
@@ -49,17 +46,15 @@ class TokenStorage {
   /// Returns the stored refresh token, or null if none.
   static Future<String?> readRefreshToken() => _storage.read(key: _refreshKey);
 
-  /// Whether any access or refresh credential remains in either token store.
+  /// Whether any access or refresh credential remains in the token store.
   ///
-  /// The background store can restore the secure store during startup, so it
-  /// must participate in this check. Treating even a partial pair as a session
-  /// is deliberately conservative: a surviving access token may still work,
-  /// and a refresh token can mint a new pair.
+  /// Treating even a partial pair as a session is deliberately conservative:
+  /// a surviving access token may still work, and a refresh token can mint a
+  /// new pair.
   static Future<bool> hasStoredSession() async {
     final List<String?> credentials = <String?>[
       await readAccessToken(),
       await readRefreshToken(),
-      await BackgroundCredentialStore.readAccessToken(),
     ];
     return credentials.any(
       (String? credential) => credential != null && credential.isNotEmpty,
@@ -100,8 +95,8 @@ class TokenStorage {
         await readRefreshToken(),
         await readDeviceId(),
         await BackgroundCredentialStore.readApiBaseUrl(),
-        await BackgroundCredentialStore.readAccessToken(),
         await BackgroundCredentialStore.readDeviceId(),
+        await BackgroundCredentialStore.readIngestKey(),
       ];
       if (remaining.any((String? value) => value != null)) {
         throw StateError('One or more session credentials remain.');
@@ -133,26 +128,4 @@ class TokenStorage {
 
   /// Returns the stored device id, or null if none.
   static Future<String?> readDeviceId() => _storage.read(key: _deviceIdKey);
-
-  /// Reconciles the secure store with an access token the background isolate
-  /// may have rotated while the app was backgrounded.
-  ///
-  /// The refresh token is never mirrored into shared_preferences (WB-002), so
-  /// when the background isolate refreshes it writes the new pair to secure
-  /// storage on a best-effort basis. If that write failed, only the new access
-  /// token survives (in shared_preferences) while its matching refresh token
-  /// is lost with the isolate. In that case copying the newer access token
-  /// here keeps the current session valid until the access TTL expires; the
-  /// next refresh then fails and the user signs in again. When the
-  /// secure-storage write succeeded, this is a no-op.
-  static Future<void> syncFromBackgroundStore() async {
-    final String? access = await BackgroundCredentialStore.readAccessToken();
-    if (access == null || access.isEmpty) {
-      return;
-    }
-    final String? currentAccess = await readAccessToken();
-    if (access != currentAccess) {
-      await _storage.write(key: _accessKey, value: access);
-    }
-  }
 }
