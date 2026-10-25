@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"net/http"
 	"sort"
@@ -10,12 +11,12 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
+	"github.com/wheresfrank/openfamily/backend/internal/config"
 	"github.com/wheresfrank/openfamily/backend/internal/middleware"
 )
 
 const (
 	maxHistoryRange    = 25 * time.Hour
-	maxHistoryAge      = 90 * 24 * time.Hour
 	trailBucket        = 30 * time.Second
 	trailPointCap      = 1500
 	stayDistanceMeters = 100.0
@@ -202,8 +203,8 @@ func parseHistoryRange(r *http.Request, now time.Time) (time.Time, time.Time, st
 	if to.Sub(from) > maxHistoryRange {
 		return time.Time{}, time.Time{}, "range must be at most one day", false
 	}
-	if now.Sub(from) > maxHistoryAge {
-		return time.Time{}, time.Time{}, "from is older than the 90-day retention window", false
+	if now.Sub(from) > config.LocationRetention() {
+		return time.Time{}, time.Time{}, fmt.Sprintf("from is older than the %d-day retention window", config.LocationRetentionDays()), false
 	}
 	return from, to, "", true
 }

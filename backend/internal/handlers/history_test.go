@@ -363,3 +363,32 @@ func stayPoints(start time.Time, lat, lon float64, n int, step time.Duration) []
 	}
 	return out
 }
+
+func TestParseHistoryRangeHonorsConfiguredRetention(t *testing.T) {
+	now := time.Date(2026, 8, 22, 18, 0, 0, 0, time.UTC)
+	mk := func(daysAgo int) *http.Request {
+		f := now.Add(-time.Duration(daysAgo) * 24 * time.Hour)
+		return httptest.NewRequest(http.MethodGet, "/history?from="+f.Format(time.RFC3339)+"&to="+f.Add(time.Hour).Format(time.RFC3339), nil)
+	}
+
+	t.Setenv("LOCATION_RETENTION_DAYS", "")
+	if _, _, _, ok := parseHistoryRange(mk(89), now); !ok {
+		t.Error("89 days should be within the default 90-day window")
+	}
+	if _, _, msg, ok := parseHistoryRange(mk(91), now); ok || msg != "from is older than the 90-day retention window" {
+		t.Errorf("default window: ok=%v msg=%q", ok, msg)
+	}
+
+	t.Setenv("LOCATION_RETENTION_DAYS", "30")
+	if _, _, _, ok := parseHistoryRange(mk(29), now); !ok {
+		t.Error("29 days should be within a 30-day window")
+	}
+	if _, _, msg, ok := parseHistoryRange(mk(45), now); ok || msg != "from is older than the 30-day retention window" {
+		t.Errorf("30-day window: ok=%v msg=%q", ok, msg)
+	}
+
+	t.Setenv("LOCATION_RETENTION_DAYS", "365")
+	if _, _, _, ok := parseHistoryRange(mk(200), now); !ok {
+		t.Error("200 days should be within a 365-day window")
+	}
+}
