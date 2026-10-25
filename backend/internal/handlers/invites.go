@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math/big"
 	"net/http"
 	"strings"
@@ -122,8 +123,16 @@ func (s *Server) insertInviteCode(ctx context.Context, tx pgx.Tx, familyID strin
 	return ic, errors.New("failed to generate a unique invite code")
 }
 
+const (
+	maxInviteUses       = 50
+	maxInviteExpiryHrs  = 30 * 24
+	defaultInviteExpiry = 7 * 24
+)
+
 // normalizeInviteParams applies defaults to an invite request: role defaults to
-// member, max_uses to 1, and expiry to 7 days when not specified.
+// member, max_uses to 1, and expiry to 7 days when not specified. Values above
+// maxInviteUses / 30 days are rejected (BSEC-019), which also rules out
+// time.Duration overflow from absurd expires_in_hours.
 func normalizeInviteParams(role models.Role, maxUses, expiresInHours int) (models.Role, int, *time.Time, error) {
 	if role == "" {
 		role = models.RoleMember
@@ -134,9 +143,15 @@ func normalizeInviteParams(role models.Role, maxUses, expiresInHours int) (model
 	if maxUses <= 0 {
 		maxUses = 1
 	}
+	if maxUses > maxInviteUses {
+		return "", 0, nil, fmt.Errorf("max_uses must be at most %d", maxInviteUses)
+	}
 	hours := expiresInHours
 	if hours <= 0 {
-		hours = 7 * 24
+		hours = defaultInviteExpiry
+	}
+	if hours > maxInviteExpiryHrs {
+		return "", 0, nil, fmt.Errorf("expires_in_hours must be at most %d", maxInviteExpiryHrs)
 	}
 	t := time.Now().Add(time.Duration(hours) * time.Hour)
 	return role, maxUses, &t, nil
