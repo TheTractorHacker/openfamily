@@ -108,6 +108,10 @@ type Server struct {
 	// apk tracks the platform APK build job state (at most one concurrent build).
 	apk apkManager
 
+	// RefreshStore tracks refresh-token families for rotation and reuse
+	// detection. Nil means the Postgres-backed store over Pool.
+	RefreshStore refreshStore
+
 	// hub fans out live location updates to connected WebSocket clients.
 	hub *hub
 
@@ -131,6 +135,14 @@ func New(pool *pgxpool.Pool, tm *auth.TokenManager, push push.Dispatcher) *Serve
 		locationRequests: newLocationRequestGate(locationRequestCooldown),
 		staleWatchdog:    newStaleRequestGate(staleRequestCooldown),
 	}
+}
+
+// refreshSessions returns the refresh-token store.
+func (s *Server) refreshSessions() refreshStore {
+	if s.RefreshStore != nil {
+		return s.RefreshStore
+	}
+	return pgRefreshStore{s.Pool}
 }
 
 // familyIDForUser resolves a user's current family ID from the database. It

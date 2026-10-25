@@ -57,7 +57,22 @@ func (m *TokenManager) IssueRefresh(userID, familyID string, tokenVersion int) (
 	return m.issue(userID, familyID, tokenVersion, RefreshToken, m.refreshTTL)
 }
 
+// IssueRefreshWithID creates a refresh token carrying a unique token id (jti).
+// The id is what the server tracks to make refresh tokens single-use. Tokens
+// from IssueRefresh carry no jti and are treated as legacy by the refresh
+// endpoint.
+func (m *TokenManager) IssueRefreshWithID(userID, familyID string, tokenVersion int, jti string) (string, error) {
+	return m.issueWithID(userID, familyID, tokenVersion, RefreshToken, m.refreshTTL, jti)
+}
+
+// RefreshTTL returns the configured refresh-token lifetime.
+func (m *TokenManager) RefreshTTL() time.Duration { return m.refreshTTL }
+
 func (m *TokenManager) issue(userID, familyID string, tokenVersion int, typ TokenType, ttl time.Duration) (string, error) {
+	return m.issueWithID(userID, familyID, tokenVersion, typ, ttl, "")
+}
+
+func (m *TokenManager) issueWithID(userID, familyID string, tokenVersion int, typ TokenType, ttl time.Duration, jti string) (string, error) {
 	now := time.Now()
 	claims := Claims{
 		UserID:       userID,
@@ -67,6 +82,7 @@ func (m *TokenManager) issue(userID, familyID string, tokenVersion int, typ Toke
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    "openfamily",
 			Subject:   userID,
+			ID:        jti,
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
 		},

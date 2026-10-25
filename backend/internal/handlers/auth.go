@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -170,7 +171,18 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 		familyID = *user.FamilyID
 	}
 	s.logAudit(r.Context(), user.ID, familyID, "auth.login", "login for "+user.Email, clientIP(r))
-	s.issueTokens(w, user)
+	jti, err := newTokenID()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to issue refresh token")
+		return
+	}
+	if err := s.refreshSessions().Create(r.Context(), user.ID, jti, time.Now().Add(s.TM.RefreshTTL())); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to issue refresh token")
+		return
+	}
+	// Opportunistic cleanup of long-expired rows; never blocks login.
+	go func() { _ = s.refreshSessions().Purge(context.Background()) }()
+	s.issueTokens(w, user, jti)
 }
 
 // Refresh rotates a refresh token into a new token pair.
@@ -211,7 +223,22 @@ func (s *Server) Refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.issueTokens(w, user)
+	newJTI, status := s.rotateRefreshToken(r.Context(), user.ID, claims.ID)
+	switch status {
+	case refreshRotated:
+	case refreshReuse:
+		s.logAudit(r.Context(), user.ID, "", "auth.refresh_reuse",
+			"refresh token reuse detected; session family revoked", clientIP(r))
+		writeError(w, http.StatusUnauthorized, "invalid refresh token")
+		return
+	case refreshRejected:
+		writeError(w, http.StatusUnauthorized, "invalid refresh token")
+		return
+	default:
+		writeError(w, http.StatusInternalServerError, "failed to rotate refresh token")
+		return
+	}
+	s.issueTokens(w, user, newJTI)
 }
 
 // Logout bumps token_version so every outstanding access and refresh token
@@ -235,7 +262,48 @@ func (s *Server) Logout(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-func (s *Server) issueTokens(w http.ResponseWriter, user models.User) {
+// issueTokens writes a fresh token pair. refreshJTI is the id of the (already
+// stored) refresh token to embed.
+type refreshStatus int
+
+const (
+	refreshRotated refreshStatus = iota
+	refreshRejected
+	refreshReuse
+	refreshError
+)
+
+// rotateRefreshToken spends oldJTI and returns the id of its successor. Every
+// refresh token is single-use; presenting a spent one revokes its whole
+// family. An empty oldJTI is a token issued before rotation existed: it is
+// accepted once and replaced by a tracked token (replay of such legacy tokens
+// cannot be detected).
+func (s *Server) rotateRefreshToken(ctx context.Context, userID, oldJTI string) (string, refreshStatus) {
+	newJTI, err := newTokenID()
+	if err != nil {
+		return "", refreshError
+	}
+	expires := time.Now().Add(s.TM.RefreshTTL())
+	if oldJTI == "" {
+		if err := s.refreshSessions().Create(ctx, userID, newJTI, expires); err != nil {
+			return "", refreshError
+		}
+		return newJTI, refreshRotated
+	}
+	out, err := s.refreshSessions().Rotate(ctx, userID, oldJTI, newJTI, expires)
+	if err != nil {
+		return "", refreshError
+	}
+	switch out {
+	case rotateOK:
+		return newJTI, refreshRotated
+	case rotateReused:
+		return "", refreshReuse
+	}
+	return "", refreshRejected
+}
+
+func (s *Server) issueTokens(w http.ResponseWriter, user models.User, refreshJTI string) {
 	familyID := ""
 	if user.FamilyID != nil {
 		familyID = *user.FamilyID
@@ -245,7 +313,7 @@ func (s *Server) issueTokens(w http.ResponseWriter, user models.User) {
 		writeError(w, http.StatusInternalServerError, "failed to issue access token")
 		return
 	}
-	refresh, err := s.TM.IssueRefresh(user.ID, familyID, user.TokenVersion)
+	refresh, err := s.TM.IssueRefreshWithID(user.ID, familyID, user.TokenVersion, refreshJTI)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to issue refresh token")
 		return
