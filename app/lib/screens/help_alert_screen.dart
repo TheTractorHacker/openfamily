@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 
+import '../models/alert.dart';
+import '../services/alert_service.dart';
 import '../services/api_client.dart';
+import 'alert_status_screen.dart';
 import '../services/location_service.dart';
 import '../theme/app_theme.dart';
 
@@ -17,6 +20,7 @@ class HelpAlertScreen extends StatefulWidget {
 
 class _HelpAlertScreenState extends State<HelpAlertScreen> {
   bool _sent = false;
+  String? _alertId;
   bool _sending = false;
   String? _error;
   double? _lat;
@@ -49,7 +53,11 @@ class _HelpAlertScreenState extends State<HelpAlertScreen> {
         body['lat'] = _lat;
         body['lon'] = _lon;
       }
-      await ApiClient.post('/alerts/help', body: body);
+      final dynamic response =
+          await ApiClient.post('/alerts/help', body: body);
+      if (response is Map && response['id'] is String) {
+        _alertId = response['id'] as String;
+      }
       if (!mounted) return;
       setState(() {
         _sent = true;
@@ -61,13 +69,13 @@ class _HelpAlertScreenState extends State<HelpAlertScreen> {
       if (!mounted) return;
       setState(() {
         _sending = false;
-        _error = e.message;
+        _error = 'Not sent. ${alertErrorMessage(e)}';
       });
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       setState(() {
         _sending = false;
-        _error = 'Couldn\'t send help alert. Please try again.';
+        _error = 'Not sent. ${alertErrorMessage(e)}';
       });
     }
   }
@@ -79,7 +87,21 @@ class _HelpAlertScreenState extends State<HelpAlertScreen> {
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(24),
-          child: _sent ? _buildSent() : _buildForm(),
+          child: _sent && _alertId != null
+              ? AlertStatusBody(
+                  alertId: _alertId!,
+                  kind: AlertKind.help,
+                  title: 'Help alert sent',
+                  footer: [
+                    TextButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      child: const Text('Done'),
+                    ),
+                  ],
+                )
+              : _sent
+                  ? _buildSent()
+                  : _buildForm(),
         ),
       ),
     );
@@ -148,7 +170,7 @@ class _HelpAlertScreenState extends State<HelpAlertScreen> {
         ),
         const SizedBox(height: 8),
         const Text(
-          'Your family has been notified with your location.',
+          'Your family was notified. Emergency services were NOT contacted.',
           textAlign: TextAlign.center,
           style: TextStyle(fontSize: 15, color: AppColors.textMuted),
         ),

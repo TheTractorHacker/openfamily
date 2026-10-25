@@ -6,6 +6,7 @@ import '../services/contact_picker.dart';
 import '../services/emergency_contact_service.dart';
 import '../services/server_features.dart';
 import '../theme/app_theme.dart';
+import 'alerts_history_screen.dart';
 
 /// The Safety screen. Manages emergency contacts (who receive SOS alerts).
 ///
@@ -236,7 +237,20 @@ class _SafetyScreenState extends State<SafetyScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Safety')),
+      appBar: AppBar(
+        title: const Text('Safety'),
+        actions: <Widget>[
+          IconButton(
+            tooltip: 'Alert history',
+            icon: const Icon(Icons.history),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => const AlertsHistoryScreen(),
+              ),
+            ),
+          ),
+        ],
+      ),
       body: _buildBody(),
     );
   }

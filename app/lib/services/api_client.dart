@@ -941,4 +941,35 @@ class ApiClient {
     final String t = Uri.encodeQueryComponent(to.toUtc().toIso8601String());
     return post('/trips/compute?from=$f&to=$t');
   }
+
+  // --- alerts ---
+
+  /// `GET /alerts`: the family's alert history, newest first.
+  static Future<Map<String, dynamic>> listAlerts({
+    int limit = 20,
+    String? before,
+  }) async {
+    final dynamic r = await get('/alerts', query: <String, String>{
+      'limit': '$limit',
+      if (before != null && before.isNotEmpty) 'before': before,
+    });
+    return r is Map<String, dynamic> ? r : <String, dynamic>{};
+  }
+
+  /// `GET /alerts/{id}`: one alert with per-recipient delivery rows.
+  static Future<Map<String, dynamic>> getAlert(String id) async {
+    final dynamic r = await get('/alerts/${Uri.encodeComponent(id)}');
+    return r is Map<String, dynamic> ? r : <String, dynamic>{};
+  }
+
+  /// `POST /alerts/{id}/ack`: idempotent acknowledgement by a recipient.
+  static Future<Map<String, dynamic>> ackAlert(String id) async {
+    final dynamic r = await post('/alerts/${Uri.encodeComponent(id)}/ack');
+    return r is Map<String, dynamic> ? r : <String, dynamic>{};
+  }
+
+  /// `POST /alerts/{id}/share/revoke`: turns the public location link off.
+  static Future<void> revokeAlertShare(String id) async {
+    await post('/alerts/${Uri.encodeComponent(id)}/share/revoke');
+  }
 }
