@@ -38,6 +38,8 @@
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
         android:usesCleartextTraffic="false">
         <activity
             android:name=".MainActivity"
@@ -58,11 +60,15 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2"/>
-        <!-- background_locator_2: restarts tracking after a device reboot. -->
+        <!-- background_locator_2: restarts tracking after a device reboot.
+             Not exported (MOB-011): BOOT_COMPLETED is a protected system
+             broadcast and is still delivered to non-exported receivers, so
+             other apps cannot poke this receiver. Verify on a device/emulator
+             reboot after changing this. -->
         <receiver
             android:name="yukams.app.background_locator_2.BootBroadcastReceiver"
             android:enabled="true"
-            android:exported="true">
+            android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED"/>
             </intent-filter>
