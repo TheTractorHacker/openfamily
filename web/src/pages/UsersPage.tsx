@@ -9,6 +9,7 @@ import {
   listFamilies,
   listUsers,
   resetUserPassword,
+  updateUser,
   updateUserRole,
 } from '../lib/api'
 import { useAsync, isAccessDenied } from '../lib/useAsync'
@@ -266,6 +267,7 @@ function UserRow({
   const [role, setRole] = React.useState<Role>(user.role)
   const [saving, setSaving] = React.useState(false)
   const [message, setMessage] = React.useState<string | null>(null)
+  const [editing, setEditing] = React.useState(false)
 
   React.useEffect(() => {
     setFamilyId(user.family_id ?? '')
@@ -353,12 +355,150 @@ function UserRow({
           <Button size="sm" onClick={save} loading={saving}>
             Save
           </Button>
+          <Button size="sm" variant="secondary" onClick={() => setEditing(true)}>
+            Edit
+          </Button>
           <Button size="sm" variant="ghost" onClick={resetPassword}>
             Reset password
           </Button>
-          {message && <span className="wb-row-message">{message}</span>}
+          {message && (
+            <span className="wb-row-message" role="status">
+              {message}
+            </span>
+          )}
         </div>
+        {editing && (
+          <EditUserDialog
+            user={user}
+            onClose={() => setEditing(false)}
+            onSaved={(updated) => {
+              onUpdated(updated)
+              setMessage('Details saved')
+              setEditing(false)
+            }}
+          />
+        )}
       </td>
     </tr>
+  )
+}
+
+// EditUserDialog edits name, email and phone in a native modal <dialog>:
+// showModal() traps focus, Esc closes it, and focus returns to the Edit button.
+function EditUserDialog({
+  user,
+  onClose,
+  onSaved,
+}: {
+  user: AdminUser
+  onClose: () => void
+  onSaved: (user: AdminUser) => void
+}) {
+  const dialogRef = React.useRef<HTMLDialogElement>(null)
+  const nameRef = React.useRef<HTMLInputElement>(null)
+  const [name, setName] = React.useState(user.name)
+  const [email, setEmail] = React.useState(user.email)
+  const [phone, setPhone] = React.useState(user.phone ?? '')
+  const [error, setError] = React.useState<string | null>(null)
+  const [saving, setSaving] = React.useState(false)
+
+  React.useEffect(() => {
+    const dialog = dialogRef.current
+    if (dialog && !dialog.open) dialog.showModal()
+    nameRef.current?.focus()
+  }, [])
+
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault()
+    const patch: { name?: string; email?: string; phone?: string } = {}
+    if (name.trim() !== user.name) patch.name = name
+    if (email.trim().toLowerCase() !== user.email) patch.email = email
+    if (phone.trim() !== (user.phone ?? '')) patch.phone = phone
+    if (Object.keys(patch).length === 0) {
+      onClose()
+      return
+    }
+    setSaving(true)
+    setError(null)
+    try {
+      onSaved(await updateUser(user.id, patch))
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Could not update user')
+      setSaving(false)
+    }
+  }
+
+  const emailChanging = email.trim().toLowerCase() !== user.email
+  const titleId = `edit-user-${user.id}`
+
+  return (
+    <dialog
+      ref={dialogRef}
+      className="wb-dialog"
+      aria-labelledby={titleId}
+      onCancel={(e) => {
+        e.preventDefault()
+        if (!saving) onClose()
+      }}
+      onClick={(e) => {
+        if (e.target === dialogRef.current && !saving) onClose()
+      }}
+    >
+      <form onSubmit={submit} className="wb-dialog-body">
+        <h2 id={titleId} className="wb-dialog-title">
+          Edit {user.name}
+        </h2>
+        <label className="wb-field">
+          <span className="wb-label">Name</span>
+          <input
+            ref={nameRef}
+            className="wb-input"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            required
+            maxLength={120}
+          />
+        </label>
+        <label className="wb-field">
+          <span className="wb-label">Email</span>
+          <input
+            className="wb-input"
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+            aria-describedby={emailChanging ? `${titleId}-email-note` : undefined}
+          />
+        </label>
+        {emailChanging && (
+          <p id={`${titleId}-email-note`} className="wb-muted wb-dialog-note">
+            Changing the email signs this user out of every device.
+          </p>
+        )}
+        <label className="wb-field">
+          <span className="wb-label">Phone</span>
+          <input
+            className="wb-input"
+            type="tel"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            placeholder="+15551234567 (leave empty to clear)"
+          />
+        </label>
+        {error && (
+          <p className="wb-error-text" role="alert">
+            {error}
+          </p>
+        )}
+        <div className="wb-dialog-actions">
+          <Button type="button" variant="ghost" onClick={onClose} disabled={saving}>
+            Cancel
+          </Button>
+          <Button type="submit" loading={saving}>
+            Save changes
+          </Button>
+        </div>
+      </form>
+    </dialog>
   )
 }

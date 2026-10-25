@@ -66,6 +66,7 @@ export interface AdminUser {
   family_name: string | null
   email: string
   name: string
+  phone: string | null
   role: Role
   platform_admin: boolean
   created_at: string

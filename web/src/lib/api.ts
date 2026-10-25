@@ -385,6 +385,16 @@ export function createUser(input: {
   return request<AdminUser>('/api/admin/users', { method: 'POST', body: input })
 }
 
+export function updateUser(
+  userId: string,
+  input: { name?: string; email?: string; phone?: string },
+): Promise<AdminUser> {
+  return request<AdminUser>(`/api/admin/users/${encodeURIComponent(userId)}`, {
+    method: 'PATCH',
+    body: input,
+  })
+}
+
 export function assignUser(userId: string, familyId: string | null): Promise<AdminUser> {
   return request<AdminUser>(`/api/admin/users/${encodeURIComponent(userId)}/family`, {
     method: 'PATCH',
