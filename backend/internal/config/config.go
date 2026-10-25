@@ -178,7 +178,6 @@ func Load() Config {
 		TLSBehindProxy:        getenvBool("TLS_BEHIND_PROXY", false),
 		DBSSLDisableOK:        getenvBool("DB_SSL_DISABLE_OK", false),
 		InsecureHTTP:          getenvBool("INSECURE_HTTP", false),
-		DBSSLDisableOK:        getenvBool("DB_SSL_DISABLE_OK", false),
 		VerbosePush:           getenvBool("VERBOSE_PUSH", false),
 		NtfyBaseURL:           strings.TrimRight(getenv("NTFY_BASE_URL", ""), "/"),
 		TileURL:               getenv("TILE_URL", DefaultTileURL),
