@@ -72,6 +72,7 @@ Map<String, dynamic> row(String who, String ch, String st, {String err = ''}) =>
 Widget host(Widget child) => MaterialApp(home: child);
 
 void main() {
+  emergencyNumberTests();
   testWidgets('status shows honest line, call button and updates states',
       (tester) async {
     final svc = FakeAlertService(details: [
@@ -245,5 +246,19 @@ void main() {
     await Future<void>.delayed(Duration.zero);
     expect(alerts, hasLength(1));
     await sub.cancel();
+  });
+}
+
+void emergencyNumberTests() {
+  group('emergencyNumberForCountry', () {
+    test('US and Canada use 911', () {
+      expect(emergencyNumberForCountry('US'), '911');
+      expect(emergencyNumberForCountry('ca'), '911');
+    });
+    test('other regions and unknown fall back sensibly', () {
+      expect(emergencyNumberForCountry('GB'), '999');
+      expect(emergencyNumberForCountry('DE'), '112');
+      expect(emergencyNumberForCountry(null), '112');
+    });
   });
 }

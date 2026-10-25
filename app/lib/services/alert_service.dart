@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' show PlatformDispatcher;
 
 import 'package:android_intent_plus/android_intent.dart';
 import 'package:flutter/foundation.dart';
@@ -58,16 +59,50 @@ String alertErrorMessage(Object e, {String action = 'send the alert'}) {
 /// True when [e] is a 429 cooldown/rate-limit.
 bool isCooldownError(Object e) => e is ApiException && e.status == 429;
 
+/// Emergency number for a region (ISO 3166-1 alpha-2 country code). Covers the
+/// common non-112 regions; everything else falls back to 112, the GSM-standard
+/// number that phones route to the local service almost everywhere.
+String emergencyNumberForCountry(String? countryCode) {
+  switch (countryCode?.toUpperCase()) {
+    case 'US':
+    case 'CA':
+    case 'MX':
+    case 'PR':
+    case 'GU':
+    case 'VI':
+    case 'AS':
+    case 'MP':
+      return '911';
+    case 'GB':
+    case 'GG':
+    case 'JE':
+    case 'IM':
+    case 'HK':
+    case 'SG':
+      return '999';
+    case 'AU':
+      return '000';
+    case 'NZ':
+      return '111';
+    case 'JP':
+      return '110';
+    case 'IN':
+      return '112';
+    default:
+      return '112';
+  }
+}
+
 /// Opens the phone's dialer pre-filled with an emergency number. It only
 /// opens the dialer; the user must press call, and OpenFamily never places the
 /// call. Android only, via the existing android_intent_plus dependency
-/// (ACTION_DIAL needs no permission). 112 is the GSM-standard emergency number
-/// that phones route to the local service almost everywhere. iOS has no
-/// equivalent dependency, so [available] is false there.
+/// (ACTION_DIAL needs no permission). The number follows the phone's region.
+/// iOS has no equivalent dependency, so [available] is false there.
 class EmergencyDialer {
   const EmergencyDialer();
 
-  static const String number = '112';
+  String get number =>
+      emergencyNumberForCountry(PlatformDispatcher.instance.locale.countryCode);
 
   bool get available =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
@@ -75,7 +110,7 @@ class EmergencyDialer {
   Future<bool> dial() async {
     if (!available) return false;
     try {
-      await const AndroidIntent(
+      await AndroidIntent(
         action: 'android.intent.action.DIAL',
         data: 'tel:$number',
       ).launch();
