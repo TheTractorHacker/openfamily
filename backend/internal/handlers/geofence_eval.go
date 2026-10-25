@@ -428,17 +428,29 @@ func (s *Server) reconcileGeofencesOnce(ctx context.Context) {
 	s.redispatchFailedPushes(ctx)
 }
 
+// reconcileLookback bounds which users the reconcile pass revisits: only those
+// whose last stored point is newer than this. Idle or offline users have no
+// pending work (ingest evaluates every point, and firePendingNotifications
+// covers elapsed debounces), so they are skipped instead of re-evaluated
+// every minute forever.
+const reconcileLookback = 24 * time.Hour
+
+// reconcileLatestPointsSQL reads each user's latest point from member_positions
+// (one row per user, maintained on every stored point) rather than running
+// DISTINCT ON over the whole locations hypertable (PERF-001). The ts predicate
+// bounds the work to recently active users. $1 is the lookback in seconds.
+const reconcileLatestPointsSQL = `
+	SELECT user_id, lon, lat, ts
+	FROM member_positions
+	WHERE ts > now() - make_interval(secs => $1::float8)`
+
 // reconcileLatestPoints re-evaluates the latest point for each user. Only the
 // latest point is re-evaluated so the pass is idempotent: that point is already
 // reflected in the stored state, so re-evaluating it produces no transition.
 // (Re-evaluating a window of older points would flip state back and forth and
 // re-fire events on every pass.)
 func (s *Server) reconcileLatestPoints(ctx context.Context) {
-	rows, err := s.Pool.Query(ctx, `
-		SELECT DISTINCT ON (d.user_id) d.user_id, ST_X(l.geom), ST_Y(l.geom), l.ts
-		FROM locations l
-		JOIN devices d ON d.id = l.device_id
-		ORDER BY d.user_id, l.ts DESC`)
+	rows, err := s.Pool.Query(ctx, reconcileLatestPointsSQL, reconcileLookback.Seconds())
 	if err != nil {
 		slog.Error("geofence: reconcile query", "err", err)
 		return
