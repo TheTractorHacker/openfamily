@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -421,15 +422,36 @@ func cors(allowedOrigin string) func(http.Handler) http.Handler {
 //   - img-src https: data: blob: tile hosts come from server config, so any
 //     HTTPS image host must stay allowed
 //   - default-src 'self', object-src 'none', frame-ancestors 'none'
-const adminSPACSP = "default-src 'self'; " +
-	"script-src 'self' 'sha256-3+KRjeKvEdP+bglkPezOzH6i2TloyL+3eFCBV+90WH8='; " +
-	"style-src 'self' 'unsafe-inline'; " +
-	"img-src 'self' data: blob: https:; " +
-	"connect-src 'self'; " +
-	"font-src 'self' data:; " +
-	"object-src 'none'; " +
-	"base-uri 'self'; " +
-	"frame-ancestors 'none'"
+//   - connect-src                the MapLibre vector map fetches its style,
+//     glyphs, sprites and tiles with fetch/XHR, so the OpenFreeMap host (and
+//     the origin of an operator-set MAP_STYLE_URL) is allowed, nothing else
+//   - worker-src/child-src blob: MapLibre runs its tile parser in a blob Worker
+const defaultMapStyleOrigin = "https://tiles.openfreemap.org"
+
+// adminSPACSP is built once at startup; see buildAdminCSP.
+var adminSPACSP = buildAdminCSP(os.Getenv("MAP_STYLE_URL"))
+
+// buildAdminCSP returns the admin CSP. styleURL is the optional operator
+// MAP_STYLE_URL; its https origin is added to connect-src.
+func buildAdminCSP(styleURL string) string {
+	connect := "'self' " + defaultMapStyleOrigin
+	if u, err := url.Parse(strings.TrimSpace(styleURL)); err == nil && u.Scheme == "https" && u.Host != "" {
+		if origin := "https://" + u.Host; origin != defaultMapStyleOrigin {
+			connect += " " + origin
+		}
+	}
+	return "default-src 'self'; " +
+		"script-src 'self' 'sha256-3+KRjeKvEdP+bglkPezOzH6i2TloyL+3eFCBV+90WH8='; " +
+		"style-src 'self' 'unsafe-inline'; " +
+		"img-src 'self' data: blob: https:; " +
+		"connect-src " + connect + "; " +
+		"worker-src 'self' blob:; " +
+		"child-src blob:; " +
+		"font-src 'self' data:; " +
+		"object-src 'none'; " +
+		"base-uri 'self'; " +
+		"frame-ancestors 'none'"
+}
 
 // setAdminSPAHeaders applies the headers shared by every admin panel response.
 func setAdminSPAHeaders(w http.ResponseWriter) {
