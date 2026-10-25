@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"html"
 	"log/slog"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -132,6 +133,39 @@ func (s *Server) ResolveAlert(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, alertJSON{ID: a.ID, Type: a.Type, Status: a.Status, Lat: a.Lat, Lon: a.Lon, Note: a.Note, CreatedAt: a.CreatedAt})
 }
 
+// validAlertCoord accepts an absent value or a finite one within [min, max].
+func validAlertCoord(v *float64, min, max float64) bool {
+	if v == nil {
+		return true
+	}
+	return !math.IsNaN(*v) && !math.IsInf(*v, 0) && *v >= min && *v <= max
+}
+
+type alertRequest struct {
+	Note string   `json:"note"`
+	Lat  *float64 `json:"lat"`
+	Lon  *float64 `json:"lon"`
+}
+
+// decodeAlertRequest parses and validates an alert body: note length, and
+// client-supplied coordinates must be finite and in range (BSEC-010). It
+// returns a client-facing message, or "" when the request is acceptable.
+func decodeAlertRequest(r *http.Request) (req alertRequest, note, errMsg string) {
+	if r.Body != nil && r.ContentLength != 0 {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			return req, "", "invalid request body"
+		}
+	}
+	note = strings.TrimSpace(req.Note)
+	if utf8.RuneCountInString(note) > maxAlertNote {
+		return req, "", "note is too long"
+	}
+	if !validAlertCoord(req.Lat, -90, 90) || !validAlertCoord(req.Lon, -180, 180) {
+		return req, "", "lat/lon out of range"
+	}
+	return req, note, ""
+}
+
 func (s *Server) postAlert(w http.ResponseWriter, r *http.Request, typ string, includeContacts bool, window time.Duration) {
 	claims := middleware.ClaimsFromContext(r.Context())
 	if claims == nil {
@@ -157,20 +191,9 @@ func (s *Server) postAlert(w http.ResponseWriter, r *http.Request, typ string, i
 		return
 	}
 
-	var req struct {
-		Note string   `json:"note"`
-		Lat  *float64 `json:"lat"`
-		Lon  *float64 `json:"lon"`
-	}
-	if r.Body != nil && r.ContentLength != 0 {
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid request body")
-			return
-		}
-	}
-	note := strings.TrimSpace(req.Note)
-	if utf8.RuneCountInString(note) > maxAlertNote {
-		writeError(w, http.StatusBadRequest, "note is too long")
+	req, note, errMsg := decodeAlertRequest(r)
+	if errMsg != "" {
+		writeError(w, http.StatusBadRequest, errMsg)
 		return
 	}
 
@@ -375,8 +398,27 @@ func (s *Server) shareURL(token string) string {
 	return base + "/alerts/share/" + token
 }
 
+// shareCSP allows nothing but inline styles: the page runs no script and loads
+// no third-party resources (the map is an outbound link the viewer may click).
+const shareCSP = "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+
+func setShareHeaders(w http.ResponseWriter) {
+	h := w.Header()
+	h.Set("Content-Security-Policy", shareCSP)
+	h.Set("Referrer-Policy", "no-referrer")
+	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("X-Frame-Options", "DENY")
+	h.Set("X-Robots-Tag", "noindex, nofollow, noarchive")
+	h.Set("Cache-Control", "no-store")
+}
+
 // ShareAlert is the public, unauthenticated share page for SMS links.
 func (s *Server) ShareAlert(w http.ResponseWriter, r *http.Request) {
+	setShareHeaders(w)
+	if s.AuthLimit != nil && !s.AuthLimit.Allow(authIPKey("share", clientIP(r)), sharePerIP, shareWindow) {
+		http.Error(w, "too many requests", http.StatusTooManyRequests)
+		return
+	}
 	token := chi.URLParam(r, "token")
 	if token == "" {
 		http.NotFound(w, r)
@@ -398,7 +440,6 @@ func (s *Server) ShareAlert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-store")
 	_, _ = w.Write([]byte(sharePageHTML(a)))
 }
 
@@ -465,24 +506,27 @@ func alertLocationText(shareURL string, lat, lon *float64) string {
 	return ""
 }
 
+// sharePageHTML renders the public share page. It contains no script and no
+// third-party resources. Coordinates and the map link are shown only while the
+// alert is active: once resolved the page no longer reveals where the sender
+// was.
 func sharePageHTML(a alertRow) string {
 	title, _ := alertCopy(a.Type, firstName(a.SenderName), a.Note)
 	when := a.CreatedAt.UTC().Format(time.RFC3339)
-	var mapHTML string
-	if a.Lat != nil && a.Lon != nil {
-		mapHTML = fmt.Sprintf(
-			`<div id="map" style="height:280px;margin:16px 0;border-radius:12px"></div>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="anonymous"></script>
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="anonymous"/>
-<script>
-const map = L.map('map').setView([%f, %f], 15);
-L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom: 19, attribution: '&copy; OpenStreetMap'}).addTo(map);
-L.marker([%f, %f]).addTo(map);
-</script>`, *a.Lat, *a.Lon, *a.Lat, *a.Lon)
+	var locHTML string
+	switch {
+	case a.Status != alertStatusActive:
+		locHTML = `<p>This alert has been resolved. Location sharing has ended.</p>`
+	case a.Lat != nil && a.Lon != nil:
+		// %.5f cannot carry markup; the URL holds only the two numbers.
+		locHTML = fmt.Sprintf(
+			`<p>Last known location: %.5f, %.5f</p>
+<p><a href="https://www.openstreetmap.org/?mlat=%.5f&amp;mlon=%.5f#map=16/%.5f/%.5f" rel="noreferrer noopener">Open in OpenStreetMap</a></p>`,
+			*a.Lat, *a.Lon, *a.Lat, *a.Lon, *a.Lat, *a.Lon)
 	}
-	status := a.Status
 	return fmt.Sprintf(`<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer"><meta name="robots" content="noindex,nofollow">
 <title>%s</title>
 <style>body{font-family:system-ui,sans-serif;margin:24px;color:#111;max-width:40rem}</style>
 </head><body>
@@ -490,5 +534,5 @@ L.marker([%f, %f]).addTo(map);
 <p>%s</p>
 <p>%s</p>
 %s
-</body></html>`, html.EscapeString(title), html.EscapeString(title), html.EscapeString(when), html.EscapeString(status), mapHTML)
+</body></html>`, html.EscapeString(title), html.EscapeString(title), html.EscapeString(when), html.EscapeString(a.Status), locHTML)
 }

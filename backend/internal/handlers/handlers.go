@@ -96,6 +96,17 @@ type Server struct {
 	// apk tracks the platform APK build job state (at most one concurrent build).
 	apk apkManager
 
+	// viewAudit throttles repeated identical platform-admin location-view
+	// audit rows. Nil writes every row.
+	viewAudit *sms.Limiter
+
+	// auditHook, when set (tests), receives audit entries instead of the DB.
+	auditHook func(userID, familyID, action, detail string)
+
+	// RefreshStore tracks refresh-token families for rotation and reuse
+	// detection. Nil means the Postgres-backed store over Pool.
+	RefreshStore refreshStore
+
 	// hub fans out live location updates to connected WebSocket clients.
 	hub *hub
 
@@ -116,9 +127,18 @@ func New(pool *pgxpool.Pool, tm *auth.TokenManager, push push.Dispatcher) *Serve
 		TM:               tm,
 		Push:             push,
 		hub:              newHub(),
+		viewAudit:        sms.NewLimiter(),
 		locationRequests: newLocationRequestGate(locationRequestCooldown),
 		staleWatchdog:    newStaleRequestGate(staleRequestCooldown),
 	}
+}
+
+// refreshSessions returns the refresh-token store.
+func (s *Server) refreshSessions() refreshStore {
+	if s.RefreshStore != nil {
+		return s.RefreshStore
+	}
+	return pgRefreshStore{s.Pool}
 }
 
 // familyIDForUser resolves a user's current family ID from the database. It

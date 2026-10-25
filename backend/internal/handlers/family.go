@@ -249,6 +249,9 @@ func (s *Server) LeaveFamily(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to commit")
 		return
 	}
+	if s.hub != nil {
+		s.hub.disconnectFamilyUser(claims.UserID)
+	}
 	s.logAudit(r.Context(), claims.UserID, *familyID, "family.left",
 		"left family", clientIP(r))
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})

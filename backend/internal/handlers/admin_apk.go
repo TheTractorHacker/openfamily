@@ -145,6 +145,9 @@ func (s *Server) AdminDownloadAPK(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/vnd.android.package-archive")
 	w.Header().Set("Content-Disposition", `attachment; filename="`+filepath.Base(path)+`"`)
+	// The APK is tens of MiB; the server-wide WriteTimeout must not cut off a
+	// slow download.
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
 	http.ServeFile(w, r, path)
 }
 

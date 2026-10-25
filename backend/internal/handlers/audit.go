@@ -25,6 +25,10 @@ type auditEntry struct {
 // a failed write is logged and dropped. userID/familyID may be empty (e.g. a
 // failed login where the account is unknown), in which case NULL is stored.
 func (s *Server) logAudit(ctx context.Context, userID, familyID, action, detail, ipAddress string) {
+	if s.auditHook != nil { // test seam: capture instead of writing
+		s.auditHook(userID, familyID, action, detail)
+		return
+	}
 	var uid, fid any
 	if userID != "" {
 		uid = userID
@@ -40,9 +44,25 @@ func (s *Server) logAudit(ctx context.Context, userID, familyID, action, detail,
 	}
 }
 
+// auditViewThrottle collapses repeated identical operator reads (an admin
+// panel polling the member list) into one audit row per window.
+const auditViewThrottle = time.Minute
+
+// auditAdminView records a platform admin reading live or historical
+// locations (BSEC-007). familyID is the family whose members were viewed, so
+// that family's admins can see it in GET /audit; it is empty for reads that
+// span every family. Identical reads by the same admin within auditViewThrottle
+// write one row. Best effort, like all audit writes.
+func (s *Server) auditAdminView(ctx context.Context, adminID, familyID, detail, ipAddress string) {
+	if s.viewAudit != nil && !s.viewAudit.Allow("adminview:"+adminID+"|"+familyID+"|"+detail, 1, auditViewThrottle) {
+		return
+	}
+	s.logAudit(ctx, adminID, familyID, "admin.location_view", detail, ipAddress)
+}
+
 // clientIP extracts the client IP from r.RemoteAddr, stripping any port.
-// middleware.RealIP has already rewritten RemoteAddr to the real client when
-// behind a proxy, so this is the effective source address.
+// middleware.ClientIP has already rewritten RemoteAddr to the real client when
+// the peer is a trusted proxy, so this is the effective source address.
 func clientIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
