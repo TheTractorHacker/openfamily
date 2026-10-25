@@ -972,4 +972,17 @@ class ApiClient {
   static Future<void> revokeAlertShare(String id) async {
     await post('/alerts/${Uri.encodeComponent(id)}/share/revoke');
   }
+
+  // --- member edit ---
+
+  /// `PATCH /family/members/{id}`: a family admin edits a member's name
+  /// and/or phone. Only the keys present in [body] are changed.
+  static Future<Map<String, dynamic>> updateFamilyMember(
+    String id,
+    Map<String, dynamic> body,
+  ) async {
+    final dynamic r =
+        await patch('/family/members/${Uri.encodeComponent(id)}', body: body);
+    return r is Map<String, dynamic> ? r : <String, dynamic>{};
+  }
 }

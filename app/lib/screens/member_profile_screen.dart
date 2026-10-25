@@ -7,6 +7,7 @@ import '../services/app_config.dart';
 import '../services/api_client.dart';
 import '../services/location_refresh_service.dart';
 import '../theme/app_theme.dart';
+import '../widgets/member_admin_section.dart';
 import '../widgets/member_avatar_bubble.dart';
 import '../widgets/movement_icon.dart';
 import 'day_detail_screen.dart';
@@ -108,6 +109,7 @@ class MemberProfileScreen extends StatelessWidget {
             label: 'Address',
             value: member.address,
           ),
+          MemberAdminSection(memberId: member.id, memberName: member.name),
           const SizedBox(height: 16),
           _LocationRefreshButton(memberId: member.id),
           const SizedBox(height: 12),

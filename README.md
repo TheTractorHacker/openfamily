@@ -591,6 +591,7 @@ For a fully private map, host your own tiles. The simplest option is
 | POST | `/family/leave` | Leave (last admin cannot) |
 | GET | `/family/members` | List members |
 | PATCH | `/family/members/{id}/role` | Change a member's role |
+| PATCH | `/family/members/{id}` | Circle/family admin edits a member's `name` and/or `phone` (E.164, empty clears). Not email, role, password or 2FA. 404 if you share no circle with them, 403 if you are not an admin of it, 403 for another platform admin's account. Audit-logged (field names only). `GET /family/members` includes `phone` only for admins |
 | POST | `/family/members/{id}/reset-code` | Family admin issues a password reset code for a same-family member (not for platform admins or yourself) |
 | POST | `/family/invites` | Create an invite code (admin) |
 | POST | `/family/join` | Join by invite code |

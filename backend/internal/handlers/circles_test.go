@@ -67,10 +67,11 @@ func newCircleEnv(t *testing.T) *circleEnv {
 	r.Get("/circles/{id}/invites", srv.ListCircleInvites)
 	r.Delete("/circles/{id}/invites/{invite_id}", srv.RevokeCircleInvite)
 	r.Get("/family/members", srv.ListMembers)
+	r.Patch("/family/members/{id}", srv.UpdateFamilyMember)
 	e.rt = r
 
 	prefix := "circ-" + time.Now().Format("150405.000000")
-	for _, n := range []string{"A", "B", "C", "D"} {
+	for _, n := range []string{"A", "B", "C", "D", "E", "P"} {
 		var id string
 		if err := pool.QueryRow(ctx, `INSERT INTO users (email, name, password_hash) VALUES ($1,$2,'x') RETURNING id`,
 			prefix+"-"+n+"@example.com", "User"+n).Scan(&id); err != nil {
