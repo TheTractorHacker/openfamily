@@ -6,7 +6,7 @@ import '../services/device_service.dart';
 import '../services/push_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/openfamily_brand.dart';
-import 'map_screen.dart';
+import 'app_shell.dart';
 import 'reset_password_screen.dart';
 import 'sign_up_screen.dart';
 
@@ -104,7 +104,7 @@ class _LoginScreenState extends State<LoginScreen> {
     // Android back button on the map exits the app instead of revealing the
     // logged-out welcome screen.
     Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute<void>(builder: (_) => const MapScreen()),
+      MaterialPageRoute<void>(builder: (_) => const AppShell()),
       (route) => false,
     );
   }

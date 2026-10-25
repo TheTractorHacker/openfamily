@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'screens/login_screen.dart';
-import 'screens/map_screen.dart';
+import 'screens/app_shell.dart';
 import 'screens/server_config_screen.dart';
 import 'screens/welcome_screen.dart';
 import 'services/api_client.dart';
@@ -180,7 +180,7 @@ class _SessionGateState extends State<_SessionGate> {
           case _GateResult.needsServerConfig:
             return const ServerConfigScreen();
           case _GateResult.hasSession:
-            return const MapScreen();
+            return const AppShell();
           default:
             return const WelcomeScreen();
         }

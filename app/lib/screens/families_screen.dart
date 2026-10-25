@@ -5,7 +5,7 @@ import '../services/family_service.dart';
 import '../theme/app_theme.dart';
 import 'invite_screen.dart';
 import 'join_circle_screen.dart';
-import 'map_screen.dart';
+import 'app_shell.dart';
 
 class _FamilyMember {
   const _FamilyMember({
@@ -203,7 +203,7 @@ class _FamiliesScreenState extends State<FamiliesScreen> {
       await ApiClient.leaveFamily();
       if (!mounted) return;
       Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute<void>(builder: (_) => const MapScreen()),
+        MaterialPageRoute<void>(builder: (_) => const AppShell()),
         (route) => false,
       );
     } on ApiException catch (e) {
