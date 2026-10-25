@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 
+import '../widgets/openfamily_map_layers.dart';
 import '../models/trip.dart';
-import '../services/app_config.dart';
 import '../services/speed_units.dart';
 import '../services/trips_service.dart';
 import '../theme/app_theme.dart';
@@ -283,11 +283,7 @@ class TripRouteMap extends StatelessWidget {
               ),
             ),
             children: <Widget>[
-              TileLayer(
-                urlTemplate: kTileUrl,
-                userAgentPackageName: 'app.openfamily',
-                tileProvider: tileProvider,
-              ),
+              OpenFamilyTileLayer(tileProvider: tileProvider),
               PolylineLayer(
                 polylines: <Polyline>[
                   Polyline(

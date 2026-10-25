@@ -2,10 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 
+import '../widgets/openfamily_map_layers.dart';
 import '../models/member.dart';
 import '../models/place.dart';
 import '../services/api_client.dart';
-import '../services/app_config.dart';
 import '../services/family_service.dart';
 import '../services/history_service.dart';
 import '../services/place_service.dart';
@@ -339,10 +339,7 @@ class _TrailMap extends StatelessWidget {
           ),
         ),
         children: [
-          TileLayer(
-            urlTemplate: kTileUrl,
-            userAgentPackageName: 'app.openfamily',
-          ),
+          const OpenFamilyTileLayer(),
           if (trail.length >= 2)
             PolylineLayer(
               polylines: <Polyline>[

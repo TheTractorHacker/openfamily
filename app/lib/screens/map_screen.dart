@@ -5,9 +5,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' hide Circle;
 
+import '../widgets/openfamily_map_layers.dart';
 import '../models/member.dart';
 import '../services/api_client.dart';
-import '../services/app_config.dart';
 import '../services/background_location_service.dart';
 import '../services/battery_optimization_service.dart';
 import '../services/device_service.dart';
@@ -644,10 +644,7 @@ class _MapScreenState extends State<MapScreen>
                   _onCameraChanged(camera, hasGesture),
             ),
             children: [
-              TileLayer(
-                urlTemplate: _satellite ? kSatelliteTileUrl : kTileUrl,
-                userAgentPackageName: 'app.openfamily',
-              ),
+              OpenFamilyTileLayer(satellite: _satellite),
               // Blue "range" circle for members whose location accuracy is
               // known (or who are in the approximate GPS-accuracy state).
               // The radius is the member's real GPS accuracy in meters, so the

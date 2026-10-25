@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 
+import '../widgets/openfamily_map_layers.dart';
 import '../models/member.dart';
-import '../services/app_config.dart';
 import '../services/api_client.dart';
 import '../services/location_refresh_service.dart';
 import '../theme/app_theme.dart';
@@ -250,10 +250,7 @@ class _AccuracyMapPreview extends StatelessWidget {
             ),
           ),
           children: [
-            TileLayer(
-              urlTemplate: kTileUrl,
-              userAgentPackageName: 'app.openfamily',
-            ),
+            const OpenFamilyTileLayer(),
             CircleLayer(
               circles: [
                 CircleMarker(

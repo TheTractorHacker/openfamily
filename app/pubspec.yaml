@@ -23,6 +23,8 @@ dependencies:
   shared_preferences: ^2.3.0
   # Interactive map (OpenStreetMap tiles) for the map-first home screen.
   flutter_map: ^7.0.2
+  # Vector (OpenMapTiles) rendering for crisp maps; 8.0.x targets flutter_map 7.
+  vector_map_tiles: ^8.0.0
   # Geographic coordinate type used by flutter_map.
   latlong2: ^0.9.1
   # Native share sheet for the "Send Code" invite flow.
