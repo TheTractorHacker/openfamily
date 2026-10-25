@@ -7,5 +7,4 @@
 !.git/refs
 !.git/refs/**
 !.git/packed-refs
-!updater
-!updater/distrust-compromised-cas.sh
+!scripts/distrust-compromised-cas.sh

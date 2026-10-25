@@ -20,7 +20,6 @@ import type {
   Role,
   SmsSettings,
   DomainStatus,
-  UpdateStatus,
 } from './types'
 
 const API_BASE = '/api'
@@ -454,18 +453,9 @@ export function getDomainStatus(): Promise<DomainStatus> {
   return request<DomainStatus>('/api/admin/domain/status')
 }
 
-// ---- Server self-update (platform admin) ----
+// ---- Server version (platform admin, read-only) ----
 
-export function getUpdateStatus(): Promise<UpdateStatus> {
-  return request<UpdateStatus>('/api/admin/update/status')
-}
-
-/** Asks the updater sidecar to pull and rebuild; poll getUpdateStatus after. */
-export function applyServerUpdate(): Promise<{ status: string }> {
-  return request<{ status: string }>('/api/admin/update/apply', { method: 'POST' })
-}
-
-/** Tail of the updater's log (text/plain) for live progress display. */
-export function getUpdateLog(): Promise<string> {
-  return request<string>('/api/admin/update/log', { text: true, accept: 'text/plain' })
+/** Running server version. Upgrades are done on the host with scripts/upgrade.sh. */
+export function getServerVersion(): Promise<{ version: string }> {
+  return request<{ version: string }>('/api/admin/version')
 }

@@ -1,57 +1,60 @@
-# Pin the compose project name. The updater sidecar mounts this repo at
-# /repo and runs `docker compose up` from there; without an explicit name,
-# compose would derive the project name from the directory basename ("repo"
-# inside the container) and spin up a second, conflicting stack. A fixed name
-# keeps both invocations on the same project.
+# OpenFamily. Basic install:   ./scripts/setup.sh && docker compose up -d
+#
+# Optional components are compose profiles (enable with --profile or the
+# COMPOSE_PROFILES variable in .env):
+#   proxy  Caddy reverse proxy with automatic HTTPS (set SITE_ADDRESS)
+#   push   self-hosted ntfy server for UnifiedPush (Android push)
+# e.g.  COMPOSE_PROFILES=proxy,push   or   docker compose --profile proxy up -d
+#
+# Without the proxy profile the API is published on 127.0.0.1:${API_PORT:-8080}
+# only; put your own TLS reverse proxy in front of it or enable "proxy".
 name: openfamily
 
-services:
-  caddy:
-    image: caddy:2-alpine
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    environment:
-      # Local dev: ":80" (HTTP only). Production: your domain, e.g.
-      # "openfamily.example.com" (Caddy provisions Let's Encrypt automatically).
-      SITE_ADDRESS: ${SITE_ADDRESS:-:80}
-      # Optional: public address for ntfy (UnifiedPush). Leave empty locally.
-      # Production: PUSH_ADDRESS=push.example.com and CADDYFILE=Caddyfile.with-push.
-      PUSH_ADDRESS: ${PUSH_ADDRESS:-}
-    volumes:
-      - ./caddy/${CADDYFILE:-Caddyfile}:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    depends_on:
-      - api
+x-hardening: &hardening
+  restart: unless-stopped
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
 
+services:
   api:
+    <<: *hardening
     build:
       context: .
       dockerfile: backend/Dockerfile
       args:
         GIT_COMMIT: ${GIT_COMMIT:-}
-    restart: unless-stopped
+    image: openfamily-api:local
+    # Non-root user baked into the image (see backend/Dockerfile).
+    read_only: true
+    tmpfs:
+      - /tmp
     environment:
       HTTP_ADDR: ":8080"
-      # Dev default uses sslmode=disable. In production (APP_ENV=production),
-      # set DATABASE_URL in .env with sslmode=require or sslmode=verify-full.
-      DATABASE_URL: "${DATABASE_URL:-postgres://${POSTGRES_USER:-openfamily}:${POSTGRES_PASSWORD:-openfamily}@postgres:5432/${POSTGRES_DB:-openfamily}?sslmode=disable}"
-      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      # Local dev uses sslmode=disable (Postgres is only reachable on the
+      # private compose network). With APP_ENV=production the API refuses
+      # sslmode=disable unless DB_SSL_DISABLE_OK=true, or you point
+      # DATABASE_URL at a Postgres with TLS and sslmode=require/verify-full.
+      # See docs/self-hosting.md ("Database TLS").
+      DATABASE_URL: "${DATABASE_URL:-postgres://${POSTGRES_USER:-openfamily}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is not set - run ./scripts/setup.sh to generate .env}@postgres:5432/${POSTGRES_DB:-openfamily}?sslmode=${DB_SSLMODE:-disable}}"
+      DB_SSL_DISABLE_OK: ${DB_SSL_DISABLE_OK:-false}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is not set - run ./scripts/setup.sh to generate .env}
       ACCESS_TOKEN_TTL: "15m"
       REFRESH_TOKEN_TTL: "720h"
       ALLOWED_ORIGIN: ${ALLOWED_ORIGIN:-}
       # Read-only passthrough so the admin panel can show domain status.
       SITE_ADDRESS: ${SITE_ADDRESS:-}
       APP_ENV: ${APP_ENV:-development}
-      # Caddy terminates TLS in front of the API.
+      # TLS is terminated in front of the API (Caddy or your own proxy).
       TLS_BEHIND_PROXY: ${TLS_BEHIND_PROXY:-true}
+      INSECURE_HTTP: ${INSECURE_HTTP:-false}
       VERBOSE_PUSH: ${VERBOSE_PUSH:-false}
+      PLATFORM_ADMIN_EMAIL: ${PLATFORM_ADMIN_EMAIL:-}
+      PLATFORM_ADMIN_PASSWORD: ${PLATFORM_ADMIN_PASSWORD:-}
       # Advertised to the app via GET /config so a generic APK can register
       # UnifiedPush without a dart-define.
       NTFY_BASE_URL: ${NTFY_BASE_URL:-http://localhost:2586}
-      # Raster tile templates on GET /config. Empty uses OSM street + Esri satellite.
       TILE_URL: ${TILE_URL:-}
       SATELLITE_TILE_URL: ${SATELLITE_TILE_URL:-}
       # APNs (iOS push). Empty disables APNs; Android still works via ntfy.
@@ -64,53 +67,41 @@ services:
       APNS_TEAM_ID: ${APNS_TEAM_ID:-}
       APNS_TOPIC: ${APNS_TOPIC:-}
       APNS_PRODUCTION: ${APNS_PRODUCTION:-false}
-      # Optional Twilio SMS for family alerts. Empty disables SMS; in-app
-      # push and WebSocket still work. Admin Settings can override these.
+      # Optional Twilio SMS for family alerts. Empty disables SMS.
       TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-}
       TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}
       TWILIO_FROM: ${TWILIO_FROM:-}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
       # Directory the admin panel caches the v* GitHub Release APK into.
-      # Families/admin follow the latest semver release (not CI apk-* tags).
-      # The server fetches that asset on download; it does not build APKs.
       APK_DIR: ${APK_DIR:-/data/apk}
       APK_GITHUB_REPO: ${APK_GITHUB_REPO:-wheresfrank/openfamily}
       APK_GITHUB_TOKEN: ${APK_GITHUB_TOKEN:-}
-      # In-admin "Update server" button: the API proxies to the updater sidecar
-      # below (same shared token). Leave UPDATER_TOKEN empty to disable server
-      # self-update entirely.
-      UPDATER_URL: http://updater:8081
-      UPDATER_TOKEN: ${UPDATER_TOKEN:-}
-      # File where the updater records the deployed git ref; read at runtime so
-      # the admin panel can show which commit is running.
-      DEPLOY_REF_FILE: /data/deploy/deployed-ref
     volumes:
-      # REPO_DIR must be an absolute HOST path. The updater drives
-      # "docker compose" from inside its own container (deploys and the
-      # self-install bootstrap), where a relative path like "./apk" resolves
-      # to a container path that the daemon then interprets on the HOST —
-      # recreating services against a bogus "/repo/apk" stub. The updater
-      # passes REPO_DIR (resolved from its own mount) on every compose call;
-      # plain host-side invocations leave it unset and get the project dir.
-      - ${REPO_DIR:-.}/apk:/data/apk
-      - deploy_meta:/data/deploy
+      - apk_data:/data/apk
     depends_on:
       postgres:
         condition: service_healthy
-    expose:
-      - "8080"
+    ports:
+      - "127.0.0.1:${API_PORT:-8080}:8080"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- \"http://127.0.0.1$${HTTP_ADDR}/healthz\" >/dev/null"]
       interval: 10s
       timeout: 3s
       retries: 6
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
 
   postgres:
-    image: timescale/timescaledb-ha:pg16
-    restart: unless-stopped
+    <<: *hardening
+    # Pinned for reproducible installs. Bump deliberately (and take a backup
+    # first: ./scripts/backup.sh) rather than tracking a moving tag.
+    image: timescale/timescaledb-ha:pg16.15-ts2.31.0
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-openfamily}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-openfamily}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is not set - run ./scripts/setup.sh to generate .env}
       POSTGRES_DB: ${POSTGRES_DB:-openfamily}
     volumes:
       - pgdata:/home/postgres/pgdata/data
@@ -119,15 +110,52 @@ services:
       interval: 5s
       timeout: 5s
       retries: 12
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 1G
+
+  caddy:
+    <<: *hardening
+    profiles: ["proxy"]
+    image: caddy:2.10.2-alpine
+    # Caddy needs to bind 80/443 inside its container; everything else is dropped.
+    cap_add:
+      - NET_BIND_SERVICE
+    read_only: true
+    tmpfs:
+      - /tmp
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      # Production: your domain, e.g. "openfamily.example.com" (Caddy
+      # provisions Let's Encrypt automatically). ":80" is HTTP only.
+      SITE_ADDRESS: ${SITE_ADDRESS:-:80}
+      # Only used with CADDYFILE=Caddyfile.with-push (profiles proxy + push).
+      PUSH_ADDRESS: ${PUSH_ADDRESS:-}
+    volumes:
+      - ./caddy/${CADDYFILE:-Caddyfile}:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
 
   ntfy:
-    image: binwiederhier/ntfy:latest
-    restart: unless-stopped
+    <<: *hardening
+    profiles: ["push"]
+    image: binwiederhier/ntfy:v2.11.0
     command: serve
     environment:
       # Public base URL the app uses to reach ntfy. Production must be https://
-      # on PUSH_ADDRESS (see caddy/Caddyfile.with-push). Local default is
-      # loopback-only so the topic server is not on the public internet.
+      # on PUSH_ADDRESS (see caddy/Caddyfile.with-push).
       NTFY_BASE_URL: ${NTFY_BASE_URL:-http://127.0.0.1:2586}
     volumes:
       - ntfy_cache:/var/cache/ntfy
@@ -136,41 +164,11 @@ services:
       - "80"
     ports:
       - "127.0.0.1:2586:80"
-
-  # Sidecar that powers the in-admin "Update server" button. It mounts the
-  # compose project (the git clone) and the host Docker socket so it can
-  # fast-forward the default branch and run "docker compose up -d --build"
-  # on behalf of the API, which cannot update itself from inside its own
-  # container.
-  #
-  # SECURITY: mounting docker.sock grants root-equivalent access to the host.
-  # This service is internal-only (no published ports) and every endpoint
-  # requires X-Updater-Token to match UPDATER_TOKEN. Set a long random token
-  # (openssl rand -hex 32), or leave UPDATER_TOKEN empty to disable updates.
-  updater:
-    build: ./updater
-    restart: unless-stopped
-    environment:
-      UPDATER_TOKEN: ${UPDATER_TOKEN:-}
-      REPO_DIR: /repo
-      DATA_DIR: /data
-      # Branch to fast-forward. Empty uses the remote default (origin/HEAD).
-      UPDATE_BRANCH: ${UPDATE_BRANCH:-}
-      # Shared with the api service so it can read the deployed git ref.
-      DEPLOY_REF_FILE: /data/deploy/deployed-ref
-    volumes:
-      # Same REPO_DIR rule as the api above: when the updater (or its
-      # self-install bootstrap) re-runs compose from inside a container, a
-      # relative "." would mount the HOST path "/repo" instead of this
-      # checkout. The updater overrides REPO_DIR with the host path it
-      # resolves from its own mount.
-      - ${REPO_DIR:-.}:/repo
-      - /var/run/docker.sock:/var/run/docker.sock
-      - updater_data:/data
-      - deploy_meta:/data/deploy
-    depends_on:
-      api:
-        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
 
 volumes:
   caddy_data:
@@ -178,5 +176,4 @@ volumes:
   pgdata:
   ntfy_cache:
   ntfy_etc:
-  deploy_meta:
-  updater_data:
+  apk_data:

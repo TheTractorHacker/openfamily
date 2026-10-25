@@ -1,16 +1,26 @@
-# Caddy reverse proxy for OpenFamily.
+# Caddy reverse proxy for OpenFamily (compose profile "proxy").
 #
 # SITE_ADDRESS: the public address for the API (e.g. "openfamily.example.com"
 # for production with automatic HTTPS, or ":80" for local HTTP-only dev).
 #
-# ntfy is NOT published on the public internet in docker-compose.yml (loopback
-# only). For production UnifiedPush over TLS, set:
+# For production UnifiedPush over TLS also enable the "push" profile and set:
 #   PUSH_ADDRESS=push.example.com
 #   NTFY_BASE_URL=https://push.example.com
 #   CADDYFILE=Caddyfile.with-push
-# and use caddy/Caddyfile.with-push.
+
+(security_headers) {
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		Permissions-Policy "geolocation=(), camera=(), microphone=()"
+		-Server
+	}
+}
 
 {$SITE_ADDRESS:localhost} {
+	import security_headers
 	encode gzip
 	reverse_proxy api:8080
 }

@@ -6,16 +6,67 @@ that is reachable from the internet.
 
 ## Before `docker compose up`
 
-1. Copy `.env.example` to `.env`. Do not commit `.env`.
-2. Set `APP_ENV=production`.
-3. Set `JWT_SECRET` to at least 32 random bytes (`openssl rand -base64 48`).
-4. Set `POSTGRES_PASSWORD` (and `DATABASE_URL` with `sslmode=require` if Postgres
-   is not on the Compose network).
-5. Set `SITE_ADDRESS=openfamily.example.com` (Caddy will request a certificate).
-6. Set `PLATFORM_ADMIN_EMAIL` and `PLATFORM_ADMIN_PASSWORD`. This creates the
+```bash
+./scripts/setup.sh
+```
+
+This writes `.env` (never overwriting an existing one) with a random
+`POSTGRES_PASSWORD`, `JWT_SECRET` and first-admin password, and asks for your
+`SITE_ADDRESS` and `PLATFORM_ADMIN_EMAIL`. Compose refuses to start if
+`POSTGRES_PASSWORD` or `JWT_SECRET` is unset; there are no default passwords.
+Doing it by hand instead: copy `.env.example` to `.env` and set
+
+1. `JWT_SECRET` (at least 32 random bytes, `openssl rand -hex 32`) and
+   `POSTGRES_PASSWORD` (use a hex/alphanumeric value; it is embedded in a URL).
+2. `SITE_ADDRESS=openfamily.example.com` and `COMPOSE_PROFILES=proxy` so Caddy
+   requests a certificate.
+3. `APP_ENV=production` and `DB_SSL_DISABLE_OK=true` (see Database TLS below).
+4. `PLATFORM_ADMIN_EMAIL` and `PLATFORM_ADMIN_PASSWORD`. This creates the
    first admin and **closes open registration** (invite codes required).
-7. Set `TLS_BEHIND_PROXY=true` (Compose default) so the API accepts HTTP from
-   Caddy on the private network.
+
+## Optional components (compose profiles)
+
+| Profile | Service | Enable when |
+|---|---|---|
+| *(none)* | `api`, `postgres` | Always. The API is published on `127.0.0.1:8080` only. |
+| `proxy` | `caddy` | You want HTTPS on a domain without bringing your own reverse proxy. |
+| `push` | `ntfy` | You want Android push (UnifiedPush) hosted by you. |
+
+Enable with `COMPOSE_PROFILES=proxy,push` in `.env` or
+`docker compose --profile proxy up -d`. Without `proxy`, put your own TLS
+reverse proxy in front of `127.0.0.1:8080` (the API trusts it because
+`TLS_BEHIND_PROXY=true`). All images are pinned to explicit versions; services
+drop all Linux capabilities, use `no-new-privileges`, and have CPU/memory
+limits (edit `deploy.resources.limits` in `docker-compose.yml` for small or
+large hosts). The Caddyfiles set HSTS, `X-Content-Type-Options`,
+`X-Frame-Options`, `Referrer-Policy` and `Permissions-Policy` headers (no CSP,
+to avoid breaking the admin panel).
+
+## Database TLS
+
+`APP_ENV=production` makes the API reject `sslmode=disable`, `prefer`, `allow`
+and a missing `sslmode`. The bundled Postgres is reachable only on the private
+Compose network and has no TLS configured, so `setup.sh` sets
+`DB_SSL_DISABLE_OK=true` for production installs. If Postgres runs elsewhere or
+is published, set `DATABASE_URL=...?sslmode=verify-full`, leave
+`DB_SSL_DISABLE_OK` unset, and configure server certificates on Postgres. In
+`APP_ENV=development` (the default) nothing is enforced.
+
+## Upgrades and backups
+
+```bash
+./scripts/backup.sh                      # ./backups/openfamily-<UTC time>.dump (BACKUP_KEEP=N prunes)
+./scripts/restore.sh backups/<file>.dump # DESTRUCTIVE; asks you to type RESTORE
+./scripts/upgrade.sh                     # backup, pull, rebuild, wait for /healthz, roll back on failure
+```
+
+`upgrade.sh` refuses to run with uncommitted changes, writes
+`backups/pre-upgrade-*.dump`, runs `git pull --ff-only`, `docker compose up -d
+--build`, and polls `/healthz` (`HEALTH_TIMEOUT`, default 120s). On failure it
+checks out the previous git ref, rebuilds, and prints the `restore.sh` command
+for the pre-upgrade dump, since migrations that already ran are not undone by a
+code rollback. There is no in-app updater and no Docker socket access. Schedule
+`backup.sh` from cron and copy `backups/` off the host.
 
 Step 5 in detail — DNS records, certificate behavior, and troubleshooting — is
 covered in [custom-domain.md](custom-domain.md). The admin panel's
@@ -24,11 +75,12 @@ setup.
 
 ## Android push (ntfy)
 
-Do **not** publish ntfy on `0.0.0.0:2586`. Current Compose binds loopback only.
+Do **not** publish ntfy on `0.0.0.0:2586`. Compose binds loopback only, and the service only exists with the `push` profile.
 
 For phones on the public internet:
 
 ```bash
+COMPOSE_PROFILES=proxy,push
 PUSH_ADDRESS=push.example.com
 NTFY_BASE_URL=https://push.example.com
 CADDYFILE=Caddyfile.with-push
@@ -60,7 +112,7 @@ SMS is configured.
 
 ## Backups and disk encryption
 
-- Volume `pgdata` is the family database. Snapshot it. Schedule `pg_dump`.
+- Volume `pgdata` is the family database. Use `./scripts/backup.sh` (above) on a schedule and keep copies off the host.
 - Enable host disk encryption (LUKS, Synology volume encryption, cloud disk
   encryption). The app does not encrypt rows itself.
 - Keep `app/android/upload-keystore.jks` (or CI signing secrets) backed up.

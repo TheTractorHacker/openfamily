@@ -35,3 +35,6 @@ apk/.apk-release.json
 # OS
 .DS_Store
 app/android/build/
+
+# Local backups (database dumps)
+backups/
