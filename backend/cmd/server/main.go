@@ -125,6 +125,7 @@ func main() {
 	r.Use(middleware.RequestID)
 	r.Use(mid.ClientIP(trustedProxies))
 	r.Use(middleware.Recoverer)
+	r.Use(mid.SecurityHeaders)
 	r.Use(mid.LimitBody(mid.BodyLimitFor))
 	r.Use(cors(cfg.AllowedOrigin))
 
@@ -151,6 +152,7 @@ func main() {
 
 	// Authenticated API.
 	r.Group(func(r chi.Router) {
+		r.Use(mid.NoStore)
 		r.Use(mid.RequireAuth(tm))
 		r.Use(mid.RequireTokenVersion(pool))
 
@@ -211,6 +213,7 @@ func main() {
 	// working after the 15-minute access token expires without ever holding
 	// the 30-day refresh token outside secure storage.
 	r.Group(func(r chi.Router) {
+		r.Use(mid.NoStore)
 		r.Use(mid.RequireAuthOrDeviceIngestKey(tm, pool))
 
 		r.Post("/devices/heartbeat", srv.HeartbeatDevice)
@@ -227,6 +230,7 @@ func main() {
 	// RequirePlatformAdmin re-reads the platform_admin flag from the DB on
 	// every request (never trusts the JWT).
 	r.Group(func(r chi.Router) {
+		r.Use(mid.NoStore)
 		r.Use(mid.RequireAuth(tm))
 		r.Use(mid.RequireTokenVersion(pool))
 		r.Use(mid.RequirePlatformAdmin(pool))
