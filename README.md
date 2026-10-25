@@ -196,30 +196,33 @@ On-site write-up: [openfamily.app/compare](https://openfamily.app/compare/).
 ### 1. Start the stack
 
 ```bash
-cp .env.example .env
-# Set a strong POSTGRES_PASSWORD and JWT_SECRET
-docker compose up -d --build
+./scripts/setup.sh && docker compose up -d
 ```
+
+`setup.sh` writes `.env` with random database, JWT and admin passwords (it never
+overwrites an existing `.env`) and asks for your domain and admin email. A
+domain turns on the `proxy` profile (Caddy with automatic HTTPS); with `:80`
+the API listens on `http://localhost:8080` only. Optional pieces are compose
+profiles: `proxy` (Caddy) and `push` (ntfy). See
+[docs/self-hosting.md](docs/self-hosting.md).
 
 Existing deployments should retain their current `DATABASE_URL`,
 `POSTGRES_USER`, and `POSTGRES_DB` values during the upgrade. The OpenFamily
 database defaults are for fresh installations and do not rename stored data.
 
-The API is at `http://localhost` (via Caddy):
-
 ```bash
-curl http://localhost/healthz
+curl http://localhost:8080/healthz   # or https://your-domain/healthz
 # {"status":"ok"}
 ```
 
 ### 2. Create an account
 
 ```bash
-curl -X POST http://localhost/auth/register \
+curl -X POST http://localhost:8080/auth/register \
   -H 'Content-Type: application/json' \
   -d '{"email":"alice@example.com","password":"supersecret1","name":"Alice"}'
 
-curl -X POST http://localhost/auth/login \
+curl -X POST http://localhost:8080/auth/login \
   -H 'Content-Type: application/json' \
   -d '{"email":"alice@example.com","password":"supersecret1"}'
 ```
@@ -260,14 +263,14 @@ places, safety, history, and foreground + background location reporting.
 cd app
 flutter create .        # generates missing platform scaffolding
 flutter pub get
-flutter run --dart-define=OPENFAMILY_API_URL=http://localhost
+flutter run --dart-define=OPENFAMILY_API_URL=http://localhost:8080
 ```
 
 | Target | `OPENFAMILY_API_URL` |
 |---|---|
-| iOS simulator | `http://localhost` |
-| Android emulator | `http://10.0.2.2` (host loopback from inside the emulator) |
-| Physical device | `http://<your-LAN-IP>` (e.g. `http://192.168.1.20`) |
+| iOS simulator | `http://localhost:8080` |
+| Android emulator | `http://10.0.2.2:8080` (host loopback from inside the emulator) |
+| Physical device | `http://<your-LAN-IP>:8080` (e.g. `http://192.168.1.20:8080`) |
 
 A release APK does not need a dart-define. If the URL is unset, the app
 shows a server-config screen and stores the origin you type.
@@ -341,7 +344,8 @@ Setting `PLATFORM_ADMIN_EMAIL` **closes open registration**.
    assign, change role, reset password.
    **APK** — download the Android APK.
    **Settings** — your account (name, password, photo), this server, and
-   server updates (see [Updating the server](#updating-the-server)).
+   the running server version (upgrade with `./scripts/upgrade.sh`, see
+   [Updating the server](#updating-the-server)).
 
 ### Invite codes
 
@@ -394,46 +398,17 @@ screen.
 
 ### Updating the server
 
-The admin **Settings → Server updates** card shows the commit the server is
-running and whether a newer commit exists upstream, with an **Update now**
-button that pulls the latest code and rebuilds/recreates changed containers —
-no shell access required.
-
-The button is powered by the `updater` sidecar (docker-compose service), which
-mounts the compose project directory and the Docker socket and runs
-`git fetch`, checks out the remote default branch (or `UPDATE_BRANCH`),
-fast-forwards it with `--ff-only`, then `docker compose up -d --build` on
-behalf of the API, which cannot update itself from inside its own container.
-
-To enable it, set a long random shared token in `.env`:
+The server does not update itself and nothing in the stack has access to the
+Docker socket. Upgrade from a shell on the host:
 
 ```bash
-UPDATER_TOKEN=$(openssl rand -hex 32)
+./scripts/upgrade.sh
 ```
 
-then `docker compose up -d --build` once more (this builds the sidecar). The
-token must be identical on both sides; compose wires it to both services.
-Leave it empty to disable self-update entirely — the card still reports
-versions and tells you the manual commands. The updater listens only on the
-internal Docker network (no published ports) and rejects every request without
-the token.
-
-Notes:
-
-- **Security:** mounting `/var/run/docker.sock` is root-equivalent host access.
-  That is inherent to in-panel updates; the sidecar is internal-only,
-  token-gated, runs exactly two fixed commands, and update triggers are
-  audit-logged as `admin.update_apply`.
-- The updater always deploys the remote default branch (usually `main`), even
-  if the clone was left on a feature branch whose remote copy was deleted
-  after merge. Override with `UPDATE_BRANCH` if you deploy something else.
-- Local changes in the clone make checkout or `git merge --ff-only` fail
-  loudly rather than silently clobbering them; resolve and re-run the button.
-- If the sidecar's own image changed, its container may be recreated mid-run;
-  the card then reports the run as *interrupted*. Verify container health and
-  press the button again.
-- Without the sidecar enabled you can always update manually:
-  `git checkout main && git pull --ff-only origin main && docker compose up -d --build`.
+It refuses to run with uncommitted changes, backs up the database to
+`./backups`, pulls, rebuilds, waits for `/healthz`, and rolls the code back
+(printing the restore command) if the new version does not come up. See
+[docs/self-hosting.md](docs/self-hosting.md#upgrades-and-backups).
 
 ## Self-hosting map tiles
 
@@ -504,7 +479,8 @@ For a fully private map, host your own tiles. The simplest option is
 | `ACCESS_TOKEN_TTL` | `15m` | Access token lifetime |
 | `REFRESH_TOKEN_TTL` | `720h` | Refresh token lifetime |
 | `ALLOWED_ORIGIN` | *(empty)* | CORS origin |
-| `APP_ENV` | `development` | `production` fails fast on insecure defaults |
+| `APP_ENV` | `development` | `production` fails fast on insecure defaults (incl. Postgres `sslmode`) |
+| `DB_SSL_DISABLE_OK` | `false` | Allow `sslmode=disable` in production (Postgres only on the private Docker network) |
 | `TLS_CERT_FILE` / `TLS_KEY_FILE` | *(empty)* | Direct HTTPS (Caddy is the usual path) |
 | `TLS_BEHIND_PROXY` | `false` | `true` when a reverse proxy terminates TLS |
 | `INSECURE_HTTP` | `false` | Opt-out of TLS (trusted private networks only) |
@@ -637,9 +613,7 @@ All routes require a platform admin. The SPA at `/admin` calls these under
 | POST | `/api/admin/apk/build` | Optional on-server build (needs Flutter) |
 | GET | `/api/admin/apk/status` | Poll that build |
 | GET / PUT / DELETE | `/api/admin/settings/sms` | Twilio SMS settings (token never returned) |
-| GET | `/api/admin/update/status` | Deployed vs. latest commit; updater availability |
-| POST | `/api/admin/update/apply` | Pull + rebuild + rolling restart (needs the updater sidecar) |
-| GET | `/api/admin/update/log` | Tail of the updater's log |
+| GET | `/api/admin/version` | Running server version (read-only) |
 | WS | `/api/admin/ws` | Live positions across all families |
 
 </details>
