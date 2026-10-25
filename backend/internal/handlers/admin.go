@@ -409,6 +409,9 @@ func (s *Server) AdminDeleteFamily(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "family not found")
 		return
 	}
+	if s.hub != nil {
+		s.hub.disconnectFamily(familyID)
+	}
 	s.logAudit(r.Context(), claims.UserID, familyID, "admin.family_deleted",
 		"deleted family "+familyID, clientIP(r))
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})

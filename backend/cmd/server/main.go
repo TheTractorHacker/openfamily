@@ -56,6 +56,7 @@ func main() {
 	}
 	defer pool.Close()
 
+	mid.IngestKeyTTL = cfg.IngestKeyTTL
 	tm := auth.NewTokenManager(cfg.JWTSecret, cfg.AccessTokenTTL, cfg.RefreshTokenTTL)
 	dispatcher := push.NewDispatcher(push.APNsConfig{
 		KeyFile:    cfg.APNsKeyFile,
@@ -188,6 +189,7 @@ func main() {
 		r.Get("/devices", srv.ListDevices)
 		r.Patch("/devices/{id}", srv.UpdateDevice)
 		r.Post("/devices/{id}/ingest-key", srv.RotateDeviceIngestKey)
+		r.Delete("/devices/{id}", srv.DeleteDevice)
 
 		r.Post("/alerts/check-in", srv.PostCheckIn)
 		r.Post("/alerts/help", srv.PostHelp)

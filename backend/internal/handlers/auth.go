@@ -226,6 +226,11 @@ func (s *Server) Logout(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to log out")
 		return
 	}
+	if err := s.revokeIngestKeys(r.Context(), claims.UserID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to revoke device keys")
+		return
+	}
+	s.dropUserSockets(claims.UserID)
 	s.logAudit(r.Context(), claims.UserID, "", "auth.logout", "logged out", clientIP(r))
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }

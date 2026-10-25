@@ -213,6 +213,11 @@ func (s *Server) ChangeMyPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := s.revokeIngestKeys(r.Context(), claims.UserID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to revoke device keys")
+		return
+	}
+	s.dropUserSockets(claims.UserID)
 	s.logAudit(r.Context(), claims.UserID, "", "profile.password_changed", "changed password", clientIP(r))
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -288,6 +293,7 @@ func (s *Server) DeleteMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.dropUserSockets(claims.UserID)
 	s.logAudit(r.Context(), "", auditFamily, "auth.account_deleted", "deleted account", clientIP(r))
 	w.WriteHeader(http.StatusNoContent)
 }

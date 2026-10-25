@@ -57,11 +57,12 @@ func (s *Server) RegisterDevice(w http.ResponseWriter, r *http.Request) {
 		AppVersion string `json:"app_version"`
 	}
 	err = s.Pool.QueryRow(r.Context(), `
-		INSERT INTO devices (user_id, platform, name, push_token, unifiedpush_endpoint, app_version, ingest_key_hash)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO devices (user_id, platform, name, push_token, unifiedpush_endpoint, app_version, ingest_key_hash, ingest_key_expires_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		RETURNING id, user_id, platform, name, app_version`,
 		claims.UserID, req.Platform, req.Name, req.PushToken, req.UnifiedPushEndpoint, req.AppVersion,
 		middleware.EncodeIngestKeyHash(middleware.HashDeviceIngestKey(ingestKey)),
+		newIngestKeyExpiry(),
 	).Scan(&device.ID, &device.UserID, &device.Platform, &device.Name, &device.AppVersion)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to register device")
@@ -102,8 +103,8 @@ func (s *Server) RotateDeviceIngestKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tag, err := s.Pool.Exec(r.Context(), `
-		UPDATE devices SET ingest_key_hash = $1 WHERE id = $2 AND user_id = $3`,
-		middleware.EncodeIngestKeyHash(middleware.HashDeviceIngestKey(ingestKey)), id, claims.UserID)
+		UPDATE devices SET ingest_key_hash = $1, ingest_key_expires_at = $4 WHERE id = $2 AND user_id = $3`,
+		middleware.EncodeIngestKeyHash(middleware.HashDeviceIngestKey(ingestKey)), id, claims.UserID, newIngestKeyExpiry())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to rotate device key")
 		return
@@ -113,6 +114,35 @@ func (s *Server) RotateDeviceIngestKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"ingest_key": ingestKey})
+}
+
+// DeleteDevice removes one of the caller's devices (`DELETE /devices/{id}`).
+// Deleting the row revokes its ingest key immediately and, via ON DELETE
+// CASCADE, also removes the device's stored location history and push-tracking
+// rows. Only the owner can delete; another user's device id is a 404.
+func (s *Server) DeleteDevice(w http.ResponseWriter, r *http.Request) {
+	claims := middleware.ClaimsFromContext(r.Context())
+	if claims == nil {
+		writeError(w, http.StatusUnauthorized, "unauthenticated")
+		return
+	}
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "device id required")
+		return
+	}
+	tag, err := s.Pool.Exec(r.Context(),
+		`DELETE FROM devices WHERE id = $1 AND user_id = $2`, id, claims.UserID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete device")
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		writeError(w, http.StatusNotFound, "device not found")
+		return
+	}
+	s.logAudit(r.Context(), claims.UserID, "", "device.deleted", "deleted device "+id, clientIP(r))
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // UpdateDevice attaches or clears push credentials on an existing device.

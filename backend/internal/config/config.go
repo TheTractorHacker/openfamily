@@ -162,6 +162,11 @@ type Config struct {
 	// passed through to the api service so the admin panel can show domain
 	// status; empty means "not configured".
 	SiteAddress string
+
+	// IngestKeyTTL is the sliding server-side lifetime of a device ingest key
+	// (config: INGEST_KEY_TTL, default 90 days; 0 disables expiry). Each use in
+	// the second half of the window renews it.
+	IngestKeyTTL time.Duration
 }
 
 // buildVersion is overridden at build time with:
@@ -210,6 +215,7 @@ func Load() Config {
 		TwilioFrom:            getenv("TWILIO_FROM", ""),
 		PublicBaseURL:         strings.TrimRight(getenv("PUBLIC_BASE_URL", ""), "/"),
 		SiteAddress:           strings.TrimSpace(getenv("SITE_ADDRESS", "")),
+		IngestKeyTTL:          getenvDuration("INGEST_KEY_TTL", 90*24*time.Hour),
 	}
 }
 

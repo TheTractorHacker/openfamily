@@ -3,12 +3,14 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/jackc/pgx/v5"
 	"github.com/wheresfrank/openfamily/backend/internal/auth"
 	"github.com/wheresfrank/openfamily/backend/internal/models"
 )
@@ -135,6 +137,9 @@ func (s *Server) Stream(w http.ResponseWriter, r *http.Request) {
 		done: make(chan struct{}),
 	}
 	s.hub.register(familyID, claims.UserID, c)
+	go s.hub.watch(c, wsRevalidateInterval, func(ctx context.Context) (bool, error) {
+		return s.familyStreamAuthorized(ctx, claims.UserID, claims.TokenVersion, familyID)
+	})
 	defer func() {
 		s.hub.unregister(familyID, c)
 		c.close()
@@ -213,6 +218,25 @@ func (s *Server) Stream(w http.ResponseWriter, r *http.Request) {
 		default:
 		}
 	}
+}
+
+// familyStreamAuthorized re-checks, against the database, that the socket
+// owner still exists, still holds the token version the socket was opened
+// with (logout / password change bump it) and is still in the family the
+// socket is registered under.
+func (s *Server) familyStreamAuthorized(ctx context.Context, userID string, version int, familyID string) (bool, error) {
+	var current int
+	var fid *string
+	err := s.Pool.QueryRow(ctx,
+		`SELECT token_version, family_id FROM users WHERE id = $1`, userID,
+	).Scan(&current, &fid)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return current == version && fid != nil && *fid == familyID, nil
 }
 
 // familyMembersSnapshot returns every member of the family joined to their

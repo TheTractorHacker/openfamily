@@ -161,6 +161,90 @@ func (h *hub) disconnectFamilyUser(userID string) {
 	}
 }
 
+// disconnectUser closes every socket (family-scoped and platform-admin) that
+// belongs to userID. Used when the account itself is no longer trustworthy:
+// logout, password change or reset, deletion.
+func (h *hub) disconnectUser(userID string) {
+	h.disconnectFamilyUser(userID)
+	h.disconnectAdminUser(userID)
+}
+
+// disconnectAdminUser closes every platform-admin socket for userID (admin
+// demoted, logged out, password reset, deleted).
+func (h *hub) disconnectAdminUser(userID string) {
+	h.mu.Lock()
+	var clients []*wsClient
+	for c := range h.admins {
+		if c.userID == userID {
+			clients = append(clients, c)
+		}
+	}
+	for _, c := range clients {
+		delete(h.admins, c)
+	}
+	h.mu.Unlock()
+	for _, c := range clients {
+		c.close()
+	}
+}
+
+// disconnectFamily closes every family-scoped socket registered under
+// familyID (family deleted).
+func (h *hub) disconnectFamily(familyID string) {
+	h.mu.Lock()
+	clients := make([]*wsClient, 0, len(h.families[familyID]))
+	for c := range h.families[familyID] {
+		clients = append(clients, c)
+	}
+	for _, c := range clients {
+		h.unregisterFamilyClientLocked(familyID, c)
+	}
+	h.mu.Unlock()
+	for _, c := range clients {
+		c.close()
+	}
+}
+
+// wsRevalidateInterval is how often an open stream re-checks that its owner is
+// still authorized. A variable so tests can shorten it.
+var wsRevalidateInterval = 30 * time.Second
+
+// watch re-validates a connected client every interval until it closes. When
+// check reports false the client is removed from the hub (so no further
+// fan-out reaches it) and its socket is closed. A check error is treated as
+// transient: the socket stays open and the next tick retries.
+func (h *hub) watch(c *wsClient, interval time.Duration, check func(context.Context) (bool, error)) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-c.done:
+			return
+		case <-ticker.C:
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			ok, err := check(ctx)
+			cancel()
+			if err != nil || ok {
+				continue
+			}
+			h.mu.Lock()
+			h.unregisterFamilyClientLocked(c.familyID, c)
+			delete(h.admins, c)
+			h.mu.Unlock()
+			c.close()
+			return
+		}
+	}
+}
+
+// dropUserSockets closes all live streams of a user. Safe on a Server built
+// without a hub (unit tests).
+func (s *Server) dropUserSockets(userID string) {
+	if s.hub != nil {
+		s.hub.disconnectUser(userID)
+	}
+}
+
 // hasAny reports whether any client is connected to any family. It lets
 // callers skip a database lookup when there is nobody to notify.
 func (h *hub) hasAny() bool {

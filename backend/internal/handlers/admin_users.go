@@ -293,6 +293,11 @@ func (s *Server) AdminResetUserPassword(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusNotFound, "user not found")
 		return
 	}
+	if err := s.revokeIngestKeys(r.Context(), userID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to revoke device keys")
+		return
+	}
+	s.dropUserSockets(userID)
 	s.logAudit(r.Context(), claims.UserID, "", "admin.user_password_reset",
 		"reset password for user "+userID, clientIP(r))
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})

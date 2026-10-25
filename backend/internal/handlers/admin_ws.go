@@ -3,11 +3,13 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/jackc/pgx/v5"
 	"github.com/wheresfrank/openfamily/backend/internal/auth"
 	"github.com/wheresfrank/openfamily/backend/internal/models"
 )
@@ -85,7 +87,11 @@ func (s *Server) AdminStream(w http.ResponseWriter, r *http.Request) {
 		send: make(chan []byte, clientSendBuffer),
 		done: make(chan struct{}),
 	}
+	c.userID = claims.UserID
 	s.hub.registerAdmin(c)
+	go s.hub.watch(c, wsRevalidateInterval, func(ctx context.Context) (bool, error) {
+		return s.adminStreamAuthorized(ctx, claims.UserID, claims.TokenVersion)
+	})
 	defer func() {
 		s.hub.unregisterAdmin(c)
 		c.close()
@@ -130,6 +136,24 @@ func (s *Server) AdminStream(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+}
+
+// adminStreamAuthorized re-checks, against the database, that the admin
+// socket owner still exists, still holds the token version the socket was
+// opened with, and is still a platform admin.
+func (s *Server) adminStreamAuthorized(ctx context.Context, userID string, version int) (bool, error) {
+	var current int
+	var platformAdmin bool
+	err := s.Pool.QueryRow(ctx,
+		`SELECT token_version, platform_admin FROM users WHERE id = $1`, userID,
+	).Scan(&current, &platformAdmin)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return current == version && platformAdmin, nil
 }
 
 // adminMembersSnapshot returns every member across every family, each joined to
