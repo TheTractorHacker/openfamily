@@ -69,6 +69,7 @@ services:
       NTFY_BASE_URL: ${NTFY_BASE_URL:-http://localhost:2586}
       TILE_URL: ${TILE_URL:-}
       SATELLITE_TILE_URL: ${SATELLITE_TILE_URL:-}
+      MAP_STYLE_URL: ${MAP_STYLE_URL:-}
       # APNs (iOS push). Empty disables APNs; Android still works via ntfy.
       # To enable iOS push, add a volume mount to this service:
       #   volumes:

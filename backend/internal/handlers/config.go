@@ -24,5 +24,6 @@ func (s *Server) GetConfig(w http.ResponseWriter, r *http.Request) {
 		"sms_configured":     s.SMSEnabled(),
 		"tile_url":           tileURL,
 		"satellite_tile_url": satelliteURL,
+		"map_style_url":      s.MapStyleURL,
 	})
 }

@@ -71,6 +71,7 @@ func main() {
 	srv.NtfyBaseURL = cfg.NtfyBaseURL
 	srv.TileURL = cfg.TileURL
 	srv.SatelliteTileURL = cfg.SatelliteTileURL
+	srv.MapStyleURL = cfg.MapStyleURL
 	srv.APNsConfigured = cfg.APNsKeyFile != ""
 	srv.SMSEnv = sms.Settings{
 		AccountSID:    cfg.TwilioAccountSID,

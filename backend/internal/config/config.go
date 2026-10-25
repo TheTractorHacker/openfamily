@@ -88,6 +88,10 @@ type Config struct {
 	TileURL          string
 	SatelliteTileURL string
 
+	// MapStyleURL is an optional vector style JSON (MapLibre/OpenMapTiles) URL
+	// advertised on GET /config. Empty = the app uses its built-in OpenFreeMap.
+	MapStyleURL string
+
 	// APNs push notification credentials (optional; empty KeyFile disables APNs).
 	APNsKeyFile    string
 	APNsKeyID      string
@@ -194,6 +198,7 @@ func Load() Config {
 		NtfyBaseURL:           strings.TrimRight(getenv("NTFY_BASE_URL", ""), "/"),
 		TileURL:               getenv("TILE_URL", DefaultTileURL),
 		SatelliteTileURL:      getenv("SATELLITE_TILE_URL", DefaultSatelliteTileURL),
+		MapStyleURL:           getenv("MAP_STYLE_URL", ""),
 		APNsKeyFile:           getenv("APNS_KEY_FILE", ""),
 		APNsKeyID:             getenv("APNS_KEY_ID", ""),
 		APNsTeamID:            getenv("APNS_TEAM_ID", ""),
