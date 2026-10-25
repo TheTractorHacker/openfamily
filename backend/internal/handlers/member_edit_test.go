@@ -97,11 +97,18 @@ func TestUpdateFamilyMember(t *testing.T) {
 // GET /family/members returns phone only to admins of the family.
 func TestListMembersPhoneOnlyForAdmins(t *testing.T) {
 	e := newCircleEnv(t)
-	c := e.createCircle("A", "Fam1", "B")
-	if _, err := e.pool.Exec(context.Background(), `UPDATE users SET family_id = $1 WHERE id IN ($2, $3)`, c, e.ids["A"], e.ids["B"]); err != nil {
+	ctx := context.Background()
+	// GET /family/members reads the legacy family, so build a real family row
+	// (the sync triggers mirror it into circles).
+	var fam string
+	if err := e.pool.QueryRow(ctx, `INSERT INTO families (name) VALUES ('Fam1') RETURNING id::text`).Scan(&fam); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.pool.Exec(context.Background(), `UPDATE users SET phone = '+15550009999' WHERE id = $1`, e.ids["B"]); err != nil {
+	t.Cleanup(func() { e.pool.Exec(ctx, `UPDATE users SET family_id = NULL WHERE family_id = $1`, fam); e.pool.Exec(ctx, `DELETE FROM families WHERE id = $1`, fam) })
+	if _, err := e.pool.Exec(ctx, `UPDATE users SET family_id = $1, role = 'admin' WHERE id = $2`, fam, e.ids["A"]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.pool.Exec(ctx, `UPDATE users SET family_id = $1, role = 'member', phone = '+15550009999' WHERE id = $2`, fam, e.ids["B"]); err != nil {
 		t.Fatal(err)
 	}
 	for user, wantPhone := range map[string]bool{"A": true, "B": false} {
