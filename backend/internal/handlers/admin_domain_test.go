@@ -8,8 +8,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/wheresfrank/openfamily/backend/internal/auth"
-	"github.com/wheresfrank/openfamily/backend/internal/middleware"
+	"github.com/TheTractorHacker/openfamily/backend/internal/auth"
+	"github.com/TheTractorHacker/openfamily/backend/internal/middleware"
 )
 
 func TestAdminGetDomainStatusUnauthenticated(t *testing.T) {

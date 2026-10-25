@@ -169,7 +169,7 @@ type Config struct {
 
 // buildVersion is overridden at build time with:
 //
-//	-ldflags "-X github.com/wheresfrank/openfamily/backend/internal/config.buildVersion=$(git rev-parse --short HEAD)"
+//	-ldflags "-X github.com/TheTractorHacker/openfamily/backend/internal/config.buildVersion=$(git rev-parse --short HEAD)"
 var buildVersion = "dev"
 
 // BuildVersion returns the git ref embedded at build time ("dev" by default).

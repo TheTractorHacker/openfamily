@@ -27,27 +27,6 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      # Analytics snippet is injected at deploy time so the repository itself
-      # stays tracking-free (forks and self-deploys of site/ get no analytics).
-      # See PRIVACY.md ("About this website").
-      #
-      # Plausible v3 per-site script (pa-*.js) defines init() but does NOT
-      # auto-start capture; the official shim + plausible.init() call is
-      # required. The shim is appended to same-origin script.js (the site's
-      # CSP forbids inline scripts), AFTER the tracker tag in the HTML.
-      - name: Inject analytics snippet (official deployment only)
-        if: github.repository == 'wheresfrank/openfamily'
-        run: |
-          find site -name '*.html' -print0 | xargs -0 sed -i 's#</head>#  <script async data-domain="openfamily.app" src="https://stats.subwiz.ai/js/pa-L7jWcNReMehlGYzagVUpb.js"></script>\n</head>#'
-          grep -q 'stats.subwiz.ai/js/pa-' site/index.html
-          grep -q 'stats.subwiz.ai/js/pa-' site/compare/index.html
-          printf '\n// Plausible v3 tracker: define the official queue shim and start\n// auto-capture (the pa-*.js script does not initialize itself).\nwindow.plausible=window.plausible||function(){(plausible.q=plausible.q||[]).push(arguments)};\nplausible.init=plausible.init||function(i){plausible.o=i||{}};\nplausible.init();\n' >> site/script.js
-          grep -q 'plausible.init()' site/script.js
-          # CSP must allow the tracker script AND its event POSTs (every page).
-          find site -name '*.html' | while read -r f; do
-            grep -q "connect-src[^;]*stats.subwiz.ai" "$f"
-          done
-
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
 

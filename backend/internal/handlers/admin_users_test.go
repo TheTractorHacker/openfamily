@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/wheresfrank/openfamily/backend/internal/models"
+	"github.com/TheTractorHacker/openfamily/backend/internal/models"
 )
 
 func TestValidateAdminUserInput(t *testing.T) {

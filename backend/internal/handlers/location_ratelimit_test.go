@@ -5,9 +5,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/wheresfrank/openfamily/backend/internal/auth"
-	"github.com/wheresfrank/openfamily/backend/internal/middleware"
-	"github.com/wheresfrank/openfamily/backend/internal/sms"
+	"github.com/TheTractorHacker/openfamily/backend/internal/auth"
+	"github.com/TheTractorHacker/openfamily/backend/internal/middleware"
+	"github.com/TheTractorHacker/openfamily/backend/internal/sms"
 )
 
 // testClaims builds access-token claims for the given user id.

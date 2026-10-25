@@ -1,5 +1,5 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://openfamily.app/sitemap.xml
-# Machine-readable summary: https://openfamily.app/llms.txt
+Sitemap: https://foleyit.com/sitemap.xml
+# Machine-readable summary: https://foleyit.com/llms.txt

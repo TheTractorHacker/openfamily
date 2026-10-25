@@ -27,12 +27,8 @@ the app.
 
 ## About this website
 
-This website (openfamily.app) is separate from the software. It uses
-[Plausible Analytics](https://plausible.io) — a cookieless, GDPR-friendly
-analytics tool hosted by the project author. No cookies are set and no
-personal data is collected from site visitors. If you fork and deploy this
-site yourself, no analytics code ships with the repository: the tracking
-snippet is injected at deploy time only in the official build.
+The project website pages in `site/` are static and separate from the software.
+They set no cookies and ship no analytics or tracking code.
 
 ## Who can see location
 
@@ -76,7 +72,7 @@ See [docs/self-hosting.md](docs/self-hosting.md).
 For a request about account data on a deployment, contact that server's
 operator; the software publisher cannot access or delete data on an
 independently operated server. Users can delete an account in the app or
-follow the public [account deletion instructions](https://openfamily.app/delete-account.html).
+follow the public [account deletion instructions](https://foleyit.com/delete-account.html).
 For OpenFamily software support or help finding the right deletion steps,
-contact `contact@openfamily.app`. The public [privacy policy](https://openfamily.app/privacy.html)
+contact `info@foleyit.com`. The public [privacy policy](https://foleyit.com/privacy.html)
 describes data handling and external services.

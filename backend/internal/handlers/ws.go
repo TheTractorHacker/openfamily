@@ -11,9 +11,9 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/jackc/pgx/v5"
-	"github.com/wheresfrank/openfamily/backend/internal/auth"
-	"github.com/wheresfrank/openfamily/backend/internal/circles"
-	"github.com/wheresfrank/openfamily/backend/internal/models"
+	"github.com/TheTractorHacker/openfamily/backend/internal/auth"
+	"github.com/TheTractorHacker/openfamily/backend/internal/circles"
+	"github.com/TheTractorHacker/openfamily/backend/internal/models"
 )
 
 // wsMember is a family member in the members snapshot, joined to their latest

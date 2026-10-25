@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/wheresfrank/openfamily/backend/internal/middleware"
-	"github.com/wheresfrank/openfamily/backend/internal/models"
+	"github.com/TheTractorHacker/openfamily/backend/internal/middleware"
+	"github.com/TheTractorHacker/openfamily/backend/internal/models"
 )
 
 // maxTSSkew is the maximum allowed client clock skew into the future.

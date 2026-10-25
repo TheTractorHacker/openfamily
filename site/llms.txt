@@ -2,8 +2,8 @@
 
 > OpenFamily is a self-hosted, privacy-first family location tracker (a Life360 alternative). You run the server. Family GPS locations never leave it.
 
-Canonical site: https://openfamily.app/
-Canonical repository: https://github.com/wheresfrank/openfamily
+Canonical site: https://foleyit.com/
+Canonical repository: https://github.com/TheTractorHacker/openfamily
 
 ## What it is
 
@@ -29,8 +29,8 @@ Canonical repository: https://github.com/wheresfrank/openfamily
 
 ## Pages
 
-- https://openfamily.app/
-- https://openfamily.app/compare/
-- https://openfamily.app/privacy/
-- https://openfamily.app/quick-start/
-- https://openfamily.app/docs/
+- https://foleyit.com/
+- https://foleyit.com/compare/
+- https://foleyit.com/privacy/
+- https://foleyit.com/quick-start/
+- https://foleyit.com/docs/

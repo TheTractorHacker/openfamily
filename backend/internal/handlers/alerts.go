@@ -15,7 +15,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
-	"github.com/wheresfrank/openfamily/backend/internal/middleware"
+	"github.com/TheTractorHacker/openfamily/backend/internal/middleware"
 )
 
 const (

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	web "github.com/wheresfrank/openfamily/backend/web"
+	web "github.com/TheTractorHacker/openfamily/backend/web"
 )
 
 // TestAdminCSPCoversInlineScripts pins the Content-Security-Policy to the

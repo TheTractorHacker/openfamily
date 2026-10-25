@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/wheresfrank/openfamily/backend/internal/middleware"
+	"github.com/TheTractorHacker/openfamily/backend/internal/middleware"
 )
 
 // Domain status is a read-only mirror of how the server is addressed plus two

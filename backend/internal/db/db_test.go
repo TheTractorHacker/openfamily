@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/wheresfrank/openfamily/backend/internal/config"
+	"github.com/TheTractorHacker/openfamily/backend/internal/config"
 )
 
 const testURL = "postgres://u:p@localhost:5432/d?sslmode=disable"

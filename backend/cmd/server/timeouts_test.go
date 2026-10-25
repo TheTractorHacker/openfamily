@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-	"github.com/wheresfrank/openfamily/backend/internal/config"
-	mid "github.com/wheresfrank/openfamily/backend/internal/middleware"
+	"github.com/TheTractorHacker/openfamily/backend/internal/config"
+	mid "github.com/TheTractorHacker/openfamily/backend/internal/middleware"
 )
 
 func startTestServer(t *testing.T, h http.Handler, to serverTimeouts) string {

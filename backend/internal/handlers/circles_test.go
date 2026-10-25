@@ -13,9 +13,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/wheresfrank/openfamily/backend/internal/auth"
-	"github.com/wheresfrank/openfamily/backend/internal/circles"
-	"github.com/wheresfrank/openfamily/backend/internal/middleware"
+	"github.com/TheTractorHacker/openfamily/backend/internal/auth"
+	"github.com/TheTractorHacker/openfamily/backend/internal/circles"
+	"github.com/TheTractorHacker/openfamily/backend/internal/middleware"
 )
 
 // Integration tests for the circle API and the converted live read paths.

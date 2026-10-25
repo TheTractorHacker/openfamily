@@ -11,11 +11,11 @@
   <strong>A self-hosted family GPS locator.</strong> You run the server.
   Your family's location never leaves it.<br>
   Life360-style live map, SOS, places, and history — not a calendar or shopping app.<br>
-  <a href="https://openfamily.app">openfamily.app</a>
+  <a href="https://foleyit.com">foleyit.com</a>
   ·
-  <a href="https://openfamily.app/compare/">Compare</a>
+  <a href="https://foleyit.com/compare/">Compare</a>
   ·
-  <a href="https://openfamily.app/quick-start/">Quick start</a>
+  <a href="https://foleyit.com/quick-start/">Quick start</a>
 </p>
 
 [![Go](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white)](https://go.dev/)
@@ -174,7 +174,7 @@ need a valid invite code.
 
 ## Compared to
 
-On-site write-up: [openfamily.app/compare](https://openfamily.app/compare/).
+On-site write-up: [foleyit.com/compare](https://foleyit.com/compare/).
 
 | | OpenFamily | Life360-class apps | [OwnTracks](https://owntracks.org/) | [Traccar](https://www.traccar.org/) | [Dawarich](https://dawarich.app/) |
 |---|---|---|---|---|---|
@@ -250,9 +250,9 @@ before you invite anyone.
 5. Install [ntfy](https://ntfy.sh/) so SOS, geofence, and check-in alerts
    arrive when OpenFamily is closed.
 
-Privacy details: [PRIVACY.md](PRIVACY.md) ([on the site](https://openfamily.app/privacy/)).
+Privacy details: [PRIVACY.md](PRIVACY.md) ([on the site](https://foleyit.com/privacy/)).
 Operator hardening: [docs/self-hosting.md](docs/self-hosting.md)
-([on the site](https://openfamily.app/docs/)).
+([on the site](https://foleyit.com/docs/)).
 
 ## Mobile apps
 

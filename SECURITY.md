@@ -4,7 +4,7 @@
 
 Please **do not** open a public GitHub issue for a security problem.
 
-Use a [private GitHub security advisory](https://github.com/wheresfrank/openfamily/security/advisories/new)
+Use a [private GitHub security advisory](https://github.com/TheTractorHacker/openfamily/security/advisories/new)
 on this repository, or email the maintainer at the address on their GitHub
 profile.
 

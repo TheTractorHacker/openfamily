@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="title desc">
   <title id="title">OpenFamily social preview</title>
-  <desc id="desc">OpenFamily logo and openfamily.app on the product's charcoal dot-grid surface.</desc>
+  <desc id="desc">OpenFamily logo and foleyit.com on the product's charcoal dot-grid surface.</desc>
   <defs>
     <pattern id="social-dot-grid" width="12" height="12" patternUnits="userSpaceOnUse">
       <circle cx="1.5" cy="1.5" r="0.8" fill="#FFFFFF" opacity="0.13" stroke="none"/>
@@ -17,5 +17,5 @@
     <circle cx="156" cy="126" r="12" fill="#F4F5F7" stroke="none"/>
   </g>
   <text x="500" y="295" fill="#F4F5F7" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="104" font-weight="800" letter-spacing="-4">OpenFamily</text>
-  <text x="506" y="356" fill="#A3E635" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="32" font-weight="700" letter-spacing="0.5">openfamily.app</text>
+  <text x="506" y="356" fill="#A3E635" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="32" font-weight="700" letter-spacing="0.5">foleyit.com</text>
 </svg>
