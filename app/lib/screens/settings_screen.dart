@@ -8,6 +8,7 @@ import '../services/biometric_service.dart';
 import '../services/location_sharing_service.dart';
 import '../services/push_service.dart';
 import '../services/server_config.dart';
+import '../services/map_style_preference.dart';
 import '../services/theme_preference.dart';
 import '../theme/app_theme.dart';
 import '../widgets/dot_grid.dart';
@@ -382,6 +383,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             const DsSectionHeader('Appearance'),
             const _AppearanceTile(),
+            const _MapStyleTile(),
             const UnitsSettingTile(),
             const DsSectionHeader('Privacy & Security'),
             DsListRow(
@@ -555,6 +557,66 @@ class _AppearanceTile extends StatelessWidget {
                 onSelectionChanged: (Set<ThemePreference> next) {
                   if (next.isEmpty) return;
                   ThemePreferenceService.setPreference(next.first);
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+
+class _MapStyleTile extends StatelessWidget {
+  const _MapStyleTile();
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<MapStylePreference>(
+      valueListenable: MapStylePreferenceService.preference,
+      builder: (context, preference, _) {
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Map style', style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 4),
+              Text(
+                preference == MapStylePreference.light
+                    ? 'Always the light map, even when the app is dark.'
+                    : preference == MapStylePreference.dark
+                        ? 'Always the dark map.'
+                        : 'The map follows the app theme.',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+              ),
+              const SizedBox(height: 12),
+              SegmentedButton<MapStylePreference>(
+                showSelectedIcon: false,
+                segments: const [
+                  ButtonSegment<MapStylePreference>(
+                    value: MapStylePreference.light,
+                    label: Text('Light'),
+                    icon: Icon(Icons.light_mode_outlined, size: 18),
+                  ),
+                  ButtonSegment<MapStylePreference>(
+                    value: MapStylePreference.dark,
+                    label: Text('Dark'),
+                    icon: Icon(Icons.dark_mode_outlined, size: 18),
+                  ),
+                  ButtonSegment<MapStylePreference>(
+                    value: MapStylePreference.matchApp,
+                    label: Text('Match app'),
+                    icon: Icon(Icons.brightness_auto, size: 18),
+                  ),
+                ],
+                selected: <MapStylePreference>{preference},
+                onSelectionChanged: (Set<MapStylePreference> next) {
+                  if (next.isEmpty) return;
+                  MapStylePreferenceService.setPreference(next.first);
                 },
               ),
             ],

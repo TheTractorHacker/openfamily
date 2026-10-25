@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:vector_map_tiles/vector_map_tiles.dart';
 
+import '../services/map_style_preference.dart';
 import '../services/map_style_service.dart';
 import '../services/tile_config.dart';
 
@@ -55,9 +56,19 @@ class _OpenFamilyTileLayerState extends State<OpenFamilyTileLayer> {
   @override
   Widget build(BuildContext context) {
     final TileConfig cfg = widget.config ?? TileConfig.instance;
+    return ValueListenableBuilder<MapStylePreference>(
+      valueListenable: MapStylePreferenceService.preference,
+      builder: (BuildContext context, MapStylePreference pref, _) =>
+          _buildLayer(context, cfg, pref),
+    );
+  }
+
+  Widget _buildLayer(
+      BuildContext context, TileConfig cfg, MapStylePreference pref) {
     final MapLayerChoice choice = resolveMapLayer(
       config: cfg,
-      dark: Theme.of(context).brightness == Brightness.dark,
+      dark: pref.resolveDark(
+          appIsDark: Theme.of(context).brightness == Brightness.dark),
       satellite: widget.satellite,
     );
     if (choice.kind == MapLayerKind.raster || widget.tileProvider != null) {
@@ -76,6 +87,7 @@ class _OpenFamilyTileLayerState extends State<OpenFamilyTileLayer> {
         if (style == null) return const SizedBox.shrink();
         final bool low = widget.reducedData;
         return VectorTileLayer(
+          key: ValueKey<String>(url),
           tileProviders: style.providers,
           theme: style.theme,
           sprites: style.sprites,
