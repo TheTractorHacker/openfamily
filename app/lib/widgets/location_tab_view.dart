@@ -1,0 +1,718 @@
+import 'package:flutter/material.dart';
+
+import '../models/circle.dart';
+import '../models/member.dart';
+import '../models/place.dart';
+import '../theme/app_theme.dart';
+import '../utils/member_status.dart';
+import 'ds/ds.dart';
+import 'member_avatar_bubble.dart';
+
+/// Loads saved places for the Places tab. Injected in tests.
+typedef PlacesLoader = Future<List<Place>> Function();
+
+/// Presentational "Location" tab: a full-bleed [map] with floating controls,
+/// a circle-switcher pill and a draggable People / Places sheet.
+///
+/// The map is a black box supplied by the caller, and every action is a
+/// callback, so this widget owns no services and can be rendered in tests.
+class LocationTabView extends StatefulWidget {
+  const LocationTabView({
+    super.key,
+    required this.map,
+    required this.circleName,
+    required this.members,
+    required this.placesLoader,
+    this.circles = const <Circle>[],
+    this.selfId,
+    this.sharingPaused = false,
+    this.loading = false,
+    this.error,
+    this.hasFamily = true,
+    this.locationOff = false,
+    this.satellite = false,
+    this.onRetry,
+    this.onEnableLocation,
+    this.onToggleSatellite,
+    this.onLocate,
+    this.onOpenSettings,
+    this.onInvite,
+    this.onCheckIn,
+    this.onSos,
+    this.onSelectMember,
+    this.onOpenMember,
+    this.onManageCircles,
+    this.onOpenCircle,
+    this.onJoinCircle,
+    this.onOpenPlaces,
+  });
+
+  final Widget map;
+  final String circleName;
+  final List<Circle> circles;
+  final List<Member> members;
+  final String? selfId;
+  final bool sharingPaused;
+  final bool loading;
+  final String? error;
+  final bool hasFamily;
+  final bool locationOff;
+  final bool satellite;
+  final PlacesLoader placesLoader;
+
+  final VoidCallback? onRetry;
+  final VoidCallback? onEnableLocation;
+  final VoidCallback? onToggleSatellite;
+  final VoidCallback? onLocate;
+  final VoidCallback? onOpenSettings;
+  final VoidCallback? onInvite;
+  final VoidCallback? onCheckIn;
+  final VoidCallback? onSos;
+
+  /// A person row was tapped: the map should center on them.
+  final ValueChanged<Member>? onSelectMember;
+
+  /// "Details" on the selected person: profile, history, location request.
+  final ValueChanged<Member>? onOpenMember;
+  final VoidCallback? onManageCircles;
+  final ValueChanged<Circle>? onOpenCircle;
+  final VoidCallback? onJoinCircle;
+  final VoidCallback? onOpenPlaces;
+
+  @override
+  State<LocationTabView> createState() => _LocationTabViewState();
+}
+
+class _LocationTabViewState extends State<LocationTabView> {
+  /// Sheet heights, as fractions of the tab body.
+  static const double _peekPx = 236;
+  static const double _half = 0.5;
+
+  final DraggableScrollableController _sheet = DraggableScrollableController();
+  final ValueNotifier<double> _extent = ValueNotifier<double>(0);
+  int _tab = 0;
+  String? _selectedId;
+
+  /// Loaded the first time the Places tab opens, not before.
+  Future<List<Place>>? _places;
+
+  @override
+  void dispose() {
+    _sheet.dispose();
+    _extent.dispose();
+    super.dispose();
+  }
+
+  void _reloadPlaces() => setState(() => _places = widget.placesLoader());
+
+  void _select(Member m) {
+    setState(() => _selectedId = _selectedId == m.id ? null : m.id);
+    if (_selectedId != null) widget.onSelectMember?.call(m);
+  }
+
+  void _showCircles() {
+    final BrandTheme brand = BrandTheme.of(context);
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (BuildContext ctx) {
+        final List<Circle> circles = widget.circles;
+        return SafeArea(
+          child: DsSheetScaffold(
+            title: 'Your circles',
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  if (circles.isEmpty)
+                    DsListRow(
+                      title: widget.circleName,
+                      subtitle: 'Shown on the map',
+                      leading: DsListRow.iconTile(ctx, Icons.groups_outlined),
+                      trailing: Icon(Icons.check, color: brand.accentInk),
+                      onTap: () => Navigator.of(ctx).pop(),
+                    ),
+                  for (final Circle c in circles)
+                    DsListRow(
+                      title: c.name,
+                      subtitle:
+                          '${c.memberCount} '
+                          '${c.memberCount == 1 ? 'person' : 'people'}'
+                          '${c.isAdmin ? ' - Admin' : ''}'
+                          '${_isActive(c) ? ' - Shown on the map' : ''}',
+                      leading: _circleLeading(ctx, c),
+                      trailing: _isActive(c)
+                          ? Icon(Icons.check, color: brand.accentInk)
+                          : null,
+                      chevron: !_isActive(c),
+                      onTap: () {
+                        Navigator.of(ctx).pop();
+                        if (!_isActive(c)) widget.onOpenCircle?.call(c);
+                      },
+                    ),
+                  DsListRow(
+                    title: 'Create or join a circle',
+                    leading: DsListRow.iconTile(ctx, Icons.add),
+                    chevron: true,
+                    onTap: () {
+                      Navigator.of(ctx).pop();
+                      widget.onManageCircles?.call();
+                    },
+                  ),
+                  const SizedBox(height: AppSpace.sm),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  bool _isActive(Circle c) => widget.circles.any((Circle x) => x.isPrimary)
+      ? c.isPrimary
+      : c.name == widget.circleName;
+
+  Widget _circleLeading(BuildContext ctx, Circle c) {
+    final String? icon = c.icon;
+    if (icon == null) return DsListRow.iconTile(ctx, Icons.groups_outlined);
+    return SizedBox(
+      width: 40,
+      height: 40,
+      child: Center(child: Text(icon, style: const TextStyle(fontSize: 24))),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final BrandTheme brand = BrandTheme.of(context);
+    return Scaffold(
+      resizeToAvoidBottomInset: false,
+      body: LayoutBuilder(
+        builder: (BuildContext context, BoxConstraints box) {
+          final double h = box.maxHeight;
+          final double minSize = (_peekPx / h).clamp(0.12, 0.4);
+          // Leave the top row (settings / circle pill) visible when fully open.
+          final double full = (1 - (MediaQuery.paddingOf(context).top + 72) / h)
+              .clamp(0.5, 0.92);
+          final double textScale = MediaQuery.textScalerOf(
+            context,
+          ).scale(1).clamp(1.0, 2.0);
+          final double peek = (minSize * textScale).clamp(minSize, 0.5);
+          return Stack(
+            children: <Widget>[
+              Positioned.fill(child: widget.map),
+              _buildTop(context),
+              _buildFloating(context, h, peek),
+              NotificationListener<DraggableScrollableNotification>(
+                onNotification: (DraggableScrollableNotification n) {
+                  _extent.value = n.extent;
+                  return false;
+                },
+                child: DraggableScrollableSheet(
+                  controller: _sheet,
+                  initialChildSize: peek,
+                  minChildSize: peek,
+                  maxChildSize: full,
+                  snap: true,
+                  snapSizes: <double>[if (peek < _half - 0.05) _half],
+                  builder: (BuildContext ctx, ScrollController sc) {
+                    return DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: brand.sheet,
+                        borderRadius: AppRadius.sheet,
+                        boxShadow: const <BoxShadow>[
+                          BoxShadow(
+                            color: Color(0x40000000),
+                            blurRadius: 16,
+                            offset: Offset(0, -2),
+                          ),
+                        ],
+                      ),
+                      child: ClipRRect(
+                        borderRadius: AppRadius.sheet,
+                        child: _buildSheetBody(ctx, sc),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildTop(BuildContext context) {
+    return Positioned(
+      top: 0,
+      left: 0,
+      right: 0,
+      child: SafeArea(
+        bottom: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(
+            AppSpace.md,
+            AppSpace.sm,
+            AppSpace.md,
+            0,
+          ),
+          child: Column(
+            children: <Widget>[
+              Row(
+                children: <Widget>[
+                  DsMapButton(
+                    icon: Icons.settings_outlined,
+                    tooltip: 'Settings',
+                    onPressed: widget.onOpenSettings,
+                  ),
+                  const SizedBox(width: AppSpace.sm),
+                  Expanded(
+                    child: Center(
+                      child: _CirclePill(
+                        name: widget.circleName,
+                        onTap: _showCircles,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: AppSpace.sm),
+                  // A chat button would live here once the backend has chat.
+                  DsMapButton(
+                    icon: Icons.person_add_alt_1_outlined,
+                    tooltip: 'Invite someone',
+                    onPressed: widget.onInvite,
+                  ),
+                ],
+              ),
+              if (widget.locationOff)
+                Padding(
+                  padding: const EdgeInsets.only(top: AppSpace.sm),
+                  child: _LocationOffBanner(onEnable: widget.onEnableLocation),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFloating(BuildContext context, double h, double peek) {
+    return ValueListenableBuilder<double>(
+      valueListenable: _extent,
+      builder: (BuildContext context, double raw, _) {
+        final double extent = raw < peek ? peek : raw;
+        final bool visible = extent < 0.62;
+        return Positioned(
+          left: AppSpace.md,
+          right: AppSpace.md,
+          bottom: extent * h + AppSpace.md,
+          child: IgnorePointer(
+            ignoring: !visible,
+            child: AnimatedOpacity(
+              opacity: visible ? 1 : 0,
+              duration: AppMotion.of(context, AppMotion.fast),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: <Widget>[
+                  Expanded(
+                    child: Wrap(
+                      spacing: AppSpace.sm,
+                      runSpacing: AppSpace.sm,
+                      children: <Widget>[
+                        DsPillButton(
+                          label: 'Check in',
+                          icon: Icons.check_circle_outline,
+                          floating: true,
+                          onPressed: widget.onCheckIn,
+                        ),
+                        DsPillButton(
+                          label: 'SOS',
+                          icon: Icons.warning_amber_rounded,
+                          style: DsPillStyle.danger,
+                          floating: true,
+                          onPressed: widget.onSos,
+                          semanticLabel: 'Send an SOS to your family',
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: AppSpace.sm),
+                  Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      DsMapButton(
+                        icon: widget.satellite ? Icons.map : Icons.layers,
+                        tooltip: widget.satellite
+                            ? 'Switch to standard map'
+                            : 'Switch to satellite',
+                        onPressed: widget.onToggleSatellite,
+                      ),
+                      const SizedBox(height: AppSpace.sm),
+                      DsMapButton(
+                        icon: Icons.my_location,
+                        tooltip: 'Center on my location',
+                        onPressed: widget.onLocate,
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildSheetBody(BuildContext context, ScrollController sc) {
+    return CustomScrollView(
+      controller: sc,
+      slivers: <Widget>[
+        SliverToBoxAdapter(
+          child: Column(
+            children: <Widget>[
+              const DsDragHandle(),
+              DsSegmentedTabs(
+                labels: const <String>['People', 'Places'],
+                selected: _tab,
+                onChanged: (int i) => setState(() => _tab = i),
+              ),
+              const SizedBox(height: AppSpace.sm),
+            ],
+          ),
+        ),
+        if (_tab == 0)
+          ..._peopleSlivers(context)
+        else
+          ..._placesSlivers(context),
+        SliverToBoxAdapter(
+          child: SizedBox(
+            height: MediaQuery.paddingOf(context).bottom + AppSpace.xl,
+          ),
+        ),
+      ],
+    );
+  }
+
+  List<Widget> _peopleSlivers(BuildContext context) {
+    if (widget.error != null && widget.members.isEmpty) {
+      // Compact on purpose: the retry must be visible at the sheet's peek.
+      return <Widget>[
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(
+              AppSpace.md,
+              0,
+              AppSpace.md,
+              AppSpace.sm,
+            ),
+            child: DsOfflineBanner(
+              message: widget.error!,
+              onRetry: widget.onRetry,
+            ),
+          ),
+        ),
+      ];
+    }
+    if (widget.loading && widget.members.isEmpty) {
+      return const <Widget>[
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: EdgeInsets.all(AppSpace.xxl),
+            child: Center(child: CircularProgressIndicator()),
+          ),
+        ),
+      ];
+    }
+    if (!widget.hasFamily) {
+      return <Widget>[
+        SliverToBoxAdapter(
+          child: DsEmptyState(
+            icon: Icons.groups_outlined,
+            title: 'You are not in a circle yet',
+            message: 'Join with an invite code to see your people here.',
+            actionLabel: 'Join a circle',
+            onAction: widget.onJoinCircle,
+          ),
+        ),
+      ];
+    }
+    final List<Member> ms = widget.members;
+    return <Widget>[
+      if (widget.error != null)
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(
+              AppSpace.md,
+              0,
+              AppSpace.md,
+              AppSpace.sm,
+            ),
+            child: DsOfflineBanner(
+              message: widget.error!,
+              onRetry: widget.onRetry,
+            ),
+          ),
+        ),
+      SliverList.builder(
+        itemCount: ms.length,
+        itemBuilder: (BuildContext ctx, int i) {
+          final Member m = ms[i];
+          final bool self = m.id == widget.selfId;
+          return _PersonRow(
+            member: m,
+            paused: self && widget.sharingPaused,
+            selected: m.id == _selectedId,
+            onTap: () => _select(m),
+            onDetails: () => widget.onOpenMember?.call(m),
+          );
+        },
+      ),
+      SliverToBoxAdapter(
+        child: DsListRow(
+          title: 'Add a person',
+          leading: DsListRow.iconTile(context, Icons.person_add_alt_1_outlined),
+          onTap: widget.onInvite,
+        ),
+      ),
+    ];
+  }
+
+  List<Widget> _placesSlivers(BuildContext context) {
+    return <Widget>[
+      SliverToBoxAdapter(
+        child: FutureBuilder<List<Place>>(
+          future: _places ??= widget.placesLoader(),
+          builder: (BuildContext ctx, AsyncSnapshot<List<Place>> snap) {
+            if (snap.connectionState != ConnectionState.done) {
+              return const Padding(
+                padding: EdgeInsets.all(AppSpace.xxl),
+                child: Center(child: CircularProgressIndicator()),
+              );
+            }
+            if (snap.hasError) {
+              return DsErrorState(
+                title: 'Could not load places',
+                message: 'Check your connection and try again.',
+                onRetry: _reloadPlaces,
+              );
+            }
+            final List<Place> places = snap.data ?? const <Place>[];
+            if (places.isEmpty) {
+              return DsEmptyState(
+                icon: Icons.place_outlined,
+                title: 'No places yet',
+                message:
+                    'Add Home, School or Work to see who arrives and '
+                    'leaves.',
+                actionLabel: 'Add a place',
+                onAction: widget.onOpenPlaces,
+              );
+            }
+            return Column(
+              children: <Widget>[
+                for (final Place p in places)
+                  DsListRow(
+                    title: p.name,
+                    subtitle: p.address.isEmpty
+                        ? '${p.radiusMeters.round()} m radius'
+                        : p.address,
+                    leading: DsListRow.iconTile(ctx, p.icon),
+                    chevron: true,
+                    onTap: widget.onOpenPlaces,
+                  ),
+                DsListRow(
+                  title: 'Manage places',
+                  leading: DsListRow.iconTile(
+                    ctx,
+                    Icons.add_location_alt_outlined,
+                  ),
+                  chevron: true,
+                  onTap: widget.onOpenPlaces,
+                ),
+              ],
+            );
+          },
+        ),
+      ),
+    ];
+  }
+}
+
+/// Circle-switcher pill: circle name plus a chevron. With a single circle it
+/// still shows the name (and still opens the list so Create/Join is
+/// reachable).
+class _CirclePill extends StatelessWidget {
+  const _CirclePill({required this.name, required this.onTap});
+
+  final String name;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final BrandTheme brand = BrandTheme.of(context);
+    return Semantics(
+      button: true,
+      label: 'Circle: $name. Switch circle',
+      excludeSemantics: true,
+      onTap: onTap,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(AppRadius.pill),
+          boxShadow: kFloatShadow,
+        ),
+        child: Material(
+          color: brand.sheet,
+          shape: const StadiumBorder(),
+          child: InkWell(
+            customBorder: const StadiumBorder(),
+            onTap: onTap,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(minHeight: kMinTarget),
+              child: Padding(
+                padding: const EdgeInsets.only(
+                  left: AppSpace.lg,
+                  right: AppSpace.sm,
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    Flexible(
+                      child: Text(
+                        name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppType.headline,
+                      ),
+                    ),
+                    const SizedBox(width: AppSpace.xs),
+                    Icon(Icons.keyboard_arrow_down, color: brand.accentInk),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _LocationOffBanner extends StatelessWidget {
+  const _LocationOffBanner({required this.onEnable});
+
+  final VoidCallback? onEnable;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: BrandTheme.of(context).sheet,
+      elevation: 3,
+      borderRadius: BorderRadius.circular(AppRadius.lg),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpace.lg,
+          vertical: AppSpace.sm,
+        ),
+        child: Row(
+          children: <Widget>[
+            const Icon(Icons.location_off, color: AppColors.statusOrange),
+            const SizedBox(width: AppSpace.md),
+            Expanded(
+              child: Text(
+                'Location sharing is off, so your family can\'t see where '
+                'you are.',
+                style: AppType.secondary.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+            TextButton(onPressed: onEnable, child: const Text('Enable')),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PersonRow extends StatelessWidget {
+  const _PersonRow({
+    required this.member,
+    required this.paused,
+    required this.selected,
+    required this.onTap,
+    required this.onDetails,
+  });
+
+  final Member member;
+  final bool paused;
+  final bool selected;
+  final VoidCallback onTap;
+  final VoidCallback onDetails;
+
+  @override
+  Widget build(BuildContext context) {
+    final String status = memberStatusLine(member, sharingPaused: paused);
+    final String? battery = memberBatteryAlert(member);
+    final String? updated = memberUpdatedLabel(member);
+    final ColorScheme cs = Theme.of(context).colorScheme;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        DsListRow(
+          title: member.name,
+          subtitle: status,
+          selected: selected,
+          semanticLabel:
+              '${member.name}. $status.${battery == null ? '' : ' $battery.'}',
+          leading: StatusAvatar(member: member, size: 44),
+          onTap: onTap,
+          trailing: Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              if (battery != null)
+                DsStatusChip(
+                  label: battery,
+                  icon: Icons.battery_alert,
+                  color: AppColors.statusRed,
+                ),
+              if (updated != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: AppSpace.xs),
+                  child: Text(
+                    updated,
+                    style: AppType.secondary.copyWith(
+                      fontSize: 12,
+                      color: cs.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        if (selected)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              AppSpace.xl,
+              0,
+              AppSpace.xl,
+              AppSpace.md,
+            ),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: DsPillButton(
+                label: 'Details and history',
+                icon: Icons.history,
+                style: DsPillStyle.outlined,
+                onPressed: onDetails,
+                semanticLabel: 'Open ${member.name}\'s details and history',
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}

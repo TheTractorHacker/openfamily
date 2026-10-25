@@ -4,7 +4,7 @@ import '../theme/app_theme.dart';
 import '../widgets/onboarding_step_indicator.dart';
 import 'create_circle_screen.dart';
 import 'join_circle_screen.dart';
-import 'map_screen.dart';
+import 'app_shell.dart';
 
 /// Onboarding step: create a new family or join an existing one with an
 /// invite code.
@@ -51,7 +51,7 @@ class CreateOrJoinCircleScreen extends StatelessWidget {
                       step: 4,
                       onDone: () => Navigator.of(context).pushAndRemoveUntil(
                         MaterialPageRoute<void>(
-                          builder: (_) => const MapScreen(),
+                          builder: (_) => const AppShell(),
                         ),
                         (route) => false,
                       ),

@@ -7,7 +7,7 @@ import '../services/geofence_service.dart';
 import '../services/place_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/onboarding_step_indicator.dart';
-import 'map_screen.dart';
+import 'app_shell.dart';
 import 'place_picker_screen.dart';
 
 /// Onboarding step: add home/work/school places to the map (shared with all
@@ -285,7 +285,7 @@ class _AddLocationsScreenState extends State<AddLocationsScreen> {
     // Onboarding is complete; MapScreen starts background location reporting
     // once it is shown (and the app is in the foreground).
     Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute<void>(builder: (_) => const MapScreen()),
+      MaterialPageRoute<void>(builder: (_) => const AppShell()),
       (route) => false,
     );
   }

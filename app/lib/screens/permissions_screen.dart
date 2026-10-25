@@ -7,7 +7,7 @@ import '../services/permission_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/onboarding_step_indicator.dart';
 import 'create_or_join_circle_screen.dart';
-import 'map_screen.dart';
+import 'app_shell.dart';
 
 /// Walks the user through the onboarding permissions — location ("Always
 /// Allow" for background tracking), notifications, and (on supported devices)
@@ -181,7 +181,7 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
       await FamilyService().fetchFamily();
       if (!mounted) return;
       Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute<void>(builder: (_) => const MapScreen()),
+        MaterialPageRoute<void>(builder: (_) => const AppShell()),
         (route) => false,
       );
     } on ApiException catch (e) {
@@ -195,7 +195,7 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
         return;
       }
       Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute<void>(builder: (_) => const MapScreen()),
+        MaterialPageRoute<void>(builder: (_) => const AppShell()),
         (route) => false,
       );
     } catch (_) {
