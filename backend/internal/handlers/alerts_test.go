@@ -4,6 +4,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -20,29 +21,99 @@ func TestFirstName(t *testing.T) {
 	}
 }
 
-func TestShareExpired(t *testing.T) {
+func TestShareState(t *testing.T) {
 	created := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	if shareExpired(created, created.Add(23*time.Hour)) {
-		t.Fatal("23h should not expire")
+	a := alertRow{CreatedAt: created}
+	if shareState(a, created.Add(23*time.Hour)) != shareOK || shareState(a, created.Add(25*time.Hour)) != shareExpiredState {
+		t.Fatal("legacy rows keep the 24h lifetime")
 	}
-	if !shareExpired(created, created.Add(25*time.Hour)) {
-		t.Fatal("25h should expire")
+	exp := created.Add(time.Hour)
+	a.ShareExpiresAt = &exp
+	if shareState(a, created.Add(30*time.Minute)) != shareOK || shareState(a, created.Add(2*time.Hour)) != shareExpiredState {
+		t.Fatal("explicit expiry must win")
+	}
+	rev := created.Add(time.Minute)
+	a.ShareRevokedAt = &rev
+	if shareState(a, created.Add(2*time.Minute)) != shareRevoked {
+		t.Fatal("revoked link must not be served")
 	}
 }
 
-func TestAlertSMSBody(t *testing.T) {
-	got := alertSMSBody("Frank", alertCheckIn, "https://example.com/alerts/share/abc")
-	if got != "Frank checked in. https://example.com/alerts/share/abc" {
+func TestShareTokenIs128BitAndUnique(t *testing.T) {
+	seen := map[string]bool{}
+	for i := 0; i < 200; i++ {
+		tok, err := newShareToken()
+		if err != nil || len(tok) != shareTokenLen {
+			t.Fatalf("token %q err=%v", tok, err)
+		}
+		if seen[tok] {
+			t.Fatal("duplicate token")
+		}
+		seen[tok] = true
+	}
+	if shareTokenLen*4 < 128 {
+		t.Fatal("token below 128 bits")
+	}
+}
+
+func TestAlertSMSBodyNeverHasCoordinatesOrEmergencyClaims(t *testing.T) {
+	got := alertSMSBody("Frank", alertSOS, "https://example.com/alerts/share/abc")
+	if !strings.Contains(got, "https://example.com/alerts/share/abc") || !strings.Contains(got, "NOT been contacted") {
 		t.Fatalf("got %q", got)
 	}
-	sos := alertSMSBody("Frank", alertSOS, "https://example.com/x")
-	if sos != "Frank sent SOS. https://example.com/x" {
-		t.Fatalf("sos %q", sos)
+	noLink := alertSMSBody("Frank", alertSOS, "")
+	for _, b := range []string{got, noLink} {
+		if regexp.MustCompile(`-?\d{1,3}\.\d{3,}`).MatchString(b) {
+			t.Fatalf("coordinates in SMS: %q", b)
+		}
 	}
-	lat, lon := 37.7, -122.4
-	loc := alertLocationText("", &lat, &lon)
-	if loc == "" {
-		t.Fatal("expected lat/lon fallback")
+	if strings.Contains(noLink, "http") {
+		t.Fatalf("no link expected: %q", noLink)
+	}
+}
+
+func TestAlertPushPayloadHidesSenderAndCoordinates(t *testing.T) {
+	note := "at 51.50735, -0.12776 help"
+	off := &Server{}
+	title, body := off.alertPushCopy(alertSOS, "Sam Doe", note)
+	for _, v := range []string{title, body} {
+		if strings.Contains(v, "Sam") || strings.Contains(v, "51.5") || strings.Contains(v, "help") {
+			t.Fatalf("non-verbose push leaks: %q", v)
+		}
+	}
+	on := &Server{VerbosePush: true}
+	title, _ = on.alertPushCopy(alertSOS, "Sam Doe", "")
+	if title != "Sam sent SOS" {
+		t.Fatalf("verbose title %q", title)
+	}
+	// Whatever the mode, the generated push never carries lat/lon-looking text
+	// unless the sender typed it into the note (verbose only).
+	for _, s := range []*Server{off, on} {
+		for _, typ := range []string{alertCheckIn, alertHelp, alertSOS} {
+			ti, bo := s.alertPushCopy(typ, "Sam Doe", "")
+			if regexp.MustCompile(`\d+\.\d{3,}`).MatchString(ti + bo) {
+				t.Fatalf("coords in push: %q %q", ti, bo)
+			}
+		}
+	}
+}
+
+func TestAlertLimitsDefaultsAndEnv(t *testing.T) {
+	d := (AlertLimits{}).withDefaults()
+	if d.SMSMaxRecipients != 5 || d.ShareTTL != 4*time.Hour || d.SOSCooldown != 2*time.Minute || d.SenderSMSPerDay != 10 || d.SMSOnCheckIn {
+		t.Fatalf("defaults %+v", d)
+	}
+	t.Setenv("ALERT_SMS_MAX_RECIPIENTS", "2")
+	t.Setenv("ALERT_SHARE_TTL", "30m")
+	t.Setenv("ALERT_SMS_SENDER_PER_DAY", "bogus")
+	t.Setenv("ALERT_SMS_ON_CHECKIN", "true")
+	e := AlertLimitsFromEnv()
+	if e.SMSMaxRecipients != 2 || e.ShareTTL != 30*time.Minute || e.SenderSMSPerDay != 10 || !e.SMSOnCheckIn {
+		t.Fatalf("env %+v", e)
+	}
+	t.Setenv("ALERT_SHARE_TTL", "9999h")
+	if AlertLimitsFromEnv().ShareTTL != 7*24*time.Hour {
+		t.Fatal("share TTL must be capped")
 	}
 }
 

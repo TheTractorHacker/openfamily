@@ -45,6 +45,9 @@ type Server struct {
 	// AlertLimit rate-limits SOS and similar fan-out per user.
 	AlertLimit *sms.Limiter
 
+	// AlertCfg holds the configurable alert/SMS ceilings (see AlertLimits).
+	AlertCfg AlertLimits
+
 	// AuthLimit rate-limits login, register, refresh, and family join.
 	AuthLimit *sms.Limiter
 
