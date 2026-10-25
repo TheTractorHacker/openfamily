@@ -273,6 +273,7 @@ func main() {
 		r.Patch("/api/admin/members/{id}/family", srv.AdminMoveMember)
 		r.Get("/api/admin/users", srv.AdminListUsers)
 		r.Post("/api/admin/users", srv.AdminCreateUser)
+		r.Patch("/api/admin/users/{id}", srv.AdminUpdateUser)
 		r.Patch("/api/admin/users/{id}/family", srv.AdminAssignUser)
 		r.Patch("/api/admin/users/{id}/role", srv.AdminUpdateUserRole)
 		r.Patch("/api/admin/users/{id}/password", srv.AdminResetUserPassword)

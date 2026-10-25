@@ -13,9 +13,11 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/TheTractorHacker/openfamily/backend/internal/auth"
 	"github.com/TheTractorHacker/openfamily/backend/internal/middleware"
 	"github.com/TheTractorHacker/openfamily/backend/internal/models"
+	"github.com/TheTractorHacker/openfamily/backend/internal/sms"
 )
 
 const (
@@ -64,6 +66,7 @@ type adminUser struct {
 	FamilyName    *string     `json:"family_name"`
 	Email         string      `json:"email"`
 	Name          string      `json:"name"`
+	Phone         *string     `json:"phone"`
 	Role          models.Role `json:"role"`
 	PlatformAdmin bool        `json:"platform_admin"`
 	CreatedAt     time.Time   `json:"created_at"`
@@ -102,7 +105,7 @@ func (s *Server) AdminListUsers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rows, err := s.Pool.Query(r.Context(), `
-		SELECT u.id, u.family_id, f.name, u.email, u.name, u.role, u.platform_admin,
+		SELECT u.id, u.family_id, f.name, u.email, u.name, u.phone, u.role, u.platform_admin,
 		       u.created_at, u.updated_at
 		FROM users u
 		LEFT JOIN families f ON f.id = u.family_id
@@ -116,7 +119,7 @@ func (s *Server) AdminListUsers(w http.ResponseWriter, r *http.Request) {
 	users := []adminUser{}
 	for rows.Next() {
 		var user adminUser
-		if err := rows.Scan(&user.ID, &user.FamilyID, &user.FamilyName, &user.Email, &user.Name,
+		if err := rows.Scan(&user.ID, &user.FamilyID, &user.FamilyName, &user.Email, &user.Name, &user.Phone,
 			&user.Role, &user.PlatformAdmin, &user.CreatedAt, &user.UpdatedAt); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to scan user")
 			return
@@ -428,11 +431,11 @@ func (s *Server) adminSetUserRole(ctx context.Context, userID string, role model
 func (s *Server) adminUserByID(ctx context.Context, userID string) (adminUser, error) {
 	var user adminUser
 	err := s.Pool.QueryRow(ctx, `
-		SELECT u.id, u.family_id, f.name, u.email, u.name, u.role, u.platform_admin,
+		SELECT u.id, u.family_id, f.name, u.email, u.name, u.phone, u.role, u.platform_admin,
 		       u.created_at, u.updated_at
 		FROM users u
 		LEFT JOIN families f ON f.id = u.family_id
-		WHERE u.id = $1`, userID).Scan(&user.ID, &user.FamilyID, &user.FamilyName, &user.Email, &user.Name,
+		WHERE u.id = $1`, userID).Scan(&user.ID, &user.FamilyID, &user.FamilyName, &user.Email, &user.Name, &user.Phone,
 		&user.Role, &user.PlatformAdmin, &user.CreatedAt, &user.UpdatedAt)
 	return user, err
 }
@@ -442,4 +445,160 @@ func stringPtrEqual(a, b *string) bool {
 		return a == nil && b == nil
 	}
 	return *a == *b
+}
+
+type adminUpdateUserRequest struct {
+	Name  *string `json:"name"`
+	Email *string `json:"email"`
+	Phone *string `json:"phone"`
+}
+
+// validateAdminEmail applies the same rules as account creation.
+func validateAdminEmail(email string) (string, error) {
+	email = strings.ToLower(strings.TrimSpace(email))
+	if email == "" || len(email) > maxAdminEmailLength {
+		return "", errors.New("a valid email is required")
+	}
+	parsed, err := mail.ParseAddress(email)
+	if err != nil || parsed.Address != email {
+		return "", errors.New("a valid email is required")
+	}
+	return email, nil
+}
+
+// AdminUpdateUser edits another account's name, email and phone. All fields
+// are optional; only those present are changed.
+//
+// Changing an email changes the login identity, so it bumps token_version
+// (revoking refresh tokens and access tokens) and revokes device ingest keys,
+// exactly like a password reset. Policy: the email of a platform admin other
+// than the caller cannot be changed here, because rewriting another operator's
+// login identity is an account-takeover vector. Admins may still edit their
+// own email (which signs them out) and any platform admin's name or phone.
+func (s *Server) AdminUpdateUser(w http.ResponseWriter, r *http.Request) {
+	claims := middleware.ClaimsFromContext(r.Context())
+	if claims == nil {
+		writeError(w, http.StatusUnauthorized, "unauthenticated")
+		return
+	}
+	userID := chi.URLParam(r, "id")
+	var req adminUpdateUserRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Name == nil && req.Email == nil && req.Phone == nil {
+		writeError(w, http.StatusBadRequest, "provide name, email or phone")
+		return
+	}
+	var name *string
+	if req.Name != nil {
+		n := strings.TrimSpace(*req.Name)
+		if len([]rune(n)) == 0 || len([]rune(n)) > maxAdminNameLength {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("name is required and must be %d characters or fewer", maxAdminNameLength))
+			return
+		}
+		name = &n
+	}
+	var email *string
+	if req.Email != nil {
+		e, err := validateAdminEmail(*req.Email)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		email = &e
+	}
+	updatePhone := req.Phone != nil
+	phone := ""
+	if updatePhone {
+		normalized, err := sms.NormalizeE164(*req.Phone)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		phone = normalized
+	}
+
+	tx, err := s.Pool.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to begin transaction")
+		return
+	}
+	defer tx.Rollback(r.Context())
+
+	var curEmail string
+	var targetIsAdmin bool
+	var familyID *string
+	err = tx.QueryRow(r.Context(),
+		`SELECT email, platform_admin, family_id FROM users WHERE id = $1 FOR UPDATE`, userID,
+	).Scan(&curEmail, &targetIsAdmin, &familyID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "user not found")
+		return
+	} else if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load user")
+		return
+	}
+	emailChanged := email != nil && *email != curEmail
+	if emailChanged && targetIsAdmin && userID != claims.UserID {
+		writeError(w, http.StatusForbidden, "cannot change another platform admin's email")
+		return
+	}
+	if _, err := tx.Exec(r.Context(), `
+		UPDATE users SET
+			name = COALESCE($1, name),
+			email = COALESCE($2, email),
+			phone = CASE WHEN $3 THEN NULLIF($4, '') ELSE phone END,
+			token_version = CASE WHEN $5 THEN token_version + 1 ELSE token_version END,
+			updated_at = now()
+		WHERE id = $6`, name, email, updatePhone, phone, emailChanged, userID); err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			if strings.Contains(pgErr.ConstraintName, "phone") {
+				writeError(w, http.StatusConflict, "phone number already in use by another account")
+			} else {
+				writeError(w, http.StatusConflict, "email already registered to another account")
+			}
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to update user")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to commit")
+		return
+	}
+	if emailChanged {
+		if err := s.revokeIngestKeys(r.Context(), userID); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to revoke device keys")
+			return
+		}
+		s.dropUserSockets(userID)
+	}
+	user, err := s.adminUserByID(r.Context(), userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load updated user")
+		return
+	}
+	fields := []string{}
+	if name != nil {
+		fields = append(fields, "name")
+	}
+	if email != nil {
+		fields = append(fields, "email")
+	}
+	if updatePhone {
+		fields = append(fields, "phone")
+	}
+	fam := ""
+	if familyID != nil {
+		fam = *familyID
+	}
+	detail := "edited user " + userID + " fields: " + strings.Join(fields, ",")
+	if emailChanged {
+		detail += " (email changed, sessions revoked)"
+	}
+	s.logAudit(r.Context(), claims.UserID, fam, "admin.user_updated", detail, clientIP(r))
+	writeJSON(w, http.StatusOK, user)
 }
