@@ -1,6 +1,6 @@
 # Roadmap
 
-Status: planning. Milestones M0 to M8, labels and 29 issues exist at https://github.com/TheTractorHacker/openfamily/issues. The project board is not created yet (needs the `project` token scope).
+Status: in progress. M0 and M1 largely done; see the GitHub milestones and the project board. This repository is independent of the original project (docs/maintenance/UPSTREAM.md).
 
 | Milestone | Focus | First tasks |
 |-----------|-------|-------------|

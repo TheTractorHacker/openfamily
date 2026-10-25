@@ -1,0 +1,14 @@
+OpenFamily
+
+This project is licensed under the GNU Affero General Public License v3.0
+(see LICENSE) and continues the work of the original OpenFamily project:
+
+  Copyright (c) the original OpenFamily authors
+  https://github.com/wheresfrank/openfamily
+
+Modifications and additions are copyright their respective contributors to this
+repository. Third-party components keep their own licenses (see go.mod,
+app/pubspec.lock and app/packages/background_locator_2/LICENSE).
+
+If you run a modified version as a network service, the AGPL requires you to
+offer its source to the users of that service.
