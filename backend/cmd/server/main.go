@@ -161,6 +161,21 @@ func main() {
 		r.Put("/api/profile/avatar", srv.PutProfileAvatar)
 		r.Delete("/api/profile/avatar", srv.DeleteProfileAvatar)
 
+		// Circles (multi-circle model, stage 1). Authorization is in
+		// internal/circles; see docs/design/CIRCLES.md.
+		r.Post("/circles", srv.CreateCircle)
+		r.Get("/circles", srv.ListCircles)
+		r.Post("/circles/join", srv.JoinCircle)
+		r.Patch("/circles/{id}", srv.UpdateCircle)
+		r.Delete("/circles/{id}", srv.DeleteCircle)
+		r.Get("/circles/{id}/members", srv.ListCircleMembers)
+		r.Delete("/circles/{id}/members/{user_id}", srv.RemoveCircleMember)
+		r.Patch("/circles/{id}/members/{user_id}", srv.UpdateCircleMemberRole)
+		r.Put("/circles/{id}/sharing", srv.SetCircleSharing)
+		r.Post("/circles/{id}/invites", srv.CreateCircleInvite)
+		r.Get("/circles/{id}/invites", srv.ListCircleInvites)
+		r.Delete("/circles/{id}/invites/{invite_id}", srv.RevokeCircleInvite)
+
 		r.Post("/families", srv.CreateFamily)
 		r.Get("/family", srv.GetFamily)
 		r.Patch("/family", srv.RenameFamily)

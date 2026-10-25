@@ -69,7 +69,7 @@ func (s *Server) consumeInviteCode(ctx context.Context, tx pgx.Tx, code string) 
 	}
 	var (
 		id        string
-		familyID  string
+		familyID  *string
 		role      models.Role
 		maxUses   int
 		uses      int
@@ -91,10 +91,15 @@ func (s *Server) consumeInviteCode(ctx context.Context, tx pgx.Tx, code string) 
 	if uses >= maxUses {
 		return "", "", &inviteError{msg: "invite code has already been used"}
 	}
+	if familyID == nil {
+		// A code for a circle that is not a legacy family: only
+		// POST /circles/join can redeem it. Rejected before it is consumed.
+		return "", "", &inviteError{msg: "invalid invite code"}
+	}
 	if _, err := tx.Exec(ctx, `UPDATE invite_codes SET uses = uses + 1 WHERE id = $1`, id); err != nil {
 		return "", "", err
 	}
-	return familyID, role, nil
+	return *familyID, role, nil
 }
 
 // insertInviteCode generates a unique code and inserts it within tx, returning
@@ -372,6 +377,7 @@ func (s *Server) AdminListInvites(w http.ResponseWriter, r *http.Request) {
 		       ic.uses, ic.expires_at, ic.created_at, COALESCE(f.name, '')
 		FROM invite_codes ic
 		LEFT JOIN families f ON f.id = ic.family_id
+		WHERE ic.family_id IS NOT NULL
 		ORDER BY ic.created_at DESC`)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list invite codes")
