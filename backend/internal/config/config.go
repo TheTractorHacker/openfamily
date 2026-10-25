@@ -163,6 +163,13 @@ type Config struct {
 	// status; empty means "not configured".
 	SiteAddress string
 
+	// TrustedProxies is a comma-separated list of CIDRs/IPs of reverse proxies
+	// whose X-Forwarded-For header is believed (config: TRUSTED_PROXIES). Empty
+	// means: trust the private/loopback ranges when TLS_BEHIND_PROXY=true (the
+	// compose Caddy setup), otherwise trust nobody and use the TCP peer
+	// address. "none" forces trusting nobody.
+	TrustedProxies string
+
 	// IngestKeyTTL is the sliding server-side lifetime of a device ingest key
 	// (config: INGEST_KEY_TTL, default 90 days; 0 disables expiry). Each use in
 	// the second half of the window renews it.
@@ -215,6 +222,7 @@ func Load() Config {
 		TwilioFrom:            getenv("TWILIO_FROM", ""),
 		PublicBaseURL:         strings.TrimRight(getenv("PUBLIC_BASE_URL", ""), "/"),
 		SiteAddress:           strings.TrimSpace(getenv("SITE_ADDRESS", "")),
+		TrustedProxies:        strings.TrimSpace(getenv("TRUSTED_PROXIES", "")),
 		IngestKeyTTL:          getenvDuration("INGEST_KEY_TTL", 90*24*time.Hour),
 	}
 }

@@ -43,6 +43,9 @@ func validateAdminUserInput(email, password, name string, role models.Role) (val
 	if len([]rune(name)) == 0 || len([]rune(name)) > maxAdminNameLength {
 		return validatedAdminUserInput{}, fmt.Errorf("name is required and must be %d characters or fewer", maxAdminNameLength)
 	}
+	if len(password) > auth.MaxPasswordLength {
+		return validatedAdminUserInput{}, fmt.Errorf("password must be at most %d characters", auth.MaxPasswordLength)
+	}
 	if len(password) < minPasswordLength {
 		return validatedAdminUserInput{}, fmt.Errorf("password must be at least %d characters", minPasswordLength)
 	}
@@ -273,8 +276,8 @@ func (s *Server) AdminResetUserPassword(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if len(req.Password) < minPasswordLength {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("password must be at least %d characters", minPasswordLength))
+	if len(req.Password) < minPasswordLength || len(req.Password) > auth.MaxPasswordLength {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("password must be %d-%d characters", minPasswordLength, auth.MaxPasswordLength))
 		return
 	}
 	hash, err := auth.HashPassword(req.Password)

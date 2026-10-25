@@ -21,6 +21,10 @@ func (s *Server) RegisterDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !s.allowKey(w, "devcreate:user:"+claims.UserID, deviceCreatePerUser, deviceCreateWindow) {
+		return
+	}
+
 	var req struct {
 		Platform            string `json:"platform"`
 		Name                string `json:"name"`
@@ -261,6 +265,10 @@ func (s *Server) HeartbeatDevice(w http.ResponseWriter, r *http.Request) {
 	claims := middleware.ClaimsFromContext(r.Context())
 	if claims == nil {
 		writeError(w, http.StatusUnauthorized, "unauthenticated")
+		return
+	}
+
+	if !s.allowKey(w, "heartbeat:user:"+claims.UserID, heartbeatPerUser, heartbeatWindow) {
 		return
 	}
 

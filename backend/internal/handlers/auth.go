@@ -59,6 +59,10 @@ func (s *Server) Register(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "password must be at least 8 characters")
 		return
 	}
+	if len(req.Password) > auth.MaxPasswordLength {
+		writeError(w, http.StatusBadRequest, "password must be at most 256 bytes")
+		return
+	}
 
 	hash, err := auth.HashPassword(req.Password)
 	if err != nil {
@@ -130,7 +134,14 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
-	if !s.allowAuth(w, authEmailKey(req.Email), loginPerEmail, loginWindow) {
+	emailKey := authEmailKey(req.Email, clientIP(r))
+	if s.loginBlocked(w, emailKey) {
+		return
+	}
+
+	if len(req.Password) > auth.MaxPasswordLength {
+		// Never feed oversized input to Argon2.
+		writeError(w, http.StatusUnauthorized, "invalid credentials")
 		return
 	}
 
@@ -142,6 +153,7 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 		&user.PasswordHash, &user.TOTPSecret, &user.TOTPEnabled, &user.TokenVersion, &user.CreatedAt, &user.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		// Avoid leaking which emails exist — same HTTP body and audit text.
+		s.loginFailed(emailKey)
 		s.logAudit(r.Context(), "", "", "auth.login_failed", "login failed", clientIP(r))
 		writeError(w, http.StatusUnauthorized, "invalid credentials")
 		return
@@ -153,6 +165,7 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 
 	ok, err := auth.VerifyPassword(req.Password, user.PasswordHash)
 	if err != nil || !ok {
+		s.loginFailed(emailKey)
 		s.logAudit(r.Context(), user.ID, "", "auth.login_failed", "login failed", clientIP(r))
 		writeError(w, http.StatusUnauthorized, "invalid credentials")
 		return
@@ -160,6 +173,7 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 
 	if user.TOTPEnabled {
 		if req.TOTPCode == "" || !auth.ValidateTOTPWithSkew(user.TOTPSecret, req.TOTPCode, 1) {
+			s.loginFailed(emailKey)
 			s.logAudit(r.Context(), user.ID, "", "auth.login_failed", "login failed", clientIP(r))
 			writeError(w, http.StatusUnauthorized, "invalid totp code")
 			return
@@ -170,6 +184,7 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 	if user.FamilyID != nil {
 		familyID = *user.FamilyID
 	}
+	s.loginSucceeded(emailKey)
 	s.logAudit(r.Context(), user.ID, familyID, "auth.login", "login for "+user.Email, clientIP(r))
 	jti, err := newTokenID()
 	if err != nil {

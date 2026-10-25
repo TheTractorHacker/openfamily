@@ -334,3 +334,16 @@ func TestValidatePasswordChange(t *testing.T) {
 		})
 	}
 }
+
+func TestValidatePasswordChangeRejectsOversizedPasswords(t *testing.T) {
+	long := strings.Repeat("a", 257)
+	if err := validatePasswordChange("current-pass", long); err == nil {
+		t.Fatal("oversized new password accepted")
+	}
+	if err := validatePasswordChange(long, "new-password"); err == nil {
+		t.Fatal("oversized current password accepted")
+	}
+	if err := validatePasswordChange("current-pass", "new-password"); err != nil {
+		t.Fatalf("normal change rejected: %v", err)
+	}
+}

@@ -137,6 +137,9 @@ func validatePasswordChange(current, newPassword string) error {
 	if current == "" || newPassword == "" {
 		return errors.New("current_password and new_password are required")
 	}
+	if len(current) > auth.MaxPasswordLength || len(newPassword) > auth.MaxPasswordLength {
+		return fmt.Errorf("password must be at most %d bytes", auth.MaxPasswordLength)
+	}
 	if len(newPassword) < minPasswordLength {
 		return fmt.Errorf("password must be at least %d characters", minPasswordLength)
 	}
@@ -168,6 +171,13 @@ func (s *Server) ChangeMyPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Current-password guesses are throttled per user (failures only).
+	pwKey := "pwchange:fail:" + claims.UserID
+	if s.AuthLimit != nil && s.AuthLimit.Exceeded(pwKey, passwordFailsPerUser, passwordFailsWindow) {
+		writeError(w, http.StatusTooManyRequests, "too many requests")
+		return
+	}
+
 	var hash string
 	err := s.Pool.QueryRow(r.Context(), `SELECT password_hash FROM users WHERE id = $1`, claims.UserID).Scan(&hash)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -185,6 +195,9 @@ func (s *Server) ChangeMyPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil || !ok {
+		if s.AuthLimit != nil {
+			s.AuthLimit.Record(pwKey, passwordFailsWindow)
+		}
 		writeError(w, http.StatusBadRequest, "current password is incorrect")
 		return
 	}
@@ -233,6 +246,9 @@ func (s *Server) DeleteMe(w http.ResponseWriter, r *http.Request) {
 	claims := middleware.ClaimsFromContext(r.Context())
 	if claims == nil {
 		writeError(w, http.StatusUnauthorized, "unauthenticated")
+		return
+	}
+	if !s.allowKey(w, "deleteme:user:"+claims.UserID, deleteMePerUser, deleteMeWindow) {
 		return
 	}
 

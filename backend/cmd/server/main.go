@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io/fs"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -114,10 +115,17 @@ func main() {
 	// or was interrupted during ingest.
 	go srv.ReconcileGeofences(ctx)
 
+	trustedProxies, err := resolveTrustedProxies(cfg)
+	if err != nil {
+		slog.Error("invalid TRUSTED_PROXIES", "err", err)
+		os.Exit(1)
+	}
+
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
-	r.Use(middleware.RealIP)
+	r.Use(mid.ClientIP(trustedProxies))
 	r.Use(middleware.Recoverer)
+	r.Use(mid.LimitBody(mid.BodyLimitFor))
 	r.Use(cors(cfg.AllowedOrigin))
 
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -280,11 +288,7 @@ func main() {
 	r.Get("/admin/", adminIndexHandler(adminIndex))
 	r.Get("/admin/*", adminStatic)
 
-	httpServer := &http.Server{
-		Addr:              cfg.HTTPAddr,
-		Handler:           r,
-		ReadHeaderTimeout: 10 * time.Second,
-	}
+	httpServer := newHTTPServer(cfg.HTTPAddr, r, defaultServerTimeouts)
 
 	go func() {
 		if cfg.TLSCertFile != "" && cfg.TLSKeyFile != "" {
@@ -308,6 +312,50 @@ func main() {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_ = httpServer.Shutdown(shutdownCtx)
+}
+
+// resolveTrustedProxies decides whose forwarding headers are believed. Explicit
+// TRUSTED_PROXIES wins; otherwise a deployment that says it is behind a TLS
+// proxy (the compose default) trusts private/loopback peers, and everything
+// else trusts nobody so client-supplied X-Forwarded-For/X-Real-IP cannot forge
+// the address used for rate limiting and audit.
+func resolveTrustedProxies(cfg config.Config) ([]*net.IPNet, error) {
+	if cfg.TrustedProxies != "" {
+		return mid.ParseTrustedProxies(cfg.TrustedProxies)
+	}
+	if cfg.TLSBehindProxy {
+		return mid.DefaultProxyNets, nil
+	}
+	return nil, nil
+}
+
+// serverTimeouts are the net/http server deadlines (BSEC-005).
+type serverTimeouts struct {
+	ReadHeader, Read, Write, Idle time.Duration
+}
+
+// defaultServerTimeouts bound slow-header/slow-body clients and idle
+// keep-alives. They do not affect WebSockets: net/http clears the connection
+// deadlines when a handler hijacks the connection (coder/websocket does so in
+// Accept), and the stream's liveness is covered by its own ping/pong.
+// Handlers that legitimately stream for longer (the APK download) extend their
+// own write deadline with http.ResponseController.
+var defaultServerTimeouts = serverTimeouts{
+	ReadHeader: 10 * time.Second,
+	Read:       60 * time.Second,
+	Write:      60 * time.Second,
+	Idle:       120 * time.Second,
+}
+
+func newHTTPServer(addr string, h http.Handler, t serverTimeouts) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           h,
+		ReadHeaderTimeout: t.ReadHeader,
+		ReadTimeout:       t.Read,
+		WriteTimeout:      t.Write,
+		IdleTimeout:       t.Idle,
+	}
 }
 
 // cors adds a permissive CORS policy for the configured origin (or none).
