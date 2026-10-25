@@ -11,6 +11,7 @@ import '../services/server_config.dart';
 import '../services/theme_preference.dart';
 import '../theme/app_theme.dart';
 import '../widgets/dot_grid.dart';
+import '../widgets/ds/ds.dart';
 import '../widgets/units_setting_tile.dart';
 import 'profile_screen.dart';
 import 'circles_screen.dart';
@@ -342,226 +343,160 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    void push(Widget page) => Navigator.of(context)
+        .push(MaterialPageRoute<void>(builder: (_) => page));
+    final bool busy = _loggingOut || _deletingAccount;
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
       body: DotGridBackground(
         child: ListView(
           children: [
-            const _SectionHeader('Account'),
-          ListTile(
-            leading: const Icon(Icons.person_outline, color: AppColors.purple),
-            title: const Text('Profile'),
-            trailing:
-                const Icon(Icons.chevron_right, color: AppColors.textMuted),
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute<void>(builder: (_) => const ProfileScreen()),
+            const DsSectionHeader('Account'),
+            DsListRow(
+              leading: DsListRow.iconTile(context, Icons.person_outline),
+              title: 'Profile',
+              chevron: true,
+              onTap: () => push(const ProfileScreen()),
             ),
-          ),
-          ListTile(
-            leading: const Icon(Icons.group_outlined, color: AppColors.purple),
-            title: const Text('Family'),
-            trailing:
-                const Icon(Icons.chevron_right, color: AppColors.textMuted),
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute<void>(builder: (_) => const FamiliesScreen()),
+            DsListRow(
+              leading: DsListRow.iconTile(context, Icons.group_outlined),
+              title: 'Family',
+              chevron: true,
+              onTap: () => push(const FamiliesScreen()),
             ),
-          ),
-          ListTile(
-            leading: const Icon(Icons.groups_outlined, color: AppColors.purple),
-            title: const Text('Circles'),
-            subtitle: const Text('All your circles and location sharing'),
-            trailing:
-                const Icon(Icons.chevron_right, color: AppColors.textMuted),
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute<void>(builder: (_) => const CirclesScreen()),
+            DsListRow(
+              leading: DsListRow.iconTile(context, Icons.groups_outlined),
+              title: 'Circles',
+              subtitle: 'All your circles and location sharing',
+              chevron: true,
+              onTap: () => push(const CirclesScreen()),
             ),
-          ),
-          ListTile(
-            leading: const Icon(Icons.dns_outlined, color: AppColors.purple),
-            title: const Text('Server'),
-            subtitle: Text(
-              ServerConfig.instance.apiBaseUrl.isEmpty
+            DsListRow(
+              leading: DsListRow.iconTile(context, Icons.dns_outlined),
+              title: 'Server',
+              subtitle: ServerConfig.instance.apiBaseUrl.isEmpty
                   ? 'Not set'
                   : ServerConfig.instance.apiBaseUrl,
+              chevron: true,
+              onTap: _changeServer,
             ),
-            trailing:
-                const Icon(Icons.chevron_right, color: AppColors.textMuted),
-            onTap: _changeServer,
-          ),
-            const Divider(height: 1),
-            const _SectionHeader('Appearance'),
+            const DsSectionHeader('Appearance'),
             const _AppearanceTile(),
             const UnitsSettingTile(),
-            const Divider(height: 1),
-            const _SectionHeader('Privacy & Security'),
-          ListTile(
-            leading: const Icon(Icons.shield_outlined, color: AppColors.purple),
-            title: const Text('Security'),
-            subtitle: const Text(
-              'Two-factor, sessions, password, your data',
+            const DsSectionHeader('Privacy & Security'),
+            DsListRow(
+              leading: DsListRow.iconTile(context, Icons.shield_outlined),
+              title: 'Security',
+              subtitle: 'Two-factor, sessions, password, your data',
+              chevron: true,
+              onTap: () => push(const SecurityScreen()),
             ),
-            trailing:
-                const Icon(Icons.chevron_right, color: AppColors.textMuted),
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute<void>(builder: (_) => const SecurityScreen()),
+            DsToggleRow(
+              icon: Icons.fingerprint,
+              title: 'Biometric unlock',
+              subtitle: _biometricSubtitle,
+              subtitleColor:
+                  _biometricError == null ? null : AppColors.statusRed,
+              value: _biometricEnabled,
+              onChanged: !_biometricLoading &&
+                      !_biometricUpdating &&
+                      ((_biometricAvailability?.isAvailable ?? false) ||
+                          _biometricEnabled)
+                  ? _setBiometricEnabled
+                  : null,
             ),
-          ),
-          SwitchListTile(
-            secondary: const Icon(
-              Icons.fingerprint,
-              color: AppColors.purple,
-            ),
-            title: const Text('Biometric unlock'),
-            subtitle: Text(
-              _biometricSubtitle,
-              style: _biometricError == null
-                  ? null
-                  : const TextStyle(color: AppColors.statusRed),
-            ),
-            value: _biometricEnabled,
-            onChanged: !_biometricLoading &&
-                    !_biometricUpdating &&
-                    ((_biometricAvailability?.isAvailable ?? false) ||
-                        _biometricEnabled)
-                ? _setBiometricEnabled
-                : null,
-          ),
-          if (_biometricEnabled) ...[
-            const Divider(height: 1),
-            ListTile(
-              leading: const Icon(
-                Icons.lock_clock_outlined,
-                color: AppColors.purple,
+            if (_biometricEnabled)
+              ListTile(
+                leading: DsListRow.iconTile(context, Icons.lock_clock_outlined),
+                title: const Text('Lock delay'),
+                subtitle: const Text(
+                  'How long the app can stay in the background before it '
+                  'locks. Longer delays are convenient but let the recents '
+                  'screen show your family map.',
+                ),
+                trailing: DropdownButton<Duration>(
+                  value: _lockGrace,
+                  underline: const SizedBox.shrink(),
+                  onChanged: _biometricUpdating ? null : _setLockGrace,
+                  items: const [
+                    DropdownMenuItem(
+                      value: Duration.zero,
+                      child: Text('Immediately'),
+                    ),
+                    DropdownMenuItem(
+                      value: Duration(seconds: 30),
+                      child: Text('30 seconds'),
+                    ),
+                    DropdownMenuItem(
+                      value: Duration(minutes: 1),
+                      child: Text('1 minute'),
+                    ),
+                    DropdownMenuItem(
+                      value: Duration(minutes: 5),
+                      child: Text('5 minutes'),
+                    ),
+                    DropdownMenuItem(
+                      value: Duration(minutes: 15),
+                      child: Text('15 minutes'),
+                    ),
+                  ],
+                ),
               ),
-              title: const Text('Lock delay'),
-              subtitle: const Text(
-                'How long the app can stay in the background before it '
-                'locks. Longer delays are convenient but let the recents '
-                'screen show your family map.',
-              ),
-              trailing: DropdownButton<Duration>(
-                value: _lockGrace,
-                underline: const SizedBox.shrink(),
-                onChanged: _biometricUpdating ? null : _setLockGrace,
-                items: const [
-                  DropdownMenuItem(
-                    value: Duration.zero,
-                    child: Text('Immediately'),
-                  ),
-                  DropdownMenuItem(
-                    value: Duration(seconds: 30),
-                    child: Text('30 seconds'),
-                  ),
-                  DropdownMenuItem(
-                    value: Duration(minutes: 1),
-                    child: Text('1 minute'),
-                  ),
-                  DropdownMenuItem(
-                    value: Duration(minutes: 5),
-                    child: Text('5 minutes'),
-                  ),
-                  DropdownMenuItem(
-                    value: Duration(minutes: 15),
-                    child: Text('15 minutes'),
-                  ),
-                ],
-              ),
+            const DsSectionHeader('Location'),
+            DsToggleRow(
+              icon: Icons.location_on_outlined,
+              title: 'Location sharing',
+              subtitle: 'When off, this device stops reporting your position.',
+              value: _locationSharing,
+              onChanged: _locationSharingLoading ? null : _setLocationSharing,
             ),
+            if (BatteryOptimizationService.isSupported)
+              DsListRow(
+                leading:
+                    DsListRow.iconTile(context, Icons.battery_alert_outlined),
+                title: 'Background updates',
+                subtitle: 'Let OpenFamily run freely so your location stays '
+                    'fresh when the app is closed.',
+                chevron: true,
+                onTap: BatteryOptimizationService.openSettings,
+              ),
+            const DsSectionHeader('Notifications'),
+            DsToggleRow(
+              icon: Icons.notifications_outlined,
+              title: 'Push notifications',
+              subtitle: pushNotificationsSubtitle(isWeb: kIsWeb),
+              value: _notifications,
+              onChanged: _notificationsLoading ? null : _setPushNotifications,
+            ),
+            const DsSectionHeader('About'),
+            DsListRow(
+              leading: DsListRow.iconTile(context, Icons.privacy_tip_outlined),
+              title: 'Privacy policy',
+              chevron: true,
+              onTap: () => push(const PrivacyPolicyScreen()),
+            ),
+            DsListRow(
+              leading: DsListRow.iconTile(context, Icons.info_outline),
+              title: 'OpenFamily',
+              subtitle: 'Version 0.1.0',
+            ),
+            const Divider(height: AppSpace.xxl),
+            DsListRow(
+              leading: DsListRow.iconTile(context, Icons.logout,
+                  color: AppColors.sosRed),
+              title: 'Log Out',
+              destructive: true,
+              onTap: busy ? null : _logout,
+            ),
+            DsListRow(
+              leading: DsListRow.iconTile(context, Icons.delete_forever,
+                  color: AppColors.sosRed),
+              title: 'Delete account',
+              destructive: true,
+              onTap: busy ? null : _deleteAccount,
+            ),
+            const SizedBox(height: AppSpace.xxl),
           ],
-          const Divider(height: 1),
-          const _SectionHeader('Location'),
-          SwitchListTile(
-            secondary:
-                const Icon(Icons.location_on_outlined, color: AppColors.purple),
-            title: const Text('Location sharing'),
-            subtitle: const Text(
-              'When off, this device stops reporting your position.',
-            ),
-            value: _locationSharing,
-            onChanged: _locationSharingLoading ? null : _setLocationSharing,
-          ),
-          if (BatteryOptimizationService.isSupported)
-            ListTile(
-              leading: const Icon(
-                Icons.battery_alert_outlined,
-                color: AppColors.purple,
-              ),
-              title: const Text('Background updates'),
-              subtitle: const Text(
-                'Let OpenFamily run freely so your location stays fresh '
-                'when the app is closed.',
-              ),
-              trailing:
-                  const Icon(Icons.chevron_right, color: AppColors.textMuted),
-                  onTap: BatteryOptimizationService.openSettings,
-            ),
-          const Divider(height: 1),
-          const _SectionHeader('Notifications'),
-          SwitchListTile(
-            secondary: const Icon(Icons.notifications_outlined,
-                color: AppColors.purple),
-            title: const Text('Push notifications'),
-            subtitle: Text(pushNotificationsSubtitle(isWeb: kIsWeb)),
-            value: _notifications,
-            onChanged: _notificationsLoading ? null : _setPushNotifications,
-          ),
-          const Divider(height: 1),
-          const _SectionHeader('About'),
-          ListTile(
-            leading: const Icon(Icons.privacy_tip_outlined, color: AppColors.purple),
-            title: const Text('Privacy policy'),
-            trailing: const Icon(Icons.chevron_right, color: AppColors.textMuted),
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute<void>(builder: (_) => const PrivacyPolicyScreen()),
-            ),
-          ),
-          const ListTile(
-            leading: Icon(Icons.info_outline, color: AppColors.purple),
-            title: Text('OpenFamily'),
-            subtitle: Text('Version 0.1.0'),
-          ),
-          const Divider(height: 1),
-          ListTile(
-            leading: const Icon(Icons.logout, color: AppColors.sosRed),
-            title: const Text(
-              'Log Out',
-              style: TextStyle(color: AppColors.sosRed),
-            ),
-            enabled: !_loggingOut && !_deletingAccount,
-            onTap: _logout,
-          ),
-            ListTile(
-              leading: const Icon(Icons.delete_forever, color: AppColors.sosRed),
-              title: const Text(
-                'Delete account',
-                style: TextStyle(color: AppColors.sosRed),
-              ),
-              enabled: !_loggingOut && !_deletingAccount,
-              onTap: _deleteAccount,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _SectionHeader extends StatelessWidget {
-  const _SectionHeader(this.title);
-
-  final String title;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
-      child: Text(
-        title.toUpperCase(),
-        style: TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.w700,
-          letterSpacing: 1,
-          color: Theme.of(context).colorScheme.onSurfaceVariant,
         ),
       ),
     );

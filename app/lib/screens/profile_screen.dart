@@ -453,7 +453,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   onRefresh: _loadProfile,
                   child: ListView(
                     physics: const AlwaysScrollableScrollPhysics(),
-                    padding: const EdgeInsets.fromLTRB(24, 24, 24, 32),
+                    padding: const EdgeInsets.fromLTRB(
+                        AppSpace.xxl, AppSpace.xxl, AppSpace.xxl, AppSpace.xxxl),
                     children: [
                       _AvatarEditor(
                         name: profile.name,
@@ -559,13 +560,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       const SizedBox(height: 28),
                       const Divider(),
                       const SizedBox(height: 16),
-                      const Text(
-                        'Change password',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
+                      Text('Change password', style: AppType.headline),
                       const SizedBox(height: 12),
                       TextField(
                         controller: _currentPasswordController,
@@ -614,20 +609,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       const SizedBox(height: 28),
                       const Divider(),
                       const SizedBox(height: 16),
-                      const Text(
-                        'Profile photo privacy',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
+                      Text('Profile photo privacy', style: AppType.headline),
                       const SizedBox(height: 6),
-                      const Text(
+                      Text(
                         'Your photo is stored privately on your OpenFamily server '
                         'and shared only with authenticated family members and '
                         'platform administrators.',
-                        style: TextStyle(
-                          color: AppColors.textMuted,
+                        style: AppType.secondary.copyWith(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
                           height: 1.35,
                         ),
                       ),
@@ -660,6 +649,7 @@ class _AvatarEditor extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final BrandTheme brand = BrandTheme.of(context);
     final String initials = _initials(name);
     final String semanticLabel = avatarBytes == null
         ? 'No profile photo. Initials $initials.'
@@ -679,16 +669,16 @@ class _AvatarEditor extends StatelessWidget {
                 height: 112,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: AppColors.surfaceTint,
-                  border: Border.all(color: AppColors.purple, width: 3),
+                  color: brand.paper,
+                  border: Border.all(color: brand.accent, width: 3),
                 ),
                 child: ClipOval(
                   child: avatarBytes == null
                       ? Center(
                           child: Text(
                             initials,
-                            style: const TextStyle(
-                              color: AppColors.purple,
+                            style: TextStyle(
+                              color: brand.accentInk,
                               fontSize: 38,
                               fontWeight: FontWeight.w800,
                             ),
@@ -700,8 +690,8 @@ class _AvatarEditor extends StatelessWidget {
                           errorBuilder: (_, __, ___) => Center(
                             child: Text(
                               initials,
-                              style: const TextStyle(
-                                color: AppColors.purple,
+                              style: TextStyle(
+                                color: brand.accentInk,
                                 fontSize: 38,
                                 fontWeight: FontWeight.w800,
                               ),
@@ -755,8 +745,8 @@ class _AvatarError extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: const Color(0xFFFFF1F0),
-        borderRadius: BorderRadius.circular(12),
+        color: AppColors.sosRed.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(AppRadius.md),
       ),
       child: Row(
         children: [
