@@ -223,3 +223,30 @@ class TripSummary {
   final double speedThresholdMps;
   final List<TripStop> stops;
 }
+
+/// Trips that started on one local calendar day, newest first.
+class TripDay {
+  const TripDay(this.day, this.trips);
+
+  final DateTime day;
+  final List<Trip> trips;
+}
+
+/// Groups [trips] by the local day they started on; days newest first, trips
+/// inside a day newest first.
+List<TripDay> groupTripsByDay(List<Trip> trips) {
+  final Map<DateTime, List<Trip>> byDay = <DateTime, List<Trip>>{};
+  for (final Trip t in trips) {
+    final DateTime l = t.startedAt.toLocal();
+    byDay.putIfAbsent(DateTime(l.year, l.month, l.day), () => <Trip>[]).add(t);
+  }
+  final List<DateTime> days = byDay.keys.toList()
+    ..sort((DateTime a, DateTime b) => b.compareTo(a));
+  return <TripDay>[
+    for (final DateTime d in days)
+      TripDay(
+        d,
+        byDay[d]!..sort((Trip a, Trip b) => b.startedAt.compareTo(a.startedAt)),
+      ),
+  ];
+}

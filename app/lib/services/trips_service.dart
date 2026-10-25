@@ -63,6 +63,9 @@ abstract class TripsApi {
     double? speedThresholdMps,
   });
   Future<int> compute({required DateTime from, required DateTime to});
+
+  /// The signed-in user's id, or null if unknown (hides self-only actions).
+  Future<String?> currentUserId();
 }
 
 class TripsService implements TripsApi {
@@ -124,6 +127,15 @@ class TripsService implements TripsApi {
       );
     } catch (e) {
       throw mapTripsError(e);
+    }
+  }
+
+  @override
+  Future<String?> currentUserId() async {
+    try {
+      return (await ApiClient.getProfile()).id;
+    } catch (_) {
+      return null;
     }
   }
 

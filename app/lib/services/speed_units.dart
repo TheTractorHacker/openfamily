@@ -41,8 +41,8 @@ extension UnitSystemX on UnitSystem {
 
 /// Compact duration such as "1 h 05 min" or "7 min".
 String formatTripDuration(Duration d) {
+  if (d.inSeconds < 60) return '${d.inSeconds} s';
   final int mins = (d.inSeconds / 60).round();
-  if (mins < 1) return '${d.inSeconds} s';
   if (mins < 60) return '$mins min';
   final int h = mins ~/ 60;
   final int m = mins % 60;
@@ -61,6 +61,11 @@ class UnitPreferenceService {
 
   static final ValueNotifier<UnitSystem> units =
       ValueNotifier<UnitSystem>(UnitSystem.imperial);
+
+  static Future<UnitSystem>? _loading;
+
+  /// Loads the stored preference once; later calls reuse the result.
+  static Future<UnitSystem> ensureLoaded() => _loading ??= load();
 
   static Future<UnitSystem> load() async {
     try {
