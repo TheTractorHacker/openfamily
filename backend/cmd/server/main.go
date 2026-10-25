@@ -130,6 +130,7 @@ func main() {
 	r.Post("/auth/register", srv.Register)
 	r.Post("/auth/login", srv.Login)
 	r.Post("/auth/refresh", srv.Refresh)
+	r.Post("/auth/password/reset", srv.ResetPassword)
 
 	// WebSocket stream (authenticates via Bearer header or Sec-WebSocket-Protocol subprotocol).
 	r.Get("/ws/stream", srv.Stream)
@@ -151,6 +152,15 @@ func main() {
 		r.Patch("/me/password", srv.ChangeMyPassword)
 		r.Delete("/me", srv.DeleteMe)
 		r.Post("/auth/logout", srv.Logout)
+		r.Post("/auth/logout-all", srv.LogoutAll)
+		r.Post("/auth/password/change", srv.ChangePassword)
+		r.Post("/auth/totp/setup", srv.TOTPSetup)
+		r.Post("/auth/totp/enable", srv.TOTPEnable)
+		r.Post("/auth/totp/disable", srv.TOTPDisable)
+		r.Get("/auth/sessions", srv.ListSessions)
+		r.Delete("/auth/sessions/{id}", srv.RevokeSession)
+		r.Get("/me/export", srv.ExportMe)
+		r.Post("/family/members/{id}/reset-code", srv.FamilyIssueResetCode)
 		r.Get("/me/contacts", srv.ListContacts)
 		r.Post("/me/contacts", srv.CreateContact)
 		r.Delete("/me/contacts/{id}", srv.DeleteContact)
@@ -239,6 +249,7 @@ func main() {
 		r.Patch("/api/admin/users/{id}/family", srv.AdminAssignUser)
 		r.Patch("/api/admin/users/{id}/role", srv.AdminUpdateUserRole)
 		r.Patch("/api/admin/users/{id}/password", srv.AdminResetUserPassword)
+		r.Post("/api/admin/users/{id}/reset-code", srv.AdminIssueResetCode)
 		r.Get("/api/admin/places", srv.AdminListPlaces)
 		r.Get("/api/admin/invites", srv.AdminListInvites)
 		r.Post("/api/admin/invites", srv.AdminCreateInvite)
@@ -275,6 +286,8 @@ func main() {
 		os.Exit(1)
 	}
 	adminStatic := adminStaticHandler(adminFS, adminIndex)
+	// The bare hostname lands on the admin panel.
+	r.Get("/", rootRedirect)
 	r.Get("/admin", adminIndexHandler(adminIndex))
 	r.Get("/admin/", adminIndexHandler(adminIndex))
 	r.Get("/admin/*", adminStatic)
@@ -431,4 +444,10 @@ func adminStaticHandler(fsys fs.FS, index []byte) http.HandlerFunc {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write(index)
 	}
+}
+
+// rootRedirect sends the bare hostname to the admin panel (302, not
+// permanent, so a later landing page can replace it).
+func rootRedirect(w http.ResponseWriter, req *http.Request) {
+	http.Redirect(w, req, "/admin/", http.StatusFound)
 }
