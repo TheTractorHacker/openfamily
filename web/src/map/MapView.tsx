@@ -27,10 +27,10 @@ import {
   MapContainer,
   Marker,
   Popup,
-  TileLayer,
   useMapEvents,
 } from "react-leaflet";
 import "./map.css";
+import { BaseMapLayer } from "./BaseMapLayer";
 import { AnimatedMarker } from "./AnimatedMarker";
 import { clusterMembers, placeBubbles, type BubblePlacement, type Pt } from "./clustering";
 import { clusterBubbleIcon, memberBubbleIcon } from "./memberBubble";
@@ -706,7 +706,7 @@ export function MapView(props: MapViewProps): JSX.Element {
         className="wb-leaflet"
         ref={(m) => setMap(m)}
       >
-        <TileLayer url={tileUrl} attribution='&copy; OpenStreetMap contributors' />
+        <BaseMapLayer rasterUrl={tileUrl} />
         <ZoomWatcher onZoom={() => setViewTick((t) => t + 1)} />
 
         {/* GPS-issue approximate zones */}
