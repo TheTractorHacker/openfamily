@@ -100,7 +100,7 @@ gradle.taskGraph.whenReady {
         throw GradleException(
             "Release signing is not configured: android/key.properties is missing. " +
                 "Create it with storePassword, keyPassword, keyAlias and storeFile " +
-                "(see .github/workflows/apk.yml), or pass " +
+                "(see docs/android-release.md), or pass " +
                 "-POPENFAMILY_ALLOW_DEBUG_SIGNING=true for a local, non-distributable build.",
         )
     }
