@@ -13,7 +13,9 @@ import (
 //   - nosniff: a JSON/avatar response is never reinterpreted as HTML or script
 //   - CSP default-src 'none'; frame-ancestors 'none': API responses are data,
 //     never documents, and cannot be framed
-//   - X-Frame-Options / Referrer-Policy: legacy framing guard, no URL leakage
+//   - X-Frame-Options / Referrer-Policy: legacy framing guard; only the origin
+//     (never the path) is sent cross-origin, which map tile servers such as
+//     OpenStreetMap require. Token-bearing pages set no-referrer themselves.
 //   - HSTS, only when the request arrived over TLS (directly or via a proxy
 //     that says so)
 func SecurityHeaders(next http.Handler) http.Handler {
@@ -21,7 +23,7 @@ func SecurityHeaders(next http.Handler) http.Handler {
 		h := w.Header()
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("X-Frame-Options", "DENY")
-		h.Set("Referrer-Policy", "no-referrer")
+		h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
 		h.Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
 		h.Set("Permissions-Policy", "geolocation=(), camera=(), microphone=()")
 		if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {

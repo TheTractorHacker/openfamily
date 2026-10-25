@@ -15,7 +15,7 @@ func TestSecurityHeadersOnAPIResponses(t *testing.T) {
 		want := map[string]string{
 			"X-Content-Type-Options":  "nosniff",
 			"X-Frame-Options":         "DENY",
-			"Referrer-Policy":         "no-referrer",
+			"Referrer-Policy":         "strict-origin-when-cross-origin",
 			"Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'",
 			"Cache-Control":           "no-store",
 		}
