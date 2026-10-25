@@ -5,6 +5,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'alert_router.dart';
 import 'api_client.dart';
 import 'device_service.dart';
 import 'location_refresh_service.dart';
@@ -69,6 +70,9 @@ class PushService {
       // Tests and unsupported platforms have no native plugin.
     }
     _apns.setMethodCallHandler(_onApnsCall);
+    try {
+      AlertRouter.instance.start();
+    } catch (_) {}
     try {
       await initUnifiedPush(
         onNewEndpoint: _onUnifiedPushEndpoint,
