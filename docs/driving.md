@@ -75,9 +75,13 @@ effect are returned in the report (`thresholds`). The older per-request
 
 ## Phone sensor events
 
-The Android app can detect `hard_brake`, `rapid_accel` and `phone_use` with the
-motion sensor and upload them. Each user opts in once (per user, not per
-device); the opt-in is stored in `users.driving_sensor_enabled`.
+The Android app can detect `hard_brake` and `rapid_accel` with the motion
+sensor, and `phone_use` (a separate, experimental switch that stays off by
+default), and upload them. Driving detection is **on by default in the app**:
+the app sends the opt-in (`sensor_enabled=true`) the first time it can and
+retries until acknowledged; turn it off in Settings > Driving detection.
+The opt-in is per user, not per device, and is stored in
+`users.driving_sensor_enabled` (server default false until the app reports).
 
 ### `POST /trips/sensor-events`
 

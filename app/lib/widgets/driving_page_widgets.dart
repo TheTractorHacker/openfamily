@@ -449,7 +449,7 @@ class DrivingDaysChart extends StatelessWidget {
                 : 'Tap a day to list only its drives',
             style: AppType.secondary.copyWith(color: cs.onSurfaceVariant),
           ),
-          const SizedBox(height: AppSpace.md),
+          const SizedBox(height: AppSpace.xl),
           Stack(
             children: <Widget>[
               SizedBox(

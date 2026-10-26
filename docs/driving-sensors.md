@@ -8,10 +8,23 @@ the detected events**.
 
 ## Privacy contract
 
-* Opt-in, default OFF (Settings > Driving detection). The switch calls
-  `POST /trips/sensor-events` with `sensor_enabled` and is stored locally
-  (`driving_sensor_enabled`). Turning it off stops sampling at once, deletes the
-  unsent queue and tells the server (`sensor_enabled=false` opts out there).
+* **On by default**, switch-off in Settings > Driving detection. A missing
+  local preference (`driving_sensor_enabled`) counts as ON, for new installs
+  and for installs that update. The first time the app can (opening the
+  Driving tab, or the next background location fix) it sends
+  `POST /trips/sensor-events` with `sensor_enabled=true`, then persists the
+  effective value and a `driving_sensor_server_synced` flag. A failed call
+  leaves the flag unset and is retried (foreground and, at most every 10
+  minutes, the background service) until the server acknowledges it.
+* The Driving tab shows a one-time, dismissible card ("Driving detection is
+  on": motion sensor only while driving, only detected events uploaded, a
+  button to Settings). "Seen" is local (`driving_detection_disclosure_seen`).
+  The "needs Driving detection" prompt on the page appears only when the user
+  has turned detection off.
+* Turning it off stops sampling at once (the runtime re-checks the switch every
+  5 s and on every fix), deletes the unsent queue and tells the server
+  (`sensor_enabled=false`); if that call fails it is redelivered like the
+  opt-in. Existing uploaded events are kept.
 * Raw samples live in memory inside the detector (a 30 s ring buffer) and are
   never written to disk or sent. Uploaded: kind, start/end time, magnitude and
   the latest GPS position.
@@ -79,7 +92,7 @@ are not covered** (the first launch is usually missed).
 
 ## Phone use (`phone_use`), Android, estimate only
 
-Implemented, default OFF (second switch, requires the first). The local plugin
+Implemented, **default OFF and not changed by the detection default** (second switch, requires the first). The local plugin
 `app/packages/driving_native` registers a receiver for `ACTION_SCREEN_ON`,
 `ACTION_SCREEN_OFF` and `ACTION_USER_PRESENT` dynamically (they cannot be
 manifest-declared) on the application context, only while a driving session is
