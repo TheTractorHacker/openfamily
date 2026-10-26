@@ -1,6 +1,8 @@
 /// OpenFamily design-system widgets. See docs/ux/DESIGN_SYSTEM.md.
 library;
 
+export 'choice_setting.dart';
+export 'confirm.dart';
 export 'list_row.dart';
 export 'map_round_button.dart';
 export 'page.dart';

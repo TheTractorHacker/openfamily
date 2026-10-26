@@ -4,7 +4,20 @@ import '../../theme/app_theme.dart';
 
 /// Small caps section label used above grouped list rows.
 class DsSectionHeader extends StatelessWidget {
-  const DsSectionHeader(this.title, {super.key, this.trailing});
+  const DsSectionHeader(
+    this.title, {
+    super.key,
+    this.trailing,
+    this.padding = const EdgeInsets.fromLTRB(
+      AppSpace.xl,
+      AppSpace.xl,
+      AppSpace.xl,
+      AppSpace.xs,
+    ),
+  });
+
+  /// Defaults to the list-row gutter; pass less inside a [DsPage].
+  final EdgeInsetsGeometry padding;
 
   final String title;
   final Widget? trailing;
@@ -14,12 +27,7 @@ class DsSectionHeader extends StatelessWidget {
     return Semantics(
       header: true,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(
-          AppSpace.xl,
-          AppSpace.xl,
-          AppSpace.xl,
-          AppSpace.xs,
-        ),
+        padding: padding,
         child: Row(
           children: <Widget>[
             Expanded(

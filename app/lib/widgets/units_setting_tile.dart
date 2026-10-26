@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../services/speed_units.dart';
+import 'ds/ds.dart';
 
 /// Settings row choosing mph / km/h for trips and driving reports.
 class UnitsSettingTile extends StatefulWidget {
@@ -22,32 +23,14 @@ class _UnitsSettingTileState extends State<UnitsSettingTile> {
     return ValueListenableBuilder<UnitSystem>(
       valueListenable: UnitPreferenceService.units,
       builder: (BuildContext context, UnitSystem units, _) {
-        return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Text('Speed and distance units',
-                  style: Theme.of(context).textTheme.titleMedium),
-              const SizedBox(height: 8),
-              SegmentedButton<UnitSystem>(
-                showSelectedIcon: false,
-                segments: const <ButtonSegment<UnitSystem>>[
-                  ButtonSegment<UnitSystem>(
-                    value: UnitSystem.imperial,
-                    label: Text('mph / mi'),
-                  ),
-                  ButtonSegment<UnitSystem>(
-                    value: UnitSystem.metric,
-                    label: Text('km/h / km'),
-                  ),
-                ],
-                selected: <UnitSystem>{units},
-                onSelectionChanged: (Set<UnitSystem> s) =>
-                    UnitPreferenceService.setUnits(s.first),
-              ),
-            ],
-          ),
+        return DsChoiceSetting<UnitSystem>(
+          title: 'Speed and distance units',
+          options: const <DsChoice<UnitSystem>>[
+            DsChoice<UnitSystem>(UnitSystem.imperial, 'mph / mi'),
+            DsChoice<UnitSystem>(UnitSystem.metric, 'km/h / km'),
+          ],
+          selected: units,
+          onChanged: UnitPreferenceService.setUnits,
         );
       },
     );
