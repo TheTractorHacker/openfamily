@@ -4,6 +4,7 @@ import '../models/alert.dart';
 import '../services/alert_service.dart';
 import '../services/api_client.dart';
 import '../theme/app_theme.dart';
+import '../widgets/ds/ds.dart';
 
 String formatAlertTime(DateTime t, {DateTime? now}) {
   final DateTime n = now ?? DateTime.now();
@@ -71,7 +72,8 @@ class _AlertReceivedScreenState extends State<AlertReceivedScreen> {
   @override
   Widget build(BuildContext context) {
     final AlertSummary a = widget.alert;
-    final Color muted = Theme.of(context).colorScheme.onSurfaceVariant;
+    final ColorScheme cs = Theme.of(context).colorScheme;
+    final Color muted = cs.onSurfaceVariant;
     final bool urgent = a.kind == AlertKind.sos && a.isActive;
     final String headline = switch (a.kind) {
       AlertKind.sos => '${a.senderName} sent an SOS',
@@ -79,118 +81,116 @@ class _AlertReceivedScreenState extends State<AlertReceivedScreen> {
       AlertKind.checkIn => '${a.senderName} checked in',
       AlertKind.unknown => 'Alert from ${a.senderName}',
     };
-    return Scaffold(
-      appBar: AppBar(title: Text(alertKindLabel(a.kind))),
-      body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.all(20),
-          children: <Widget>[
-            Semantics(
-              header: true,
-              liveRegion: true,
-              child: Row(
-                children: <Widget>[
-                  Icon(
-                    urgent ? Icons.warning_amber_rounded : Icons.notifications_none,
-                    size: 36,
-                    color: urgent ? AppColors.sosRed : BrandTheme.of(context).accentInk,
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(headline,
-                        style: const TextStyle(
-                            fontSize: 24, fontWeight: FontWeight.w700)),
-                  ),
-                ],
-              ),
+    return DsPage(
+      title: alertKindLabel(a.kind),
+      maxWidth: 560,
+      actions: <Widget>[
+        if (_ackedAt == null)
+          KeyedSubtree(
+            key: const ValueKey<String>('ack-button'),
+            child: DsBusyButton(
+              label: 'Acknowledge',
+              icon: Icons.check,
+              busy: _busy,
+              onPressed: _busy ? null : _ack,
             ),
-            const SizedBox(height: 8),
-            Text(
-              '${formatAlertTime(a.createdAt)} · ${a.isActive ? 'Active' : 'Resolved'}',
-              style: TextStyle(color: muted),
-            ),
-            if (a.note.isNotEmpty) ...<Widget>[
-              const SizedBox(height: 12),
-              Text('"${a.note}"', style: const TextStyle(fontSize: 16)),
-            ],
-            if (urgent) ...<Widget>[
-              const SizedBox(height: 12),
-              const Text(
-                'OpenFamily does not contact emergency services. If you '
-                'think they are in danger, call emergency services yourself.',
-                style: TextStyle(fontWeight: FontWeight.w600),
+          ),
+        if (widget.dialer.available)
+          DsPillButton(
+            label: 'Call emergency services',
+            icon: Icons.call,
+            style: urgent ? DsPillStyle.danger : DsPillStyle.outlined,
+            onPressed: widget.dialer.dial,
+          ),
+        if (widget.onOpenMap != null)
+          DsPillButton(
+            label: 'Open the map',
+            icon: Icons.map_outlined,
+            style: DsPillStyle.tonal,
+            onPressed: widget.onOpenMap,
+          ),
+      ],
+      children: <Widget>[
+        Semantics(
+          header: true,
+          liveRegion: true,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Icon(
+                urgent ? Icons.warning_amber_rounded : Icons.notifications_none,
+                size: 36,
+                color: urgent
+                    ? AppColors.sosRed
+                    : BrandTheme.of(context).accentInk,
               ),
-            ],
-            const SizedBox(height: 20),
-            if (_ackedAt != null)
-              Semantics(
-                liveRegion: true,
-                child: Row(
-                  children: <Widget>[
-                    const Icon(Icons.verified_outlined, color: AppColors.sky),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'You acknowledged this ${formatAlertTime(_ackedAt!)}. '
-                        '${a.senderName} can see that you did.',
-                        key: const ValueKey<String>('ack-confirmation'),
-                      ),
-                    ),
-                  ],
-                ),
-              )
-            else
-              SizedBox(
-                height: 56,
-                child: FilledButton.icon(
-                  key: const ValueKey<String>('ack-button'),
-                  onPressed: _busy ? null : _ack,
-                  icon: _busy
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2))
-                      : const Icon(Icons.check),
-                  label: const Text('Acknowledge',
-                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-                ),
-              ),
-            if (_error != null) ...<Widget>[
-              const SizedBox(height: 12),
-              Semantics(
-                liveRegion: true,
-                child: Row(children: <Widget>[
-                  const Icon(Icons.error_outline, color: AppColors.sosRed),
-                  const SizedBox(width: 8),
-                  Expanded(child: Text(_error!)),
-                ]),
-              ),
-            ],
-            if (widget.dialer.available) ...<Widget>[
-              const SizedBox(height: 16),
-              SizedBox(
-                height: 48,
-                child: OutlinedButton.icon(
-                  onPressed: widget.dialer.dial,
-                  icon: const Icon(Icons.call),
-                  label: const Text('Call emergency services'),
+              const SizedBox(width: AppSpace.md),
+              Expanded(
+                child: Text(
+                  headline,
+                  style: AppType.title.copyWith(fontSize: 26),
                 ),
               ),
             ],
-            if (widget.onOpenMap != null) ...<Widget>[
-              const SizedBox(height: 8),
-              SizedBox(
-                height: 48,
-                child: TextButton.icon(
-                  onPressed: widget.onOpenMap,
-                  icon: const Icon(Icons.map_outlined),
-                  label: const Text('Open the map'),
-                ),
-              ),
-            ],
-          ],
+          ),
         ),
-      ),
+        const SizedBox(height: AppSpace.sm),
+        Text(
+          '${formatAlertTime(a.createdAt)} · ${a.isActive ? 'Active' : 'Resolved'}',
+          style: AppType.body.copyWith(fontWeight: FontWeight.w500, color: muted),
+        ),
+        if (a.note.isNotEmpty) ...<Widget>[
+          const SizedBox(height: AppSpace.md),
+          Text('"${a.note}"', style: AppType.headline),
+        ],
+        if (urgent) ...<Widget>[
+          const SizedBox(height: AppSpace.lg),
+          Container(
+            padding: const EdgeInsets.all(AppSpace.lg),
+            decoration: BoxDecoration(
+              color: BrandTheme.of(context).sheet,
+              borderRadius: BorderRadius.circular(AppRadius.md),
+              border: Border.all(color: cs.outlineVariant, width: 1.5),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                const Icon(Icons.info_outline),
+                const SizedBox(width: AppSpace.md),
+                Expanded(
+                  child: Text(
+                    'OpenFamily does not contact emergency services. If you '
+                    'think they are in danger, call emergency services '
+                    'yourself.',
+                    style: AppType.body.copyWith(height: 1.4),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+        const SizedBox(height: AppSpace.lg),
+        if (_ackedAt != null)
+          Semantics(
+            liveRegion: true,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                const Icon(Icons.verified_outlined, color: AppColors.sky),
+                const SizedBox(width: AppSpace.sm),
+                Expanded(
+                  child: Text(
+                    'You acknowledged this ${formatAlertTime(_ackedAt!)}. '
+                    '${a.senderName} can see that you did.',
+                    key: const ValueKey<String>('ack-confirmation'),
+                    style: AppType.body,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        if (_error != null) DsMessage(_error!),
+      ],
     );
   }
 }

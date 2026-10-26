@@ -10,6 +10,7 @@ import '../services/location_reporter.dart';
 import '../services/location_service.dart';
 import '../services/server_features.dart';
 import '../theme/app_theme.dart';
+import '../widgets/ds/ds.dart';
 import 'alert_status_screen.dart';
 import 'safety_screen.dart';
 
@@ -396,17 +397,33 @@ class _SosScreenState extends State<SosScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('SOS')),
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: _phase == _SosPhase.sent
-                ? [Expanded(child: _buildBody())]
-                : [
-                    const Spacer(),
-                    _buildBody(),
-                    const Spacer(),
-                  ],
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 520),
+            child: _phase == _SosPhase.sent
+                ? Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpace.sm,
+                    ),
+                    child: _buildBody(),
+                  )
+                : LayoutBuilder(
+                    // Content is centred when it fits and scrolls when text
+                    // is large, so no action is ever squeezed or clipped.
+                    builder: (BuildContext c, BoxConstraints box) =>
+                        SingleChildScrollView(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpace.xxl,
+                        vertical: AppSpace.lg,
+                      ),
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(
+                          minHeight: box.maxHeight - 2 * AppSpace.lg,
+                        ),
+                        child: Center(child: _buildBody()),
+                      ),
+                    ),
+                  ),
           ),
         ),
       ),
@@ -416,7 +433,10 @@ class _SosScreenState extends State<SosScreen> {
   Widget _buildBody() {
     switch (_phase) {
       case _SosPhase.loading:
-        return const Center(child: CircularProgressIndicator());
+        return Semantics(
+          label: 'Loading SOS',
+          child: const DsSkeletonList(rows: 2, avatar: false),
+        );
       case _SosPhase.intro:
         return _IntroCard(
           smsConfigured: _smsConfigured,
@@ -426,14 +446,10 @@ class _SosScreenState extends State<SosScreen> {
       case _SosPhase.idle:
       case _SosPhase.holding:
         return _PhaseColumn(
-          children: [
-            if (_error != null && _phase == _SosPhase.idle) ...[
-              Text(
-                _error!,
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: AppColors.sosRed),
-              ),
-              const SizedBox(height: 16),
+          children: <Widget>[
+            if (_error != null && _phase == _SosPhase.idle) ...<Widget>[
+              DsMessage(_error!),
+              const SizedBox(height: AppSpace.lg),
             ],
             _SosButton(
               holding: _phase == _SosPhase.holding,
@@ -446,14 +462,33 @@ class _SosScreenState extends State<SosScreen> {
                 }
               },
             ),
-            if (_phase == _SosPhase.idle) ...[
-              const SizedBox(height: 8),
-              TextButton(
-                onPressed: _startPractice,
-                style: TextButton.styleFrom(
-                  foregroundColor: BrandTheme.of(context).accentInk,
+            if (_phase == _SosPhase.idle) ...<Widget>[
+              const SizedBox(height: AppSpace.lg),
+              Text(
+                _smsConfigured
+                    ? 'This alerts your family and emergency contacts. It '
+                        'does not call emergency services.'
+                    : 'This alerts your family. It does not call emergency '
+                        'services.',
+                textAlign: TextAlign.center,
+                style: AppType.secondary.copyWith(
+                  fontSize: 14,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
-                child: const Text('Practice SOS'),
+              ),
+              if (widget.dialer.available) ...<Widget>[
+                const SizedBox(height: AppSpace.lg),
+                EmergencyCallButton(
+                  key: const ValueKey<String>('sos-call-button'),
+                  dialer: widget.dialer,
+                  onPressed: _callEmergency,
+                ),
+              ],
+              const SizedBox(height: AppSpace.sm),
+              DsPillButton(
+                label: 'Practice SOS',
+                style: DsPillStyle.outlined,
+                onPressed: _startPractice,
               ),
             ],
           ],
@@ -467,16 +502,25 @@ class _SosScreenState extends State<SosScreen> {
           label: 'Practice SOS…',
         );
       case _SosPhase.sending:
-        return const _PhaseColumn(
-          children: [
-            SizedBox(
-              width: 48,
-              height: 48,
-              child: CircularProgressIndicator(color: AppColors.sosRed),
-            ),
-            SizedBox(height: 16),
-            Text('Sending SOS…'),
-          ],
+        return Semantics(
+          liveRegion: true,
+          child: const _PhaseColumn(
+            children: <Widget>[
+              Center(
+                child: SizedBox(
+                  width: 48,
+                  height: 48,
+                  child: CircularProgressIndicator(color: AppColors.sosRed),
+                ),
+              ),
+              SizedBox(height: AppSpace.lg),
+              Text(
+                'Sending SOS…',
+                textAlign: TextAlign.center,
+                style: AppType.headline,
+              ),
+            ],
+          ),
         );
       case _SosPhase.sent:
         return AlertStatusBody(
@@ -485,23 +529,15 @@ class _SosScreenState extends State<SosScreen> {
           service: widget.alertService,
           dialer: widget.dialer,
           title: 'SOS sent',
-          footer: [
-            if (_error != null)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: Text(_error!),
-              ),
-            SizedBox(
-              height: 48,
-              child: FilledButton(
-                onPressed: _imSafe,
-                child: const Text('I\'m safe'),
-              ),
-            ),
-            const SizedBox(height: 8),
-            TextButton(
+          footer: <Widget>[
+            if (_error != null) DsMessage(_error!, tone: DsTone.info),
+            const SizedBox(height: AppSpace.sm),
+            DsPillButton(label: 'I\'m safe', onPressed: _imSafe),
+            const SizedBox(height: AppSpace.sm),
+            DsPillButton(
+              label: 'Done',
+              style: DsPillStyle.tonal,
               onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Done'),
             ),
           ],
         );
@@ -536,9 +572,23 @@ class _SosScreenState extends State<SosScreen> {
         );
     }
   }
+
+  Future<void> _callEmergency() async {
+    final bool ok = await widget.dialer.dial();
+    if (!ok && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Could not open the phone app. Dial your local emergency '
+            'number yourself.',
+          ),
+        ),
+      );
+    }
+  }
 }
 
-/// First-run explainer. This is not a settings wizard — it tells the user
+/// First-run explainer. This is not a settings wizard: it tells the user
 /// what the red button actually does before they can fire it.
 class _IntroCard extends StatelessWidget {
   const _IntroCard({
@@ -554,24 +604,27 @@ class _IntroCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final Color muted = Theme.of(context).colorScheme.onSurfaceVariant;
+    final TextStyle para = AppType.body.copyWith(
+      fontWeight: FontWeight.w500,
+      height: 1.4,
+      color: muted,
+    );
     return _PhaseColumn(
-      children: [
-        const Icon(Icons.sos, size: 72, color: AppColors.sosRed),
-        const SizedBox(height: 16),
-        const Text(
-          'How SOS works',
-          style: TextStyle(fontSize: 24, fontWeight: FontWeight.w700),
+      children: <Widget>[
+        const Center(
+          child: Icon(Icons.sos, size: 72, color: AppColors.sosRed),
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: AppSpace.lg),
+        const DsHeading('How SOS works', center: true),
         Text(
           smsConfigured
               ? 'The red button sends a real alert to your family and any '
                   'emergency contacts, with your location.'
               : 'The red button sends a real alert to your family, with your location.',
           textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 15, color: muted),
+          style: para,
         ),
-        const SizedBox(height: 10),
+        const SizedBox(height: AppSpace.md),
         Text(
           smsConfigured
               ? 'Practice runs the countdown only — nobody is notified. '
@@ -579,30 +632,28 @@ class _IntroCard extends StatelessWidget {
                   'not I\'m safe.'
               : 'Practice runs the countdown only — nobody is notified.',
           textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 15, color: muted),
+          style: para,
         ),
-        const SizedBox(height: 24),
-        if (smsConfigured) ...[
-          FilledButton(
+        const SizedBox(height: AppSpace.xxl),
+        if (smsConfigured) ...<Widget>[
+          DsPillButton(
+            label: 'Add emergency contacts',
             onPressed: onAddContacts,
-            child: const Text('Add emergency contacts'),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: AppSpace.sm),
         ],
-        TextButton(
+        DsPillButton(
+          label: 'Continue',
+          style: smsConfigured ? DsPillStyle.tonal : DsPillStyle.filled,
           onPressed: onContinue,
-          style: TextButton.styleFrom(
-            foregroundColor: BrandTheme.of(context).accentInk,
-          ),
-          child: const Text('Continue'),
         ),
       ],
     );
   }
 }
 
-/// Centers phase content. The scaffold column stretches this to full
-/// width so a long hint line cannot shift the SOS disc.
+/// Centers phase content. The scaffold stretches this to full width so a
+/// long hint line cannot shift the SOS disc.
 class _PhaseColumn extends StatelessWidget {
   const _PhaseColumn({required this.children});
 
@@ -612,7 +663,7 @@ class _PhaseColumn extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.center,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: children,
     );
   }
@@ -635,19 +686,21 @@ class _SosButton extends StatelessWidget {
   final VoidCallback onHoldCancel;
   final bool holding;
 
-  static const double _size = 180;
+  static const double _size = 200;
 
   @override
   Widget build(BuildContext context) {
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.center,
-      children: [
+      children: <Widget>[
         Semantics(
           button: true,
           label: holding
               ? 'SOS armed. Release to start the countdown.'
               : 'SOS. Tap to send a real alert. Press and hold to arm discreetly.',
+          onTap: holding ? null : onTap,
+          excludeSemantics: true,
           child: GestureDetector(
             key: const ValueKey<String>('sos-send-button'),
             behavior: HitTestBehavior.opaque,
@@ -662,7 +715,8 @@ class _SosButton extends StatelessWidget {
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 color: AppColors.sosRed,
-                boxShadow: [
+                border: Border.all(color: Colors.white, width: 4),
+                boxShadow: <BoxShadow>[
                   BoxShadow(
                     color: AppColors.sosRed.withValues(alpha: 0.32),
                     blurRadius: 28,
@@ -674,9 +728,7 @@ class _SosButton extends StatelessWidget {
                   ? const SizedBox(
                       width: 48,
                       height: 48,
-                      child: CircularProgressIndicator(
-                        color: Colors.white,
-                      ),
+                      child: CircularProgressIndicator(color: Colors.white),
                     )
                   : const Text(
                       'SOS',
@@ -684,23 +736,22 @@ class _SosButton extends StatelessWidget {
                       style: TextStyle(
                         color: Colors.white,
                         fontWeight: FontWeight.w800,
-                        fontSize: 32,
+                        fontSize: 44,
                         height: 1,
                       ),
                     ),
             ),
           ),
         ),
-        const SizedBox(height: 24),
+        const SizedBox(height: AppSpace.xl),
         Text(
           holding
               ? 'Keep holding… release to start the countdown'
               : 'Tap to send · press and hold to arm discreetly',
           textAlign: TextAlign.center,
-          style: TextStyle(
-            fontSize: 14,
-            height: 1.35,
-            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          style: AppType.body.copyWith(
+            fontWeight: FontWeight.w500,
+            color: Theme.of(context).colorScheme.onSurface,
           ),
         ),
       ],
@@ -722,27 +773,38 @@ class _Countdown extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return _PhaseColumn(
-      children: [
-        Text(
-          '$seconds',
-          style: const TextStyle(
-            fontSize: 96,
-            fontWeight: FontWeight.w800,
-            color: AppColors.sosRed,
-            height: 1,
+      children: <Widget>[
+        Semantics(
+          label: '$label $seconds seconds',
+          excludeSemantics: true,
+          child: Text(
+            '$seconds',
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontSize: 96,
+              fontWeight: FontWeight.w800,
+              color: AppColors.sosRed,
+              height: 1,
+            ),
           ),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: AppSpace.sm),
         Text(
           label,
           textAlign: TextAlign.center,
-          style: TextStyle(
-            fontSize: 16,
-            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          style: AppType.headline.copyWith(
+            color: Theme.of(context).colorScheme.onSurface,
           ),
         ),
-        const SizedBox(height: 32),
+        const SizedBox(height: AppSpace.xxxl),
         _SlideToCancel(onCancel: onCancel),
+        const SizedBox(height: AppSpace.md),
+        DsPillButton(
+          label: 'Cancel',
+          style: DsPillStyle.outlined,
+          semanticLabel: 'Cancel SOS',
+          onPressed: onCancel,
+        ),
       ],
     );
   }
@@ -768,31 +830,18 @@ class _ResultCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return _PhaseColumn(
-      children: [
-        Icon(icon, size: 72, color: color),
-        const SizedBox(height: 16),
-        Text(
-          title,
-          textAlign: TextAlign.center,
-          style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w700),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          subtitle,
-          textAlign: TextAlign.center,
-          style: TextStyle(
-            fontSize: 15,
-            color: Theme.of(context).colorScheme.onSurfaceVariant,
-          ),
-        ),
-        const SizedBox(height: 24),
-        FilledButton(onPressed: onAction, child: Text(actionLabel)),
+      children: <Widget>[
+        Center(child: Icon(icon, size: 72, color: color)),
+        const SizedBox(height: AppSpace.lg),
+        DsHeading(title, subtitle: subtitle, center: true),
+        DsPillButton(label: actionLabel, onPressed: onAction),
       ],
     );
   }
 }
 
-/// A "slide to cancel" control: drag the thumb **left** to cancel.
+/// A "slide to cancel" control: drag the thumb **left** to cancel. A plain
+/// Cancel button sits under it for people who cannot drag.
 class _SlideToCancel extends StatefulWidget {
   const _SlideToCancel({required this.onCancel});
 
@@ -803,67 +852,80 @@ class _SlideToCancel extends StatefulWidget {
 }
 
 class _SlideToCancelState extends State<_SlideToCancel> {
-  static const double _trackWidth = 280;
+  static const double _maxTrack = 320;
   static const double _thumbSize = 48;
 
   double _drag = 0; // 0..1 (0 = right, 1 = fully slid left)
 
   @override
   Widget build(BuildContext context) {
-    const double maxTravel = _trackWidth - _thumbSize - 8;
-
-    return GestureDetector(
-      onHorizontalDragUpdate: (details) {
-        setState(() {
-          // Swipe LEFT (negative dx) advances the slider.
-          _drag = (_drag - details.delta.dx / maxTravel).clamp(0.0, 1.0);
-        });
-        if (_drag >= 1.0) {
-          widget.onCancel();
-        }
-      },
-      child: Container(
-        width: _trackWidth,
-        height: 56,
-        decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surfaceContainerHighest,
-          borderRadius: BorderRadius.circular(28),
-        ),
-        child: Stack(
-          children: [
-            Center(
-              child: Text(
-                'Slide to Cancel',
-                style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
-              ),
-            ),
-            Positioned(
-              // Thumb starts on the right and moves left as _drag grows.
-              left: 4 + maxTravel * (1 - _drag),
-              top: 4,
+    final ColorScheme cs = Theme.of(context).colorScheme;
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints box) {
+        final double track = box.maxWidth.isFinite
+            ? box.maxWidth.clamp(_thumbSize * 3, _maxTrack).toDouble()
+            : _maxTrack;
+        final double maxTravel = track - _thumbSize - 8;
+        return Center(
+          child: Semantics(
+            label: 'Slide left to cancel',
+            onTap: widget.onCancel,
+            excludeSemantics: true,
+            child: GestureDetector(
+              onHorizontalDragUpdate: (DragUpdateDetails details) {
+                setState(() {
+                  // Swipe LEFT (negative dx) advances the slider.
+                  _drag = (_drag - details.delta.dx / maxTravel).clamp(
+                    0.0,
+                    1.0,
+                  );
+                });
+                if (_drag >= 1.0) widget.onCancel();
+              },
               child: Container(
-                width: _thumbSize,
-                height: _thumbSize,
+                width: track,
+                height: 56,
                 decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: BrandTheme.of(context).sheet,
-                  boxShadow: const [
-                    BoxShadow(color: Color(0x33000000), blurRadius: 6),
+                  color: cs.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(AppRadius.pill),
+                ),
+                child: Stack(
+                  children: <Widget>[
+                    Center(
+                      child: Text(
+                        'Slide to Cancel',
+                        style: AppType.body.copyWith(
+                          color: cs.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      // Thumb starts on the right and moves left.
+                      left: 4 + maxTravel * (1 - _drag),
+                      top: 4,
+                      child: Container(
+                        width: _thumbSize,
+                        height: _thumbSize,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: BrandTheme.of(context).sheet,
+                          boxShadow: const <BoxShadow>[
+                            BoxShadow(color: Color(0x33000000), blurRadius: 6),
+                          ],
+                        ),
+                        child: const Icon(
+                          Icons.chevron_left,
+                          color: AppColors.sosRed,
+                        ),
+                      ),
+                    ),
                   ],
                 ),
-                child: const Icon(
-                  Icons.chevron_left,
-                  color: AppColors.sosRed,
-                ),
               ),
             ),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 }

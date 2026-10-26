@@ -9,6 +9,7 @@ import '../models/place.dart';
 import '../services/geocoding_service.dart';
 import '../services/location_service.dart';
 import '../theme/app_theme.dart';
+import '../widgets/ds/ds.dart';
 
 /// A map-first place picker: a full-bleed map with a drop-pin fixed at the
 /// center (drag the map to move the pin), an optional address label, and a
@@ -201,24 +202,32 @@ class _PlacePickerScreenState extends State<PlacePickerScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final BrandTheme brand = BrandTheme.of(context);
+    final ColorScheme cs = Theme.of(context).colorScheme;
+    // The control panel never takes more than this share of the screen, so
+    // the map stays usable and the panel scrolls at large text sizes.
+    final double panelMax = MediaQuery.sizeOf(context).height * 0.55;
     return Scaffold(
       appBar: AppBar(
         title: Text(
           widget.placeName.isEmpty ? 'Add a place' : 'Set ${widget.placeName} location',
         ),
-        actions: [
+        actions: <Widget>[
           TextButton(
+            style: TextButton.styleFrom(
+              minimumSize: const Size(kMinTarget, kMinTarget),
+            ),
             onPressed: _save,
             child: const Text('Save'),
           ),
         ],
       ),
       body: Column(
-        children: [
+        children: <Widget>[
           // Map-first: the map dominates the top of the screen.
           Expanded(
             child: Stack(
-              children: [
+              children: <Widget>[
                 FlutterMap(
                   mapController: _mapController,
                   options: MapOptions(
@@ -233,17 +242,17 @@ class _PlacePickerScreenState extends State<PlacePickerScreen> {
                       _onMapMoved(camera.center, hasGesture);
                     },
                   ),
-                  children: [
+                  children: <Widget>[
                     const OpenFamilyTileLayer(),
                     // The geofence radius, drawn live around the pin.
                     CircleLayer(
-                      circles: [
+                      circles: <CircleMarker>[
                         CircleMarker(
                           point: _position,
                           radius: _radiusMeters,
                           useRadiusInMeter: true,
-                          color: AppColors.purple.withValues(alpha: 0.12),
-                          borderColor: AppColors.purple,
+                          color: brand.accent.withValues(alpha: 0.2),
+                          borderColor: brand.accentInk,
                           borderStrokeWidth: 2,
                         ),
                       ],
@@ -256,34 +265,43 @@ class _PlacePickerScreenState extends State<PlacePickerScreen> {
                   child: Center(
                     child: Transform.translate(
                       offset: const Offset(0, -24),
-                      child: const Icon(
+                      child: Icon(
                         Icons.location_pin,
                         size: 48,
-                        color: AppColors.purple,
+                        color: brand.accentInk,
+                        shadows: const <Shadow>[
+                          Shadow(color: Color(0x66000000), blurRadius: 6),
+                        ],
                       ),
                     ),
                   ),
                 ),
                 // Live coordinates so pin-drop is usable without address search.
                 Positioned(
-                  left: 12,
-                  right: 12,
-                  top: 12,
+                  left: AppSpace.md,
+                  right: AppSpace.md + kMinTarget,
+                  top: AppSpace.md,
                   child: IgnorePointer(
                     child: Center(
-                      child: Material(
-                        color: Colors.white.withValues(alpha: 0.92),
-                        borderRadius: BorderRadius.circular(20),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 6,
-                          ),
-                          child: Text(
-                            _formatCoordinates(_position),
-                            style: const TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
+                      child: Semantics(
+                        label: 'Pin position ${_formatCoordinates(_position)}',
+                        excludeSemantics: true,
+                        child: Material(
+                          color: brand.sheet,
+                          elevation: 3,
+                          borderRadius: BorderRadius.circular(AppRadius.pill),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: AppSpace.md,
+                              vertical: AppSpace.xs + AppSpace.xxs,
+                            ),
+                            child: Text(
+                              _formatCoordinates(_position),
+                              style: AppType.secondary.copyWith(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w700,
+                                color: cs.onSurface,
+                              ),
                             ),
                           ),
                         ),
@@ -294,143 +312,125 @@ class _PlacePickerScreenState extends State<PlacePickerScreen> {
                 // "Use my location" affordance, shown while locating or as a
                 // way to re-center after the user has dragged away.
                 Positioned(
-                  right: 12,
-                  bottom: 12,
-                  child: FloatingActionButton.small(
-                    heroTag: 'place-picker-locate',
-                    onPressed: _locating ? null : _locateUser,
+                  right: AppSpace.md,
+                  bottom: AppSpace.md,
+                  child: DsMapButton(
+                    icon: Icons.my_location,
                     tooltip: 'Use my location',
-                    child: _locating
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.white,
-                            ),
-                          )
-                        : const Icon(Icons.my_location),
+                    onPressed: _locating ? null : _locateUser,
                   ),
                 ),
               ],
             ),
           ),
           // Address + radius controls.
-          SafeArea(
-            top: false,
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  TextField(
-                    controller: _name,
-                    textCapitalization: TextCapitalization.words,
-                    textInputAction: TextInputAction.next,
-                    decoration: const InputDecoration(
-                      labelText: 'Name',
-                      hintText: 'e.g. Grandma',
-                      prefixIcon: const Icon(Icons.label_outline),
+          ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: panelMax),
+            child: SafeArea(
+              top: false,
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(AppSpace.lg),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    TextField(
+                      controller: _name,
+                      textCapitalization: TextCapitalization.words,
+                      textInputAction: TextInputAction.next,
+                      decoration: const InputDecoration(
+                        labelText: 'Name',
+                        hintText: 'e.g. Grandma',
+                        prefixIcon: Icon(Icons.label_outline),
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: _address,
-                    textCapitalization: TextCapitalization.words,
-                    textInputAction: GeocodingService.isEnabled
-                        ? TextInputAction.search
-                        : TextInputAction.done,
-                    onSubmitted: GeocodingService.isEnabled
-                        ? _searchAddress
-                        : null,
-                    decoration: InputDecoration(
-                      labelText: GeocodingService.isEnabled
-                          ? 'Address'
-                          : 'Address (optional)',
-                      hintText: 'e.g. 123 Maple St',
-                      prefixIcon: const Icon(Icons.place_outlined),
-                      suffixIcon: !GeocodingService.isEnabled
-                          ? null
-                          : _searching
-                              ? const Padding(
-                                  padding: EdgeInsets.all(12),
-                                  child: SizedBox(
-                                    width: 18,
-                                    height: 18,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
+                    const SizedBox(height: AppSpace.sm),
+                    TextField(
+                      controller: _address,
+                      textCapitalization: TextCapitalization.words,
+                      textInputAction: GeocodingService.isEnabled
+                          ? TextInputAction.search
+                          : TextInputAction.done,
+                      onSubmitted:
+                          GeocodingService.isEnabled ? _searchAddress : null,
+                      decoration: InputDecoration(
+                        labelText: GeocodingService.isEnabled
+                            ? 'Address'
+                            : 'Address (optional)',
+                        hintText: 'e.g. 123 Maple St',
+                        prefixIcon: const Icon(Icons.place_outlined),
+                        suffixIcon: !GeocodingService.isEnabled
+                            ? null
+                            : _searching
+                                ? const Padding(
+                                    padding: EdgeInsets.all(AppSpace.md),
+                                    child: SizedBox(
+                                      width: 18,
+                                      height: 18,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
                                     ),
+                                  )
+                                : IconButton(
+                                    icon: const Icon(Icons.search),
+                                    tooltip: 'Search address',
+                                    onPressed: () =>
+                                        _searchAddress(_address.text),
                                   ),
-                                )
-                              : IconButton(
-                                  icon: const Icon(Icons.search),
-                                  tooltip: 'Search address',
-                                  onPressed: () =>
-                                      _searchAddress(_address.text),
-                                ),
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    GeocodingService.isEnabled
-                        ? 'Type an address to move the pin, or drag the map — '
-                            'the address fills in automatically.'
-                        : 'Drag the map to drop a pin, then save. Address '
-                            'search needs a geocoding add-on — you can still '
-                            'save the pin, and type a label here if you want.',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: AppColors.textMuted,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  Row(
-                    children: [
-                      const Text(
-                        'Radius',
-                        style: TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
-                        ),
                       ),
-                      const Spacer(),
-                      Text(
-                        _formatRadius(_radiusMeters),
-                        style: const TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.purple,
-                        ),
-                      ),
-                    ],
-                  ),
-                  Slider(
-                    value: _radiusMeters,
-                    min: kMinPlaceRadiusMeters,
-                    max: kMaxPlaceRadiusMeters,
-                    onChanged: (double v) => setState(() => _radiusMeters = v),
-                  ),
-                  Wrap(
-                    spacing: 8,
-                    children: [
-                      for (final double preset in _radiusPresets)
-                        ChoiceChip(
-                          label: Text(_formatRadius(preset)),
-                          selected: (_radiusMeters - preset).abs() < 1,
-                          onSelected: (_) =>
-                              setState(() => _radiusMeters = preset),
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  FilledButton(
-                    onPressed: _save,
-                    child: const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 12),
-                      child: Text('Save place'),
                     ),
-                  ),
-                ],
+                    const SizedBox(height: AppSpace.xs),
+                    Text(
+                      GeocodingService.isEnabled
+                          ? 'Type an address to move the pin, or drag the map — '
+                              'the address fills in automatically.'
+                          : 'Drag the map to drop a pin, then save. Address '
+                              'search needs a geocoding add-on — you can still '
+                              'save the pin, and type a label here if you want.',
+                      style: AppType.secondary.copyWith(
+                        color: cs.onSurfaceVariant,
+                      ),
+                    ),
+                    const SizedBox(height: AppSpace.lg),
+                    Row(
+                      children: <Widget>[
+                        const Expanded(
+                          child: Text('Radius', style: AppType.body),
+                        ),
+                        Text(
+                          _formatRadius(_radiusMeters),
+                          style: AppType.body.copyWith(
+                            fontWeight: FontWeight.w800,
+                            color: brand.accentInk,
+                          ),
+                        ),
+                      ],
+                    ),
+                    Slider(
+                      value: _radiusMeters,
+                      min: kMinPlaceRadiusMeters,
+                      max: kMaxPlaceRadiusMeters,
+                      semanticFormatterCallback: _formatRadius,
+                      onChanged: (double v) =>
+                          setState(() => _radiusMeters = v),
+                    ),
+                    Wrap(
+                      spacing: AppSpace.sm,
+                      runSpacing: AppSpace.xs,
+                      children: <Widget>[
+                        for (final double preset in _radiusPresets)
+                          ChoiceChip(
+                            label: Text(_formatRadius(preset)),
+                            selected: (_radiusMeters - preset).abs() < 1,
+                            onSelected: (_) =>
+                                setState(() => _radiusMeters = preset),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: AppSpace.lg),
+                    DsPillButton(label: 'Save place', onPressed: _save),
+                  ],
+                ),
               ),
             ),
           ),

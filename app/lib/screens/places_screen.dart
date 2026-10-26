@@ -6,12 +6,31 @@ import '../services/family_service.dart';
 import '../services/geofence_service.dart';
 import '../services/place_service.dart';
 import '../theme/app_theme.dart';
+import '../widgets/ds/ds.dart';
 import 'place_picker_screen.dart';
+
+/// What [PlacesScreen] needs to render: the places (with `alertsOn` set), and
+/// who is looking.
+class PlacesSnapshot {
+  const PlacesSnapshot({
+    required this.places,
+    this.role = 'member',
+    this.userId = '',
+  });
+
+  final List<Place> places;
+  final String role;
+  final String userId;
+}
 
 /// The Places / geofences list screen. Lists saved Places with their radius
 /// and an arrive/leave alert toggle, and lets the user add a new Place.
 class PlacesScreen extends StatefulWidget {
-  const PlacesScreen({super.key});
+  const PlacesScreen({super.key, this.loader});
+
+  /// Replaces the network load (tests and screenshots). Returns the places
+  /// with their alert state already applied, plus the caller's role and id.
+  final Future<PlacesSnapshot> Function()? loader;
 
   @override
   State<PlacesScreen> createState() => _PlacesScreenState();
@@ -43,6 +62,17 @@ class _PlacesScreenState extends State<PlacesScreen> {
       _error = null;
     });
     try {
+      final Future<PlacesSnapshot> Function()? custom = widget.loader;
+      if (custom != null) {
+        final PlacesSnapshot snap = await custom();
+        if (!mounted) return;
+        setState(() {
+          _role = snap.role;
+          _userId = snap.userId;
+          _places = List<Place>.of(snap.places);
+        });
+        return;
+      }
       final List<dynamic> results = await Future.wait<dynamic>([
         _familyService.fetchFamily(),
         PlaceService.fetchPlaces(),
@@ -203,47 +233,53 @@ class _PlacesScreenState extends State<PlacesScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Places')),
-      body: _buildBody(),
+      body: SafeArea(
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 640),
+            child: _buildBody(),
+          ),
+        ),
+      ),
     );
   }
 
   Widget _buildBody() {
     if (_error != null) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(_error!, textAlign: TextAlign.center),
-            const SizedBox(height: 12),
-            FilledButton(onPressed: _load, child: const Text('Retry')),
-          ],
-        ),
+      return DsErrorState(
+        icon: Icons.cloud_off,
+        title: 'Could not load places',
+        message: _error!,
+        onRetry: _load,
       );
     }
     final List<Place>? places = _places;
     if (places == null) {
-      return const Center(child: CircularProgressIndicator());
+      return Semantics(
+        label: 'Loading places',
+        child: const Padding(
+          padding: EdgeInsets.all(AppSpace.xl),
+          child: DsSkeletonList(rows: 4),
+        ),
+      );
     }
     if (places.isEmpty) {
       return ListView(
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        children: [
-          const Padding(
-            padding: EdgeInsets.all(24),
-            child: Text(
-              'No places yet. Add one to start getting arrival and '
-              'departure alerts.',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: AppColors.textMuted),
-            ),
+        padding: const EdgeInsets.symmetric(vertical: AppSpace.sm),
+        children: <Widget>[
+          const DsEmptyState(
+            icon: Icons.place_outlined,
+            title: 'No places yet',
+            message: 'Add one to start getting arrival and departure alerts.',
           ),
           if (_canManage) _AddPlaceTile(onTap: _addPlace),
         ],
       );
     }
     return ListView(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      children: [
+      padding: const EdgeInsets.symmetric(vertical: AppSpace.sm),
+      children: <Widget>[
+        const DsSectionHeader('Saved places'),
         for (int i = 0; i < places.length; i++)
           _PlaceTile(
             place: places[i],
@@ -272,42 +308,45 @@ class _PlaceTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final String subtitle = place.address.isEmpty
+    final BrandTheme brand = BrandTheme.of(context);
+    final ColorScheme cs = Theme.of(context).colorScheme;
+    final String where = place.address.isEmpty
         ? place.radiusLabel
         : '${place.address} · ${place.radiusLabel}';
-    return ListTile(
-      leading: Container(
-        width: 40,
-        height: 40,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: AppColors.purple.withValues(alpha: 0.12),
-        ),
-        child: Icon(place.icon, color: AppColors.purple, size: 22),
-      ),
-      title: Text(
-        place.name,
-        style: const TextStyle(fontWeight: FontWeight.w600),
-      ),
-      subtitle: Text(subtitle),
+    // Words, not just colour: the alert state is part of the subtitle.
+    final String subtitle =
+        '$where\nArrival and departure alerts: ${place.alertsOn ? 'on' : 'off'}';
+    return DsListRow(
+      leading: DsListRow.iconTile(context, place.icon),
+      title: place.name,
+      subtitle: subtitle,
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
-        children: [
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: <Widget>[
           if (onToggleAlerts != null)
             IconButton(
               tooltip: place.alertsOn ? 'Alerts on' : 'Alerts off',
+              constraints: const BoxConstraints(
+                minWidth: kMinTarget,
+                minHeight: kMinTarget,
+              ),
               icon: Icon(
                 place.alertsOn
                     ? Icons.notifications_active
-                    : Icons.notifications_off,
-                color: place.alertsOn ? AppColors.purple : AppColors.textMuted,
+                    : Icons.notifications_off_outlined,
+                color: place.alertsOn ? brand.accentInk : cs.onSurfaceVariant,
               ),
               onPressed: toggling ? null : onToggleAlerts,
             ),
           if (onDelete != null)
             IconButton(
               tooltip: 'Delete place',
-              icon: const Icon(Icons.delete_outline, color: AppColors.textMuted),
+              constraints: const BoxConstraints(
+                minWidth: kMinTarget,
+                minHeight: kMinTarget,
+              ),
+              icon: Icon(Icons.delete_outline, color: cs.onSurfaceVariant),
               onPressed: onDelete,
             ),
         ],
@@ -323,12 +362,10 @@ class _AddPlaceTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ListTile(
-      leading: const Icon(Icons.add_circle_outline, color: AppColors.purple),
-      title: const Text(
-        'Add a Place',
-        style: TextStyle(color: AppColors.purple, fontWeight: FontWeight.w600),
-      ),
+    return DsListRow(
+      leading: DsListRow.iconTile(context, Icons.add),
+      title: 'Add a Place',
+      chevron: true,
       onTap: onTap,
     );
   }

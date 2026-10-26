@@ -211,7 +211,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.textContaining('Could not reach'), findsOneWidget);
     bad.failList = false;
-    await tester.tap(find.text('Retry'));
+    await tester.tap(find.text('Try again'));
     await tester.pumpAndSettle();
     expect(find.text('Sam'), findsOneWidget);
     await tester.tap(find.text('Load older alerts'));

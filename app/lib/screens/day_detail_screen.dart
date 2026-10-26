@@ -10,6 +10,7 @@ import '../services/family_service.dart';
 import '../services/history_service.dart';
 import '../services/place_service.dart';
 import '../theme/app_theme.dart';
+import '../widgets/ds/ds.dart';
 import '../widgets/member_avatar_bubble.dart';
 import '../widgets/movement_icon.dart';
 import '../widgets/trips_entry_button.dart';
@@ -165,7 +166,7 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
             onBack: () => _shiftDay(-1),
             onForward: () => _shiftDay(1),
           ),
-          const Divider(height: 1, color: Color(0x11000000)),
+          const Divider(height: 1),
           Expanded(child: _body()),
         ],
       ),
@@ -174,69 +175,60 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
 
   Widget _body() {
     if (_loading) {
-      return const Center(
-        child: CircularProgressIndicator(color: AppColors.purple),
+      return Semantics(
+        label: 'Loading history',
+        child: const Padding(
+          padding: EdgeInsets.all(AppSpace.xl),
+          child: DsSkeletonList(rows: 4),
+        ),
       );
     }
     if (_error != null) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                _error!,
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: AppColors.textMuted),
-              ),
-              const SizedBox(height: 12),
-              TextButton(onPressed: _load, child: const Text('Retry')),
-            ],
-          ),
-        ),
+      return DsErrorState(
+        icon: Icons.cloud_off,
+        title: 'Could not load history',
+        message: _error!,
+        onRetry: _load,
       );
     }
     final MemberHistory history = _history!;
     if (history.isEmpty) {
-      return const Center(
-        child: Padding(
-          padding: EdgeInsets.all(24),
-          child: Text(
-            'No location history for this day.',
-            textAlign: TextAlign.center,
-            style: TextStyle(color: AppColors.textMuted, fontSize: 15),
-          ),
-        ),
+      return const DsEmptyState(
+        icon: Icons.timeline,
+        title: 'No location history',
+        message: 'No location history for this day.',
       );
     }
-    return Column(
-      children: [
-        _TrailMap(
-          member: widget.member,
-          history: history,
-          mapController: _mapController,
-          onMapReady: () {
-            _mapReady = true;
-            _fitTrail();
-          },
-        ),
-        Expanded(
-          child: ListView.builder(
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-            itemCount: history.visits.length,
-            itemBuilder: (BuildContext context, int index) {
-              final HistoryVisit visit = history.visits[index];
-              return _TimelineEntry(
-                visit: visit,
-                isLast: index == history.visits.length - 1,
-                canSave: _canManage && visit.isStop,
-                onSave: () => _saveStop(visit),
-              );
-            },
+    // One scrolling list so large text never squeezes the map or timeline.
+    return ListView.builder(
+      padding: const EdgeInsets.only(bottom: AppSpace.xxl),
+      itemCount: history.visits.length + 1,
+      itemBuilder: (BuildContext context, int index) {
+        if (index == 0) {
+          return Padding(
+            padding: const EdgeInsets.only(bottom: AppSpace.lg),
+            child: _TrailMap(
+              member: widget.member,
+              history: history,
+              mapController: _mapController,
+              onMapReady: () {
+                _mapReady = true;
+                _fitTrail();
+              },
+            ),
+          );
+        }
+        final HistoryVisit visit = history.visits[index - 1];
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: AppSpace.xl),
+          child: _TimelineEntry(
+            visit: visit,
+            isLast: index == history.visits.length,
+            canSave: _canManage && visit.isStop,
+            onSave: () => _saveStop(visit),
           ),
-        ),
-      ],
+        );
+      },
     );
   }
 }
@@ -260,44 +252,63 @@ class _Header extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final ColorScheme cs = Theme.of(context).colorScheme;
+    final bool large = MediaQuery.textScalerOf(context).scale(16) > 16 * 1.4;
+    final Widget nav = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        IconButton(
+          tooltip: 'Previous day',
+          constraints: const BoxConstraints(
+            minWidth: kMinTarget,
+            minHeight: kMinTarget,
+          ),
+          onPressed: canGoBack ? onBack : null,
+          icon: const Icon(Icons.chevron_left),
+        ),
+        IconButton(
+          tooltip: 'Next day',
+          constraints: const BoxConstraints(
+            minWidth: kMinTarget,
+            minHeight: kMinTarget,
+          ),
+          onPressed: canGoForward ? onForward : null,
+          icon: const Icon(Icons.chevron_right),
+        ),
+      ],
+    );
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
-      child: Row(
-        children: [
-          StatusAvatar(member: member, size: 48),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  member.name,
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
-                  ),
+      padding: const EdgeInsets.all(AppSpace.md),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              StatusAvatar(member: member, size: 48),
+              const SizedBox(width: AppSpace.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Semantics(
+                      header: true,
+                      child: Text(member.name, style: AppType.headline),
+                    ),
+                    const SizedBox(height: AppSpace.xxs),
+                    Text(
+                      _formatDate(day),
+                      style: AppType.secondary.copyWith(
+                        fontSize: 14,
+                        color: cs.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  _formatDate(day),
-                  style: const TextStyle(
-                    fontSize: 13,
-                    color: AppColors.textMuted,
-                  ),
-                ),
-              ],
-            ),
+              ),
+              if (!large) nav,
+            ],
           ),
-          IconButton(
-            tooltip: 'Previous day',
-            onPressed: canGoBack ? onBack : null,
-            icon: const Icon(Icons.chevron_left),
-          ),
-          IconButton(
-            tooltip: 'Next day',
-            onPressed: canGoForward ? onForward : null,
-            icon: const Icon(Icons.chevron_right),
-          ),
+          if (large) Align(alignment: Alignment.centerRight, child: nav),
         ],
       ),
     );
@@ -328,7 +339,9 @@ class _TrailMap extends StatelessWidget {
     return SizedBox(
       height: 220,
       width: double.infinity,
-      child: FlutterMap(
+      child: Semantics(
+        label: 'Map of ${member.name}\'s location trail for this day',
+        child: FlutterMap(
         mapController: mapController,
         options: MapOptions(
           initialCenter: center,
@@ -384,6 +397,7 @@ class _TrailMap extends StatelessWidget {
           ),
         ],
       ),
+      ),
     );
   }
 }
@@ -404,8 +418,9 @@ class _TimelineEntry extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final MovementType movement = _movementFor(visit);
-    final Color dotColor =
-        visit.isTransit ? AppColors.textMuted : AppColors.purple;
+    final BrandTheme brand = BrandTheme.of(context);
+    final ColorScheme cs = Theme.of(context).colorScheme;
+    final Color dotColor = visit.isTransit ? cs.onSurfaceVariant : brand.accentInk;
     final Duration stay = visit.departedAt.difference(visit.arrivedAt);
 
     return IntrinsicHeight(
@@ -413,16 +428,16 @@ class _TimelineEntry extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           SizedBox(
-            width: 64,
+            width: 76,
             child: Padding(
               padding: const EdgeInsets.only(top: 2),
               child: Text(
                 _formatTime(visit.arrivedAt.toLocal()),
                 textAlign: TextAlign.right,
-                style: const TextStyle(
-                  fontSize: 13,
+                style: AppType.secondary.copyWith(
+                  fontSize: 14,
                   fontWeight: FontWeight.w600,
-                  color: AppColors.textMuted,
+                  color: cs.onSurfaceVariant,
                 ),
               ),
             ),
@@ -439,14 +454,14 @@ class _TimelineEntry extends StatelessWidget {
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     color: dotColor,
-                    border: Border.all(color: Colors.white, width: 2),
+                    border: Border.all(color: brand.sheet, width: 2),
                   ),
                 ),
                 if (!isLast)
                   Expanded(
                     child: Container(
                       width: 2,
-                      color: const Color(0x22000000),
+                      color: cs.outlineVariant,
                     ),
                   ),
               ],
@@ -455,7 +470,7 @@ class _TimelineEntry extends StatelessWidget {
           const SizedBox(width: 12),
           Expanded(
             child: Padding(
-              padding: EdgeInsets.only(bottom: isLast ? 0 : 20),
+              padding: EdgeInsets.only(bottom: isLast ? 0 : AppSpace.xl),
               child: Row(
                 children: [
                   Expanded(
@@ -464,17 +479,13 @@ class _TimelineEntry extends StatelessWidget {
                       children: [
                         Text(
                           visit.placeName,
-                          style: const TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                          ),
+                          style: AppType.body,
                         ),
                         if (stay.inMinutes >= 1)
                           Text(
                             _formatDuration(stay),
-                            style: const TextStyle(
-                              fontSize: 12,
-                              color: AppColors.textMuted,
+                            style: AppType.secondary.copyWith(
+                              color: cs.onSurfaceVariant,
                             ),
                           ),
                       ],
@@ -488,14 +499,18 @@ class _TimelineEntry extends StatelessWidget {
                     Icon(
                       _visitIcon(visit),
                       size: 18,
-                      color: AppColors.purple,
+                      color: brand.accentInk,
                     ),
                   ],
                   if (canSave)
                     IconButton(
                       tooltip: 'Save as place',
+                      constraints: const BoxConstraints(
+                        minWidth: kMinTarget,
+                        minHeight: kMinTarget,
+                      ),
                       icon: const Icon(Icons.add_location_alt_outlined),
-                      color: AppColors.purple,
+                      color: brand.accentInk,
                       onPressed: onSave,
                     ),
                 ],

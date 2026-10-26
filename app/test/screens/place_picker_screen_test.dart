@@ -45,6 +45,8 @@ void main() {
     expect(find.byTooltip('Search address'), findsNothing);
     expect(find.text('0.00000, 0.00000'), findsOneWidget);
 
+    await tester.ensureVisible(find.text('Save place'));
+    await tester.pump();
     await tester.tap(find.text('Save place'));
     await tester.pumpAndSettle();
 

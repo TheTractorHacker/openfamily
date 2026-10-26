@@ -6,6 +6,7 @@ import '../services/contact_picker.dart';
 import '../services/emergency_contact_service.dart';
 import '../services/server_features.dart';
 import '../theme/app_theme.dart';
+import '../widgets/ds/ds.dart';
 import 'alerts_history_screen.dart';
 
 /// The Safety screen. Manages emergency contacts (who receive SOS alerts).
@@ -112,29 +113,26 @@ class _SafetyScreenState extends State<SafetyScreen> {
     if (picked.phones.length == 1) return picked.phones.first;
     return showModalBottomSheet<String>(
       context: context,
-      showDragHandle: true,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
       builder: (BuildContext context) {
         return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
-                child: Text(
-                  'Which number for ${picked.name}?',
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
+          child: DsSheetScaffold(
+            title: 'Which number for ${picked.name}?',
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  for (final String phone in picked.phones)
+                    DsListRow(
+                      leading: DsListRow.iconTile(context, Icons.phone_outlined),
+                      title: phone,
+                      onTap: () => Navigator.of(context).pop(phone),
+                    ),
+                  const SizedBox(height: AppSpace.sm),
+                ],
               ),
-              for (final String phone in picked.phones)
-                ListTile(
-                  leading: const Icon(Icons.phone_outlined),
-                  title: Text(phone),
-                  onTap: () => Navigator.of(context).pop(phone),
-                ),
-            ],
+            ),
           ),
         );
       },
@@ -242,6 +240,10 @@ class _SafetyScreenState extends State<SafetyScreen> {
         actions: <Widget>[
           IconButton(
             tooltip: 'Alert history',
+            constraints: const BoxConstraints(
+              minWidth: kMinTarget,
+              minHeight: kMinTarget,
+            ),
             icon: const Icon(Icons.history),
             onPressed: () => Navigator.of(context).push(
               MaterialPageRoute<void>(
@@ -251,81 +253,127 @@ class _SafetyScreenState extends State<SafetyScreen> {
           ),
         ],
       ),
-      body: _buildBody(),
+      body: SafeArea(
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 640),
+            child: _buildBody(),
+          ),
+        ),
+      ),
     );
   }
 
   Widget _buildBody() {
     if (!_smsConfigured) {
-      return const Center(
-        child: Padding(
-          padding: EdgeInsets.all(24),
-          child: Text(
-            'Emergency contacts get SOS by text message. This server '
+      return const DsEmptyState(
+        icon: Icons.sms_failed_outlined,
+        title: 'Text alerts are not set up',
+        message: 'Emergency contacts get SOS by text message. This server '
             'has not set up SMS yet, so those contacts would not be notified.',
-            textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 15, color: AppColors.textMuted),
-          ),
-        ),
       );
     }
     if (_error != null) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(_error!, textAlign: TextAlign.center),
-              const SizedBox(height: 12),
-              FilledButton(onPressed: _load, child: const Text('Retry')),
-            ],
-          ),
-        ),
+      return DsErrorState(
+        icon: Icons.cloud_off,
+        title: 'Could not load contacts',
+        message: _error!,
+        onRetry: _load,
       );
     }
     final List<EmergencyContact>? contacts = _contacts;
     if (contacts == null) {
-      return const Center(child: CircularProgressIndicator());
+      return const Padding(
+        padding: EdgeInsets.all(AppSpace.xl),
+        child: DsSkeletonList(rows: 3),
+      );
     }
+    final ColorScheme cs = Theme.of(context).colorScheme;
+    final bool canAdd = !_saving && contacts.length < 10;
 
     return ListView(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      children: [
-        const Padding(
-          padding: EdgeInsets.fromLTRB(20, 8, 20, 8),
+      padding: const EdgeInsets.symmetric(vertical: AppSpace.sm),
+      children: <Widget>[
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+            AppSpace.xl,
+            AppSpace.sm,
+            AppSpace.xl,
+            AppSpace.sm,
+          ),
           child: Text(
             'Emergency contacts receive your SOS alerts with your location. '
             'They do not need the app or to be in your family.',
-            style: TextStyle(fontSize: 13, color: AppColors.textMuted),
+            style: AppType.secondary.copyWith(
+              fontSize: 14,
+              color: cs.onSurfaceVariant,
+            ),
           ),
         ),
+        const DsSectionHeader('Emergency contacts'),
         if (contacts.isEmpty)
-          const Padding(
-            padding: EdgeInsets.fromLTRB(20, 8, 20, 16),
-            child: Text(
-              'No emergency contacts yet. Choose someone from your phone.',
-              style: TextStyle(fontSize: 13, color: AppColors.textMuted),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              AppSpace.xl,
+              AppSpace.sm,
+              AppSpace.xl,
+              AppSpace.lg,
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Icon(Icons.info_outline, color: cs.onSurfaceVariant),
+                const SizedBox(width: AppSpace.sm),
+                Expanded(
+                  child: Text(
+                    'No emergency contacts yet. Choose someone from your phone.',
+                    style: AppType.body.copyWith(
+                      fontWeight: FontWeight.w500,
+                      color: cs.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
         for (final EmergencyContact c in contacts)
-          _ContactTile(
-            contact: c,
-            onRemove: () => _removeContact(c),
+          _ContactTile(contact: c, onRemove: () => _removeContact(c)),
+        if (contacts.length >= 10)
+          Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppSpace.xl,
+              vertical: AppSpace.sm,
+            ),
+            child: Text(
+              'You have added the most contacts allowed (10).',
+              style: AppType.secondary.copyWith(
+                fontSize: 14,
+                color: cs.onSurfaceVariant,
+              ),
+            ),
           ),
-        _AddContactTile(
-          enabled: !_saving && contacts.length < 10,
-          onTap: _addFromPhone,
+        const SizedBox(height: AppSpace.sm),
+        Opacity(
+          opacity: canAdd ? 1 : 0.5,
+          child: DsListRow(
+            leading: DsListRow.iconTile(context, Icons.contacts_outlined),
+            title: 'Choose from contacts',
+            chevron: true,
+            onTap: canAdd ? _addFromPhone : null,
+          ),
         ),
-        ListTile(
-          leading:
-              const Icon(Icons.keyboard_outlined, color: AppColors.textMuted),
-          title: const Text(
-            'Type a name and number',
-            style: TextStyle(color: AppColors.textMuted),
+        Opacity(
+          opacity: canAdd ? 1 : 0.5,
+          child: DsListRow(
+            leading: DsListRow.iconTile(
+              context,
+              Icons.keyboard_outlined,
+              color: cs.onSurfaceVariant,
+            ),
+            title: 'Type a name and number',
+            chevron: true,
+            onTap: canAdd ? _addManually : null,
           ),
-          enabled: !_saving && contacts.length < 10,
-          onTap: _addManually,
         ),
       ],
     );
@@ -343,52 +391,25 @@ class _ContactTile extends StatelessWidget {
     final String subtitle = contact.relation.isEmpty
         ? contact.phone
         : '${contact.phone} · ${contact.relation}';
-    return ListTile(
-      leading: Container(
-        width: 40,
-        height: 40,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: AppColors.purple.withValues(alpha: 0.12),
-        ),
-        child: const Icon(Icons.person, color: AppColors.purple, size: 22),
-      ),
-      title: Text(
-        contact.name,
-        style: const TextStyle(fontWeight: FontWeight.w600),
-      ),
-      subtitle: Text(subtitle),
-      trailing: IconButton(
-        tooltip: 'Remove',
-        icon: const Icon(Icons.delete_outline, color: AppColors.textMuted),
-        onPressed: onRemove,
-      ),
-    );
-  }
-}
-
-class _AddContactTile extends StatelessWidget {
-  const _AddContactTile({required this.onTap, required this.enabled});
-
-  final VoidCallback onTap;
-  final bool enabled;
-
-  @override
-  Widget build(BuildContext context) {
-    return ListTile(
-      leading: Icon(
-        Icons.contacts_outlined,
-        color: enabled ? AppColors.purple : AppColors.textMuted,
-      ),
-      title: Text(
-        'Choose from contacts',
-        style: TextStyle(
-          color: enabled ? AppColors.purple : AppColors.textMuted,
-          fontWeight: FontWeight.w600,
+    return DsListRow(
+      leading: DsListRow.iconTile(context, Icons.person),
+      title: contact.name,
+      subtitle: subtitle,
+      trailing: Align(
+        alignment: Alignment.centerRight,
+        child: IconButton(
+          tooltip: 'Remove',
+          constraints: const BoxConstraints(
+            minWidth: kMinTarget,
+            minHeight: kMinTarget,
+          ),
+          icon: Icon(
+            Icons.delete_outline,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+          onPressed: onRemove,
         ),
       ),
-      enabled: enabled,
-      onTap: onTap,
     );
   }
 }

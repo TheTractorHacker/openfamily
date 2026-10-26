@@ -4,6 +4,7 @@ import '../models/alert.dart';
 import '../services/alert_service.dart';
 import '../services/api_client.dart';
 import '../theme/app_theme.dart';
+import '../widgets/ds/ds.dart';
 import 'alert_received_screen.dart';
 import 'alert_status_screen.dart';
 
@@ -115,36 +116,32 @@ class _AlertsHistoryScreenState extends State<AlertsHistoryScreen> {
   }
 
   Widget _body() {
-    if (_loading) return const Center(child: CircularProgressIndicator());
+    if (_loading) {
+      return const Padding(
+        padding: EdgeInsets.all(AppSpace.xl),
+        child: DsSkeletonList(rows: 5),
+      );
+    }
     if (_error != null) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              const Icon(Icons.cloud_off, size: 40),
-              const SizedBox(height: 12),
-              Text(_error!, textAlign: TextAlign.center),
-              const SizedBox(height: 12),
-              FilledButton(onPressed: _load, child: const Text('Retry')),
-            ],
-          ),
-        ),
+      return DsErrorState(
+        icon: Icons.cloud_off,
+        title: 'Could not load alerts',
+        message: _error!,
+        onRetry: _load,
       );
     }
     if (_items.isEmpty) {
       return RefreshIndicator(
         onRefresh: _load,
         child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
           children: const <Widget>[
-            Padding(
-              padding: EdgeInsets.all(32),
-              child: Text(
-                'No alerts yet. Check-ins, help requests and SOS from your '
-                'family will be listed here.',
-                textAlign: TextAlign.center,
-              ),
+            SizedBox(height: AppSpace.xxxl),
+            DsEmptyState(
+              icon: Icons.notifications_none,
+              title: 'No alerts yet',
+              message: 'Check-ins, help requests and SOS from your family '
+                  'will be listed here.',
             ),
           ],
         ),
@@ -152,34 +149,41 @@ class _AlertsHistoryScreenState extends State<AlertsHistoryScreen> {
     }
     return RefreshIndicator(
       onRefresh: _load,
-      child: ListView.builder(
-        itemCount: _items.length + (_next != null ? 1 : 0),
-        itemBuilder: (BuildContext context, int i) {
-          if (i == _items.length) return _footer();
-          return AlertTile(
-            alert: _items[i],
-            isMine: _self != null && _items[i].userId == _self,
-            onTap: () => _open(_items[i]),
-          );
-        },
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 640),
+          child: ListView.builder(
+            physics: const AlwaysScrollableScrollPhysics(),
+            itemCount: _items.length + (_next != null ? 1 : 0),
+            itemBuilder: (BuildContext context, int i) {
+              if (i == _items.length) return _footer();
+              return AlertTile(
+                alert: _items[i],
+                isMine: _self != null && _items[i].userId == _self,
+                onTap: () => _open(_items[i]),
+              );
+            },
+          ),
+        ),
       ),
     );
   }
 
   Widget _footer() {
     return Padding(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(AppSpace.lg),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          if (_moreError != null)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Text(_moreError!, textAlign: TextAlign.center),
-            ),
+          if (_moreError != null) DsMessage(_moreError!),
+          const SizedBox(height: AppSpace.sm),
           _loadingMore
-              ? const CircularProgressIndicator()
-              : OutlinedButton(
-                  onPressed: _more, child: const Text('Load older alerts')),
+              ? const Center(child: CircularProgressIndicator())
+              : DsPillButton(
+                  label: 'Load older alerts',
+                  style: DsPillStyle.outlined,
+                  onPressed: _more,
+                ),
         ],
       ),
     );
@@ -214,18 +218,26 @@ class AlertTile extends StatelessWidget {
       button: true,
       label: '$who, $line',
       excludeSemantics: true,
-      child: ListTile(
-        minVerticalPadding: 12,
-        leading: Icon(icon,
-            color: alert.kind == AlertKind.sos
-                ? AppColors.sosRed
-                : BrandTheme.of(context).accentInk),
-        title: Text(who),
-        subtitle: Text(line),
-        trailing: alert.isActive
-            ? const Icon(Icons.radio_button_checked,
-                size: 18, color: AppColors.statusOrange)
-            : const Icon(Icons.check_circle_outline, size: 18),
+      child: DsListRow(
+        title: who,
+        subtitle: line,
+        leading: DsListRow.iconTile(
+          context,
+          icon,
+          color: alert.kind == AlertKind.sos ? AppColors.sosRed : null,
+        ),
+        trailing: Align(
+          alignment: Alignment.centerRight,
+          child: DsStatusChip(
+            label: status,
+            icon: alert.isActive
+                ? Icons.radio_button_checked
+                : Icons.check_circle_outline,
+            color: alert.isActive
+                ? AppColors.statusOrange
+                : AppColors.statusGrey,
+          ),
+        ),
         onTap: onTap,
       ),
     );
