@@ -305,8 +305,7 @@ void main() {
   testWidgets('phone use tile: zero is a real count, never shown for off',
       (WidgetTester t) async {
     final Map<String, dynamic> j = reportJson(rich: true, sensor: true);
-    await _pump(t, FakeTripReportApi(result: j));
-    // sensor fixture: totals phone_use 0 for an enabled member
+    // an enabled member with no phone use really is 0
     (j['totals'] as Map<String, dynamic>)['events']['phone_use'] = 0;
     await _pump(t, FakeTripReportApi(result: j));
     expect(find.text('Off'), findsNothing);

@@ -244,7 +244,10 @@ func TestSensorLimitsAndValidation(t *testing.T) {
 	if code != 200 || num(out, "accepted") != 1 || num(out, "rejected") != 2 || num(out, "duplicate") != 0 {
 		t.Errorf("mixed: %d %v", code, out)
 	}
-	// Null location is fine.
+	// Null location is fine (phone_use needs its own opt-in).
+	if code, _ = e.post(h, `{"phone_use_enabled":true}`); code != 200 {
+		t.Fatalf("enable phone use: %d", code)
+	}
 	code, out = e.post(h, evBody("", `{"kind":"phone_use","started_at":"`+at.Add(-3*time.Hour).UTC().Format(time.RFC3339)+`","ended_at":"`+at.Add(-3*time.Hour+30*time.Second).UTC().Format(time.RFC3339)+`","magnitude":30,"lat":null,"lon":null}`))
 	if code != 200 || num(out, "accepted") != 1 {
 		t.Errorf("null location: %d %v", code, out)

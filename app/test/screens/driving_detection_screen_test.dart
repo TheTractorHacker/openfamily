@@ -94,9 +94,11 @@ void main() {
 
   testWidgets('phone-use switch sends phone_use_enabled and resyncs on change',
       (WidgetTester t) async {
+    t.view.physicalSize = const Size(800, 3200);
+    t.view.devicePixelRatio = 1;
+    addTearDown(t.view.reset);
     final FakeSensorEventsApi api = FakeSensorEventsApi();
     await pump(t, api);
-    await t.ensureVisible(find.text('Count screen activity while moving'));
     await t.tap(find.text('Count screen activity while moving'));
     await t.pumpAndSettle();
     expect(api.phoneFlags, <bool>[true]);
@@ -110,9 +112,11 @@ void main() {
 
   testWidgets('phone use stays off when the server cannot be told',
       (WidgetTester t) async {
+    t.view.physicalSize = const Size(800, 3200);
+    t.view.devicePixelRatio = 1;
+    addTearDown(t.view.reset);
     final FakeSensorEventsApi api = FakeSensorEventsApi()..offline = true;
     await pump(t, api);
-    await t.ensureVisible(find.text('Count screen activity while moving'));
     await t.tap(find.text('Count screen activity while moving'));
     await t.pumpAndSettle();
     expect(await DrivingSettings.phoneUseEnabled(), isFalse);
