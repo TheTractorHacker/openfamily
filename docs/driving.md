@@ -9,7 +9,7 @@ for the people in a circle.
 | `speeding` | Speed above the limit for a sustained time | max speed, m/s |
 | `hard_brake` | Sudden deceleration while moving | m/s^2 (positive) |
 | `rapid_accel` | Sudden acceleration to a moving speed | m/s^2 |
-| `phone_use` | Phone handled while driving. Only from the phone sensor (below); `null` in reports for members who have not enabled the sensor | interaction duration, s |
+| `phone_use` | Phone handled while driving. Only from the phone (below), and only for members who turned on the separate phone-use opt-in; `null` in reports (shown as Off in the app, never 0) for everyone else | interaction duration, s |
 
 Events only exist inside legs classified as `driving` (walking, cycling and
 slow transit never produce events).
@@ -66,7 +66,7 @@ effect are returned in the report (`thresholds`). The older per-request
     members, newest first: `{id, user_id, name, started_at, ended_at,
     distance_m, duration_s, max_speed_mps, mode, event_counts:{speeding,
     hard_brake, rapid_accel, phone_use}}`. `event_counts.phone_use` is `null`
-    unless that member has the phone sensor on. Event counts follow the same
+    unless that member has phone-use detection on. Event counts follow the same
     "sensor wins" view as the report.
   Both use exactly the report's authorization: circle membership plus the
   member sharing location (a member always sees their own trips).
@@ -82,6 +82,9 @@ the app sends the opt-in (`sensor_enabled=true`) the first time it can and
 retries until acknowledged; turn it off in Settings > Driving detection.
 The opt-in is per user, not per device, and is stored in
 `users.driving_sensor_enabled` (server default false until the app reports).
+Phone-use detection has its own opt-in, `users.driving_phone_use_enabled`
+(migration 000103, default false, requires the sensor opt-in), because the
+server cannot know it from `sensor_enabled`.
 
 ### `POST /trips/sensor-events`
 
@@ -93,7 +96,7 @@ normal Bearer access token. Body, at most 64 KB (413 above):
 {"events":[{"kind":"hard_brake","started_at":"2026-10-21T12:00:00Z",
             "ended_at":"2026-10-21T12:00:02Z","magnitude":4.2,
             "lat":40.1,"lon":-75.2}],
- "sensor_enabled": true}
+ "sensor_enabled": true, "phone_use_enabled": false}
 ```
 
 - `kind`: `hard_brake`, `rapid_accel` or `phone_use`.
@@ -103,13 +106,18 @@ normal Bearer access token. Body, at most 64 KB (413 above):
   the interaction duration in seconds, 0-300.
 - `lat` / `lon`: both or neither (null), within -90..90 / -180..180.
 - At most 100 events per request (400 above). `events` may be empty when
-  `sensor_enabled` is given. 30 requests per minute per device (429).
+  `sensor_enabled` or `phone_use_enabled` is given. 30 requests per minute per device (429).
 - `sensor_enabled` (optional) sets the opt-in. `false` turns the feature off:
   later events are not stored (counted as `rejected`) and existing ones are
   kept. Events are only stored while the opt-in is true, so the first upload
   should carry `"sensor_enabled": true`.
+- `phone_use_enabled` (optional) sets the separate phone-use opt-in. When
+  omitted the stored value is kept. `phone_use` events are accepted only while
+  it is true (otherwise they count as `rejected`). Turning `sensor_enabled`
+  off also forces phone use off, even if `phone_use_enabled: true` is sent in
+  the same request; turning the sensor back on does not bring it back.
 
-Response `200`: `{"accepted":n,"duplicate":n,"rejected":n,"sensor_enabled":bool}`.
+Response `200`: `{"accepted":n,"duplicate":n,"rejected":n,"sensor_enabled":bool,"phone_use_enabled":bool}`.
 Events are deduplicated on (user, kind, started_at), so retrying a request is
 safe. Invalid events are counted in `rejected`; the others are still stored.
 The audit log records counts only.
@@ -130,10 +138,16 @@ The audit log records counts only.
 ### Report and trip changes
 
 - `GET /trips/report` counts include sensor events. `phone_use` is a number
-  for members with the sensor enabled and `null` for everyone else;
-  `totals.events.phone_use` (and `previous_totals`) is the sum over enabled
-  members, `null` if there are none. New field `sensor_members`: the user ids
-  (of members the viewer can see) with the sensor enabled.
+  only for members with the sensor AND phone-use opt-in enabled and `null`
+  for everyone else (a member without phone-use detection never reads 0);
+  `totals.events.phone_use` (and `previous_totals`) is the sum over those
+  members, `null` if there are none. `sensor_members`: the user ids (of
+  members the viewer can see) with the sensor enabled. `phone_use_members`:
+  the user ids with phone-use detection enabled.
+- **Compatibility.** Clients up to v0.6.0 never send `phone_use_enabled`, so
+  their stored value stays false: their `phone_use` is `null` in reports and
+  any `phone_use` events they upload are now rejected (they used to be
+  counted). Updating the app sends the flag from the phone-use switch.
 - Every event of `GET /trips/{id}/events` (and `GET /trips/{id}`) has `source`
   (`gps` or `sensor`); `lat` / `lon` are `null` for sensor events without a fix.
 
@@ -158,7 +172,8 @@ viewer sees a member's events (and counts in the report) only when they share
 a circle with that member AND the member shares their location in that circle.
 Outsiders and members with sharing off get 404 and are left out of the report;
 a member always sees their own events. Events are deleted with the
-user, included in `GET /me/export` (`driving_events`, `driving_sensor_enabled`)
+user, included in `GET /me/export` (`driving_events`, `driving_sensor_enabled`,
+`driving_phone_use_enabled`)
 and pruned, including unattached sensor events, once older than
 `LOCATION_RETENTION_DAYS`. Sensor events are read through the same circle
 rules as trips.
