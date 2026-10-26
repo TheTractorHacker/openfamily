@@ -203,7 +203,7 @@ void main() {
     await open(tester);
     await tester.enterText(addressField(), 'main street');
     await tester.pump(const Duration(milliseconds: 400));
-    expect(find.textContaining('Too many searches'), findsOneWidget);
+    expect(find.textContaining('Please wait a few seconds'), findsOneWidget);
     fake.failure = GeocodeFailure.offline;
     await tester.enterText(addressField(), 'main street 2');
     await tester.pump(const Duration(milliseconds: 400));
@@ -228,5 +228,99 @@ void main() {
     await tester.tap(find.text('Save place'));
     await tester.pumpAndSettle();
     expect(saved!.address, 'Home sweet home');
+  });
+
+  group('search states', () {
+    testWidgets('typing never sends explicit; the search icon and keyboard do', (
+      tester,
+    ) async {
+      enable();
+      fake.results = <GeocodeSuggestion>[kMainStreet];
+      await open(tester);
+      await tester.enterText(addressField(), 'main street');
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(fake.suggestExplicit, <bool>[false]);
+      await tester.tap(find.byTooltip('Search address'));
+      await tester.pump();
+      expect(fake.suggestExplicit, <bool>[false, true]);
+      await tester.testTextInput.receiveAction(TextInputAction.search);
+      await tester.pump();
+      expect(fake.suggestExplicit, <bool>[false, true, true]);
+      expect(
+        tester.widget<TextField>(addressField()).textInputAction,
+        TextInputAction.search,
+      );
+    });
+
+    testWidgets('suggestions show city and state', (
+      tester,
+    ) async {
+      enable();
+      fake.results = <GeocodeSuggestion>[kMainStreet];
+      await open(tester);
+      await tester.enterText(addressField(), 'main street');
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.text(kMainStreet.label), findsOneWidget); // city and state are in the line
+    });
+
+    testWidgets('explicit search with no results gives helpful guidance', (
+      tester,
+    ) async {
+      enable();
+      fake.results = const <GeocodeSuggestion>[];
+      await open(tester);
+      await tester.enterText(addressField(), '14322 Old 88rd, Chester Ar');
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.textContaining('We could not find that address'), findsNothing);
+      await tester.tap(find.byTooltip('Search address'));
+      await tester.pump();
+      expect(
+        find.text(
+          'We could not find that address. Try the street and city, or drag the pin on the map.',
+        ),
+        findsOneWidget,
+      );
+      expect(find.textContaining('No matches'), findsNothing);
+    });
+
+    testWidgets('approximate results explain the pin is on the street', (
+      tester,
+    ) async {
+      enable();
+      fake.results = <GeocodeSuggestion>[kStreetOnly];
+      await open(tester);
+      await tester.enterText(addressField(), '14322 Old 88rd, Chester Ar');
+      await tester.tap(find.byTooltip('Search address'));
+      await tester.pump();
+      expect(
+        find.textContaining('We found the street but not that house number'),
+        findsOneWidget,
+      );
+      await tester.tap(find.text(kStreetOnly.label));
+      await tester.pump();
+      // The typed address (with its house number) is kept.
+      expect(
+        tester.widget<TextField>(addressField()).controller!.text,
+        '14322 Old 88rd, Chester Ar',
+      );
+      expect(find.textContaining('Drag it to the exact spot'), findsOneWidget);
+    });
+
+    testWidgets('offline offers Try again, which searches again', (tester) async {
+      enable();
+      fake.failure = GeocodeFailure.offline;
+      await open(tester);
+      await tester.enterText(addressField(), 'main street');
+      await tester.tap(find.byTooltip('Search address'));
+      await tester.pump();
+      expect(find.textContaining('Can\'t reach the server'), findsOneWidget);
+      fake.failure = null;
+      fake.results = <GeocodeSuggestion>[kMainStreet];
+      await tester.tap(find.text('Try again'));
+      await tester.pump();
+      expect(find.text('Try again'), findsNothing);
+      expect(fake.suggestExplicit, <bool>[true, true]);
+      expect(find.text('123 Main St, Springfield, IL'), findsOneWidget);
+    });
   });
 }

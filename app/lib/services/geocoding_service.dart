@@ -14,6 +14,8 @@ class GeocodeSuggestion {
     required this.name,
     required this.position,
     required this.type,
+    this.approximate = false,
+    this.matched,
   });
 
   /// Full address line to put in the address field.
@@ -25,6 +27,13 @@ class GeocodeSuggestion {
 
   /// `house | street | city | poi` (unknown values are treated as `poi`).
   final String type;
+
+  /// True when the server had to relax the query (drop the house number or the
+  /// street): the pin is on the street or town, not the exact address.
+  final bool approximate;
+
+  /// What a relaxed hit matched: `street` or `locality`.
+  final String? matched;
 
   /// Friendly secondary text for the suggestion row.
   String get typeLabel {
@@ -55,7 +64,10 @@ class GeocodeSuggestion {
     }
     final Object? name = json['name'];
     final Object? type = json['type'];
+    final Object? matched = json['matched'];
     return GeocodeSuggestion(
+      approximate: json['approximate'] == true,
+      matched: matched is String && matched.isNotEmpty ? matched : null,
       label: label.trim(),
       name: name is String && name.trim().isNotEmpty ? name.trim() : label.trim(),
       position: LatLng(la, lo),
@@ -117,8 +129,8 @@ class ApiGeocodingBackend implements GeocodingBackend {
     final Map<String, String> q = <String, String>{
       'q': query.trim(),
       'limit': '$limit',
-      if (near != null) 'lat': near.latitude.toStringAsFixed(2),
-      if (near != null) 'lon': near.longitude.toStringAsFixed(2),
+      if (near != null) 'lat': near.latitude.toStringAsFixed(3),
+      if (near != null) 'lon': near.longitude.toStringAsFixed(3),
       if (explicit) 'explicit': '1',
     };
     final Object? body = await _call(

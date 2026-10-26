@@ -6,6 +6,8 @@ import 'package:openfamily/services/geocoding_service.dart';
 /// Scriptable [GeocodingBackend] for unit and widget tests.
 class FakeGeocodingBackend implements GeocodingBackend {
   final List<String> suggestQueries = <String>[];
+  final List<bool> suggestExplicit = <bool>[];
+  final List<LatLng?> suggestNear = <LatLng?>[];
   final List<LatLng> reverseCalls = <LatLng>[];
 
   /// Completers let tests resolve responses out of order.
@@ -24,6 +26,8 @@ class FakeGeocodingBackend implements GeocodingBackend {
     int limit = 5,
   }) async {
     suggestQueries.add(query);
+    suggestExplicit.add(explicit);
+    suggestNear.add(near);
     if (onSuggest != null) return onSuggest!(query);
     if (failure != null) throw GeocodeException(failure!);
     return results;
@@ -49,4 +53,13 @@ const GeocodeSuggestion kLibrary = GeocodeSuggestion(
   name: 'Lincoln Library',
   position: LatLng(39.7983, -89.6544),
   type: 'poi',
+);
+
+const GeocodeSuggestion kStreetOnly = GeocodeSuggestion(
+  label: 'Old 88 Road, Chester, Arkansas',
+  name: 'Old 88 Road',
+  position: LatLng(35.65, -94.25),
+  type: 'street',
+  approximate: true,
+  matched: 'street',
 );

@@ -34,6 +34,21 @@ class AddressSuggester extends ChangeNotifier {
   SuggestStatus status = SuggestStatus.idle;
   List<GeocodeSuggestion> suggestions = const <GeocodeSuggestion>[];
 
+  /// True when the current list came from an explicit search (changes the
+  /// wording of the "nothing found" message).
+  bool lastExplicit = false;
+  String _lastQuery = '';
+
+  /// True when every shown hit is approximate (street/town, not the house).
+  bool get approximate =>
+      suggestions.isNotEmpty && suggestions.every((GeocodeSuggestion s) => s.approximate);
+
+  /// Re-runs the last search (offline / error "Try again").
+  void retry() {
+    if (_lastQuery.isEmpty) return;
+    unawaited(_run(_lastQuery, explicit: lastExplicit));
+  }
+
   bool get visible => status != SuggestStatus.idle;
 
   /// Call on every user edit of the address field.
@@ -60,6 +75,8 @@ class AddressSuggester extends ChangeNotifier {
 
   Future<void> _run(String q, {required bool explicit}) async {
     final int gen = ++_generation;
+    _lastQuery = q;
+    lastExplicit = explicit;
     _set(SuggestStatus.loading, suggestions);
     try {
       final GeocodingBackend b = _backend ?? GeocodingService.backend;

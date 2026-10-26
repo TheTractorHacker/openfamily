@@ -50,6 +50,28 @@ void main() {
       expect(r.last.typeLabel, 'Place');
     });
 
+    test('parses approximate and matched', () {
+      final List<GeocodeSuggestion> r = GeocodeSuggestion.parseList(<String, dynamic>{
+        'approximate': true,
+        'results': <dynamic>[
+          <String, dynamic>{
+            'label': 'Old 88 Road, Arkansas',
+            'name': 'Old 88 Road',
+            'lat': 35.65,
+            'lon': -94.25,
+            'type': 'street',
+            'approximate': true,
+            'matched': 'street',
+          },
+          <String, dynamic>{'label': 'Cafe', 'lat': 1, 'lon': 2, 'type': 'poi'},
+        ],
+      });
+      expect(r.first.approximate, isTrue);
+      expect(r.first.matched, 'street');
+      expect(r.last.approximate, isFalse);
+      expect(r.last.matched, isNull);
+    });
+
     test('non-map or missing results give an empty list', () {
       expect(GeocodeSuggestion.parseList(null), isEmpty);
       expect(GeocodeSuggestion.parseList(<String, dynamic>{'results': 3}), isEmpty);
