@@ -11,6 +11,7 @@ import '../models/member.dart';
 import '../services/api_client.dart';
 import '../services/background_location_service.dart';
 import '../services/battery_optimization_service.dart';
+import '../services/circle_selection.dart';
 import '../services/circle_service.dart';
 import '../services/device_service.dart';
 import '../services/family_service.dart';
@@ -60,6 +61,7 @@ class MapScreen extends StatefulWidget {
     this.userIdSink,
     this.circleService,
     this.placesLoader,
+    this.selectionStore,
   });
 
   /// When hosted in the app shell, the live roster is published here so the
@@ -70,6 +72,9 @@ class MapScreen extends StatefulWidget {
   /// Injected in tests; defaults to [CircleService.instance].
   final CircleService? circleService;
   final PlacesLoader? placesLoader;
+
+  /// Injected in tests; defaults to the shared-preferences store.
+  final CircleSelectionStore? selectionStore;
 
   @override
   State<MapScreen> createState() => _MapScreenState();
@@ -97,8 +102,10 @@ class _MapScreenState extends State<MapScreen>
   late final ValueNotifier<List<Member>> _membersListenable =
       widget.membersSink ?? ValueNotifier<List<Member>>(const <Member>[]);
 
-  /// Circles for the switcher pill. The map itself shows the primary circle.
-  List<Circle> _circles = const <Circle>[];
+  /// Circles for the switcher pill plus which one the map is scoped to.
+  late final CircleSelection _selection =
+      CircleSelection(store: widget.selectionStore);
+  List<Circle> get _circles => _selection.circles;
 
   /// OS connectivity watcher for this screen: coming back online must recover
   /// the map on its own (see [_onConnectivityChanged]).
@@ -137,10 +144,12 @@ class _MapScreenState extends State<MapScreen>
     WidgetsBinding.instance.addObserver(this);
     _familyService.onMembersChanged = _onMembersChanged;
     _familyService.onUserId = _onUserId;
+    _familyService.onCircleGone = _onCircleGone;
+    _familyService.onSharingChanged = _onCircleSharingChanged;
+    _selection.addListener(_onSelectionChanged);
     _connectivitySub =
         Connectivity().onConnectivityChanged.listen(_onConnectivityChanged);
     _load();
-    unawaited(_loadCircles());
     _checkLocation();
     _initLocationSharing();
     PushService.sync();
@@ -186,14 +195,23 @@ class _MapScreenState extends State<MapScreen>
     unawaited(LocationOutbox.drain(send: sendOutboxBatchViaApi));
   }
 
-  /// Fetches the family name + members, then opens the live WebSocket.
-  Future<void> _load() async {
+  /// Loads circles, resolves the selected circle, fetches the name + members
+  /// for it, then opens the live WebSocket (scoped to that circle).
+  Future<void> _load({bool retriedAfterGone = false}) async {
     setState(() {
       _loading = true;
       _error = null;
     });
+    await _selection.restore();
+    await _loadCircles();
+    if (!mounted) return;
+    final String? scope = _selection.effectiveId;
     try {
-      final String name = await _familyService.fetchFamilyName();
+      // Scope first: fetchMembers and the socket URL both read it.
+      _familyService.scopeTo(scope);
+      final String name = scope == null
+          ? await _familyService.fetchFamilyName()
+          : _selection.nameOr(_familyName);
       final List<Member> members = await _familyService.fetchMembers();
       if (!mounted) return;
       setState(() {
@@ -207,6 +225,13 @@ class _MapScreenState extends State<MapScreen>
       await _familyService.start();
     } on ApiException catch (e) {
       if (!mounted) return;
+      if (e.status == 404 && scope != null && !retriedAfterGone) {
+        // The remembered circle is gone (deleted / left): reload circles, fall
+        // back to another one and retry once.
+        _selection.removeCircle(scope);
+        await _load(retriedAfterGone: true);
+        return;
+      }
       if (e.status == 404) {
         setState(() {
           _hasFamily = false;
@@ -311,6 +336,9 @@ class _MapScreenState extends State<MapScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _connectivitySub?.cancel();
+    _selection
+      ..removeListener(_onSelectionChanged)
+      ..dispose();
     LocationSharingService.enabled.removeListener(_onSharingChanged);
     _reporter.stop();
     _familyService.dispose();
@@ -518,17 +546,73 @@ class _MapScreenState extends State<MapScreen>
         .push(MaterialPageRoute<void>(builder: (_) => const SosScreen()));
   }
 
-  /// Loads the user's circles for the switcher pill; failures leave the pill
-  /// showing just the family name.
+  /// Loads the user's circles for the switcher pill and validates the
+  /// selection against them. Failures (offline) keep the previous list and
+  /// selection.
   Future<void> _loadCircles() async {
     try {
       final List<Circle> circles =
           await (widget.circleService ?? CircleService.instance).listCircles();
       if (!mounted) return;
-      setState(() => _circles = circles);
+      final bool fellBack = _selection.update(circles);
+      if (fellBack) _applySelection();
     } catch (_) {
-      // Keep the family-name-only pill.
+      // Keep the previous list.
     }
+  }
+
+  /// The user picked a circle in the pill. Only the latest pick's data lands
+  /// (see [FamilyService.setCircle]).
+  void _selectCircle(String id) {
+    if (!_selection.select(id)) return;
+    _applySelection();
+  }
+
+  /// Pushes the current selection to the family service and the header.
+  void _applySelection() {
+    if (!mounted) return;
+    setState(() {
+      _familyName = _selection.nameOr(_familyName);
+      _hasFamily = true;
+      _error = null;
+    });
+    final String? scope = _selection.effectiveId;
+    unawaited(_familyService.setCircle(scope).then((_) {
+      if (mounted && _mapReady) _fitToMembers();
+    }));
+  }
+
+  void _onSelectionChanged() {
+    if (mounted) setState(() {});
+  }
+
+  /// The server dropped a circle we were viewing (removed, left, deleted).
+  void _onCircleGone(String circleId) {
+    if (!mounted) return;
+    final bool wasSelected = _selection.selectedId == circleId;
+    _selection.removeCircle(circleId);
+    if (wasSelected) _applySelection();
+    unawaited(_loadCircles());
+  }
+
+  /// A member of the viewed circle changed their sharing: refresh roster and
+  /// our own circle flags.
+  void _onCircleSharingChanged() {
+    unawaited(_loadCircles());
+    unawaited(_familyService.refreshMembers());
+  }
+
+  /// "Resume sharing" on the paused banner for the selected circle.
+  Future<void> _resumeSharing() async {
+    final Circle? c = _selection.selectedCircle;
+    if (c == null) return;
+    try {
+      await (widget.circleService ?? CircleService.instance)
+          .setSharing(c.id, true);
+    } catch (_) {
+      // The banner stays; the user can retry.
+    }
+    await _loadCircles();
   }
 
   void _openCircles() {
@@ -603,11 +687,18 @@ class _MapScreenState extends State<MapScreen>
     final List<Member> members = _liveMembers();
 
     return LocationTabView(
-      circleName: _familyName,
+      circleName: _selection.effectiveId == null
+          ? _familyName
+          : _selection.nameOr(_familyName),
       circles: _circles,
       members: members,
       selfId: _userId,
-      sharingPaused: !LocationSharingService.enabled.value,
+      sharingPaused:
+          !LocationSharingService.enabled.value || _selection.sharingPaused,
+      selectedCircleId: _selection.effectiveId,
+      circleSharingPaused: _selection.sharingPaused,
+      onResumeCircleSharing: _resumeSharing,
+      onSelectCircle: _selectCircle,
       loading: _loading,
       error: _error,
       hasFamily: _hasFamily,

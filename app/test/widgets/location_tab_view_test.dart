@@ -15,6 +15,9 @@ Widget _app({
   List<Member> members = const <Member>[kSelf, kDriver, kAtHome],
   List<Circle> circles = kCircles,
   String circleName = 'Frank Family',
+  String? selectedCircleId,
+  bool circleSharingPaused = false,
+  bool selectable = false,
   bool sharingPaused = false,
   bool loading = false,
   String? error,
@@ -33,6 +36,10 @@ Widget _app({
       child: LocationTabView(
         map: const FakeMap(),
         circleName: circleName,
+        selectedCircleId: selectedCircleId,
+        circleSharingPaused: circleSharingPaused,
+        onSelectCircle: selectable ? (String id) => c.log.add('select-circle:$id') : null,
+        onResumeCircleSharing: () => c.log.add('resume'),
         circles: circles,
         members: members,
         selfId: 'me',
@@ -287,5 +294,70 @@ void main() {
     );
     await tester.pump();
     await _expand(tester);
+  });
+
+  testWidgets('selecting a circle in the pill sheet reports its id', (
+    tester,
+  ) async {
+    _phone(tester);
+    final calls = _Calls();
+    await tester.pumpWidget(
+      _app(calls: calls, selectable: true, selectedCircleId: 'c1'),
+    );
+    await tester.pump();
+    await tester.tap(find.text('Frank Family'));
+    await tester.pumpAndSettle();
+    expect(find.text('All circles'), findsOneWidget);
+    await tester.tap(find.text('Soccer team'));
+    await tester.pumpAndSettle();
+    expect(calls.log, contains('select-circle:c2'));
+    expect(calls.log, isNot(contains('circle:c2')));
+    expect(find.text('Your circles'), findsNothing);
+  });
+
+  testWidgets('"All circles" selects the all scope', (tester) async {
+    _phone(tester);
+    final calls = _Calls();
+    await tester.pumpWidget(_app(calls: calls, selectable: true));
+    await tester.pump();
+    await tester.tap(find.text('Frank Family'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('All circles'));
+    await tester.pumpAndSettle();
+    expect(calls.log, contains('select-circle:all'));
+  });
+
+  testWidgets('sharing paused in the selected circle shows a resume banner', (
+    tester,
+  ) async {
+    _phone(tester);
+    final calls = _Calls();
+    await tester.pumpWidget(
+      _app(
+        calls: calls,
+        circleName: 'Soccer team',
+        selectedCircleId: 'c2',
+        circleSharingPaused: true,
+        selectable: true,
+      ),
+    );
+    await tester.pump();
+    expect(find.textContaining('Sharing paused.'), findsOneWidget);
+    await tester.tap(find.text('Resume'));
+    expect(calls.log, contains('resume'));
+  });
+
+  testWidgets('no paused banner and no All row with a single circle', (
+    tester,
+  ) async {
+    _phone(tester);
+    await tester.pumpWidget(
+      _app(circles: <Circle>[kCircles.first], selectable: true),
+    );
+    await tester.pump();
+    expect(find.textContaining('Sharing paused.'), findsNothing);
+    await tester.tap(find.text('Frank Family'));
+    await tester.pumpAndSettle();
+    expect(find.text('All circles'), findsNothing);
   });
 }

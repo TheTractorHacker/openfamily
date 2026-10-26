@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
@@ -66,13 +67,30 @@ class FamilyInfo {
 /// The OS connectivity watcher additionally forces an immediate reconnect on
 /// network regain/handoff instead of waiting out the backoff timer.
 class FamilyService {
-  FamilyService({this.onMembersChanged, this.onUserId});
+  FamilyService({this.onMembersChanged, this.onUserId, this.onCircleGone});
 
   /// Fired whenever the member list is replaced or a member is updated.
   void Function(List<Member> members)? onMembersChanged;
 
   /// Fired once the `welcome` frame identifies the caller's own user id.
   void Function(String userId)? onUserId;
+
+  /// Fired when the server says the subscribed circle no longer exists for the
+  /// caller (deleted, left or removed). The owner should reload its circles
+  /// and pick another.
+  void Function(String circleId)? onCircleGone;
+
+  /// Fired when someone in the subscribed circle changed their sharing, so the
+  /// owner can refresh circle state.
+  void Function()? onSharingChanged;
+
+  /// The circle the member list and stream are scoped to: null = legacy
+  /// (primary circle, unscoped), `all`, or a circle id.
+  String? _circleId;
+
+  /// Bumped on every scope change; responses started under an older scope are
+  /// dropped so a quick switch can never show the previous circle's people.
+  int _scopeGeneration = 0;
 
   List<Member> _members = <Member>[];
   List<Place> _places = <Place>[];
@@ -120,6 +138,57 @@ class FamilyService {
   /// The caller's own user id (from the `welcome` frame), or null until known.
   String? get userId => _userId;
 
+  /// The circle scope currently applied (null = legacy, unscoped).
+  String? get circleId => _circleId;
+
+  /// Whether a frame labelled [frameCircle] belongs to scope [scope]. Unlabelled
+  /// frames (older servers, `avatar`, `alert`) always apply; with scope null
+  /// or `all` every labelled frame applies.
+  static bool frameInScope(String? scope, String? frameCircle) {
+    if (frameCircle == null || frameCircle.isEmpty) return true;
+    if (scope == null || scope == 'all') return true;
+    return scope == frameCircle;
+  }
+
+  /// Switches the scope. Clears the roster (so the old circle's people never
+  /// linger), re-subscribes the open socket and loads the new roster over REST.
+  /// Safe to call repeatedly and quickly: only the latest call's data lands.
+  Future<void> setCircle(String? circleId) async {
+    if (_circleId == circleId) return;
+    _circleId = circleId;
+    final int gen = ++_scopeGeneration;
+    _members = <Member>[];
+    onMembersChanged?.call(_members);
+    _sendSubscribe();
+    try {
+      await fetchMembers();
+      if (gen == _scopeGeneration && !_disposed) onMembersChanged?.call(_members);
+    } catch (_) {
+      // The subscribe snapshot or the next reconnect recovers.
+    }
+  }
+
+  /// Sets the scope without fetching or re-subscribing; used before the first
+  /// load, when the roster fetch and socket connect read the scope themselves.
+  void scopeTo(String? circleId) {
+    if (_circleId == circleId) return;
+    _circleId = circleId;
+    _scopeGeneration++;
+  }
+
+  void _sendSubscribe() {
+    final WebSocketChannel? channel = _channel;
+    if (channel == null) return;
+    try {
+      channel.sink.add(jsonEncode(<String, String>{
+        'type': 'subscribe',
+        'circle_id': _circleId ?? 'all',
+      }));
+    } catch (_) {
+      _scheduleReconnect();
+    }
+  }
+
   /// The current member list (live-updated).
   List<Member> get members => List<Member>.unmodifiable(_members);
 
@@ -146,12 +215,19 @@ class FamilyService {
   /// arrives between this fetch and the WebSocket `members` snapshot is not
   /// dropped (it can be matched against the freshly fetched members).
   Future<List<Member>> fetchMembers() async {
-    final dynamic data = await ApiClient.get('/family/members');
+    final int gen = _scopeGeneration;
+    final String? scope = _circleId;
+    final dynamic data = await ApiClient.get(
+      scope == null
+          ? '/family/members'
+          : '/family/members?circle_id=${Uri.encodeQueryComponent(scope)}',
+    );
     final List<dynamic> list = data as List<dynamic>;
     final List<Member> mapped = list
         .map((dynamic e) => memberFromJson(e as Map<String, dynamic>))
         .toList();
     await _refreshPlaces();
+    if (gen != _scopeGeneration) return _members; // superseded by a newer scope
     return _replaceMembers(mapped);
   }
 
@@ -305,6 +381,9 @@ class FamilyService {
     }
   }
 
+  @visibleForTesting
+  void debugHandleFrame(String raw) => _onFrame(raw);
+
   void _onFrame(dynamic raw) {
     // Any frame — even a malformed or unknown one — proves the connection
     // path is alive, so reset the watchdog before parsing.
@@ -317,7 +396,29 @@ class FamilyService {
       return; // Ignore malformed frames.
     }
 
+    // A frame labelled with another circle (a late snapshot from before a
+    // switch, or a per-circle copy for a circle we are not viewing) is dropped.
+    final dynamic label = map['circle_id'];
+    if ((map['type'] == 'members' ||
+            map['type'] == 'location' ||
+            map['type'] == 'presence') &&
+        !frameInScope(_circleId, label is String ? label : null)) {
+      return;
+    }
+
     switch (map['type']) {
+      case 'circle_removed':
+        final dynamic gone = map['circle_id'];
+        if (gone is String && gone.isNotEmpty) onCircleGone?.call(gone);
+        break;
+      case 'error':
+        if (map['code'] == 'circle_not_found' && _circleId != null) {
+          onCircleGone?.call(_circleId!);
+        }
+        break;
+      case 'sharing':
+        onSharingChanged?.call();
+        break;
       case 'welcome':
         final String? id = map['user_id'] as String?;
         if (id != null) {
@@ -485,7 +586,12 @@ class FamilyService {
   Uri _wsUri() {
     final Uri base = Uri.parse(ServerConfig.instance.apiBaseUrl);
     final String scheme = base.scheme == 'https' ? 'wss' : 'ws';
-    return base.replace(scheme: scheme, path: '/ws/stream');
+    return base.replace(
+      scheme: scheme,
+      path: '/ws/stream',
+      queryParameters:
+          _circleId == null ? null : <String, String>{'circle_id': _circleId!},
+    );
   }
 
   /// Subscribes to OS connectivity changes for the service's lifetime
