@@ -20,6 +20,7 @@ import 'driving_detection_screen.dart';
 import 'families_screen.dart';
 import 'server_config_screen.dart';
 import 'welcome_screen.dart';
+import 'performance_screen.dart';
 import 'privacy_policy_screen.dart';
 import 'security_screen.dart';
 
@@ -77,6 +78,29 @@ String pushNotificationsSubtitle({
   }
 }
 
+/// Counts taps on the version row: [tapsNeeded] taps, each within [window] of
+/// the previous one, unlock the hidden Performance screen.
+class VersionTapCounter {
+  static const int tapsNeeded = 7;
+  static const Duration window = Duration(seconds: 2);
+
+  int _count = 0;
+  DateTime? _last;
+
+  /// Registers a tap at [now]; true when this tap completes the sequence.
+  bool tap(DateTime now) {
+    final DateTime? last = _last;
+    if (last == null || now.difference(last) > window) _count = 0;
+    _last = now;
+    _count++;
+    if (_count >= tapsNeeded) {
+      _count = 0;
+      return true;
+    }
+    return false;
+  }
+}
+
 /// The Settings screen. Account profile is server-backed; the remaining
 /// location and notification values are local toggles for now.
 class SettingsScreen extends StatefulWidget {
@@ -100,6 +124,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
   BiometricAvailability? _biometricAvailability;
   String? _biometricError;
   Duration _lockGrace = Duration.zero;
+
+  final VersionTapCounter _versionTaps = VersionTapCounter();
+
+  void _onVersionTap() {
+    if (_versionTaps.tap(DateTime.now())) {
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(builder: (_) => const PerformanceScreen()),
+      );
+    }
+  }
 
   @override
   void initState() {
@@ -451,10 +485,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
               chevron: true,
               onTap: () => push(const PrivacyPolicyScreen()),
             ),
-            DsListRow(
-              leading: DsListRow.iconTile(context, Icons.info_outline),
-              title: 'OpenFamily',
-              subtitle: 'Version 0.1.0',
+            // Seven quick taps open the hidden Performance screen. A bare
+            // GestureDetector keeps the row visually and semantically a plain
+            // static row.
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: _onVersionTap,
+              child: DsListRow(
+                leading: DsListRow.iconTile(context, Icons.info_outline),
+                title: 'OpenFamily',
+                subtitle: 'Version 0.1.0',
+              ),
             ),
             const SizedBox(height: AppSpace.lg),
             const Divider(height: 1),
