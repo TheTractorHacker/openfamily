@@ -285,3 +285,40 @@ func TestGeocodeCacheIsPerUserAndInvisible(t *testing.T) {
 		}
 	}
 }
+
+// The ladder makes several upstream calls but charges one limiter token; hits
+// from a relaxed attempt are flagged for the app.
+func TestGeocodeLadderIsOneTokenAndMarksApproximate(t *testing.T) {
+	var hits int32
+	s := geoServer(t, "photon", func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		if r.URL.Query().Get("q") == "Old 88 Road, Chester, Arkansas" {
+			w.Write(geoFixture(t, "photon_live_old88_street.json"))
+			return
+		}
+		w.Write(geoFixture(t, "photon_empty.json"))
+	})
+	rec := geoCall(s.GeocodeSearch, "/geocode/search?q=14322+Old+88rd%2C+Chester+Ar&lat=35.31049&lon=-94.39051", geoUser)
+	if rec.Code != 200 || hits != 2 {
+		t.Fatalf("%d hits=%d", rec.Code, hits)
+	}
+	var body struct {
+		Approximate bool `json:"approximate"`
+		Results     []struct {
+			Approximate bool   `json:"approximate"`
+			Matched     string `json:"matched"`
+		} `json:"results"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &body)
+	if !body.Approximate || len(body.Results) == 0 || !body.Results[0].Approximate || body.Results[0].Matched != "street" {
+		t.Fatalf("%s", rec.Body)
+	}
+	// Repeated calls consume one token each even though each used two attempts.
+	var last int
+	for i := 0; i < geocodeSearchPerMin; i++ {
+		last = geoCall(s.GeocodeSearch, "/geocode/search?q=14322+Old+88rd%2C+Chester+Ar", geoUser).Code
+	}
+	if last != http.StatusTooManyRequests {
+		t.Fatalf("limiter last=%d (31st request must be refused)", last)
+	}
+}

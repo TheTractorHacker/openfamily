@@ -15,6 +15,13 @@ type Result struct {
 	Lat   float64 `json:"lat"`
 	Lon   float64 `json:"lon"`
 	Type  string  `json:"type"` // house | street | city | poi
+	// Approximate is true when the hit comes from a relaxed attempt (the house
+	// number or street was dropped); Matched says what was matched: "street"
+	// or "locality".
+	Approximate bool   `json:"approximate,omitempty"`
+	Matched     string `json:"matched,omitempty"`
+	// Source is set for fallback providers ("nominatim", "census").
+	Source string `json:"source,omitempty"`
 }
 
 // Address is a normalized reverse-geocoding hit.
@@ -71,6 +78,11 @@ func streetLine(houseNumber, street string) string {
 
 type photon struct{}
 
+// photonBiasScale strengthens the local bias (0..1). Checked live: 0.6 keeps
+// nearby streets first without hurting ranking; 1.0 starts to push exact
+// text matches below unrelated, merely close places.
+const photonBiasScale = "0.6"
+
 type photonCollection struct {
 	Features []struct {
 		Geometry struct {
@@ -95,8 +107,9 @@ type photonCollection struct {
 func (photon) searchURL(base *url.URL, q string, bias *Point, limit int, lang string) string {
 	v := url.Values{"q": {q}, "limit": {strconv.Itoa(limit)}}
 	if bias != nil {
-		v.Set("lat", strconv.FormatFloat(bias.Lat, 'f', 2, 64))
-		v.Set("lon", strconv.FormatFloat(bias.Lon, 'f', 2, 64))
+		v.Set("lat", strconv.FormatFloat(bias.Lat, 'f', 3, 64))
+		v.Set("lon", strconv.FormatFloat(bias.Lon, 'f', 3, 64))
+		v.Set("location_bias_scale", photonBiasScale)
 	}
 	if lang != "" {
 		v.Set("lang", lang)
@@ -232,11 +245,34 @@ func (nominatim) searchURL(base *url.URL, q string, bias *Point, limit int, lang
 	}
 	if bias != nil {
 		// A soft bias: viewbox without bounded=1 only ranks nearby hits higher.
-		const d = 0.5
-		v.Set("viewbox", strconv.FormatFloat(bias.Lon-d, 'f', 2, 64)+","+
-			strconv.FormatFloat(bias.Lat+d, 'f', 2, 64)+","+
-			strconv.FormatFloat(bias.Lon+d, 'f', 2, 64)+","+
-			strconv.FormatFloat(bias.Lat-d, 'f', 2, 64))
+		v.Set("viewbox", viewbox(bias))
+	}
+	if lang != "" {
+		v.Set("accept-language", lang)
+	}
+	return withPath(base, "/search", v)
+}
+
+func viewbox(bias *Point) string {
+	const d = 0.5
+	return strconv.FormatFloat(bias.Lon-d, 'f', 3, 64) + "," +
+		strconv.FormatFloat(bias.Lat+d, 'f', 3, 64) + "," +
+		strconv.FormatFloat(bias.Lon+d, 'f', 3, 64) + "," +
+		strconv.FormatFloat(bias.Lat-d, 'f', 3, 64)
+}
+
+// structuredURL builds a structured search (street/city/state), which the
+// public Nominatim often resolves better than free text for US addresses.
+func (nominatim) structuredURL(base *url.URL, street, city, state string, us bool, bias *Point, limit int, lang string) string {
+	v := url.Values{
+		"street": {street}, "city": {city}, "state": {state},
+		"format": {"jsonv2"}, "addressdetails": {"1"}, "limit": {strconv.Itoa(limit)},
+	}
+	if us {
+		v.Set("countrycodes", "us")
+	}
+	if bias != nil {
+		v.Set("viewbox", viewbox(bias))
 	}
 	if lang != "" {
 		v.Set("accept-language", lang)

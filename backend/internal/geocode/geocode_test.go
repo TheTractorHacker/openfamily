@@ -179,7 +179,7 @@ func TestSearchAndCache(t *testing.T) {
 	if !cached || atomic.LoadInt32(&hits) != 1 {
 		t.Fatalf("cached=%v hits=%d", cached, hits)
 	}
-	if got.URL.Path != "/api" || got.URL.Query().Get("lang") != "en" || got.URL.Query().Get("lat") != "39.80" {
+	if got.URL.Path != "/api" || got.URL.Query().Get("lang") != "en" || got.URL.Query().Get("lat") != "39.799" {
 		t.Fatalf("upstream request: %s", got.URL)
 	}
 	if ua := got.Header.Get("User-Agent"); ua != "OpenFamily/1.2.3 (self-hosted)" {

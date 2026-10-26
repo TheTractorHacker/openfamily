@@ -83,10 +83,14 @@ func main() {
 	if geo, err := geocode.New(geocode.Settings{
 		URL: cfg.GeocoderURL, Type: cfg.GeocoderType, Lang: cfg.GeocoderLang,
 		AllowPrivate: cfg.GeocoderAllowPrivate, Version: config.BuildVersion(),
+		FallbackURL: cfg.GeocoderFallbackURL, CensusEnabled: cfg.GeocoderCensusEnabled,
 	}); err != nil {
 		slog.Warn("geocoder disabled: invalid configuration", "reason", err.Error())
 	} else if geo != nil {
 		srv.Geocoder = geo
+		if ferr := geo.FallbackError(); ferr != nil {
+			slog.Warn("geocoder fallback disabled: invalid configuration", "reason", ferr.Error())
+		}
 		slog.Info("geocoder enabled", "type", cfg.GeocoderType, "autocomplete", geo.Autocomplete())
 		if geo.Public() {
 			slog.Warn("GEOCODER_URL is the public nominatim.openstreetmap.org: autocomplete is disabled and explicit searches are limited to 1/second per its usage policy; prefer a self-hosted Photon")
