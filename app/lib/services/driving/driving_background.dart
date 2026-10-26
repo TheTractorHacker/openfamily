@@ -10,9 +10,13 @@ class DrivingBackground {
 
   static DrivingRuntime? _runtime;
 
+  static final DrivingEventsService _service =
+      DrivingEventsService(const IngestKeySensorEventsApi());
+
   static DrivingRuntime get _rt => _runtime ??= DrivingRuntime(
         feed: PlatformDrivingFeed(),
-        service: DrivingEventsService(const IngestKeySensorEventsApi()),
+        service: _service,
+        syncOptIn: _service.syncOptIn,
         isEnabled: DrivingSettings.sensorEnabled,
         isPhoneUseEnabled: DrivingSettings.phoneUseEnabled,
       );

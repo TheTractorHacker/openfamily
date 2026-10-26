@@ -205,7 +205,9 @@ class MemberDrivingCard extends StatelessWidget {
     );
     return Semantics(
       button: true,
-      label: '$displayName. $_summary. $riskText. Opens trips and report.',
+      label: '$displayName. $_summary. '
+          '${report.drives > 0 && (report.topSpeedMps ?? 0) > 0 ? 'Top speed ${units.formatSpeed(report.topSpeedMps!)}, GPS speed. ' : ''}'
+          '$riskText. Opens trips and report.',
       excludeSemantics: true,
       onTap: onTap,
       child: Material(
@@ -237,6 +239,13 @@ class MemberDrivingCard extends StatelessWidget {
                           color: cs.onSurfaceVariant,
                         ),
                       ),
+                      if (report.drives > 0 && (report.topSpeedMps ?? 0) > 0)
+                        Text(
+                          'Top speed ${units.formatSpeed(report.topSpeedMps!)} (GPS)',
+                          style: AppType.secondary.copyWith(
+                            color: cs.onSurfaceVariant,
+                          ),
+                        ),
                       const SizedBox(height: AppSpace.sm),
                       pill,
                     ],
@@ -248,6 +257,83 @@ class MemberDrivingCard extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Members with no drives in the period, collapsed under one row so one busy
+/// driver is not buried under empty cards.
+class NoDrivesGroup extends StatefulWidget {
+  const NoDrivesGroup({super.key, required this.names, required this.children});
+
+  final List<String> names;
+  final List<Widget> children;
+
+  @override
+  State<NoDrivesGroup> createState() => _NoDrivesGroupState();
+}
+
+class _NoDrivesGroupState extends State<NoDrivesGroup> {
+  bool _open = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme cs = Theme.of(context).colorScheme;
+    final String who = widget.names.join(', ');
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        Semantics(
+          button: true,
+          expanded: _open,
+          label: 'No drives: $who. ${_open ? 'Collapse' : 'Expand'}.',
+          excludeSemantics: true,
+          onTap: () => setState(() => _open = !_open),
+          child: Material(
+            color: BrandTheme.of(context).sheet,
+            borderRadius: BorderRadius.circular(AppRadius.lg),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(AppRadius.lg),
+              onTap: () => setState(() => _open = !_open),
+              child: Container(
+                constraints: const BoxConstraints(minHeight: kMinTarget),
+                padding: const EdgeInsets.all(AppSpace.lg),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(AppRadius.lg),
+                  border: Border.all(color: cs.outlineVariant),
+                ),
+                child: Row(
+                  children: <Widget>[
+                    Icon(Icons.hourglass_empty_rounded,
+                        color: cs.onSurfaceVariant),
+                    const SizedBox(width: AppSpace.md),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          const Text('No drives', style: AppType.headline),
+                          Text(
+                            who,
+                            style: AppType.secondary
+                                .copyWith(color: cs.onSurfaceVariant),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Icon(
+                      _open ? Icons.expand_less : Icons.expand_more,
+                      color: cs.onSurfaceVariant,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+        if (_open)
+          for (final Widget c in widget.children)
+            Padding(padding: const EdgeInsets.only(top: AppSpace.md), child: c),
+      ],
     );
   }
 }
@@ -277,9 +363,11 @@ class DrivingReportSkeleton extends StatelessWidget {
           SizedBox(height: AppSpace.md),
           DsSkeleton(height: 84, radius: AppRadius.lg),
           SizedBox(height: AppSpace.lg),
-          DsSkeleton(height: 112, radius: AppRadius.lg),
+          DsSkeleton(height: 190, radius: AppRadius.lg),
+          SizedBox(height: AppSpace.lg),
+          DsSkeleton(height: 88, radius: AppRadius.lg),
           SizedBox(height: AppSpace.md),
-          DsSkeleton(height: 112, radius: AppRadius.lg),
+          DsSkeleton(height: 88, radius: AppRadius.lg),
         ],
       ),
     );

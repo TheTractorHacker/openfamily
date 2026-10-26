@@ -188,6 +188,9 @@ class TripReport {
     required this.members,
     required this.thresholds,
     required this.estimated,
+    this.sensorMembers = const <String>[],
+    this.days = const <ReportDay>[],
+    this.recentTrips = const <RecentTrip>[],
   });
 
   factory TripReport.fromJson(Map<String, dynamic> j) {
@@ -205,6 +208,23 @@ class TripReport {
           : const <MemberReport>[],
       thresholds: ReportThresholds.fromJson(j['thresholds']),
       estimated: j['estimated'] != false,
+      sensorMembers: j['sensor_members'] is List
+          ? (j['sensor_members'] as List).map((Object? e) => '$e').toList()
+          : const <String>[],
+      days: j['days'] is List
+          ? (j['days'] as List)
+              .whereType<Map<String, dynamic>>()
+              .map(ReportDay.tryParse)
+              .whereType<ReportDay>()
+              .toList()
+          : const <ReportDay>[],
+      recentTrips: j['recent_trips'] is List
+          ? (j['recent_trips'] as List)
+              .whereType<Map<String, dynamic>>()
+              .map(RecentTrip.tryParse)
+              .whereType<RecentTrip>()
+              .toList()
+          : const <RecentTrip>[],
     );
   }
 
@@ -221,6 +241,20 @@ class TripReport {
   /// Braking / acceleration are GPS estimates.
   final bool estimated;
 
+  /// Users (visible to the viewer) whose phone sensor is on.
+  final List<String> sensorMembers;
+
+  /// One entry per local day of the period, zero-filled. Empty when the
+  /// server predates the field.
+  final List<ReportDay> days;
+
+  /// The newest drives (at most 10) of the period, newest first.
+  final List<RecentTrip> recentTrips;
+
+  /// True when no member has the phone sensor on, so every braking /
+  /// acceleration count is a GPS estimate.
+  bool get gpsOnly => sensorMembers.isEmpty;
+
   bool get isEmpty => totals.drives == 0;
 
   Trend trend(DrivingEventKind k) =>
@@ -235,6 +269,76 @@ class TripReport {
           (b.events.of(k) ?? 0).compareTo(a.events.of(k) ?? 0));
     return out;
   }
+}
+
+/// One local calendar day of the report period.
+class ReportDay {
+  const ReportDay({
+    required this.date,
+    this.drives = 0,
+    this.distanceM = 0,
+    this.topSpeedMps = 0,
+  });
+
+  static ReportDay? tryParse(Map<String, dynamic> j) {
+    final DateTime? d = DateTime.tryParse('${j['date']}');
+    if (d == null) return null;
+    return ReportDay(
+      date: DateTime(d.year, d.month, d.day),
+      drives: _intOrNull(j['drives']) ?? 0,
+      distanceM: _num(j['distance_m']),
+      topSpeedMps: _num(j['top_speed_mps']),
+    );
+  }
+
+  final DateTime date;
+  final int drives;
+  final double distanceM;
+  final double topSpeedMps;
+}
+
+/// A drive listed on the Driving page (`recent_trips`).
+class RecentTrip {
+  const RecentTrip({
+    required this.id,
+    required this.userId,
+    required this.name,
+    required this.startedAt,
+    required this.endedAt,
+    this.distanceM = 0,
+    this.durationS = 0,
+    this.maxSpeedMps = 0,
+    this.events = const EventCounts(),
+  });
+
+  static RecentTrip? tryParse(Map<String, dynamic> j) {
+    final DateTime? s = DateTime.tryParse('${j['started_at']}');
+    final DateTime? e = DateTime.tryParse('${j['ended_at']}');
+    if (s == null || e == null) return null;
+    return RecentTrip(
+      id: (j['id'] ?? '').toString(),
+      userId: (j['user_id'] ?? '').toString(),
+      name: (j['name'] ?? '').toString(),
+      startedAt: s.toLocal(),
+      endedAt: e.toLocal(),
+      distanceM: _num(j['distance_m']),
+      durationS: _num(j['duration_s']),
+      maxSpeedMps: _num(j['max_speed_mps']),
+      events: EventCounts.fromJson(j['event_counts']),
+    );
+  }
+
+  final String id;
+  final String userId;
+  final String name;
+  final DateTime startedAt;
+  final DateTime endedAt;
+  final double distanceM;
+  final double durationS;
+  final double maxSpeedMps;
+  final EventCounts events;
+
+  Duration get duration => Duration(seconds: durationS.round());
 }
 
 /// One detected event on a trip (`GET /trips/{id}/events`).
@@ -333,6 +437,43 @@ String periodPhrase(ReportPreset p) => switch (p) {
   ReportPreset.lastWeek => 'last week',
   ReportPreset.custom => 'in this week',
 };
+
+/// Start of the month containing [d].
+DateTime monthStartOf(DateTime d) => DateTime(d.year, d.month);
+
+/// The start of the period of kind [period] ('week' or 'month') containing [d].
+DateTime periodStartOf(String period, DateTime d) =>
+    period == 'month' ? monthStartOf(d) : weekStartOf(d);
+
+/// The period before/after [start] ([steps] negative = earlier).
+DateTime shiftPeriod(String period, DateTime start, int steps) =>
+    period == 'month'
+        ? DateTime(start.year, start.month + steps)
+        : DateTime(start.year, start.month, start.day + 7 * steps);
+
+/// How the period reads in sentences: "this week", "last month", "that week".
+String periodPhraseFor(String period, DateTime start, DateTime now) {
+  final DateTime cur = periodStartOf(period, now);
+  final String unit = period == 'month' ? 'month' : 'week';
+  if (start == cur) return 'this $unit';
+  if (start == shiftPeriod(period, cur, -1)) return 'last $unit';
+  return 'in this $unit';
+}
+
+const List<String> _monthNames = <String>[
+  'January', 'February', 'March', 'April', 'May', 'June', 'July', 'August',
+  'September', 'October', 'November', 'December',
+];
+
+/// "October 2026" or "Oct 19 – Oct 25" for the period starting at [start].
+String periodTitle(String period, DateTime start, {DateTime? now}) {
+  if (period == 'month') return '${_monthNames[start.month - 1]} ${start.year}';
+  return formatDateRange(
+    start,
+    DateTime(start.year, start.month, start.day + 6),
+    now: now,
+  );
+}
 
 /// "down from 3", "up from 1", "no change", "no earlier data" as words, so
 /// the trend never relies on colour or an arrow alone.

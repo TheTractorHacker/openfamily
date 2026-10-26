@@ -257,6 +257,12 @@ func (s *Server) TripsReport(w http.ResponseWriter, r *http.Request) {
 	}
 	evRows.Close()
 
+	days, recent, err := s.reportDays(r.Context(), ids, per, offset, members)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load trips")
+		return
+	}
+
 	list := make([]*reportMember, 0, len(members))
 	for _, m := range members {
 		list = append(list, m)
@@ -310,6 +316,7 @@ func (s *Server) TripsReport(w http.ResponseWriter, r *http.Request) {
 		"period": period, "start": per.startDay, "end": per.endDay,
 		"prev_start": per.prevStartDay, "prev_end": per.prevEndDay,
 		"totals": cur, "previous_totals": prev, "members": out, "sensor_members": sensorMembers,
+		"days": days, "recent_trips": recent,
 		"thresholds": reportThresholds{SpeedingMps: ep.SpeedingMps, SpeedingSeconds: ep.SpeedingSeconds,
 			HardBrakeMps2: ep.HardBrakeMps2, RapidAccelMps2: ep.RapidAccelMps2},
 		"estimated": true,

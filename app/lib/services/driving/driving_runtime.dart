@@ -35,6 +35,7 @@ class DrivingRuntime implements DrivingFeedSink {
     required this.service,
     required this.isEnabled,
     required this.isPhoneUseEnabled,
+    this.syncOptIn,
     int Function()? clock,
     DrivingConfig config = const DrivingConfig(),
     this.uploadEvery = const Duration(seconds: 60),
@@ -48,6 +49,11 @@ class DrivingRuntime implements DrivingFeedSink {
   final DrivingEventsService service;
   final Future<bool> Function() isEnabled;
   final Future<bool> Function() isPhoneUseEnabled;
+
+  /// Tells the server the effective opt-in until it has acknowledged it
+  /// (detection is on by default). Retried at most every [syncEvery].
+  final Future<bool> Function()? syncOptIn;
+  final Duration syncEvery = const Duration(minutes: 10);
   final Duration uploadEvery;
   final Duration tickEvery;
   final int Function() _clock;
@@ -57,6 +63,8 @@ class DrivingRuntime implements DrivingFeedSink {
 
   Timer? _timer;
   int _lastUpload = 0;
+  int? _lastSync;
+  bool _synced = false;
   double? _lastLat;
   double? _lastLon;
   bool _phoneActive = false;
@@ -70,6 +78,7 @@ class DrivingRuntime implements DrivingFeedSink {
     double? lat,
     double? lon,
   }) async {
+    await _maybeSyncOptIn();
     if (!await isEnabled()) {
       if (_session.isActive) _session.stop();
       return;
@@ -79,6 +88,18 @@ class DrivingRuntime implements DrivingFeedSink {
     _session.onSpeed(_clock(), speedMps);
     // A queue left over from a previous session (offline) is retried here.
     await _maybeUpload(force: false);
+  }
+
+  Future<void> _maybeSyncOptIn() async {
+    final Future<bool> Function()? sync = syncOptIn;
+    if (sync == null || _synced) return;
+    final int now = _clock();
+    final int? last = _lastSync;
+    if (last != null && now - last < syncEvery.inMilliseconds) return;
+    _lastSync = now;
+    try {
+      _synced = await sync(); // acknowledged: stop asking
+    } catch (_) {}
   }
 
   void _start() {

@@ -58,14 +58,30 @@ effect are returned in the report (`thresholds`). The older per-request
   `previous_events`, `thresholds` and `estimated: true`. Members include
   everyone the viewer may see, also those with zero drives. Distances are in
   metres and speeds in m/s; clients convert.
+  Also returns (additive):
+  - `days`: one `{date:"YYYY-MM-DD", drives, distance_m, top_speed_mps}` per
+    local calendar day of the period (7 for a week, 28-31 for a month), zero
+    filled, with days cut at the caller's `utc_offset_minutes`.
+  - `recent_trips`: up to 10 driving trips of the period across the visible
+    members, newest first: `{id, user_id, name, started_at, ended_at,
+    distance_m, duration_s, max_speed_mps, mode, event_counts:{speeding,
+    hard_brake, rapid_accel, phone_use}}`. `event_counts.phone_use` is `null`
+    unless that member has the phone sensor on. Event counts follow the same
+    "sensor wins" view as the report.
+  Both use exactly the report's authorization: circle membership plus the
+  member sharing location (a member always sees their own trips).
 - `GET /trips/{id}/events` lists a trip's events. `GET /trips/{id}` includes
   the same list as `events`.
 
 ## Phone sensor events
 
-The Android app can detect `hard_brake`, `rapid_accel` and `phone_use` with the
-motion sensor and upload them. Each user opts in once (per user, not per
-device); the opt-in is stored in `users.driving_sensor_enabled`.
+The Android app can detect `hard_brake` and `rapid_accel` with the motion
+sensor, and `phone_use` (a separate, experimental switch that stays off by
+default), and upload them. Driving detection is **on by default in the app**:
+the app sends the opt-in (`sensor_enabled=true`) the first time it can and
+retries until acknowledged; turn it off in Settings > Driving detection.
+The opt-in is per user, not per device, and is stored in
+`users.driving_sensor_enabled` (server default false until the app reports).
 
 ### `POST /trips/sensor-events`
 
