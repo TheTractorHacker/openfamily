@@ -76,6 +76,13 @@ services:
       TILE_URL: ${TILE_URL:-}
       SATELLITE_TILE_URL: ${SATELLITE_TILE_URL:-}
       MAP_STYLE_URL: ${MAP_STYLE_URL:-}
+      # Address search / automatic address detection for places. The server
+      # proxies it, so phones never contact the provider. `-` (not `:-`) means
+      # an explicitly EMPTY GEOCODER_URL disables the feature. See docs/maps.md.
+      GEOCODER_URL: ${GEOCODER_URL-https://photon.komoot.io}
+      GEOCODER_TYPE: ${GEOCODER_TYPE:-photon}
+      GEOCODER_LANG: ${GEOCODER_LANG:-}
+      GEOCODER_ALLOW_PRIVATE: ${GEOCODER_ALLOW_PRIVATE:-false}
       # APNs (iOS push). Empty disables APNs; Android still works via ntfy.
       # To enable iOS push, add a volume mount to this service:
       #   volumes:

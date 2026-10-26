@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/TheTractorHacker/openfamily/backend/internal/auth"
+	"github.com/TheTractorHacker/openfamily/backend/internal/geocode"
 	"github.com/TheTractorHacker/openfamily/backend/internal/push"
 	"github.com/TheTractorHacker/openfamily/backend/internal/sms"
 )
@@ -64,6 +65,10 @@ type Server struct {
 	TileURL          string
 	SatelliteTileURL string
 	MapStyleURL string
+
+	// Geocoder is the optional address search/reverse proxy (nil = disabled,
+	// GET /geocode/* answer 503). See internal/geocode.
+	Geocoder *geocode.Service
 
 	// PublicBaseURL is the https origin used to build SMS share links.
 	PublicBaseURL string

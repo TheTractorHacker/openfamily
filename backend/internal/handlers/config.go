@@ -26,5 +26,10 @@ func (s *Server) GetConfig(w http.ResponseWriter, r *http.Request) {
 		"tile_url":           tileURL,
 		"satellite_tile_url": satelliteURL,
 		"map_style_url":      s.MapStyleURL,
+		// Availability only; the provider URL is never exposed.
+		"geocoder": map[string]bool{
+			"enabled":      s.Geocoder.Enabled(),
+			"autocomplete": s.Geocoder.Autocomplete(),
+		},
 	})
 }

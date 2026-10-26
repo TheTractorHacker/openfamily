@@ -47,6 +47,12 @@ They set no cookies and ship no analytics or tracking code.
   another provider or your own tiles; the app ignores tile URLs that do not use
   HTTPS. A key in that URL is visible to every
   phone and to anyone who can call `GET /config`.
+- **Address search (on by default):** when a place is created or edited, the
+  address text typed and the pin's coordinates go from your server (not the
+  phone) to the geocoder, by default the public Photon at photon.komoot.io,
+  which sees them and your server's IP. No user identity is sent and your
+  server does not log them. Set `GEOCODER_URL=` (empty) to turn it off, or
+  self-host Photon; see `docs/maps.md`.
 - **Android push:** your ntfy server (or another UnifiedPush distributor).
   Payloads omit the tracked person's name unless `VERBOSE_PUSH=true`.
 - **iOS push:** APNs (platform requirement). Payloads do not include
