@@ -15,7 +15,6 @@ import 'package:openfamily/screens/sos_screen.dart';
 import 'package:openfamily/screens/trips_screen.dart';
 import 'package:openfamily/models/alert.dart';
 import 'package:openfamily/services/speed_units.dart';
-import 'package:openfamily/services/trips_service.dart';
 import 'package:openfamily/theme/app_theme.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 

@@ -162,15 +162,14 @@ class TripCard extends StatelessWidget {
                     children: <Widget>[
                       TripModeBadge(mode: trip.mode),
                       const Spacer(),
-                      Flexible(
-                        child: Text(
-                          '${tripClock(context, trip.startedAt)} - '
-                          '${tripClock(context, trip.endedAt)}',
-                          style: AppType.body.copyWith(color: cs.onSurface),
-                        ),
-                      ),
                       Icon(Icons.chevron_right, color: cs.onSurfaceVariant),
                     ],
+                  ),
+                  const SizedBox(height: AppSpace.sm),
+                  Text(
+                    '${tripClock(context, trip.startedAt)} - '
+                    '${tripClock(context, trip.endedAt)}',
+                    style: AppType.body.copyWith(color: cs.onSurface),
                   ),
                   const SizedBox(height: AppSpace.md),
                   Wrap(

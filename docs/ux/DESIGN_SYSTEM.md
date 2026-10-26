@@ -96,3 +96,36 @@ and the actions for the QR code / join link of issue #40.
 
 Goldens for these screens live in `test/goldens/r2_*.png` (light, dark, and
 200% text for welcome, sign in and permissions).
+
+## Third wave (safety, alerts, trips, places)
+
+SOS, check in, help alert, alert status / received / history, safety
+(emergency contacts), trips, trip detail, driving report, day detail, places
+and the place picker use the same tokens, `DsPillButton`, `DsListRow`,
+`DsStatusChip` and the shared states.
+
+SOS rules that every change must keep:
+
+* Honest wording: "Your family was notified. Emergency services were NOT
+  contacted." (`kFamilyNotifiedLine`) is shown on every sent alert, and the SOS
+  screen says up front that SOS does not call emergency services.
+* Delivery states are an icon plus words (`deliveryStateStyle`), never colour
+  alone. `AlertTile` shows Active / Resolved as a `DsStatusChip` with an icon.
+* The regional emergency dial button (`EmergencyCallButton`) opens the phone's
+  dialler with the local number; it never places the call by itself.
+* No coordinates in notification text. (The place picker shows the pin's
+  coordinates on screen only, as a pin-drop aid.)
+* Slide-to-cancel always has a plain Cancel button next to it.
+* Screens scroll instead of squeezing at large text; the SOS disc is 200dp.
+
+Trips and the driving report keep the "GPS speed" labelling and the mph / km/h
+conversion (`UnitSystem`). `PlacesScreen` takes an optional `loader` for tests
+and goldens.
+
+Location tab: the circle pill shows "Location sharing: on / paused" and opens
+the circle sheet. Every circle row has an info button ("Open details for X")
+and, for the selected circle, the sheet header has "Open circle details" and a
+sharing chip. Selecting a row still only selects it.
+
+Goldens: `test/goldens/m3_*.png` (SOS, alert status, trips, report, places in
+light, dark and 200% text).

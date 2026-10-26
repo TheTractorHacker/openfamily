@@ -471,8 +471,9 @@ class _SosScreenState extends State<SosScreen> {
                     : 'This alerts your family. It does not call emergency '
                         'services.',
                 textAlign: TextAlign.center,
-                style: AppType.secondary.copyWith(
-                  fontSize: 14,
+                style: AppType.body.copyWith(
+                  fontWeight: FontWeight.w500,
+                  height: 1.35,
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
               ),

@@ -316,41 +316,96 @@ class _PlaceTile extends StatelessWidget {
     // Words, not just colour: the alert state is part of the subtitle.
     final String subtitle =
         '$where\nArrival and departure alerts: ${place.alertsOn ? 'on' : 'off'}';
-    return DsListRow(
-      leading: DsListRow.iconTile(context, place.icon),
-      title: place.name,
-      subtitle: subtitle,
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        mainAxisAlignment: MainAxisAlignment.end,
-        children: <Widget>[
-          if (onToggleAlerts != null)
-            IconButton(
-              tooltip: place.alertsOn ? 'Alerts on' : 'Alerts off',
-              constraints: const BoxConstraints(
-                minWidth: kMinTarget,
-                minHeight: kMinTarget,
+    final bool large = MediaQuery.textScalerOf(context).scale(16) > 16 * 1.4;
+    final String alertsLabel = place.alertsOn ? 'Alerts on' : 'Alerts off';
+    final IconData alertsIcon = place.alertsOn
+        ? Icons.notifications_active
+        : Icons.notifications_off_outlined;
+    final Color alertsColor =
+        place.alertsOn ? brand.accentInk : cs.onSurfaceVariant;
+    if (!large) {
+      return DsListRow(
+        leading: DsListRow.iconTile(context, place.icon),
+        title: place.name,
+        subtitle: subtitle,
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.end,
+          children: <Widget>[
+            if (onToggleAlerts != null)
+              IconButton(
+                tooltip: alertsLabel,
+                constraints: const BoxConstraints(
+                  minWidth: kMinTarget,
+                  minHeight: kMinTarget,
+                ),
+                icon: Icon(alertsIcon, color: alertsColor),
+                onPressed: toggling ? null : onToggleAlerts,
               ),
-              icon: Icon(
-                place.alertsOn
-                    ? Icons.notifications_active
-                    : Icons.notifications_off_outlined,
-                color: place.alertsOn ? brand.accentInk : cs.onSurfaceVariant,
+            if (onDelete != null)
+              IconButton(
+                tooltip: 'Delete place',
+                constraints: const BoxConstraints(
+                  minWidth: kMinTarget,
+                  minHeight: kMinTarget,
+                ),
+                icon: Icon(Icons.delete_outline, color: cs.onSurfaceVariant),
+                onPressed: onDelete,
               ),
-              onPressed: toggling ? null : onToggleAlerts,
+          ],
+        ),
+      );
+    }
+    // Large text: the actions get their own labelled row so the place name
+    // and address keep the full width.
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        DsListRow(
+          leading: DsListRow.iconTile(context, place.icon),
+          title: place.name,
+          subtitle: subtitle,
+        ),
+        if (onToggleAlerts != null || onDelete != null)
+          Padding(
+            padding: const EdgeInsets.only(
+              left: AppSpace.xl,
+              right: AppSpace.xl,
+              bottom: AppSpace.sm,
             ),
-          if (onDelete != null)
-            IconButton(
-              tooltip: 'Delete place',
-              constraints: const BoxConstraints(
-                minWidth: kMinTarget,
-                minHeight: kMinTarget,
-              ),
-              icon: Icon(Icons.delete_outline, color: cs.onSurfaceVariant),
-              onPressed: onDelete,
+            child: Wrap(
+              spacing: AppSpace.sm,
+              children: <Widget>[
+                if (onToggleAlerts != null)
+                  Tooltip(
+                    message: alertsLabel,
+                    child: TextButton.icon(
+                      style: TextButton.styleFrom(
+                        minimumSize: const Size(kMinTarget, kMinTarget),
+                        foregroundColor: alertsColor,
+                      ),
+                      onPressed: toggling ? null : onToggleAlerts,
+                      icon: Icon(alertsIcon),
+                      label: Text(alertsLabel),
+                    ),
+                  ),
+                if (onDelete != null)
+                  Tooltip(
+                    message: 'Delete place',
+                    child: TextButton.icon(
+                      style: TextButton.styleFrom(
+                        minimumSize: const Size(kMinTarget, kMinTarget),
+                        foregroundColor: cs.onSurfaceVariant,
+                      ),
+                      onPressed: onDelete,
+                      icon: const Icon(Icons.delete_outline),
+                      label: const Text('Delete'),
+                    ),
+                  ),
+              ],
             ),
-        ],
-      ),
+          ),
+      ],
     );
   }
 }
