@@ -180,6 +180,25 @@ abstract final class AppGradients {
   }
 }
 
+/// Transparent status and navigation bars (the app draws edge to edge) with
+/// icon brightness matching the theme: dark icons on Ice, light on Night.
+/// Contrast enforcement is off so the gesture bar stays fully transparent
+/// instead of getting a translucent scrim.
+SystemUiOverlayStyle systemOverlayFor(Brightness b) {
+  final bool dark = b == Brightness.dark;
+  return SystemUiOverlayStyle(
+    statusBarColor: Colors.transparent,
+    statusBarIconBrightness: dark ? Brightness.light : Brightness.dark,
+    statusBarBrightness: dark ? Brightness.dark : Brightness.light,
+    systemNavigationBarColor: Colors.transparent,
+    systemNavigationBarDividerColor: Colors.transparent,
+    systemNavigationBarIconBrightness:
+        dark ? Brightness.light : Brightness.dark,
+    systemStatusBarContrastEnforced: false,
+    systemNavigationBarContrastEnforced: false,
+  );
+}
+
 ThemeData buildAppTheme() => buildLightTheme();
 
 ThemeData buildLightTheme() {
@@ -191,7 +210,7 @@ ThemeData buildLightTheme() {
     paper: AppColors.icePaper,
     onSurface: AppColors.iceInk,
     muted: AppColors.iceMuted,
-    overlay: SystemUiOverlayStyle.dark,
+    overlay: systemOverlayFor(Brightness.light),
   );
 }
 
@@ -204,7 +223,7 @@ ThemeData buildDarkTheme() {
     paper: AppColors.nightPaper,
     onSurface: AppColors.nightInk,
     muted: AppColors.nightMuted,
-    overlay: SystemUiOverlayStyle.light,
+    overlay: systemOverlayFor(Brightness.dark),
   );
 }
 
@@ -324,6 +343,22 @@ ThemeData _buildTheme({
           color: states.contains(WidgetState.selected) ? onSurface : muted,
         );
       }),
+    ),
+    navigationRailTheme: NavigationRailThemeData(
+      backgroundColor: brand.sheet,
+      indicatorColor: primary.withValues(alpha: 0.28),
+      selectedIconTheme: IconThemeData(size: 26, color: onSurface),
+      unselectedIconTheme: IconThemeData(size: 26, color: muted),
+      selectedLabelTextStyle: TextStyle(
+        fontSize: 12,
+        fontWeight: FontWeight.w800,
+        color: onSurface,
+      ),
+      unselectedLabelTextStyle: TextStyle(
+        fontSize: 12,
+        fontWeight: FontWeight.w600,
+        color: muted,
+      ),
     ),
     // Material 3 draws a level-3 black shadow under every FAB. On Night
     // charcoal that shadow reads as a thick black ring around the lime

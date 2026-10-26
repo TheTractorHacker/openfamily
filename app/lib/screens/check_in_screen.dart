@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../models/alert.dart';
 import '../services/alert_service.dart';
@@ -72,6 +73,7 @@ class _CheckInScreenState extends State<CheckInScreen> {
         _alertId = response['id'] as String;
       }
       if (!mounted) return;
+      HapticFeedback.mediumImpact();
       setState(() {
         _sent = true;
         _sending = false;

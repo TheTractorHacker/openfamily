@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/alert.dart';
@@ -192,6 +193,8 @@ class _SosScreenState extends State<SosScreen> {
   }
 
   void _startCountdown() {
+    // Felt confirmation that the SOS is armed.
+    unawaited(HapticFeedback.heavyImpact());
     _timer?.cancel();
     setState(() {
       _phase = _practice ? _SosPhase.practice : _SosPhase.countdown;
@@ -208,6 +211,7 @@ class _SosScreenState extends State<SosScreen> {
   }
 
   void _send() {
+    unawaited(HapticFeedback.vibrate());
     _timer?.cancel();
     if (_practice) {
       setState(() {

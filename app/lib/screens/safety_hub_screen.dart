@@ -26,7 +26,7 @@ class SafetyHubScreen extends StatelessWidget {
         centerTitle: false,
         titleTextStyle: AppType.title.copyWith(color: cs.onSurface),
       ),
-      body: ListView(
+      body: DsBody(child: ListView(
         children: <Widget>[
           Padding(
             padding: const EdgeInsets.fromLTRB(
@@ -89,7 +89,7 @@ class SafetyHubScreen extends StatelessWidget {
           ),
           const SizedBox(height: AppSpace.xxl),
         ],
-      ),
+      )),
     );
   }
 }

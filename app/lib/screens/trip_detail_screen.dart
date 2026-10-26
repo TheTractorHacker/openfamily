@@ -93,7 +93,7 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
         title: Text('${tripModeLabel(t.mode)} trip'),
         actions: const <Widget>[UnitToggleButton()],
       ),
-      body: ValueListenableBuilder<UnitSystem>(
+      body: DsBody(maxWidth: 760, child: ValueListenableBuilder<UnitSystem>(
         valueListenable: UnitPreferenceService.units,
         builder: (BuildContext context, UnitSystem units, _) {
           return RefreshIndicator(
@@ -111,7 +111,7 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
             ),
           );
         },
-      ),
+      )),
     );
   }
 

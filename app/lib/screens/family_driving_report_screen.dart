@@ -248,12 +248,15 @@ class _State extends State<FamilyDrivingReportScreen> {
               onRefresh: _load,
               child: Center(
                 child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 560),
+                  constraints: BoxConstraints(
+                    maxWidth:
+                        MediaQuery.sizeOf(context).width >= 840 ? 640 : 560,
+                  ),
                   child: ListView(
                     physics: const AlwaysScrollableScrollPhysics(),
                     padding: const EdgeInsets.fromLTRB(
                       AppSpace.gutter,
-                      AppSpace.md,
+                      AppSpace.lg,
                       AppSpace.gutter,
                       AppSpace.xxxl,
                     ),

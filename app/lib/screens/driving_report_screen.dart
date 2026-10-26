@@ -63,7 +63,7 @@ class _DrivingReportScreenState extends State<DrivingReportScreen> {
             ],
           ),
         ),
-        body: ValueListenableBuilder<UnitSystem>(
+        body: DsBody(child: ValueListenableBuilder<UnitSystem>(
           valueListenable: UnitPreferenceService.units,
           builder: (BuildContext context, UnitSystem units, _) {
             return Column(
@@ -93,7 +93,7 @@ class _DrivingReportScreenState extends State<DrivingReportScreen> {
               ],
             );
           },
-        ),
+        )),
       ),
     );
   }

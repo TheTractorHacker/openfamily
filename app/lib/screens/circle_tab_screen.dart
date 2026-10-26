@@ -36,7 +36,7 @@ class CircleTabScreen extends StatelessWidget {
         centerTitle: false,
         titleTextStyle: AppType.title.copyWith(color: cs.onSurface),
       ),
-      body: ListView(
+      body: DsBody(child: ListView(
         children: <Widget>[
           ValueListenableBuilder<String?>(
             valueListenable: userId,
@@ -103,7 +103,7 @@ class CircleTabScreen extends StatelessWidget {
           ),
           const SizedBox(height: AppSpace.xxl),
         ],
-      ),
+      )),
     );
   }
 }

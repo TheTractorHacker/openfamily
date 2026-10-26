@@ -83,6 +83,7 @@ class DrivingEventChips extends StatelessWidget {
                                   previous:
                                       report.previousTotals.events.of(kinds[k]),
                                   phrase: phrase,
+                                  compact: cols == 2,
                                   onTap: () => onTap(kinds[k]),
                                 )
                               : null,
@@ -107,7 +108,13 @@ class DrivingEventChip extends StatelessWidget {
     required this.previous,
     required this.phrase,
     required this.onTap,
+    this.compact = false,
   });
+
+  /// Icon beside the text (short, wide tiles) instead of stacked above it.
+  /// Used in the two-column phone layout so all four tiles stay compact and
+  /// the chart below stays on screen.
+  final bool compact;
 
   final DrivingEventKind kind;
 
@@ -145,15 +152,34 @@ class DrivingEventChip extends StatelessWidget {
           onTap: onTap,
           child: Container(
             constraints: const BoxConstraints(minHeight: kMinTarget),
-            padding: const EdgeInsets.symmetric(
-              horizontal: AppSpace.sm,
-              vertical: AppSpace.md,
+            padding: EdgeInsets.symmetric(
+              horizontal: AppSpace.md,
+              vertical: compact ? AppSpace.sm : AppSpace.md,
             ),
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(AppRadius.lg),
               border: Border.all(color: cs.outlineVariant),
             ),
-            child: Column(
+            child: compact
+                ? _compactBody(context, tint, ink, trend, tText, dark)
+                : _stackedBody(context, tint, ink, trend, tText, dark),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _stackedBody(
+    BuildContext context,
+    Color tint,
+    Color ink,
+    Trend trend,
+    String tText,
+    bool dark,
+  ) {
+    final BrandTheme brand = BrandTheme.of(context);
+    final ColorScheme cs = Theme.of(context).colorScheme;
+    return Column(
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
                 Container(
@@ -181,7 +207,7 @@ class DrivingEventChip extends StatelessWidget {
                     children: <Widget>[
                       Text(
                         '$count',
-                        style: AppType.title.copyWith(fontSize: 24),
+                        style: AppType.title.copyWith(fontSize: 24, fontFeatures: const <FontFeature>[FontFeature.tabularFigures()]),
                       ),
                       const SizedBox(width: AppSpace.xs),
                       Icon(
@@ -214,10 +240,88 @@ class DrivingEventChip extends StatelessWidget {
                     ),
                   ),
               ],
-            ),
+            );
+  }
+
+  Widget _compactBody(
+    BuildContext context,
+    Color tint,
+    Color ink,
+    Trend trend,
+    String tText,
+    bool dark,
+  ) {
+    final BrandTheme brand = BrandTheme.of(context);
+    final ColorScheme cs = Theme.of(context).colorScheme;
+    return Row(
+      children: <Widget>[
+        Container(
+          width: 36,
+          height: 36,
+          decoration: BoxDecoration(
+            color: tint.withValues(alpha: dark ? 0.28 : 0.16),
+            shape: BoxShape.circle,
+          ),
+          child: Icon(eventIcon(kind), size: 20, color: ink),
+        ),
+        const SizedBox(width: AppSpace.sm),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              if (count == null)
+                Text(
+                  'Not tracked yet',
+                  style: AppType.secondary.copyWith(
+                    fontWeight: FontWeight.w700,
+                    color: cs.onSurfaceVariant,
+                  ),
+                )
+              else
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    Text(
+                      '$count',
+                      style: AppType.title.copyWith(
+                        fontSize: 22,
+                        fontFeatures: const <FontFeature>[
+                          FontFeature.tabularFigures(),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: AppSpace.xs),
+                    Icon(
+                      trendIcon(trend),
+                      size: 18,
+                      color: trend == Trend.fewer
+                          ? (dark ? AppColors.accentBright : brand.accentInk)
+                          : trend == Trend.more
+                          ? ink
+                          : cs.onSurfaceVariant,
+                    ),
+                  ],
+                ),
+              Text(
+                kind.label,
+                style: AppType.secondary.copyWith(
+                  color: cs.onSurfaceVariant,
+                  fontSize: 12,
+                ),
+              ),
+              if (count != null)
+                Text(
+                  tText,
+                  style: AppType.secondary.copyWith(
+                    color: cs.onSurfaceVariant,
+                    fontSize: 11,
+                  ),
+                ),
+            ],
           ),
         ),
-      ),
+      ],
     );
   }
 }
