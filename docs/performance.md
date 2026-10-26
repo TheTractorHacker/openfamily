@@ -110,7 +110,7 @@ refresh unified into one single-flight first.
 | 40 sheet-drag frames: floating buttons rebuilt | 80 | 0 |
 | 4000x3000 avatar at 44 dp, 3x: decoded bitmap | 46,875 KB | 204 KB |
 | 2.5 MB JSON: longest event-loop gap | 76 ms (sync decode) | 55 ms |
-| Hidden Location tab, 20 frames: row rebuilds | 20 | 0 |
+| Hidden Location tab, 20 frames: row rebuilds | not measured on main (it had no hidden-tab guard) | 0 |
 
 The JSON row is a weak result on a loaded x86 host: the gap includes isolate
 start-up and result hand-over, so treat the benefit on a phone as unconfirmed
