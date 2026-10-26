@@ -10,7 +10,9 @@ import '../theme/app_theme.dart';
 import '../widgets/ds/ds.dart';
 import '../widgets/member_admin_section.dart';
 import '../widgets/member_avatar_bubble.dart';
+import '../widgets/live_speed.dart';
 import '../widgets/movement_icon.dart';
+import '../services/speed_units.dart';
 import 'day_detail_screen.dart';
 import '../widgets/trips_entry_button.dart';
 
@@ -92,11 +94,22 @@ class MemberProfileScreen extends StatelessWidget {
                       label: 'ETA',
                       value: member.eta ?? '—',
                     ),
-                    _DetailRow(
-                      icon: _MovementTile(member: member),
-                      label: 'Status',
-                      value: _drivingStatus(),
-                    ),
+                    member.movement == MovementType.car
+                        ? LiveSpeedBuilder(
+                            member: member,
+                            builder: (BuildContext _, double? mps,
+                                    UnitSystem units) =>
+                                _DetailRow(
+                              icon: _MovementTile(member: member),
+                              label: 'Status',
+                              value: _drivingStatus(mps, units),
+                            ),
+                          )
+                        : _DetailRow(
+                            icon: _MovementTile(member: member),
+                            label: 'Status',
+                            value: _drivingStatus(),
+                          ),
                     _DetailRow(
                       icon: DsListRow.iconTile(
                         context,
@@ -150,10 +163,11 @@ class MemberProfileScreen extends StatelessWidget {
     return AppColors.statusGreen;
   }
 
-  String _drivingStatus() {
-    if (member.movement == MovementType.car && member.speedMph != null) {
-      final String speed = '${member.speedMph} mph';
-      return member.isSpeeding ? 'Speeding · $speed' : 'Driving · $speed';
+  String _drivingStatus([double? mps, UnitSystem units = UnitSystem.imperial]) {
+    final double? v = mps ?? member.speedMps;
+    if (member.movement == MovementType.car && v != null) {
+      final String speed = units.formatSpeed(v);
+      return isSpeedingMps(v) ? 'Speeding · $speed' : 'Driving · $speed';
     }
     if (member.movement == MovementType.none) return 'Not moving';
     return member.movement.label;

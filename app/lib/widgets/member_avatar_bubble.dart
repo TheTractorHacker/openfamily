@@ -5,7 +5,10 @@ import 'package:flutter/material.dart';
 
 import '../models/member.dart';
 import '../services/member_avatar_cache.dart';
+import '../services/member_motion_hub.dart';
 import '../theme/app_theme.dart';
+import '../services/speed_units.dart';
+import 'live_speed.dart';
 import 'movement_icon.dart';
 
 /// A circular avatar bubble pinned to a member's location on the map.
@@ -124,9 +127,11 @@ class MemberAvatarBubble extends StatelessWidget {
     final StringBuffer sb = StringBuffer(member.name);
     sb.write(' — ${member.status.description}');
     if (member.movement != MovementType.none) {
-      sb.write(' · ${member.isSpeeding ? 'Speeding' : member.movement.label}');
+      final double? mps = MemberMotionHub.shared.liveSpeedMps(member);
+      sb.write(
+          ' · ${member.movement == MovementType.car && isSpeedingMps(mps) ? 'Speeding' : member.movement.label}');
       if (member.hasDrivingSpeed) {
-        sb.write(' ${member.speedMph} mph');
+        sb.write(' ${liveSpeedLabel(member) ?? ''}');
       }
     }
     return sb.toString();
@@ -445,7 +450,7 @@ class ClusterBubble extends StatelessWidget {
       if (m.movement != MovementType.none) {
         sb.write(' ${m.movement.label}');
         if (m.hasDrivingSpeed) {
-          sb.write(' ${m.speedMph} mph');
+          sb.write(' ${liveSpeedLabel(m) ?? ''}');
         }
       }
     }
@@ -498,7 +503,15 @@ class _MovementGlyphBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bool speeding = member.isSpeeding;
+    if (member.movement != MovementType.car) return _glyph(false);
+    return LiveSpeedBuilder(
+      member: member,
+      builder: (BuildContext _, double? mps, UnitSystem __) =>
+          _glyph(isSpeedingMps(mps)),
+    );
+  }
+
+  Widget _glyph(bool speeding) {
     return Container(
       width: 20,
       height: 20,
@@ -524,8 +537,9 @@ class _MovementGlyphBadge extends StatelessWidget {
 }
 
 /// Numeric speed caption that hangs under the pin (or beside a cluster glyph).
-/// Number is the primary read; "mph" is a smaller unit — never a card on the
-/// avatar face.
+/// Number is the primary read; the unit is smaller — never a card on the
+/// avatar face. It listens to the live speed itself, so the (cached) bubble
+/// around it is not rebuilt when the number changes.
 class _SpeedCaption extends StatelessWidget {
   const _SpeedCaption({required this.member});
 
@@ -533,45 +547,50 @@ class _SpeedCaption extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bool speeding = member.isSpeeding;
-    final Color ink = speeding ? _speedingInk : _badgeInk;
-    return Container(
-      padding: const EdgeInsets.fromLTRB(7, 2, 7, 2),
-      decoration: BoxDecoration(
-        color: speeding ? _speedingFill : _badgeFill,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(
-          color: speeding ? _speedingBorder : _badgeBorder,
-        ),
-        boxShadow: const [
-          BoxShadow(color: Color(0x22000000), blurRadius: 3),
-        ],
-      ),
-      child: Text.rich(
-        TextSpan(
-          children: [
-            TextSpan(
-              text: '${member.speedMph}',
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w800,
-                height: 1.4,
-                fontFeatures: const [FontFeature.tabularFigures()],
-                color: ink,
-              ),
+    return LiveSpeedBuilder(
+      member: member,
+      builder: (BuildContext _, double? mps, UnitSystem units) {
+        final bool speeding = isSpeedingMps(mps);
+        final Color ink = speeding ? _speedingInk : _badgeInk;
+        return Container(
+          padding: const EdgeInsets.fromLTRB(7, 2, 7, 2),
+          decoration: BoxDecoration(
+            color: speeding ? _speedingFill : _badgeFill,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: speeding ? _speedingBorder : _badgeBorder,
             ),
+            boxShadow: const [
+              BoxShadow(color: Color(0x22000000), blurRadius: 3),
+            ],
+          ),
+          child: Text.rich(
             TextSpan(
-              text: ' mph',
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                height: 1.4,
-                color: ink,
-              ),
+              children: [
+                TextSpan(
+                  text: mps == null ? '—' : '${units.speedFromMps(mps).round()}',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                    height: 1.4,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                    color: ink,
+                  ),
+                ),
+                TextSpan(
+                  text: ' ${units.speedLabel}',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    height: 1.4,
+                    color: ink,
+                  ),
+                ),
+              ],
             ),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 }

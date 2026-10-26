@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 
 import '../models/member.dart';
+import '../services/speed_units.dart';
 import '../theme/app_theme.dart';
 import 'ds/status_chip.dart';
 import 'member_avatar_bubble.dart';
+import 'live_speed.dart';
 import 'movement_icon.dart';
 
 /// A single member rendered as a rich list row — the roster entry shared by
@@ -124,12 +126,16 @@ class MemberTile extends StatelessWidget {
       );
     }
 
-    if (member.movement == MovementType.car && member.speedMph != null) {
+    if (member.movement == MovementType.car && member.speedMps != null) {
       chips.add(
-        DsStatusChip(
-          icon: Icons.directions_car,
-          color: member.isSpeeding ? AppColors.statusOrange : accent,
-          label: '${member.speedMph} mph',
+        LiveSpeedBuilder(
+          member: member,
+          builder: (BuildContext _, double? mps, UnitSystem units) =>
+              DsStatusChip(
+            icon: Icons.directions_car,
+            color: isSpeedingMps(mps) ? AppColors.statusOrange : accent,
+            label: speedText(mps, units) ?? '—',
+          ),
         ),
       );
     }

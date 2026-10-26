@@ -8,6 +8,8 @@ import '../theme/app_theme.dart';
 import '../utils/member_status.dart';
 import '../services/perf/perf_monitor.dart';
 import 'ds/ds.dart';
+import '../services/speed_units.dart';
+import 'live_speed.dart';
 import 'member_avatar_bubble.dart';
 import 'visible_value_builder.dart';
 
@@ -53,6 +55,7 @@ class LocationTabView extends StatefulWidget {
     this.onOpenCircle,
     this.onJoinCircle,
     this.onOpenPlaces,
+    this.topOverlay,
   });
 
   final Widget map;
@@ -105,6 +108,9 @@ class LocationTabView extends StatefulWidget {
   final ValueChanged<Circle>? onOpenCircle;
   final VoidCallback? onJoinCircle;
   final VoidCallback? onOpenPlaces;
+
+  /// Floating chip under the top row (the map's "Following" pill).
+  final Widget? topOverlay;
 
   @override
   State<LocationTabView> createState() => _LocationTabViewState();
@@ -470,6 +476,11 @@ class _LocationTabViewState extends State<LocationTabView> {
                 Padding(
                   padding: const EdgeInsets.only(top: AppSpace.sm),
                   child: _LocationOffBanner(onEnable: widget.onEnableLocation),
+                ),
+              if (widget.topOverlay != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: AppSpace.sm),
+                  child: widget.topOverlay,
                 ),
             ],
           ),
@@ -994,7 +1005,23 @@ class _PersonRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     PerfMonitor.instance.countBuild('PersonRow');
-    final String status = memberStatusLine(member, sharingPaused: paused);
+    // A driving member's speed text follows the live fix; everyone else's
+    // row has nothing live in it.
+    if (member.movement != MovementType.car) return _row(context, null, null);
+    return LiveSpeedBuilder(
+      member: member,
+      builder: (BuildContext ctx, double? mps, UnitSystem units) =>
+          _row(ctx, mps, units),
+    );
+  }
+
+  Widget _row(BuildContext context, double? mps, UnitSystem? units) {
+    final String status = memberStatusLine(
+      member,
+      sharingPaused: paused,
+      speedMps: mps,
+      units: units ?? UnitSystem.imperial,
+    );
     final String? battery = memberBatteryAlert(member);
     final String? updated = memberUpdatedLabel(member);
     final ColorScheme cs = Theme.of(context).colorScheme;

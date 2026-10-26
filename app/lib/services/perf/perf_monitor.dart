@@ -254,6 +254,15 @@ class PerfMonitor {
     rebuilds[name] = (rebuilds[name] ?? 0) + 1;
   }
 
+  /// Live-map animation frames driven by the motion ticker (recording only).
+  int animFrames = 0;
+
+  /// Counts one motion-ticker frame. One bool check when off.
+  void countAnimFrame() {
+    if (!recording) return;
+    animFrames++;
+  }
+
   // --- WebSocket (recording only) ----------------------------------------
 
   int wsReceived = 0;
@@ -371,6 +380,7 @@ class PerfMonitor {
     jankyFrames = 0;
     slowest.clear();
     rebuilds.clear();
+    animFrames = 0;
     wsReceived = 0;
     wsApplied = 0;
     wsUiUpdates = 0;
@@ -411,6 +421,7 @@ class PerfMonitor {
         b.writeln('  ${x.key}: ${x.value}');
       }
     }
+    if (animFrames > 0) b.writeln('map animation frames: $animFrames');
     final pm = wsPerMinute;
     b.writeln('websocket: received $wsReceived, applied $wsApplied,'
         ' ui updates $wsUiUpdates'

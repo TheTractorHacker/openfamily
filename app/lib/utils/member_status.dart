@@ -1,4 +1,5 @@
 import '../models/member.dart';
+import '../services/speed_units.dart';
 
 /// "3:10 pm" (12-hour, locale-neutral, no intl dependency).
 String formatClock(DateTime t) {
@@ -12,7 +13,12 @@ String formatClock(DateTime t) {
 ///
 /// [sharingPaused] is only known for the signed-in user (their own sharing
 /// switch); other members who stop reporting show "Updates stopped".
-String memberStatusLine(Member m, {bool sharingPaused = false}) {
+String memberStatusLine(
+  Member m, {
+  bool sharingPaused = false,
+  double? speedMps,
+  UnitSystem units = UnitSystem.imperial,
+}) {
   if (sharingPaused) return 'Location sharing paused';
   if (m.position == null) return 'No location yet';
   if (m.status == MemberStatus.stopped) {
@@ -23,7 +29,8 @@ String memberStatusLine(Member m, {bool sharingPaused = false}) {
   }
   switch (m.movement) {
     case MovementType.car:
-      return m.speedMph == null ? 'Driving' : 'Driving ${m.speedMph} mph';
+      final double? v = speedMps ?? m.speedMps;
+      return v == null ? 'Driving' : 'Driving ${units.formatSpeed(v)}';
     case MovementType.bike:
     case MovementType.boat:
     case MovementType.plane:

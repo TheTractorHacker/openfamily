@@ -429,7 +429,7 @@ void main() {
         (WidgetTester t) async {
       final Member driving = _blake.copyWith(
         movement: MovementType.car,
-        speedMph: 42,
+        speedMps: 18.8, // 42 mph
       );
       await pumpRich(t, members: <Member>[driving, _brian]);
       expect(find.text('DRIVING NOW'), findsOneWidget);
