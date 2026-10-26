@@ -114,6 +114,9 @@ func (s *Server) IngestSensorEvents(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Events        []sensorEventIn `json:"events"`
 		SensorEnabled *bool           `json:"sensor_enabled"`
+		// PhoneUseEnabled is the separate opt-in for phone_use events. Omitted
+		// keeps the stored value (old clients never send it, so it stays false).
+		PhoneUseEnabled *bool `json:"phone_use_enabled"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		var mbe *http.MaxBytesError
@@ -128,8 +131,8 @@ func (s *Server) IngestSensorEvents(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("too many events (max %d)", sensorMaxEvents))
 		return
 	}
-	if len(req.Events) == 0 && req.SensorEnabled == nil {
-		writeError(w, http.StatusBadRequest, "events or sensor_enabled is required")
+	if len(req.Events) == 0 && req.SensorEnabled == nil && req.PhoneUseEnabled == nil {
+		writeError(w, http.StatusBadRequest, "events, sensor_enabled or phone_use_enabled is required")
 		return
 	}
 
@@ -141,13 +144,18 @@ func (s *Server) IngestSensorEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
-	var enabled bool
-	if req.SensorEnabled != nil {
-		err = tx.QueryRow(ctx, `UPDATE users SET driving_sensor_enabled = $2 WHERE id = $1 RETURNING driving_sensor_enabled`,
-			claims.UserID, *req.SensorEnabled).Scan(&enabled)
-	} else {
-		err = tx.QueryRow(ctx, `SELECT driving_sensor_enabled FROM users WHERE id = $1`, claims.UserID).Scan(&enabled)
-	}
+	// Turning the sensor off forces phone use off; a missing flag keeps the
+	// stored value.
+	var enabled, phoneEnabled bool
+	err = tx.QueryRow(ctx, `
+		UPDATE users SET
+		  driving_sensor_enabled = COALESCE($2::boolean, driving_sensor_enabled),
+		  driving_phone_use_enabled = CASE
+		      WHEN NOT COALESCE($2::boolean, driving_sensor_enabled) THEN false
+		      ELSE COALESCE($3::boolean, driving_phone_use_enabled) END
+		WHERE id = $1
+		RETURNING driving_sensor_enabled, driving_phone_use_enabled`,
+		claims.UserID, req.SensorEnabled, req.PhoneUseEnabled).Scan(&enabled, &phoneEnabled)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load settings")
 		return
@@ -164,6 +172,9 @@ func (s *Server) IngestSensorEvents(w http.ResponseWriter, r *http.Request) {
 		}
 		for _, in := range req.Events {
 			ev, ok := validateSensorEvent(in, now)
+			if ok && ev.Kind == trips.EventPhoneUse && !phoneEnabled {
+				ok = false // phone use is a separate opt-in
+			}
 			if !ok {
 				rejected++
 				continue
@@ -196,15 +207,15 @@ func (s *Server) IngestSensorEvents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Counts only: no times, places or magnitudes in the audit log.
-	if req.SensorEnabled != nil {
-		s.logAudit(ctx, claims.UserID, "", "driving.sensor_toggle", fmt.Sprintf("driving sensor enabled=%t", enabled), clientIP(r))
+	if req.SensorEnabled != nil || req.PhoneUseEnabled != nil {
+		s.logAudit(ctx, claims.UserID, "", "driving.sensor_toggle", fmt.Sprintf("driving sensor enabled=%t phone_use enabled=%t", enabled, phoneEnabled), clientIP(r))
 	}
 	if len(req.Events) > 0 && accepted > 0 {
 		s.logAudit(ctx, claims.UserID, "", "driving.sensor_events",
 			fmt.Sprintf("accepted=%d duplicate=%d rejected=%d", accepted, duplicate, rejected), clientIP(r))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"accepted": accepted, "duplicate": duplicate, "rejected": rejected, "sensor_enabled": enabled,
+		"accepted": accepted, "duplicate": duplicate, "rejected": rejected, "sensor_enabled": enabled, "phone_use_enabled": phoneEnabled,
 	})
 }
 

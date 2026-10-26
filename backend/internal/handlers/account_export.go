@@ -127,8 +127,8 @@ func (s *Server) ExportMe(w http.ResponseWriter, r *http.Request) {
 		drivingEvents = append(drivingEvents, e)
 	}
 	erows.Close()
-	var sensorEnabled bool
-	if err := s.Pool.QueryRow(ctx, `SELECT driving_sensor_enabled FROM users WHERE id = $1`, claims.UserID).Scan(&sensorEnabled); err != nil {
+	var sensorEnabled, phoneUseEnabled bool
+	if err := s.Pool.QueryRow(ctx, `SELECT driving_sensor_enabled, driving_phone_use_enabled FROM users WHERE id = $1`, claims.UserID).Scan(&sensorEnabled, &phoneUseEnabled); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load driving settings")
 		return
 	}
@@ -166,6 +166,8 @@ func (s *Server) ExportMe(w http.ResponseWriter, r *http.Request) {
 	bw.Write(mustJSON(places))
 	bw.WriteString(`,"driving_sensor_enabled":`)
 	bw.Write(mustJSON(sensorEnabled))
+	bw.WriteString(`,"driving_phone_use_enabled":`)
+	bw.Write(mustJSON(phoneUseEnabled))
 	bw.WriteString(`,"driving_events":`)
 	bw.Write(mustJSON(drivingEvents))
 	bw.WriteString(`,"locations":[`)

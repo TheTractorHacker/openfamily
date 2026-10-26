@@ -18,7 +18,8 @@ import (
 // in that circle (circles.Authz.SharedWith).
 
 // eventCounts holds per-kind event counts. PhoneUse comes only from the phone
-// sensor: a number for members with driving_sensor_enabled, otherwise null.
+// sensor: a number for members with driving_sensor_enabled AND
+// driving_phone_use_enabled (a separate opt-in), otherwise null.
 type eventCounts struct {
 	Speeding   int  `json:"speeding"`
 	HardBrake  int  `json:"hard_brake"`
@@ -28,7 +29,7 @@ type eventCounts struct {
 	phone int // accumulated before the enabled rule is applied
 }
 
-// finalizePhoneUse exposes the phone_use count only for sensor members.
+// finalizePhoneUse exposes the phone_use count only for members who opted in to phone-use detection.
 func (c *eventCounts) finalizePhoneUse(enabled bool) {
 	c.PhoneUse = nil
 	if enabled {
@@ -68,6 +69,7 @@ type reportMember struct {
 	PreviousEvents eventCounts `json:"previous_events"`
 
 	sensor        bool
+	phoneUse      bool // sensor AND phone-use opt-in
 	prevDrives    int
 	prevDistanceM float64
 	prevTopSpeed  float64
@@ -185,14 +187,14 @@ func (s *Server) TripsReport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	members := map[string]*reportMember{}
-	nameRows, err := s.Pool.Query(r.Context(), `SELECT id::text, name, driving_sensor_enabled FROM users WHERE id = ANY($1::uuid[])`, ids)
+	nameRows, err := s.Pool.Query(r.Context(), `SELECT id::text, name, driving_sensor_enabled, (driving_sensor_enabled AND driving_phone_use_enabled) FROM users WHERE id = ANY($1::uuid[])`, ids)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load members")
 		return
 	}
 	for nameRows.Next() {
 		m := &reportMember{}
-		if err := nameRows.Scan(&m.UserID, &m.Name, &m.sensor); err == nil {
+		if err := nameRows.Scan(&m.UserID, &m.Name, &m.sensor, &m.phoneUse); err == nil {
 			members[m.UserID] = m
 		}
 	}
@@ -275,14 +277,18 @@ func (s *Server) TripsReport(w http.ResponseWriter, r *http.Request) {
 	})
 	var cur, prev reportTotals
 	sensorMembers := []string{}
+	phoneMembers := []string{}
 	curPhone, prevPhone, anySensor := 0, 0, false
 	out := make([]reportMember, 0, len(list))
 	for _, m := range list {
-		m.Events.finalizePhoneUse(m.sensor)
-		m.PreviousEvents.finalizePhoneUse(m.sensor)
+		m.Events.finalizePhoneUse(m.phoneUse)
+		m.PreviousEvents.finalizePhoneUse(m.phoneUse)
 		if m.sensor {
-			anySensor = true
 			sensorMembers = append(sensorMembers, m.UserID)
+		}
+		if m.phoneUse {
+			anySensor = true
+			phoneMembers = append(phoneMembers, m.UserID)
 			curPhone += m.Events.phone
 			prevPhone += m.PreviousEvents.phone
 		}
@@ -315,7 +321,7 @@ func (s *Server) TripsReport(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"period": period, "start": per.startDay, "end": per.endDay,
 		"prev_start": per.prevStartDay, "prev_end": per.prevEndDay,
-		"totals": cur, "previous_totals": prev, "members": out, "sensor_members": sensorMembers,
+		"totals": cur, "previous_totals": prev, "members": out, "sensor_members": sensorMembers, "phone_use_members": phoneMembers,
 		"days": days, "recent_trips": recent,
 		"thresholds": reportThresholds{SpeedingMps: ep.SpeedingMps, SpeedingSeconds: ep.SpeedingSeconds,
 			HardBrakeMps2: ep.HardBrakeMps2, RapidAccelMps2: ep.RapidAccelMps2},
