@@ -325,9 +325,20 @@ ThemeData _buildTheme({
         );
       }),
     ),
+    // Material 3 draws a level-3 black shadow under every FAB. On Night
+    // charcoal that shadow reads as a thick black ring around the lime
+    // button, so the FAB stays flat: lime on paper already has the contrast.
     floatingActionButtonTheme: FloatingActionButtonThemeData(
       backgroundColor: primary,
       foregroundColor: AppColors.onAccent,
+      elevation: 0,
+      focusElevation: 0,
+      hoverElevation: 0,
+      highlightElevation: 0,
+      disabledElevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+      ),
     ),
     listTileTheme: ListTileThemeData(
       iconColor: brand.accentInk,
