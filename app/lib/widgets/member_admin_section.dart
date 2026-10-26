@@ -3,6 +3,8 @@ import 'package:flutter/services.dart';
 
 import '../screens/member_edit_screen.dart';
 import '../services/member_edit_service.dart';
+import '../theme/app_theme.dart';
+import 'ds/ds.dart';
 
 /// Shown on a member profile. Renders nothing unless the caller is an admin of
 /// the family; admins see the member's phone (tap to copy) and an Edit button.
@@ -79,23 +81,26 @@ class _MemberAdminSectionState extends State<MemberAdminSection> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        const SizedBox(height: 8),
-        ListTile(
-          minVerticalPadding: 12,
-          contentPadding: EdgeInsets.zero,
-          leading: const Icon(Icons.phone_outlined),
-          title: const Text('Phone'),
-          subtitle: Text(phone ?? 'Not set'),
-          trailing: phone == null ? null : const Icon(Icons.copy, size: 20),
-          onTap: phone == null ? null : () => _copy(phone),
-          // Tap target is the whole row; ListTile is >= 48dp tall.
+        const SizedBox(height: AppSpace.lg),
+        DsRowGroup(
+          children: <Widget>[
+            DsListRow(
+              leading: DsListRow.iconTile(context, Icons.phone_outlined),
+              title: 'Phone',
+              subtitle: phone ?? 'Not set',
+              trailing: phone == null
+                  ? null
+                  : const Icon(Icons.copy, size: 20),
+              onTap: phone == null ? null : () => _copy(phone),
+            ),
+          ],
         ),
-        const SizedBox(height: 4),
-        OutlinedButton.icon(
-          style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+        const SizedBox(height: AppSpace.sm),
+        DsPillButton(
+          style: DsPillStyle.outlined,
           onPressed: _edit,
-          icon: const Icon(Icons.edit_outlined),
-          label: Text('Edit $_name'),
+          icon: Icons.edit_outlined,
+          label: 'Edit $_name',
         ),
       ],
     );

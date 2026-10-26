@@ -22,7 +22,10 @@ class MemberTile extends StatelessWidget {
     return InkWell(
       onTap: onTap,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpace.xl,
+          vertical: AppSpace.md,
+        ),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -34,10 +37,7 @@ class MemberTile extends StatelessWidget {
                 children: [
                   Text(
                     member.name,
-                    style: const TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                    ),
+                    style: AppType.body,
                   ),
                   const SizedBox(height: 4),
                   // Distinct glanceable fields: battery %, ETA, speed — each

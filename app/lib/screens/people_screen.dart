@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../models/member.dart';
 import '../theme/app_theme.dart';
+import '../widgets/ds/ds.dart';
 import '../widgets/member_tile.dart';
 import 'invite_screen.dart';
 import 'member_profile_screen.dart';
@@ -40,49 +41,64 @@ class PeopleScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text(
-          'People',
-          style: TextStyle(fontWeight: FontWeight.w700),
-        ),
+        title: const Text('People'),
         actions: [
           IconButton(
             onPressed: _invite(context),
             tooltip: 'Invite someone',
-            icon: const Icon(
+            constraints: const BoxConstraints(
+              minWidth: kMinTarget,
+              minHeight: kMinTarget,
+            ),
+            icon: Icon(
               Icons.person_add_alt_1,
-              color: AppColors.purple,
+              color: BrandTheme.of(context).accentInk,
             ),
           ),
         ],
       ),
-      body: ValueListenableBuilder<List<Member>>(
-        valueListenable: members,
-        builder: (context, roster, _) {
-          if (roster.isEmpty) {
-            return _EmptyPeople(
-              circleName: circleName,
-              onInvite: _invite(context),
-            );
-          }
-          return ListView.separated(
-            padding: const EdgeInsets.only(top: 4, bottom: 24),
-            itemCount: roster.length + 1,
-            separatorBuilder: (context, index) =>
-                const Divider(height: 1, indent: 76),
-            itemBuilder: (context, index) {
-              // Row 0 is the roster header; the rest are members.
-              if (index == 0) {
-                return _RosterHeader(
-                    circleName: circleName, count: roster.length);
-              }
-              final Member member = roster[index - 1];
-              return MemberTile(
-                member: member,
-                onTap: () => _openMember(context, member),
+      body: SafeArea(
+        child: ValueListenableBuilder<List<Member>>(
+          valueListenable: members,
+          builder: (context, roster, _) {
+            if (roster.isEmpty) {
+              return DsEmptyState(
+                icon: Icons.people_alt_outlined,
+                title: 'No one is in $circleName yet',
+                message: 'Invite family to share their location and see them '
+                    'on your map.',
+                actionLabel: 'Invite someone',
+                onAction: _invite(context),
               );
-            },
-          );
-        },
+            }
+            return ListView.separated(
+              padding: const EdgeInsets.only(
+                top: AppSpace.xs,
+                bottom: AppSpace.xxl,
+              ),
+              itemCount: roster.length + 1,
+              separatorBuilder: (context, index) => Divider(
+                height: 1,
+                indent: 76,
+                color: Theme.of(context).colorScheme.outlineVariant,
+              ),
+              itemBuilder: (context, index) {
+                // Row 0 is the roster header; the rest are members.
+                if (index == 0) {
+                  return _RosterHeader(
+                    circleName: circleName,
+                    count: roster.length,
+                  );
+                }
+                final Member member = roster[index - 1];
+                return MemberTile(
+                  member: member,
+                  onTap: () => _openMember(context, member),
+                );
+              },
+            );
+          },
+        ),
       ),
     );
   }
@@ -121,82 +137,27 @@ class _RosterHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final String countLabel = '$count ${count == 1 ? 'member' : 'members'}';
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 10),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
+      padding: const EdgeInsets.fromLTRB(
+        AppSpace.xl,
+        AppSpace.md,
+        AppSpace.xl,
+        AppSpace.md,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  circleName,
-                  style:
-                      const TextStyle(fontSize: 13, color: AppColors.textMuted),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  countLabel,
-                  style: const TextStyle(
-                    fontSize: 17,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ],
+          Text(
+            circleName,
+            style: AppType.secondary.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),
           ),
+          const SizedBox(height: AppSpace.xxs),
+          Semantics(
+            header: true,
+            child: Text(countLabel, style: AppType.headline),
+          ),
         ],
-      ),
-    );
-  }
-}
-
-/// Shown when the family has no members yet — invites someone to see them on
-/// the map.
-class _EmptyPeople extends StatelessWidget {
-  const _EmptyPeople({required this.circleName, required this.onInvite});
-
-  final String circleName;
-  final VoidCallback onInvite;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 72,
-              height: 72,
-              decoration: BoxDecoration(
-                color: AppColors.purple.withValues(alpha: 0.10),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(Icons.people_alt_outlined,
-                  size: 34, color: AppColors.purple),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'No one is in $circleName yet',
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: 6),
-            const Text(
-              'Invite family to share their location and see them on your map.',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 14, color: AppColors.textMuted),
-            ),
-            const SizedBox(height: 20),
-            FilledButton.icon(
-              onPressed: onInvite,
-              icon: const Icon(Icons.person_add_alt_1),
-              label: const Text('Invite someone'),
-            ),
-          ],
-        ),
       ),
     );
   }
