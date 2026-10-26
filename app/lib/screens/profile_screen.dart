@@ -6,6 +6,7 @@ import 'package:image_picker/image_picker.dart';
 import '../models/user_profile.dart';
 import '../services/api_client.dart';
 import '../theme/app_theme.dart';
+import '../widgets/ds/ds.dart';
 
 /// The authenticated user's account profile and private profile photo.
 ///
@@ -446,7 +447,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Profile')),
       body: _loading
-          ? const Center(child: CircularProgressIndicator())
+          ? const DsSkeletonList(rows: 4, avatar: true)
           : profile == null
               ? _ProfileLoadError(message: _error, onRetry: _loadProfile)
               : RefreshIndicator(
@@ -469,7 +470,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         onChanged: _onNameChanged,
                         decoration: const InputDecoration(
                           labelText: 'Name',
-                          border: OutlineInputBorder(),
                         ),
                       ),
                       const SizedBox(height: 12),
@@ -481,36 +481,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         decoration: const InputDecoration(
                           labelText: 'Phone (SMS alerts)',
                           hintText: '+15551234567',
-                          border: OutlineInputBorder(),
                         ),
                       ),
-                      if (_nameError != null) ...[
-                        const SizedBox(height: 8),
-                        Text(
-                          _nameError!,
-                          style: const TextStyle(color: AppColors.sosRed),
-                        ),
-                      ],
+                      if (_nameError != null) DsMessage(_nameError!),
                       const SizedBox(height: 12),
-                      FilledButton(
+                      DsBusyButton(
+                        label: 'Save changes',
+                        busy: _nameSaving,
                         onPressed:
                             _nameSaving || _avatarSaving ? null : _saveName,
-                        child: _nameSaving
-                            ? const SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: Colors.white,
-                                ),
-                              )
-                            : const Text('Save changes'),
                       ),
                       const SizedBox(height: 16),
                       InputDecorator(
                         decoration: const InputDecoration(
                           labelText: 'Email',
-                          border: OutlineInputBorder(),
                         ),
                         child: Text(profile.email),
                       ),
@@ -518,7 +502,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       InputDecorator(
                         decoration: const InputDecoration(
                           labelText: 'Family role',
-                          border: OutlineInputBorder(),
                         ),
                         child: Text(_roleLabel(profile.role)),
                       ),
@@ -528,14 +511,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         spacing: 8,
                         runSpacing: 8,
                         children: [
-                          OutlinedButton.icon(
+                          DsPillButton(
+                            style: DsPillStyle.tonal,
                             onPressed: _avatarSaving || _nameSaving
                                 ? null
                                 : _chooseAndUploadAvatar,
-                            icon: const Icon(Icons.photo_library_outlined),
-                            label: Text(
-                              !profile.hasAvatar ? 'Add photo' : 'Change photo',
-                            ),
+                            icon: Icons.photo_library_outlined,
+                            label:
+                                !profile.hasAvatar ? 'Add photo' : 'Change photo',
                           ),
                           if (profile.hasAvatar)
                             TextButton.icon(
@@ -567,7 +550,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         obscureText: true,
                         decoration: const InputDecoration(
                           labelText: 'Current password',
-                          border: OutlineInputBorder(),
                         ),
                       ),
                       const SizedBox(height: 12),
@@ -576,7 +558,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         obscureText: true,
                         decoration: const InputDecoration(
                           labelText: 'New password',
-                          border: OutlineInputBorder(),
                         ),
                       ),
                       const SizedBox(height: 12),
@@ -585,26 +566,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         obscureText: true,
                         decoration: const InputDecoration(
                           labelText: 'Confirm new password',
-                          border: OutlineInputBorder(),
                         ),
                       ),
-                      if (_passwordError != null) ...[
-                        const SizedBox(height: 8),
-                        Text(
-                          _passwordError!,
-                          style: const TextStyle(color: AppColors.sosRed),
-                        ),
-                      ],
+                      if (_passwordError != null) DsMessage(_passwordError!),
                       const SizedBox(height: 12),
-                      OutlinedButton(
-                        onPressed: _passwordSaving ? null : _changePassword,
-                        child: _passwordSaving
-                            ? const SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(strokeWidth: 2),
-                              )
-                            : const Text('Update password'),
+                      DsBusyButton(
+                        label: 'Update password',
+                        busy: _passwordSaving,
+                        style: DsPillStyle.outlined,
+                        onPressed: _changePassword,
                       ),
                       const SizedBox(height: 28),
                       const Divider(),
@@ -773,24 +743,10 @@ class _ProfileLoadError extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.error_outline, color: AppColors.sosRed, size: 36),
-            const SizedBox(height: 12),
-            Text(
-              message ?? 'Couldn\'t load your profile. Please try again.',
-              textAlign: TextAlign.center,
-              style: const TextStyle(color: AppColors.sosRed),
-            ),
-            const SizedBox(height: 12),
-            FilledButton(onPressed: onRetry, child: const Text('Retry')),
-          ],
-        ),
-      ),
+    return DsErrorState(
+      title: 'Couldn\'t load your profile',
+      message: message ?? 'Please check your connection and try again.',
+      onRetry: onRetry,
     );
   }
 }

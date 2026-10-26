@@ -90,7 +90,6 @@ class _MemberEditScreenState extends State<MemberEditScreen> {
               textInputAction: TextInputAction.next,
               decoration: InputDecoration(
                 labelText: 'Name',
-                border: const OutlineInputBorder(),
                 errorText: _nameError,
               ),
             ),
@@ -106,7 +105,6 @@ class _MemberEditScreenState extends State<MemberEditScreen> {
                 hintText: '+15551234567',
                 helperText: 'International format. Leave empty to remove.',
                 helperMaxLines: 2,
-                border: const OutlineInputBorder(),
                 errorText: _phoneError,
               ),
             ),

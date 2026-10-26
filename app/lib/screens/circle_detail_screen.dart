@@ -6,6 +6,7 @@ import '../models/circle.dart';
 import '../services/circle_service.dart';
 import '../services/server_config.dart';
 import '../theme/app_theme.dart';
+import '../widgets/ds/ds.dart';
 import '../widgets/circle_widgets.dart';
 
 /// One circle: my sharing switch, members (with role changes and removal for
@@ -239,7 +240,7 @@ class _CircleDetailScreenState extends State<CircleDetailScreen> {
           autofocus: true,
           onChanged: (String v) => draft = v,
           decoration: const InputDecoration(
-              labelText: 'Circle name', border: OutlineInputBorder()),
+              labelText: 'Circle name'),
         ),
         actions: <Widget>[
           TextButton(
@@ -320,7 +321,7 @@ class _CircleDetailScreenState extends State<CircleDetailScreen> {
 
   Widget _body() {
     if (_loading && _members.isEmpty) {
-      return const Center(child: CircularProgressIndicator());
+      return const DsSkeletonList(rows: 5);
     }
     final CircleException? err = _error;
     if (err != null && _members.isEmpty) {

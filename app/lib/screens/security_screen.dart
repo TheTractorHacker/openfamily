@@ -8,6 +8,7 @@ import '../services/api_client.dart';
 import '../services/security_api.dart';
 import '../services/security_format.dart';
 import '../theme/app_theme.dart';
+import '../widgets/ds/ds.dart';
 import 'change_password_screen.dart';
 import 'delete_account_screen.dart';
 import 'issue_reset_code_screen.dart';
@@ -159,7 +160,7 @@ class _SecurityScreenState extends State<SecurityScreen> {
                         api: widget.api,
                       )),
                     ),
-                  const Divider(height: 1),
+                  const Divider(height: AppSpace.xxl),
                   _tile(
                     icon: Icons.download_outlined,
                     title: 'Download my data',
@@ -168,7 +169,7 @@ class _SecurityScreenState extends State<SecurityScreen> {
                     busy: _exporting,
                     onTap: _export,
                   ),
-                  const Divider(height: 1),
+                  const Divider(height: AppSpace.xxl),
                   _tile(
                     icon: Icons.delete_forever,
                     title: 'Delete account',
@@ -193,24 +194,29 @@ class _SecurityScreenState extends State<SecurityScreen> {
     bool danger = false,
     bool busy = false,
   }) {
-    final Color? c = danger ? AppColors.sosRed : null;
-    return Semantics(
-      button: true,
-      child: ListTile(
-        minVerticalPadding: 12,
-        leading: Icon(icon, color: c ?? AppColors.purple),
-        title: Text(title, style: TextStyle(color: c)),
-        subtitle: Text(subtitle),
-        trailing: busy
-            ? const SizedBox(
-                width: 24,
-                height: 24,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              )
-            : const Icon(Icons.chevron_right),
-        enabled: !busy,
-        onTap: onTap,
-      ),
+    return DsListRow(
+      leading: busy
+          ? const SizedBox(
+              width: 40,
+              height: 40,
+              child: Center(
+                child: SizedBox(
+                  width: 22,
+                  height: 22,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              ),
+            )
+          : DsListRow.iconTile(
+              context,
+              icon,
+              color: danger ? AppColors.sosRed : null,
+            ),
+      title: title,
+      subtitle: busy ? 'Preparing your file...' : subtitle,
+      destructive: danger,
+      chevron: !busy,
+      onTap: busy ? null : onTap,
     );
   }
 }

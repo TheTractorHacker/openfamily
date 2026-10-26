@@ -5,6 +5,7 @@ import '../services/auth_service.dart';
 import '../services/device_service.dart';
 import '../services/push_service.dart';
 import '../theme/app_theme.dart';
+import '../widgets/ds/ds.dart';
 import '../widgets/openfamily_brand.dart';
 import 'app_shell.dart';
 import 'reset_password_screen.dart';
@@ -111,174 +112,136 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Log In')),
-      body: SafeArea(
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 360),
-            child: Padding(
-              padding: const EdgeInsets.all(24),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  const Center(child: OpenFamilyMark(size: 72)),
-                  const SizedBox(height: 16),
-                  Text(
-                    'Welcome back',
-                    textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.headlineMedium,
-                  ),
-                  const SizedBox(height: 32),
-                  TextField(
-                    controller: _identifier,
-                    keyboardType: TextInputType.emailAddress,
-                    autocorrect: false,
-                    textCapitalization: TextCapitalization.none,
-                    onChanged: (_) {
-                      // A different account may not need 2FA; reset the flag
-                      // and any stale code/error from the previous attempt.
-                      if (_totpRequired) {
-                        setState(() {
-                          _totpRequired = false;
-                          _totpCode.clear();
-                          _useRecovery = false;
-                          _error = null;
-                        });
-                      }
-                    },
-                    decoration: const InputDecoration(
-                      labelText: 'Email',
-                      prefixIcon: Icon(Icons.person_outline),
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: _password,
-                    obscureText: _obscure,
-                    decoration: InputDecoration(
-                      labelText: 'Password',
-                      border: const OutlineInputBorder(),
-                      suffixIcon: IconButton(
-                        icon: Icon(
-                          _obscure ? Icons.visibility : Icons.visibility_off,
-                        ),
-                        onPressed: () => setState(() => _obscure = !_obscure),
-                      ),
-                    ),
-                  ),
-                  if (_totpRequired) ...[
-                    const SizedBox(height: 16),
-                    TextField(
-                      controller: _totpCode,
-                      keyboardType: _useRecovery
-                          ? TextInputType.text
-                          : TextInputType.number,
-                      textCapitalization: TextCapitalization.characters,
-                      autocorrect: false,
-                      enableSuggestions: false,
-                      autofillHints: const <String>[AutofillHints.oneTimeCode],
-                      decoration: InputDecoration(
-                        labelText:
-                            _useRecovery ? 'Recovery code' : 'Two-factor code',
-                        hintText:
-                            _useRecovery ? 'ABCDE-FGHJK' : '6-digit code',
-                        prefixIcon: const Icon(Icons.lock_outline),
-                        border: const OutlineInputBorder(),
-                      ),
-                    ),
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: TextButton(
-                        style: TextButton.styleFrom(
-                          minimumSize: const Size(48, 48),
-                        ),
-                        onPressed: _submitting
-                            ? null
-                            : () => setState(() {
-                                  _useRecovery = !_useRecovery;
-                                  _totpCode.clear();
-                                  _error = null;
-                                }),
-                        child: Text(
-                          _useRecovery
-                              ? 'Use an authenticator code instead'
-                              : 'Lost your device? Use a recovery code',
-                        ),
-                      ),
-                    ),
-                  ],
-                  if (_error != null) ...[
-                    const SizedBox(height: 16),
-                    Text(
-                      _error!,
-                      style: const TextStyle(
-                        color: AppColors.statusRed,
-                        fontSize: 13,
-                      ),
-                    ),
-                  ],
-                  const SizedBox(height: 24),
-                  FilledButton(
-                    onPressed: _submitting ? null : _submit,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      child: _submitting
-                          ? const SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white,
-                              ),
-                            )
-                          : const Text('Log In'),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Align(
-                    child: TextButton(
-                      style: TextButton.styleFrom(
-                        minimumSize: const Size(48, 48),
-                      ),
-                      onPressed: () => Navigator.of(context).push(
-                        MaterialPageRoute<void>(
-                          builder: (_) => ResetPasswordScreen(
-                            initialEmail: _identifier.text.trim(),
-                          ),
-                        ),
-                      ),
-                      child: const Text('Have a reset code?'),
-                    ),
-                  ),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Text(
-                        "Don't have an account?",
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: AppColors.textMuted,
-                        ),
-                      ),
-                      TextButton(
-                        onPressed: () => Navigator.of(context).push(
-                          MaterialPageRoute<void>(
-                            builder: (_) => const SignUpScreen(),
-                          ),
-                        ),
-                        child: const Text('Sign up'),
-                      ),
-                    ],
-                  ),
-                ],
+    return DsPage(
+      title: 'Sign in',
+      actions: <Widget>[
+        DsBusyButton(
+          label: 'Sign in',
+          busy: _submitting,
+          onPressed: _submit,
+        ),
+        DsPillButton(
+          label: 'Have a reset code?',
+          style: DsPillStyle.tonal,
+          onPressed: () => Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) => ResetPasswordScreen(
+                initialEmail: _identifier.text.trim(),
               ),
             ),
           ),
         ),
-      ),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: <Widget>[
+            Flexible(
+              child: Text(
+                "Don't have an account?",
+                style: AppType.secondary.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(builder: (_) => const SignUpScreen()),
+              ),
+              child: const Text('Sign up'),
+            ),
+          ],
+        ),
+      ],
+      children: <Widget>[
+        const Align(
+          alignment: Alignment.centerLeft,
+          child: OpenFamilyMark(size: 56),
+        ),
+        const SizedBox(height: AppSpace.lg),
+        DsHeading(
+          _totpRequired ? 'Two-step check' : 'Welcome back',
+          subtitle: _totpRequired
+              ? 'Enter the code from your authenticator app to finish '
+                  'signing in.'
+              : 'Sign in to see your family.',
+        ),
+        TextField(
+          controller: _identifier,
+          keyboardType: TextInputType.emailAddress,
+          autocorrect: false,
+          autofillHints: const <String>[AutofillHints.username],
+          textCapitalization: TextCapitalization.none,
+          onChanged: (_) {
+            // A different account may not need 2FA; reset the flag
+            // and any stale code/error from the previous attempt.
+            if (_totpRequired) {
+              setState(() {
+                _totpRequired = false;
+                _totpCode.clear();
+                _useRecovery = false;
+                _error = null;
+              });
+            }
+          },
+          decoration: const InputDecoration(
+            labelText: 'Email',
+            prefixIcon: Icon(Icons.person_outline),
+          ),
+        ),
+        const SizedBox(height: AppSpace.lg),
+        TextField(
+          controller: _password,
+          obscureText: _obscure,
+          autofillHints: const <String>[AutofillHints.password],
+          decoration: InputDecoration(
+            labelText: 'Password',
+            prefixIcon: const Icon(Icons.lock_outline),
+            suffixIcon: IconButton(
+              tooltip: _obscure ? 'Show password' : 'Hide password',
+              constraints: const BoxConstraints(
+                minWidth: kMinTarget,
+                minHeight: kMinTarget,
+              ),
+              icon: Icon(_obscure ? Icons.visibility : Icons.visibility_off),
+              onPressed: () => setState(() => _obscure = !_obscure),
+            ),
+          ),
+        ),
+        if (_totpRequired) ...<Widget>[
+          const SizedBox(height: AppSpace.lg),
+          TextField(
+            controller: _totpCode,
+            keyboardType:
+                _useRecovery ? TextInputType.text : TextInputType.number,
+            textCapitalization: TextCapitalization.characters,
+            autocorrect: false,
+            enableSuggestions: false,
+            autofillHints: const <String>[AutofillHints.oneTimeCode],
+            decoration: InputDecoration(
+              labelText: _useRecovery ? 'Recovery code' : 'Two-factor code',
+              hintText: _useRecovery ? 'ABCDE-FGHJK' : '6-digit code',
+              prefixIcon: const Icon(Icons.pin_outlined),
+            ),
+          ),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton(
+              onPressed: _submitting
+                  ? null
+                  : () => setState(() {
+                        _useRecovery = !_useRecovery;
+                        _totpCode.clear();
+                        _error = null;
+                      }),
+              child: Text(
+                _useRecovery
+                    ? 'Use an authenticator code instead'
+                    : 'Lost your device? Use a recovery code',
+              ),
+            ),
+          ),
+        ],
+        if (_error != null) DsMessage(_error!),
+      ],
     );
   }
 }

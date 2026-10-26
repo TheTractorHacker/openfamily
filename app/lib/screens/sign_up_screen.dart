@@ -5,7 +5,7 @@ import '../services/auth_service.dart';
 import '../services/device_service.dart';
 import '../services/push_service.dart';
 import '../theme/app_theme.dart';
-import '../widgets/onboarding_step_indicator.dart';
+import '../widgets/ds/ds.dart';
 import 'login_screen.dart';
 import 'permissions_screen.dart';
 
@@ -133,121 +133,91 @@ class _SignUpScreenState extends State<SignUpScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Create your account'),
-        bottom: const OnboardingStepIndicator(currentStep: 1, totalSteps: 6),
-      ),
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              TextField(
-                controller: _name,
-                textCapitalization: TextCapitalization.words,
-                decoration: const InputDecoration(
-                  labelText: 'Your name',
-                  hintText: 'Alex Rivera',
-                  prefixIcon: Icon(Icons.person_outline),
-                  border: OutlineInputBorder(),
+    return DsPage(
+      title: 'Create account',
+      step: 1,
+      totalSteps: 6,
+      actions: <Widget>[
+        DsBusyButton(label: 'Continue', busy: _submitting, onPressed: _submit),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: <Widget>[
+            Flexible(
+              child: Text(
+                'Already have an account?',
+                style: AppType.secondary.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
               ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: _email,
-                keyboardType: TextInputType.emailAddress,
-                decoration: const InputDecoration(
-                  labelText: 'Email address',
-                  prefixIcon: Icon(Icons.mail_outline),
-                  border: OutlineInputBorder(),
-                ),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(builder: (_) => const LoginScreen()),
               ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: _password,
-                obscureText: _obscure,
-                decoration: InputDecoration(
-                  labelText: 'Password',
-                  prefixIcon: const Icon(Icons.lock_outline),
-                  border: const OutlineInputBorder(),
-                  suffixIcon: IconButton(
-                    icon: Icon(
-                      _obscure ? Icons.visibility : Icons.visibility_off,
-                    ),
-                    onPressed: () => setState(() => _obscure = !_obscure),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: _inviteCode,
-                keyboardType: TextInputType.text,
-                textCapitalization: TextCapitalization.characters,
-                decoration: const InputDecoration(
-                  labelText: 'Invite code',
-                  hintText: 'e.g. AB12CD34',
-                  prefixIcon: Icon(Icons.key_outlined),
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              if (_error != null) ...[
-                const SizedBox(height: 16),
-                Text(
-                  _error!,
-                  style: const TextStyle(
-                    color: AppColors.statusRed,
-                    fontSize: 13,
-                  ),
-                ),
-              ],
-              const SizedBox(height: 24),
-              FilledButton(
-                onPressed: _submitting ? null : _submit,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  child: _submitting
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
-                          ),
-                        )
-                      : const Text('Continue', style: TextStyle(fontSize: 16)),
-                ),
-              ),
-              const SizedBox(height: 12),
-              const Text(
-                'Your email is used to sign you in. Your data stays on your '
-                'own server — not ours, not anyone\'s.',
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 12, color: AppColors.textMuted),
-              ),
-              const SizedBox(height: 4),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Text(
-                    'Already have an account?',
-                    style: TextStyle(fontSize: 13, color: AppColors.textMuted),
-                  ),
-                  TextButton(
-                    onPressed: () => Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                        builder: (_) => const LoginScreen(),
-                      ),
-                    ),
-                    child: const Text('Log In'),
-                  ),
-                ],
-              ),
-            ],
+              child: const Text('Sign in'),
+            ),
+          ],
+        ),
+      ],
+      children: <Widget>[
+        const DsHeading(
+          'Let\'s get you set up',
+          subtitle: 'Your email is used to sign you in. Your data stays on '
+              'your own server, not ours, not anyone\'s.',
+        ),
+        TextField(
+          controller: _name,
+          textCapitalization: TextCapitalization.words,
+          autofillHints: const <String>[AutofillHints.name],
+          decoration: const InputDecoration(
+            labelText: 'Your name',
+            hintText: 'Alex Rivera',
+            prefixIcon: Icon(Icons.person_outline),
           ),
         ),
-      ),
+        const SizedBox(height: AppSpace.lg),
+        TextField(
+          controller: _email,
+          keyboardType: TextInputType.emailAddress,
+          autofillHints: const <String>[AutofillHints.email],
+          decoration: const InputDecoration(
+            labelText: 'Email address',
+            prefixIcon: Icon(Icons.mail_outline),
+          ),
+        ),
+        const SizedBox(height: AppSpace.lg),
+        TextField(
+          controller: _password,
+          obscureText: _obscure,
+          autofillHints: const <String>[AutofillHints.newPassword],
+          decoration: InputDecoration(
+            labelText: 'Password',
+            helperText: 'At least 8 characters',
+            prefixIcon: const Icon(Icons.lock_outline),
+            suffixIcon: IconButton(
+              tooltip: _obscure ? 'Show password' : 'Hide password',
+              constraints: const BoxConstraints(
+                minWidth: kMinTarget,
+                minHeight: kMinTarget,
+              ),
+              icon: Icon(_obscure ? Icons.visibility : Icons.visibility_off),
+              onPressed: () => setState(() => _obscure = !_obscure),
+            ),
+          ),
+        ),
+        const SizedBox(height: AppSpace.lg),
+        TextField(
+          controller: _inviteCode,
+          keyboardType: TextInputType.text,
+          textCapitalization: TextCapitalization.characters,
+          decoration: const InputDecoration(
+            labelText: 'Invite code',
+            hintText: 'e.g. AB12CD34',
+            prefixIcon: Icon(Icons.key_outlined),
+          ),
+        ),
+        if (_error != null) DsMessage(_error!),
+      ],
     );
   }
 }

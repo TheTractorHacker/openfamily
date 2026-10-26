@@ -86,16 +86,18 @@ class DsErrorState extends StatelessWidget {
     super.key,
     required this.message,
     this.title = 'Something went wrong',
+    this.icon = Icons.error_outline,
     this.onRetry,
   });
 
+  final IconData icon;
   final String title;
   final String message;
   final VoidCallback? onRetry;
 
   @override
   Widget build(BuildContext context) => _StateBody(
-    icon: Icons.error_outline,
+    icon: icon,
     iconColor: AppColors.statusOrange,
     title: title,
     message: message,

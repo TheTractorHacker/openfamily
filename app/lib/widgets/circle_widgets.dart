@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/circle.dart';
 import '../theme/app_theme.dart';
+import 'ds/ds.dart';
 
 /// Emoji offered when creating or editing a circle's icon.
 const List<String> kCircleIcons = <String>[
@@ -48,12 +49,12 @@ class RoleBadge extends StatelessWidget {
     final BrandTheme brand = BrandTheme.of(context);
     final ColorScheme scheme = Theme.of(context).colorScheme;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
       decoration: BoxDecoration(
         color: admin
             ? brand.accent.withValues(alpha: 0.28)
             : scheme.onSurface.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(AppRadius.pill),
       ),
       child: Text(
         admin ? 'Admin' : 'Member',
@@ -86,33 +87,17 @@ class CircleStateMessage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            Icon(icon, size: 56, color: AppColors.textMuted),
-            const SizedBox(height: 16),
-            Text(title,
-                textAlign: TextAlign.center,
-                style:
-                    const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
-            if (body != null) ...<Widget>[
-              const SizedBox(height: 8),
-              Text(body!,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(color: AppColors.textMuted)),
-            ],
-            if (onAction != null) ...<Widget>[
-              const SizedBox(height: 20),
-              FilledButton(
-                style: FilledButton.styleFrom(minimumSize: const Size(48, 48)),
-                onPressed: onAction,
-                child: Text(actionLabel ?? 'Try again'),
-              ),
-            ],
-          ],
+    return SingleChildScrollView(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          minHeight: MediaQuery.sizeOf(context).height * 0.5,
+        ),
+        child: DsEmptyState(
+          icon: icon,
+          title: title,
+          message: body,
+          actionLabel: onAction == null ? null : (actionLabel ?? 'Try again'),
+          onAction: onAction,
         ),
       ),
     );

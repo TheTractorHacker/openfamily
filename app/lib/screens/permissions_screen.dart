@@ -2,9 +2,11 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../services/api_client.dart';
+import '../services/battery_optimization_service.dart';
 import '../services/family_service.dart';
 import '../services/permission_service.dart';
 import '../theme/app_theme.dart';
+import '../widgets/ds/ds.dart';
 import '../widgets/onboarding_step_indicator.dart';
 import 'create_or_join_circle_screen.dart';
 import 'app_shell.dart';
@@ -22,16 +24,18 @@ class PermissionsScreen extends StatefulWidget {
 /// One permission step: what to request, its icon, and the "why" copy.
 class _PermissionStep {
   const _PermissionStep({
-    required this.permission,
+    this.permission,
     required this.icon,
     required this.title,
     required this.why,
     required this.consequence,
     required this.buttonLabel,
     this.optional = false,
+    this.battery = false,
   });
 
-  final OnboardingPermission permission;
+  /// Null for the battery step, which is not a runtime permission.
+  final OnboardingPermission? permission;
   final IconData icon;
   final String title;
   final String why;
@@ -41,6 +45,9 @@ class _PermissionStep {
   /// Whether this permission is optional (motion & fitness is only requested
   /// on devices that support it, and is clearly marked optional).
   final bool optional;
+
+  /// The Android battery-optimization exemption step.
+  final bool battery;
 }
 
 class _PermissionsScreenState extends State<PermissionsScreen> {
@@ -110,13 +117,33 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
     optional: true,
   );
 
+  static const _PermissionStep _batteryStep = _PermissionStep(
+    icon: Icons.battery_charging_full,
+    title: 'Keep updates flowing',
+    why: 'Phones put apps to sleep to save battery, which can pause your '
+        'location updates when the app is closed. Setting OpenFamily to '
+        '"Don\'t optimize" keeps your family\'s map fresh. It only uses '
+        'a little extra battery.',
+    consequence: 'Without this, your location may go stale while the app is '
+        'in the background on some phones.',
+    buttonLabel: 'Open battery settings',
+    optional: true,
+    battery: true,
+  );
+
   /// Adds the motion & fitness step only on devices that support it.
   Future<void> _loadMotionStep() async {
     final bool supported = await PermissionService.supportsMotion();
-    if (!mounted || !supported) return;
+    if (!mounted) return;
     setState(() {
-      _steps.add(_motionStep);
-      _states.add(null);
+      if (supported) {
+        _steps.add(_motionStep);
+        _states.add(null);
+      }
+      if (BatteryOptimizationService.isSupported) {
+        _steps.add(_batteryStep);
+        _states.add(null);
+      }
     });
   }
 
@@ -125,8 +152,16 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
   Future<void> _allow() async {
     if (_requesting) return;
     setState(() => _requesting = true);
-    final PermissionState state =
-        await PermissionService.request(_steps[_index].permission);
+    final _PermissionStep step = _steps[_index];
+    final PermissionState state;
+    if (step.battery) {
+      // Not a runtime permission: open the system page and move on. The user
+      // makes the final choice there.
+      final bool opened = await BatteryOptimizationService.openSettings();
+      state = opened ? PermissionState.granted : PermissionState.denied;
+    } else {
+      state = await PermissionService.request(step.permission!);
+    }
     if (!mounted) return;
     setState(() {
       _states[_index] = state;
@@ -171,7 +206,7 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
       return;
     }
     _controller.nextPage(
-      duration: const Duration(milliseconds: 300),
+      duration: AppMotion.of(context, const Duration(milliseconds: 300)),
       curve: Curves.easeOut,
     );
   }
@@ -231,99 +266,104 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final BrandTheme brand = BrandTheme.of(context);
+    final ColorScheme cs = Theme.of(context).colorScheme;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Enable permissions'),
+        title: const Text('Permissions'),
         bottom: const OnboardingStepIndicator(currentStep: 2, totalSteps: 6),
       ),
       body: SafeArea(
-        child: Column(
-          children: [
-            // Progress dots for the permission sub-steps.
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  for (int i = 0; i < _steps.length; i++)
-                    AnimatedContainer(
-                      duration: const Duration(milliseconds: 200),
-                      margin: const EdgeInsets.symmetric(horizontal: 4),
-                      width: i == _index ? 24 : 8,
-                      height: 8,
-                      decoration: BoxDecoration(
-                        color: i == _index
-                            ? AppColors.purple
-                            : AppColors.purple.withValues(alpha: 0.2),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-            Expanded(
-              child: PageView(
-                controller: _controller,
-                physics: const NeverScrollableScrollPhysics(),
-                onPageChanged: (i) => setState(() => _index = i),
-                children: [
-                  for (int i = 0; i < _steps.length; i++)
-                    _PermissionStepView(
-                      step: _steps[i],
-                      state: _states[i],
-                      needsManualSettings: _needsManualSettingsFor(i),
-                    ),
-                ],
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.all(24),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  FilledButton(
-                    onPressed: _requesting ? null : _allow,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      child: _requesting
-                          ? const SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white,
-                              ),
-                            )
-                          : Text(
-                              _steps[_index].buttonLabel,
-                              style: const TextStyle(fontSize: 16),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 520),
+            child: Column(
+              children: <Widget>[
+                Semantics(
+                  label: 'Permission ${_index + 1} of ${_steps.length}',
+                  excludeSemantics: true,
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: AppSpace.sm),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: <Widget>[
+                        for (int i = 0; i < _steps.length; i++)
+                          AnimatedContainer(
+                            duration: AppMotion.of(context, AppMotion.fast),
+                            margin: const EdgeInsets.symmetric(
+                              horizontal: AppSpace.xs,
                             ),
+                            width: i == _index ? 24 : 8,
+                            height: 8,
+                            decoration: BoxDecoration(
+                              color: i == _index
+                                  ? brand.accent
+                                  : cs.onSurface.withValues(alpha: 0.2),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                          ),
+                      ],
                     ),
                   ),
-                  // When the OS won't prompt again (permanently denied, or the
-                  // iOS "Always" request returning `denied`), offer a direct
-                  // path to system settings.
-                  if (_needsManualSettingsFor(_index)) ...[
-                    const SizedBox(height: 8),
-                    OutlinedButton.icon(
-                      onPressed: _requesting
-                          ? null
-                          : () => PermissionService.openSettings(),
-                      icon: const Icon(Icons.settings_outlined),
-                      label: const Text('Open Settings'),
-                    ),
-                  ],
-                  const SizedBox(height: 8),
-                  TextButton(
-                    onPressed: _requesting ? null : _notNow,
-                    child: Text(
-                      _steps[_index].optional ? 'Skip (optional)' : 'Not now',
-                    ),
+                ),
+                Expanded(
+                  child: PageView(
+                    controller: _controller,
+                    physics: const NeverScrollableScrollPhysics(),
+                    onPageChanged: (i) => setState(() => _index = i),
+                    children: <Widget>[
+                      for (int i = 0; i < _steps.length; i++)
+                        _PermissionStepView(
+                          step: _steps[i],
+                          state: _states[i],
+                          needsManualSettings: _needsManualSettingsFor(i),
+                        ),
+                    ],
                   ),
-                ],
-              ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                    AppSpace.xxl,
+                    AppSpace.sm,
+                    AppSpace.xxl,
+                    AppSpace.lg,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      DsBusyButton(
+                        label: _steps[_index].buttonLabel,
+                        busy: _requesting,
+                        onPressed: _allow,
+                      ),
+                      // When the OS won't prompt again, offer a direct path
+                      // to system settings.
+                      if (_needsManualSettingsFor(_index)) ...<Widget>[
+                        const SizedBox(height: AppSpace.sm),
+                        DsPillButton(
+                          label: 'Open Settings',
+                          icon: Icons.settings_outlined,
+                          style: DsPillStyle.tonal,
+                          onPressed: _requesting
+                              ? null
+                              : () => PermissionService.openSettings(),
+                        ),
+                      ],
+                      const SizedBox(height: AppSpace.sm),
+                      DsPillButton(
+                        label: _steps[_index].optional
+                            ? 'Skip (optional)'
+                            : 'Not now',
+                        style: DsPillStyle.outlined,
+                        onPressed: _requesting ? null : _notNow,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );
@@ -352,95 +392,81 @@ class _PermissionStepView extends StatelessWidget {
     final bool denied = state != null && !granted;
     final bool permanentlyDenied = state == PermissionState.permanentlyDenied;
 
-    return LayoutBuilder(builder: (context, constraints) {
-      return SingleChildScrollView(
-        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
-        child: ConstrainedBox(
-          constraints: BoxConstraints(
-            minHeight: (constraints.maxHeight - 48).clamp(0, double.infinity),
-          ),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Container(
-                width: 96,
-                height: 96,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: granted
-                      ? AppColors.statusGreen.withValues(alpha: 0.12)
-                      : AppColors.surfaceTint,
-                ),
-                child: Icon(
-                  granted ? Icons.check_circle : step.icon,
-                  size: 48,
-                  color: granted ? AppColors.statusGreen : AppColors.purple,
-                ),
+    final BrandTheme brand = BrandTheme.of(context);
+    final ColorScheme cs = Theme.of(context).colorScheme;
+    return SingleChildScrollView(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpace.xxl,
+        vertical: AppSpace.xl,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: <Widget>[
+          ExcludeSemantics(
+            child: Container(
+              width: 96,
+              height: 96,
+              decoration: BoxDecoration(
+                color: brand.accent,
+                borderRadius: BorderRadius.circular(AppRadius.xl),
               ),
-              const SizedBox(height: 24),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Flexible(
-                    child: Text(
-                      step.title,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
+              child: Icon(
+                granted ? Icons.check : step.icon,
+                size: 48,
+                color: brand.onAccent,
+              ),
+            ),
+          ),
+          const SizedBox(height: AppSpace.xl),
+          Semantics(
+            header: true,
+            child: Text(
+              step.title,
+              textAlign: TextAlign.center,
+              style: AppType.title.copyWith(fontSize: 26),
+            ),
+          ),
+          if (step.optional || granted || denied) ...<Widget>[
+            const SizedBox(height: AppSpace.sm),
+            Wrap(
+              alignment: WrapAlignment.center,
+              spacing: AppSpace.sm,
+              runSpacing: AppSpace.xs,
+              children: <Widget>[
+                if (step.optional)
+                  const DsStatusChip(label: 'Optional', icon: Icons.tune),
+                if (granted)
+                  const DsStatusChip(label: 'Allowed', icon: Icons.check),
+                if (denied)
+                  const DsStatusChip(
+                    label: 'Not allowed yet',
+                    icon: Icons.error_outline,
                   ),
-                  if (step.optional) ...[
-                    const SizedBox(width: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: AppColors.purple.withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: const Text(
-                        'Optional',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.purple,
-                        ),
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-              const SizedBox(height: 12),
-              Text(
-                step.why,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  fontSize: 15,
-                  height: 1.4,
-                  color: AppColors.textMuted,
-                ),
-              ),
-              if (denied) ...[
-                const SizedBox(height: 16),
-                Text(
-                  permanentlyDenied
-                      ? 'This permission is permanently denied. Tap "Open Settings" '
-                          'below to enable it.'
-                      : needsManualSettings
-                          ? 'On iOS, choose "Always Allow" in Settings to enable '
-                              'background tracking. Tap "Open Settings" below.'
-                          : 'You can enable this later in Settings.',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                      fontSize: 13, color: AppColors.statusOrange),
-                ),
               ],
-            ],
+            ),
+          ],
+          const SizedBox(height: AppSpace.md),
+          Text(
+            step.why,
+            textAlign: TextAlign.center,
+            style: AppType.body.copyWith(
+              fontWeight: FontWeight.w500,
+              height: 1.4,
+              color: cs.onSurfaceVariant,
+            ),
           ),
-        ),
-      );
-    });
+          if (denied) DsMessage(
+            permanentlyDenied
+                ? 'This permission is blocked. Tap "Open Settings" below to '
+                    'enable it.'
+                : needsManualSettings
+                    ? 'On iOS, choose "Always Allow" in Settings to enable '
+                        'background tracking. Tap "Open Settings" below.'
+                    : 'You can enable this later in Settings.',
+            tone: DsTone.info,
+          ),
+        ],
+      ),
+    );
   }
 }

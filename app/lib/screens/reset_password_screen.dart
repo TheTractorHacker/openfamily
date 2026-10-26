@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../services/security_api.dart';
 import '../services/security_format.dart';
+import '../theme/app_theme.dart';
+import '../widgets/ds/ds.dart';
 import 'security_widgets.dart';
 
 /// "Have a reset code?" flow from the login screen: email + admin-issued code
@@ -79,21 +81,19 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
       return SecurityPage(
         title: 'Reset password',
         children: <Widget>[
-          const Icon(Icons.check_circle_outline, size: 56),
-          const SizedBox(height: 16),
-          Text(
+          const SizedBox(height: AppSpace.xxl),
+          Center(
+            child: DsListRow.iconTile(context, Icons.check_circle_outline),
+          ),
+          const SizedBox(height: AppSpace.lg),
+          const DsHeading(
             'Password updated',
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.headlineSmall,
+            subtitle:
+                'All devices were signed out. Sign in with your new password.',
+            center: true,
           ),
-          const SizedBox(height: 8),
-          const Text(
-            'All devices were signed out. Log in with your new password.',
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 24),
           BusyButton(
-            label: 'Back to log in',
+            label: 'Back to sign in',
             onPressed: () => Navigator.of(context).pop(true),
           ),
         ],
@@ -102,23 +102,19 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
     return SecurityPage(
       title: 'Reset password',
       children: <Widget>[
-        Text(
-          'A family admin can give you a one-time reset code. It works once '
-          'and expires after 30 minutes.',
-          style: Theme.of(context).textTheme.bodyLarge,
+        const DsHeading(
+          'Use a reset code',
+          subtitle: 'A family admin can give you a one-time reset code. It '
+              'works once and expires after 30 minutes.',
         ),
-        const SizedBox(height: 20),
         TextField(
           controller: _email,
           enabled: !_busy,
           keyboardType: TextInputType.emailAddress,
           autocorrect: false,
-          decoration: const InputDecoration(
-            labelText: 'Email',
-            border: OutlineInputBorder(),
-          ),
+          decoration: const InputDecoration(labelText: 'Email'),
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: AppSpace.lg),
         TextField(
           controller: _code,
           enabled: !_busy,
@@ -127,16 +123,15 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
           decoration: const InputDecoration(
             labelText: 'Reset code',
             helperText: 'Looks like ABCDE-FGHJK',
-            border: OutlineInputBorder(),
           ),
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: AppSpace.lg),
         SecurePasswordField(
           controller: _next,
           label: 'New password',
           enabled: !_busy,
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: AppSpace.lg),
         SecurePasswordField(
           controller: _confirm,
           label: 'Confirm new password',
@@ -144,7 +139,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
           onSubmitted: _submit,
         ),
         if (_error != null) ErrorText(_error!),
-        const SizedBox(height: 20),
+        const SizedBox(height: AppSpace.xl),
         BusyButton(label: 'Reset password', onPressed: _submit, busy: _busy),
       ],
     );

@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../services/api_client.dart';
 import '../services/join_service.dart';
 import '../theme/app_theme.dart';
-import '../widgets/onboarding_step_indicator.dart';
+import '../widgets/ds/ds.dart';
 
 /// The join-a-family flow, reached from the map's `+` action sheet, the
 /// family switcher's `+` chip, and onboarding.
@@ -80,105 +80,68 @@ class _JoinCircleScreenState extends State<JoinCircleScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Join a family'),
-        bottom: widget.step == null
-            ? null
-            : OnboardingStepIndicator(
-                currentStep: widget.step!,
-                totalSteps: widget.totalSteps,
-              ),
-      ),
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: _joined ? _buildJoined() : _buildForm(),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildForm() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
+    if (_joined) {
+      return DsPage(
+        title: 'Join a family',
+        showBack: false,
+        step: widget.step,
+        totalSteps: widget.step == null ? null : widget.totalSteps,
+        actions: <Widget>[
+          DsPillButton(
+            label: 'Done',
+            onPressed: () {
+              if (widget.onDone != null) {
+                widget.onDone!();
+              } else {
+                Navigator.of(context).pop(true);
+              }
+            },
+          ),
+        ],
+        children: <Widget>[
+          const SizedBox(height: AppSpace.xxxl),
+          Center(
+            child: DsListRow.iconTile(context, Icons.check_circle_outline),
+          ),
+          const SizedBox(height: AppSpace.lg),
+          const DsHeading(
+            'Family joined',
+            subtitle: 'You are now a member of the family.',
+            center: true,
+          ),
+        ],
+      );
+    }
+    return DsPage(
+      title: 'Join a family',
+      step: widget.step,
+      totalSteps: widget.step == null ? null : widget.totalSteps,
+      actions: <Widget>[
+        DsBusyButton(label: 'Join', busy: _submitting, onPressed: _join),
+      ],
+      children: <Widget>[
+        const DsHeading(
           'Enter your invite code',
-          style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+          subtitle: 'Ask a family member for the invite code to join their '
+              'family.',
         ),
-        const SizedBox(height: 8),
-        const Text(
-          'Ask a family member for the invite code to join their family.',
-          style: TextStyle(fontSize: 14, color: AppColors.textMuted),
-        ),
-        const SizedBox(height: 20),
         TextField(
           controller: _code,
           autofocus: true,
           keyboardType: TextInputType.text,
           textCapitalization: TextCapitalization.characters,
+          textInputAction: TextInputAction.done,
+          onSubmitted: (_) => _join(),
           onChanged: (_) {
             if (_error != null) setState(() => _error = null);
           },
-          decoration: InputDecoration(
+          decoration: const InputDecoration(
             labelText: 'Invite code',
             hintText: 'e.g. AB12CD34',
-            border: const OutlineInputBorder(),
-            errorText: _error,
+            prefixIcon: Icon(Icons.key_outlined),
           ),
         ),
-        const Spacer(),
-        SizedBox(
-          width: double.infinity,
-          child: FilledButton(
-            onPressed: _submitting ? null : _join,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              child: _submitting
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.white,
-                      ),
-                    )
-                  : const Text('Join'),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildJoined() {
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        const Icon(Icons.check_circle, size: 72, color: AppColors.statusGreen),
-        const SizedBox(height: 16),
-        const Text(
-          'Family joined',
-          style: TextStyle(fontSize: 24, fontWeight: FontWeight.w700),
-        ),
-        const SizedBox(height: 8),
-        const Text(
-          'You are now a member of the family.',
-          textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 15, color: AppColors.textMuted),
-        ),
-        const SizedBox(height: 24),
-        FilledButton(
-          onPressed: () {
-            if (widget.onDone != null) {
-              widget.onDone!();
-            } else {
-              Navigator.of(context).pop(true);
-            }
-          },
-          child: const Text('Done'),
-        ),
+        if (_error != null) DsMessage(_error!),
       ],
     );
   }
