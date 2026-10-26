@@ -91,4 +91,35 @@ void main() {
     expect(api.flags, <bool>[false]);
     expect(await DrivingSettings.phoneUseEnabled(), isFalse);
   });
+
+  testWidgets('phone-use switch sends phone_use_enabled and resyncs on change',
+      (WidgetTester t) async {
+    t.view.physicalSize = const Size(800, 3200);
+    t.view.devicePixelRatio = 1;
+    addTearDown(t.view.reset);
+    final FakeSensorEventsApi api = FakeSensorEventsApi();
+    await pump(t, api);
+    await t.tap(find.text('Count screen activity while moving'));
+    await t.pumpAndSettle();
+    expect(api.phoneFlags, <bool>[true]);
+    expect(api.flags, <bool>[true]);
+    expect(await DrivingSettings.phoneUseEnabled(), isTrue);
+    await t.tap(find.text('Count screen activity while moving'));
+    await t.pumpAndSettle();
+    expect(api.phoneFlags, <bool>[true, false]);
+    expect(await DrivingSettings.phoneUseEnabled(), isFalse);
+  });
+
+  testWidgets('phone use stays off when the server cannot be told',
+      (WidgetTester t) async {
+    t.view.physicalSize = const Size(800, 3200);
+    t.view.devicePixelRatio = 1;
+    addTearDown(t.view.reset);
+    final FakeSensorEventsApi api = FakeSensorEventsApi()..offline = true;
+    await pump(t, api);
+    await t.tap(find.text('Count screen activity while moving'));
+    await t.pumpAndSettle();
+    expect(await DrivingSettings.phoneUseEnabled(), isFalse);
+    expect(find.textContaining('phone use stays off'), findsOneWidget);
+  });
 }

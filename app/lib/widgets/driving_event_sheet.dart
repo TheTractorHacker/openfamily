@@ -1,17 +1,25 @@
 import 'package:flutter/material.dart';
 
 import '../models/trip_report.dart';
+import '../screens/driving_detection_screen.dart';
 import '../services/speed_units.dart';
 import '../theme/app_theme.dart';
 import 'ds/ds.dart';
 import 'driving_event_chips.dart';
 
+/// Shown instead of a count while phone-use tracking is off.
+const String phoneUseOffText =
+    'Phone use tracking is off. Turn it on in Settings > Driving detection '
+    '(experimental: it records screen activity while the car is moving and '
+    'cannot tell a driver from a passenger)';
+
 /// "What is <event>?" copy, quoting the thresholds the server used.
 String eventExplanation(
   DrivingEventKind k,
   ReportThresholds t,
-  UnitSystem u,
-) {
+  UnitSystem u, {
+  bool off = false,
+}) {
   String accel(double mps2) =>
       '${u.speedFromMps(mps2).toStringAsFixed(1)} ${u.speedLabel} per second';
   return switch (k) {
@@ -27,9 +35,11 @@ String eventExplanation(
           'than ${accel(t.rapidAccelMps2)}, like pulling away from a light '
           'in a hurry.',
     DrivingEventKind.phoneUse =>
-      'Phone use would flag handling the phone while the car is moving. '
-          'OpenFamily does not measure this yet, so no count is shown. A '
-          'blank is not the same as zero.',
+      off
+          ? phoneUseOffText
+          : 'Phone use counts times the screen was active while the car was '
+              'moving, on phones that turned it on. It is experimental and '
+              'cannot tell a driver from a passenger.',
   };
 }
 
@@ -125,7 +135,7 @@ class DrivingEventSheet extends StatelessWidget {
             Center(
               child: Text(
                 count == null
-                    ? 'Not tracked yet'
+                    ? 'Off'
                     : '${incidentsText(count)} $phrase',
                 textAlign: TextAlign.center,
                 style: AppType.body.copyWith(color: cs.onSurfaceVariant),
@@ -164,7 +174,7 @@ class DrivingEventSheet extends StatelessWidget {
             ),
             const SizedBox(height: AppSpace.sm),
             Text(
-              eventExplanation(kind, report.thresholds, units),
+              eventExplanation(kind, report.thresholds, units, off: count == null),
               style: AppType.body.copyWith(
                 fontWeight: FontWeight.w500,
                 height: 1.4,
@@ -189,6 +199,22 @@ class DrivingEventSheet extends StatelessWidget {
                     ),
                   ),
                 ],
+              ),
+            ],
+            if (count == null) ...<Widget>[
+              const SizedBox(height: AppSpace.lg),
+              SizedBox(
+                width: double.infinity,
+                child: DsPillButton(
+                  label: 'Open Driving detection',
+                  onPressed: () {
+                    final NavigatorState nav = Navigator.of(context);
+                    nav.pop();
+                    nav.push(MaterialPageRoute<void>(
+                      builder: (_) => const DrivingDetectionScreen(),
+                    ));
+                  },
+                ),
               ),
             ],
             const SizedBox(height: AppSpace.xl),

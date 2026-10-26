@@ -100,7 +100,7 @@ func TestReportDaysAndRecentTrips(t *testing.T) {
 	}
 
 	// Phone sensor members get a number.
-	_, err := e.pool.Exec(ctx, `UPDATE users SET driving_sensor_enabled=true WHERE id=$1`, u)
+	_, err := e.pool.Exec(ctx, `UPDATE users SET driving_sensor_enabled=true, driving_phone_use_enabled=true WHERE id=$1`, u)
 	e.must(err)
 	d, _ = e.days(e.a2, "?start="+day+"&circle_id="+e.famA)
 	if d.Recent[1].EventCounts.PhoneUse == nil || *d.Recent[1].EventCounts.PhoneUse != 0 {

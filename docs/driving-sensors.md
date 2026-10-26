@@ -92,7 +92,7 @@ are not covered** (the first launch is usually missed).
 
 ## Phone use (`phone_use`), Android, estimate only
 
-Implemented, **default OFF and not changed by the detection default** (second switch, requires the first). The local plugin
+Implemented, **default OFF and not changed by the detection default** (second switch, requires the first). The app sends it to the server as `phone_use_enabled` with every opt-in sync; until it is true the server rejects `phone_use` events and the report shows phone use as Off. The local plugin
 `app/packages/driving_native` registers a receiver for `ACTION_SCREEN_ON`,
 `ACTION_SCREEN_OFF` and `ACTION_USER_PRESENT` dynamically (they cannot be
 manifest-declared) on the application context, only while a driving session is

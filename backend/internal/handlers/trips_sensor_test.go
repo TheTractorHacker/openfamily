@@ -134,6 +134,11 @@ func evBody(enabled string, evs ...string) string {
 	return s + `}`
 }
 
+// withPhoneUse adds the phone-use opt-in next to sensor_enabled.
+func withPhoneUse(body string) string {
+	return strings.Replace(body, `"sensor_enabled":true`, `"sensor_enabled":true,"phone_use_enabled":true`, 1)
+}
+
 func num(m map[string]any, k string) int { f, _ := m[k].(float64); return int(f) }
 
 func (e *sensorEnv) countEvents(userID, where string) int {
@@ -239,7 +244,10 @@ func TestSensorLimitsAndValidation(t *testing.T) {
 	if code != 200 || num(out, "accepted") != 1 || num(out, "rejected") != 2 || num(out, "duplicate") != 0 {
 		t.Errorf("mixed: %d %v", code, out)
 	}
-	// Null location is fine.
+	// Null location is fine (phone_use needs its own opt-in).
+	if code, _ = e.post(h, `{"phone_use_enabled":true}`); code != 200 {
+		t.Fatalf("enable phone use: %d", code)
+	}
 	code, out = e.post(h, evBody("", `{"kind":"phone_use","started_at":"`+at.Add(-3*time.Hour).UTC().Format(time.RFC3339)+`","ended_at":"`+at.Add(-3*time.Hour+30*time.Second).UTC().Format(time.RFC3339)+`","magnitude":30,"lat":null,"lon":null}`))
 	if code != 200 || num(out, "accepted") != 1 {
 		t.Errorf("null location: %d %v", code, out)
@@ -416,11 +424,11 @@ func TestSensorWinsReportAndPhoneUse(t *testing.T) {
 		t.Fatal("totals phone_use should be null")
 	}
 
-	code, out := e.post(e.bearer(e.a1), evBody("true",
+	code, out := e.post(e.bearer(e.a1), withPhoneUse(evBody("true",
 		evJSON("hard_brake", sensorAt, time.Second, 6),
 		evJSON("hard_brake", farAt, time.Second, 6),
 		evJSON("phone_use", base, 20*time.Second, 20),
-		evJSON("phone_use", base.Add(time.Hour), 20*time.Second, 20)))
+		evJSON("phone_use", base.Add(time.Hour), 20*time.Second, 20))))
 	if code != 200 || num(out, "accepted") != 4 {
 		t.Fatalf("%d %v", code, out)
 	}
@@ -475,7 +483,7 @@ func TestSensorWinsReportAndPhoneUse(t *testing.T) {
 		t.Error("existing sensor events removed on opt-out")
 	}
 	r = e.reportJSON(e.a2, e.famA)
-	if memberEvents(r, e.a1)["phone_use"] != nil || len(r["sensor_members"].([]any)) != 0 {
+	if memberEvents(r, e.a1)["phone_use"] != nil || len(r["sensor_members"].([]any)) != 0 || len(r["phone_use_members"].([]any)) != 0 {
 		t.Error("phone_use not hidden after opt-out")
 	}
 	if memberEvents(r, e.a1)["hard_brake"].(float64) != 4 {
@@ -525,6 +533,7 @@ func TestSensorExportDeletionAndRetention(t *testing.T) {
 	r.ServeHTTP(w, httptest.NewRequest("GET", "/me/export", nil))
 	var exp struct {
 		Enabled bool `json:"driving_sensor_enabled"`
+		Phone   *bool `json:"driving_phone_use_enabled"`
 		Events  []struct {
 			Source string `json:"source"`
 			Kind   string `json:"kind"`
@@ -533,6 +542,18 @@ func TestSensorExportDeletionAndRetention(t *testing.T) {
 	}
 	if err := json.Unmarshal(bytes.TrimSpace(w.Body.Bytes()), &exp); err != nil || w.Code != 200 {
 		t.Fatalf("export %d %v %s", w.Code, err, w.Body.String())
+	}
+	if exp.Phone == nil || *exp.Phone {
+		t.Fatalf("export driving_phone_use_enabled %v", exp.Phone)
+	}
+	if code, _ := e.post(e.bearer(e.a1), `{"phone_use_enabled":true}`); code != 200 {
+		t.Fatal("enable phone use")
+	}
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest("GET", "/me/export", nil))
+	exp.Phone = nil
+	if err := json.Unmarshal(bytes.TrimSpace(w.Body.Bytes()), &exp); err != nil || exp.Phone == nil || !*exp.Phone {
+		t.Fatalf("export after enable %v %v", err, exp.Phone)
 	}
 	if !exp.Complete || !exp.Enabled || len(exp.Events) != 1 || exp.Events[0].Source != "sensor" {
 		t.Fatalf("export %+v", exp)
@@ -598,5 +619,93 @@ func TestSensorEventCannotHideDistantGPSEvents(t *testing.T) {
 	}
 	if hb := memberEvents(e.reportJSON(e.a2, e.famA), e.a1)["hard_brake"].(float64); hb != 4 {
 		t.Fatalf("want 3 visible GPS + 1 sensor = 4, got %v", hb)
+	}
+}
+
+func TestPhoneUseOptIn(t *testing.T) {
+	e := setupSensorEnv(t)
+	ctx := context.Background()
+	flags := func() (bool, bool) {
+		var s, p bool
+		e.must(e.pool.QueryRow(ctx, `SELECT driving_sensor_enabled, driving_phone_use_enabled FROM users WHERE id=$1`, e.a1).Scan(&s, &p))
+		return s, p
+	}
+	e.must2(trips.NewStore(e.pool).ProcessUser(ctx, e.a1, e.famA))
+	_, ts, _ := e.tripOf(e.a1)
+	at := ts.Add(30 * time.Second)
+	phone := evJSON("phone_use", at, 20*time.Second, 20)
+	brake := evJSON("hard_brake", at, time.Second, 6)
+
+	// Sensor on, phone use never mentioned (old client): phone_use rejected.
+	code, out := e.post(e.bearer(e.a1), evBody("true", brake, phone))
+	if code != 200 || num(out, "accepted") != 1 || num(out, "rejected") != 1 || out["phone_use_enabled"] != false {
+		t.Fatalf("old client %d %v", code, out)
+	}
+	if s, p := flags(); !s || p {
+		t.Fatalf("flags %v %v", s, p)
+	}
+	r := e.reportJSON(e.a2, e.famA)
+	if memberEvents(r, e.a1)["phone_use"] != nil || r["totals"].(map[string]any)["events"].(map[string]any)["phone_use"] != nil {
+		t.Error("phone_use should be null when not enabled")
+	}
+	if sm := r["sensor_members"].([]any); len(sm) != 1 || sm[0] != e.a1 {
+		t.Errorf("sensor_members %v", sm)
+	}
+	if pm := r["phone_use_members"].([]any); len(pm) != 0 {
+		t.Errorf("phone_use_members %v", pm)
+	}
+
+	// Flag-only request enables it; events are then accepted; report has numbers.
+	code, out = e.post(e.bearer(e.a1), `{"phone_use_enabled":true}`)
+	if code != 200 || out["phone_use_enabled"] != true || out["sensor_enabled"] != true {
+		t.Fatalf("enable %d %v", code, out)
+	}
+	code, out = e.post(e.bearer(e.a1), evBody("", phone))
+	if code != 200 || num(out, "accepted") != 1 {
+		t.Fatalf("phone event %d %v", code, out)
+	}
+	r = e.reportJSON(e.a2, e.famA)
+	if v, ok := memberEvents(r, e.a1)["phone_use"].(float64); !ok || v != 1 {
+		t.Errorf("member phone_use %v", memberEvents(r, e.a1)["phone_use"])
+	}
+	if v, ok := r["totals"].(map[string]any)["events"].(map[string]any)["phone_use"].(float64); !ok || v != 1 {
+		t.Errorf("totals phone_use %v", v)
+	}
+	if pm := r["phone_use_members"].([]any); len(pm) != 1 || pm[0] != e.a1 {
+		t.Errorf("phone_use_members %v", pm)
+	}
+	// Another member without the flag stays null (not 0).
+	if memberEvents(r, e.a2)["phone_use"] != nil {
+		t.Error("a2 phone_use should be null")
+	}
+
+	// A missing flag keeps the stored value.
+	if code, _ = e.post(e.bearer(e.a1), evBody("", brake)); code != 200 {
+		t.Fatal("keep")
+	}
+	if s, p := flags(); !s || !p {
+		t.Fatalf("flags after keep %v %v", s, p)
+	}
+	// Phone use can be switched off on its own; sensor stays on.
+	code, out = e.post(e.bearer(e.a1), `{"phone_use_enabled":false}`)
+	if code != 200 || out["phone_use_enabled"] != false || out["sensor_enabled"] != true {
+		t.Fatalf("disable %d %v", code, out)
+	}
+	// Sensor off forces phone use off, even when both are sent together.
+	e.post(e.bearer(e.a1), `{"phone_use_enabled":true}`)
+	code, out = e.post(e.bearer(e.a1), `{"sensor_enabled":false}`)
+	if code != 200 || out["phone_use_enabled"] != false {
+		t.Fatalf("opt-out %d %v", code, out)
+	}
+	code, out = e.post(e.bearer(e.a1), `{"sensor_enabled":false,"phone_use_enabled":true}`)
+	if code != 200 || out["phone_use_enabled"] != false {
+		t.Fatalf("opt-out with phone %d %v", code, out)
+	}
+	if s, p := flags(); s || p {
+		t.Fatalf("flags after opt-out %v %v", s, p)
+	}
+	// Re-enabling the sensor does not bring phone use back.
+	if code, out = e.post(e.bearer(e.a1), `{"sensor_enabled":true}`); code != 200 || out["phone_use_enabled"] != false {
+		t.Fatalf("re-enable %d %v", code, out)
 	}
 }

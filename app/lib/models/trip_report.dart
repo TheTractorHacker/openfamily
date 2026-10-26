@@ -31,7 +31,8 @@ DrivingEventKind? parseEventKind(Object? raw) {
 double _num(Object? v) => v is num ? v.toDouble() : 0;
 int? _intOrNull(Object? v) => v is num ? v.toInt() : null;
 
-/// Event counts. A null count means "not tracked" (never zero).
+/// Event counts. A null count means "not tracked" (never zero): for phone use
+/// it means the member has phone-use detection off.
 class EventCounts {
   const EventCounts({
     this.speeding = 0,
@@ -189,6 +190,7 @@ class TripReport {
     required this.thresholds,
     required this.estimated,
     this.sensorMembers = const <String>[],
+    this.phoneUseMembers = const <String>[],
     this.days = const <ReportDay>[],
     this.recentTrips = const <RecentTrip>[],
   });
@@ -210,6 +212,9 @@ class TripReport {
       estimated: j['estimated'] != false,
       sensorMembers: j['sensor_members'] is List
           ? (j['sensor_members'] as List).map((Object? e) => '$e').toList()
+          : const <String>[],
+      phoneUseMembers: j['phone_use_members'] is List
+          ? (j['phone_use_members'] as List).map((Object? e) => '$e').toList()
           : const <String>[],
       days: j['days'] is List
           ? (j['days'] as List)
@@ -243,6 +248,10 @@ class TripReport {
 
   /// Users (visible to the viewer) whose phone sensor is on.
   final List<String> sensorMembers;
+
+  /// Users (visible to the viewer) who turned phone-use detection on. Only
+  /// they have a phone_use number; everyone else has null (off).
+  final List<String> phoneUseMembers;
 
   /// One entry per local day of the period, zero-filled. Empty when the
   /// server predates the field.

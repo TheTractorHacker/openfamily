@@ -107,7 +107,7 @@ func (s *Server) reportDays(ctx context.Context, ids []string, per reportPeriod,
 		}
 	}
 	for i := range recent {
-		recent[i].EventCounts.finalizePhoneUse(members[recent[i].UserID].sensor)
+		recent[i].EventCounts.finalizePhoneUse(members[recent[i].UserID].phoneUse)
 	}
 	sort.SliceStable(recent, func(a, b int) bool { return recent[a].StartedAt.After(recent[b].StartedAt) })
 	return days, recent, nil

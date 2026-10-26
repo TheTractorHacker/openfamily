@@ -125,6 +125,7 @@ Map<String, dynamic> richParts({int drives = 1, bool sensor = false}) {
   return <String, dynamic>{
     'days': days,
     'sensor_members': sensor ? <String>['u1'] : <String>[],
+    'phone_use_members': sensor ? <String>['u1'] : <String>[],
     'recent_trips': drives == 0
         ? <Map<String, dynamic>>[]
         : <Map<String, dynamic>>[

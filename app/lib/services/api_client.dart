@@ -1021,10 +1021,13 @@ class ApiClient {
   static Map<String, dynamic> sensorEventsBody(
     List<Map<String, dynamic>> events, {
     required bool sensorEnabled,
+    required bool phoneUseEnabled,
   }) {
     return <String, dynamic>{
       'events': events,
       'sensor_enabled': sensorEnabled,
+      // Separate opt-in; the server shows phone use as "off" until it is true.
+      'phone_use_enabled': phoneUseEnabled,
     };
   }
 
@@ -1033,10 +1036,12 @@ class ApiClient {
   static Future<Map<String, dynamic>> postSensorEvents(
     List<Map<String, dynamic>> events, {
     required bool sensorEnabled,
+    required bool phoneUseEnabled,
   }) async {
     final dynamic r = await post(
       '/trips/sensor-events',
-      body: sensorEventsBody(events, sensorEnabled: sensorEnabled),
+      body: sensorEventsBody(events,
+          sensorEnabled: sensorEnabled, phoneUseEnabled: phoneUseEnabled),
     );
     return r is Map<String, dynamic> ? r : <String, dynamic>{};
   }
@@ -1050,6 +1055,7 @@ class ApiClient {
     required String ingestKey,
     required List<Map<String, dynamic>> events,
     required bool sensorEnabled,
+    required bool phoneUseEnabled,
     http.Client? client,
     Duration timeout = const Duration(seconds: 15),
   }) async {
@@ -1062,8 +1068,9 @@ class ApiClient {
               'X-Device-Key': '$deviceId.$ingestKey',
               'Content-Type': 'application/json',
             },
-            body: jsonEncode(
-                sensorEventsBody(events, sensorEnabled: sensorEnabled)),
+            body: jsonEncode(sensorEventsBody(events,
+                sensorEnabled: sensorEnabled,
+                phoneUseEnabled: phoneUseEnabled)),
           )
           .timeout(timeout);
       if (r.statusCode < 200 || r.statusCode >= 300) {

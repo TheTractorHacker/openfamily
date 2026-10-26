@@ -460,8 +460,8 @@ class _State extends State<FamilyDrivingReportScreen> {
         const Padding(
           padding: EdgeInsets.only(top: AppSpace.sm),
           child: DrivingHint(
-            'Phone use is not tracked yet, so it shows no number rather '
-            'than a zero.',
+            'Phone use is off, so it shows Off rather than a zero. Turn it on '
+            'in Settings > Driving detection.',
           ),
         ),
       const SizedBox(height: AppSpace.lg),

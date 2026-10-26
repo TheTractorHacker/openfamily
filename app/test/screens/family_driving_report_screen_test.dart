@@ -102,8 +102,8 @@ void main() {
     expect(find.text('1 drive · 30 mi'), findsOneWidget);
     expect(find.text('1 risky event'), findsOneWidget);
     expect(find.text('No drives'), findsOneWidget, reason: 'idle member is collapsed');
-    expect(find.text('Not tracked yet'), findsOneWidget);
-    expect(find.textContaining('Phone use is not tracked yet'), findsOneWidget);
+    expect(find.text('Off'), findsOneWidget);
+    expect(find.textContaining('Phone use is off'), findsOneWidget);
     expect(api.calls.single.$1, DateTime(2026, 10, 26));
   });
 
@@ -137,7 +137,7 @@ void main() {
       findsOneWidget,
     );
     expect(
-      find.bySemanticsLabel('Phone use: not tracked yet. Tap to learn more.'),
+      find.bySemanticsLabel('Phone use: off. Tap to learn more.'),
       findsOneWidget,
     );
     h.dispose();
@@ -286,12 +286,33 @@ void main() {
     expect(find.text('0 incidents this week'), findsOneWidget);
   });
 
-  testWidgets('phone use sheet explains it is not tracked', (WidgetTester t) async {
+  testWidgets('phone use sheet explains it is off and opens the settings',
+      (WidgetTester t) async {
     await _pump(t, FakeTripReportApi());
     await t.tap(find.text('Phone use'));
     await t.pumpAndSettle();
-    expect(find.text('Not tracked yet'), findsWidgets);
-    expect(find.textContaining('does not measure this yet'), findsOneWidget);
+    expect(find.text('Off'), findsWidgets);
+    expect(find.textContaining('Phone use tracking is off. Turn it on in '
+        'Settings > Driving detection (experimental: it records screen '
+        'activity while the car is moving and cannot tell a driver from a '
+        'passenger)'), findsOneWidget);
+    await t.ensureVisible(find.text('Open Driving detection'));
+    await t.tap(find.text('Open Driving detection'));
+    await t.pumpAndSettle();
+    expect(find.byType(DrivingDetectionScreen), findsOneWidget);
+  });
+
+  testWidgets('phone use tile: zero is a real count, never shown for off',
+      (WidgetTester t) async {
+    final Map<String, dynamic> j = reportJson(rich: true, sensor: true);
+    // an enabled member with no phone use really is 0
+    (j['totals'] as Map<String, dynamic>)['events']['phone_use'] = 0;
+    await _pump(t, FakeTripReportApi(result: j));
+    expect(find.text('Off'), findsNothing);
+    await t.tap(find.text('Phone use'));
+    await t.pumpAndSettle();
+    expect(find.text('0 incidents this week'), findsOneWidget);
+    expect(find.text('Open Driving detection'), findsNothing);
   });
 
   testWidgets('member card opens that member\'s trips', (WidgetTester t) async {

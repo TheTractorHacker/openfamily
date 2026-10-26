@@ -47,6 +47,8 @@ class DrivingSettings {
   static Future<void> setPhoneUseEnabled(bool v) async {
     final SharedPreferences p = await SharedPreferences.getInstance();
     await p.setBool(phoneUseKey, v);
+    // The server must be told again (syncOptIn resends both flags).
+    await p.setBool(syncedKey, false);
   }
 
   static Future<bool> serverSynced({bool reload = true}) =>
@@ -55,10 +57,14 @@ class DrivingSettings {
   /// Persists the effective value explicitly and records that the server has
   /// been told [enabled]. Does nothing if the local value changed meanwhile,
   /// so a later sync still delivers the newer choice.
-  static Future<void> markSynced(bool enabled) async {
+  /// [phoneUse], when given, must also still match the stored phone-use flag.
+  static Future<void> markSynced(bool enabled, {bool? phoneUse}) async {
     final SharedPreferences p = await SharedPreferences.getInstance();
     await p.reload();
     if ((p.getBool(sensorKey) ?? true) != enabled) return;
+    if (phoneUse != null && (p.getBool(phoneUseKey) ?? false) != phoneUse) {
+      return;
+    }
     await p.setBool(sensorKey, enabled);
     await p.setBool(syncedKey, true);
   }

@@ -26,6 +26,19 @@ void main() {
       expect(r.isEmpty, isFalse);
     });
 
+    test('phone_use null stays null, a number stays a number', () {
+      final Map<String, dynamic> j = reportJson(rich: true, sensor: true);
+      (j['totals'] as Map<String, dynamic>)['events']['phone_use'] = 0;
+      ((j['members'] as List).first as Map<String, dynamic>)['events']
+          ['phone_use'] = 3;
+      final TripReport r = TripReport.fromJson(j);
+      expect(r.totals.events.phoneUse, 0);
+      expect(r.members.first.events.phoneUse, 3);
+      expect(r.members.last.events.phoneUse, isNull);
+      expect(r.phoneUseMembers, <String>['u1']);
+      expect(TripReport.fromJson(reportJson()).phoneUseMembers, isEmpty);
+    });
+
     test('empty week has null top speed and no drives', () {
       final TripReport r = TripReport.fromJson(
         reportJson(drives: 0, speeding: 0),

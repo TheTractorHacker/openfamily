@@ -111,7 +111,7 @@ class DrivingEventChip extends StatelessWidget {
 
   final DrivingEventKind kind;
 
-  /// Null = not tracked.
+  /// Null = tracking is off (never shown as zero).
   final int? count;
   final int? previous;
   final String phrase;
@@ -129,7 +129,7 @@ class DrivingEventChip extends StatelessWidget {
     final Trend trend = trendOf(count, previous);
     final String tText = trendText(trend, previous);
     final String label = count == null
-        ? '${kind.label}: not tracked yet. Tap to learn more.'
+        ? '${kind.label}: off. Tap to learn more.'
         : '${kind.label}: ${incidentsText(count!)} $phrase, $tText. '
             'Tap to learn more.';
     return Semantics(
@@ -168,7 +168,7 @@ class DrivingEventChip extends StatelessWidget {
                 const SizedBox(height: AppSpace.sm),
                 if (count == null)
                   Text(
-                    'Not tracked yet',
+                    'Off',
                     textAlign: TextAlign.center,
                     style: AppType.secondary.copyWith(
                       fontWeight: FontWeight.w700,
