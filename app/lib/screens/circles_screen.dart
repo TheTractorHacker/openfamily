@@ -118,7 +118,10 @@ class _CirclesScreenState extends State<CirclesScreen> {
         actions: <Widget>[
           IconButton(
             tooltip: 'Join a circle with a code',
-            constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+            constraints: const BoxConstraints(
+              minWidth: kMinTarget,
+              minHeight: kMinTarget,
+            ),
             icon: const Icon(Icons.vpn_key_outlined),
             onPressed: _join,
           ),
@@ -161,7 +164,12 @@ class _CirclesScreenState extends State<CirclesScreen> {
       onRefresh: _load,
       child: ListView.builder(
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(12, 8, 12, 96),
+        padding: const EdgeInsets.fromLTRB(
+          AppSpace.lg,
+          AppSpace.sm,
+          AppSpace.lg,
+          96,
+        ),
         itemCount: circles.length,
         itemBuilder: (BuildContext context, int i) => _CircleTile(
           circle: circles[i],

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../services/api_client.dart';
 import '../services/security_api.dart';
 import '../services/security_format.dart';
+import '../theme/app_theme.dart';
 import 'security_widgets.dart';
 
 /// Change password. Requires the current password, plus a code when
@@ -84,19 +85,25 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
   Widget build(BuildContext context) {
     return SecurityPage(
       title: 'Change password',
+      heading: 'Choose a new password',
+      subtitle: 'Other devices are signed out when you change it. This one '
+          'stays signed in.',
+      actions: <Widget>[
+        BusyButton(label: 'Change password', onPressed: _submit, busy: _busy),
+      ],
       children: <Widget>[
         SecurePasswordField(
           controller: _current,
           label: 'Current password',
           enabled: !_busy,
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: AppSpace.lg),
         SecurePasswordField(
           controller: _next,
           label: 'New password',
           enabled: !_busy,
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: AppSpace.lg),
         SecurePasswordField(
           controller: _confirm,
           label: 'Confirm new password',
@@ -104,12 +111,10 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
           onSubmitted: widget.totpEnabled ? null : _submit,
         ),
         if (widget.totpEnabled) ...<Widget>[
-          const SizedBox(height: 16),
+          const SizedBox(height: AppSpace.lg),
           CodeField(controller: _code, enabled: !_busy, onSubmitted: _submit),
         ],
         if (_error != null) ErrorText(_error!),
-        const SizedBox(height: 20),
-        BusyButton(label: 'Change password', onPressed: _submit, busy: _busy),
       ],
     );
   }

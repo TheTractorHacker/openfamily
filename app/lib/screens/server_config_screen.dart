@@ -6,6 +6,7 @@ import '../services/server_config.dart';
 import '../services/tile_config.dart';
 import '../theme/app_theme.dart';
 import '../widgets/openfamily_brand.dart';
+import '../widgets/ds/ds.dart';
 import 'welcome_screen.dart';
 import 'privacy_policy_screen.dart';
 
@@ -85,78 +86,64 @@ class _ServerConfigScreenState extends State<ServerConfigScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: widget.allowCancel ? AppBar(title: const Text('Server')) : null,
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const Spacer(),
-              const Center(child: OpenFamilyMark(size: 88)),
-              const SizedBox(height: 20),
-              Text(
-                'OpenFamily',
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.headlineLarge?.copyWith(
-                      fontWeight: FontWeight.w800,
-                      color: Theme.of(context).colorScheme.onSurface,
-                    ),
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                'Requires a self-hosted OpenFamily server with HTTPS.\n'
-                'Ask your family administrator for its secure address.',
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 16, color: AppColors.textMuted),
-              ),
-              const SizedBox(height: 32),
-              TextField(
-                controller: _controller,
-                decoration: InputDecoration(
-                  labelText: 'Server URL',
-                  hintText: 'https://openfamily.example.com',
-                  prefixIcon: const Icon(Icons.dns_outlined),
-                  errorText: _error,
-                ),
-                keyboardType: TextInputType.url,
-                autocorrect: false,
-                enableSuggestions: false,
-                onSubmitted: (_) => _save(),
-              ),
-              const SizedBox(height: 16),
-              FilledButton(
-                onPressed: _saving ? null : _save,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  child: _saving
-                      ? const SizedBox(
-                          height: 20,
-                          width: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Text('Connect', style: TextStyle(fontSize: 16)),
-                ),
-              ),
-              const Spacer(),
-              TextButton(
-                onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                      builder: (_) => const PrivacyPolicyScreen()),
-                ),
-                child: const Text('Privacy policy'),
-              ),
-              const Text(
-                'Your HTTPS server URL is stored on this device only.\n'
-                'It is sent nowhere except your own server.',
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 12, color: AppColors.textMuted),
-              ),
-            ],
+    final ColorScheme cs = Theme.of(context).colorScheme;
+    return DsPage(
+      title: 'Server',
+      showBack: widget.allowCancel,
+      actions: <Widget>[
+        DsBusyButton(label: 'Connect', busy: _saving, onPressed: _save),
+        DsPillButton(
+          label: 'Privacy policy',
+          style: DsPillStyle.outlined,
+          icon: Icons.privacy_tip_outlined,
+          onPressed: () => Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) => const PrivacyPolicyScreen(),
+            ),
           ),
         ),
-      ),
+      ],
+      children: <Widget>[
+        const SizedBox(height: AppSpace.lg),
+        const Center(child: OpenFamilyMark(size: 88)),
+        const SizedBox(height: AppSpace.xl),
+        const DsHeading(
+          'Connect to your server',
+          subtitle: 'Requires a self-hosted OpenFamily server with HTTPS.\n'
+              'Ask your family administrator for its secure address.',
+          center: true,
+        ),
+        TextField(
+          controller: _controller,
+          enabled: !_saving,
+          decoration: const InputDecoration(
+            labelText: 'Server URL',
+            hintText: 'https://openfamily.example.com',
+            prefixIcon: Icon(Icons.dns_outlined),
+          ),
+          keyboardType: TextInputType.url,
+          textInputAction: TextInputAction.done,
+          autocorrect: false,
+          enableSuggestions: false,
+          onSubmitted: (_) => _save(),
+        ),
+        if (_error != null) DsMessage(_error!),
+        const SizedBox(height: AppSpace.lg),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Icon(Icons.lock_outline, size: 16, color: cs.onSurfaceVariant),
+            const SizedBox(width: AppSpace.sm),
+            Expanded(
+              child: Text(
+                'Your HTTPS server URL is stored on this device only. It is '
+                'sent nowhere except your own server.',
+                style: AppType.secondary.copyWith(color: cs.onSurfaceVariant),
+              ),
+            ),
+          ],
+        ),
+      ],
     );
   }
 }

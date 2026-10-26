@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../theme/app_theme.dart';
+import '../widgets/ds/ds.dart';
+
 /// Available offline and before sign-in so users can review data handling
 /// before connecting to a server or granting location permission.
 class PrivacyPolicyScreen extends StatelessWidget {
@@ -79,24 +82,32 @@ class PrivacyPolicyScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Privacy policy')),
-      body: ListView(
-        padding: const EdgeInsets.all(24),
-        children: [
-          Text('OpenFamily privacy policy',
-              style: Theme.of(context).textTheme.headlineSmall),
-          const SizedBox(height: 8),
-          const Text('Updated October 17, 2026'),
-          const SizedBox(height: 24),
-          for (final section in sections) ...[
-            Text(section.$1, style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 8),
-            SelectableText(section.$2),
-            const SizedBox(height: 24),
-          ],
+    final ColorScheme cs = Theme.of(context).colorScheme;
+    return DsPage(
+      title: 'Privacy policy',
+      maxWidth: 640,
+      children: [
+        const DsHeading(
+          'OpenFamily privacy policy',
+          subtitle: 'Updated October 17, 2026',
+        ),
+        for (final section in sections) ...[
+          Semantics(
+            header: true,
+            child: Text(section.$1, style: AppType.headline),
+          ),
+          const SizedBox(height: AppSpace.sm),
+          SelectableText(
+            section.$2,
+            style: AppType.body.copyWith(
+              fontWeight: FontWeight.w500,
+              height: 1.5,
+              color: cs.onSurface,
+            ),
+          ),
+          const SizedBox(height: AppSpace.xxl),
         ],
-      ),
+      ],
     );
   }
 }

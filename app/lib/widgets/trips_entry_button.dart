@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/member.dart';
 import '../screens/trips_screen.dart';
+import 'ds/ds.dart';
 
 void openTrips(BuildContext context, Member member) {
   Navigator.of(context).push(
@@ -17,46 +18,13 @@ class TripsEntryButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ColorScheme cs = Theme.of(context).colorScheme;
-    return Semantics(
-      button: true,
-      label: 'Trips and driving reports for ${member.name}',
-      excludeSemantics: true,
-      child: Material(
-        color: Theme.of(context).cardColor.withValues(alpha: 0),
-        child: Ink(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: cs.outlineVariant),
-          ),
-          child: InkWell(
-            borderRadius: BorderRadius.circular(14),
-            onTap: () => openTrips(context, member),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(minHeight: 56),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Row(
-                  children: <Widget>[
-                    Icon(Icons.route_rounded, color: cs.onSurface),
-                    const SizedBox(width: 12),
-                    const Expanded(
-                      child: Text(
-                        'Trips & driving',
-                        style: TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                    Icon(Icons.chevron_right, color: cs.onSurfaceVariant),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
+    return DsListRow(
+      leading: DsListRow.iconTile(context, Icons.route_rounded),
+      title: 'Trips & driving',
+      subtitle: 'Drives and driving reports',
+      chevron: true,
+      semanticLabel: 'Trips and driving reports for ${member.name}',
+      onTap: () => openTrips(context, member),
     );
   }
 }

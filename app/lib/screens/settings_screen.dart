@@ -91,7 +91,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _notifications = true;
   bool _notificationsLoading = true;
   bool _loggingOut = false;
-  bool _deletingAccount = false;
+  final bool _deletingAccount = false;
   final BiometricService _biometricService = BiometricService.instance;
   bool _biometricLoading = true;
   bool _biometricUpdating = false;
@@ -271,6 +271,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _logout() async {
     if (_loggingOut) return;
+    final bool sure = await showDsConfirm(
+      context,
+      title: 'Log out?',
+      message: 'You will need to sign in again on this device.',
+      confirmLabel: 'Log out',
+    );
+    if (!sure || !mounted) return;
     setState(() => _loggingOut = true);
     try {
       await AuthService.logout();
@@ -294,28 +301,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _changeServer() async {
-    final bool? confirmed = await showDialog<bool>(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: const Text('Change server?'),
-          content: const Text(
-            'You will be signed out. Enter the new server address on the next screen.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('Continue'),
-            ),
-          ],
-        );
-      },
+    final bool confirmed = await showDsConfirm(
+      context,
+      title: 'Change server?',
+      message: 'You will be signed out. Enter the new server address on the '
+          'next screen.',
+      confirmLabel: 'Continue',
     );
-    if (confirmed != true || !mounted) return;
+    if (!confirmed || !mounted) return;
     try {
       await AuthService.logout();
     } catch (_) {
@@ -352,8 +345,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
       body: DotGridBackground(
-        child: ListView(
-          children: [
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 640),
+            child: ListView(
+              children: [
             const DsSectionHeader('Account'),
             DsListRow(
               leading: DsListRow.iconTile(context, Icons.person_outline),
@@ -410,41 +406,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   : null,
             ),
             if (_biometricEnabled)
-              ListTile(
-                leading: DsListRow.iconTile(context, Icons.lock_clock_outlined),
-                title: const Text('Lock delay'),
-                subtitle: const Text(
-                  'How long the app can stay in the background before it '
-                  'locks. Longer delays are convenient but let the recents '
-                  'screen show your family map.',
-                ),
-                trailing: DropdownButton<Duration>(
-                  value: _lockGrace,
-                  underline: const SizedBox.shrink(),
-                  onChanged: _biometricUpdating ? null : _setLockGrace,
-                  items: const [
-                    DropdownMenuItem(
-                      value: Duration.zero,
-                      child: Text('Immediately'),
-                    ),
-                    DropdownMenuItem(
-                      value: Duration(seconds: 30),
-                      child: Text('30 seconds'),
-                    ),
-                    DropdownMenuItem(
-                      value: Duration(minutes: 1),
-                      child: Text('1 minute'),
-                    ),
-                    DropdownMenuItem(
-                      value: Duration(minutes: 5),
-                      child: Text('5 minutes'),
-                    ),
-                    DropdownMenuItem(
-                      value: Duration(minutes: 15),
-                      child: Text('15 minutes'),
-                    ),
-                  ],
-                ),
+              _LockDelayRow(
+                value: _lockGrace,
+                onChanged: _biometricUpdating ? null : _setLockGrace,
               ),
             const DsSectionHeader('Location'),
             DsToggleRow(
@@ -484,7 +448,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               title: 'OpenFamily',
               subtitle: 'Version 0.1.0',
             ),
-            const Divider(height: AppSpace.xxl),
+            const SizedBox(height: AppSpace.lg),
+            const Divider(height: 1),
             DsListRow(
               leading: DsListRow.iconTile(context, Icons.logout,
                   color: AppColors.sosRed),
@@ -502,6 +467,66 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const SizedBox(height: AppSpace.xxl),
           ],
         ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _LockDelayRow extends StatelessWidget {
+  const _LockDelayRow({required this.value, required this.onChanged});
+
+  final Duration value;
+  final ValueChanged<Duration?>? onChanged;
+
+  static const List<(Duration, String)> _options = [
+    (Duration.zero, 'Immediately'),
+    (Duration(seconds: 30), '30 seconds'),
+    (Duration(minutes: 1), '1 minute'),
+    (Duration(minutes: 5), '5 minutes'),
+    (Duration(minutes: 15), '15 minutes'),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme cs = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        AppSpace.xl,
+        AppSpace.sm,
+        AppSpace.xl,
+        AppSpace.md,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              DsListRow.iconTile(context, Icons.lock_clock_outlined),
+              const SizedBox(width: AppSpace.md),
+              const Expanded(child: Text('Lock delay', style: AppType.body)),
+            ],
+          ),
+          const SizedBox(height: AppSpace.sm),
+          Text(
+            'How long the app can stay in the background before it locks. '
+            'Longer delays are convenient but let the recents screen show '
+            'your family map.',
+            style: AppType.secondary.copyWith(color: cs.onSurfaceVariant),
+          ),
+          const SizedBox(height: AppSpace.sm),
+          DropdownButtonFormField<Duration>(
+            initialValue: value,
+            isExpanded: true,
+            onChanged: onChanged,
+            decoration: const InputDecoration(labelText: 'Lock after'),
+            items: [
+              for (final (Duration, String) o in _options)
+                DropdownMenuItem(value: o.$1, child: Text(o.$2)),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -515,60 +540,28 @@ class _AppearanceTile extends StatelessWidget {
     return ValueListenableBuilder<ThemePreference>(
       valueListenable: ThemePreferenceService.preference,
       builder: (context, preference, _) {
-        return Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Theme',
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              const SizedBox(height: 4),
-              Text(
-                preference == ThemePreference.system
-                    ? 'Following this device. Light is Ice, dark is Night.'
-                    : preference == ThemePreference.light
-                        ? 'Ice. This device setting is ignored.'
-                        : 'Night. This device setting is ignored.',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-              ),
-              const SizedBox(height: 12),
-              SegmentedButton<ThemePreference>(
-                showSelectedIcon: false,
-                segments: const [
-                  ButtonSegment<ThemePreference>(
-                    value: ThemePreference.system,
-                    label: Text('System'),
-                    icon: Icon(Icons.brightness_auto, size: 18),
-                  ),
-                  ButtonSegment<ThemePreference>(
-                    value: ThemePreference.light,
-                    label: Text('Light'),
-                    icon: Icon(Icons.light_mode_outlined, size: 18),
-                  ),
-                  ButtonSegment<ThemePreference>(
-                    value: ThemePreference.dark,
-                    label: Text('Dark'),
-                    icon: Icon(Icons.dark_mode_outlined, size: 18),
-                  ),
-                ],
-                selected: <ThemePreference>{preference},
-                onSelectionChanged: (Set<ThemePreference> next) {
-                  if (next.isEmpty) return;
-                  ThemePreferenceService.setPreference(next.first);
-                },
-              ),
-            ],
-          ),
+        return DsChoiceSetting<ThemePreference>(
+          title: 'Theme',
+          description: preference == ThemePreference.system
+              ? 'Following this device. Light is Ice, dark is Night.'
+              : preference == ThemePreference.light
+                  ? 'Ice. This device setting is ignored.'
+                  : 'Night. This device setting is ignored.',
+          options: const [
+            DsChoice(ThemePreference.system, 'System',
+                icon: Icons.brightness_auto),
+            DsChoice(ThemePreference.light, 'Light',
+                icon: Icons.light_mode_outlined),
+            DsChoice(ThemePreference.dark, 'Dark',
+                icon: Icons.dark_mode_outlined),
+          ],
+          selected: preference,
+          onChanged: ThemePreferenceService.setPreference,
         );
       },
     );
   }
 }
-
 
 class _MapStyleTile extends StatelessWidget {
   const _MapStyleTile();
@@ -578,51 +571,23 @@ class _MapStyleTile extends StatelessWidget {
     return ValueListenableBuilder<MapStylePreference>(
       valueListenable: MapStylePreferenceService.preference,
       builder: (context, preference, _) {
-        return Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Map style', style: Theme.of(context).textTheme.titleMedium),
-              const SizedBox(height: 4),
-              Text(
-                preference == MapStylePreference.light
-                    ? 'Always the light map, even when the app is dark.'
-                    : preference == MapStylePreference.dark
-                        ? 'Always the dark map.'
-                        : 'The map follows the app theme.',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-              ),
-              const SizedBox(height: 12),
-              SegmentedButton<MapStylePreference>(
-                showSelectedIcon: false,
-                segments: const [
-                  ButtonSegment<MapStylePreference>(
-                    value: MapStylePreference.light,
-                    label: Text('Light'),
-                    icon: Icon(Icons.light_mode_outlined, size: 18),
-                  ),
-                  ButtonSegment<MapStylePreference>(
-                    value: MapStylePreference.dark,
-                    label: Text('Dark'),
-                    icon: Icon(Icons.dark_mode_outlined, size: 18),
-                  ),
-                  ButtonSegment<MapStylePreference>(
-                    value: MapStylePreference.matchApp,
-                    label: Text('Match app'),
-                    icon: Icon(Icons.brightness_auto, size: 18),
-                  ),
-                ],
-                selected: <MapStylePreference>{preference},
-                onSelectionChanged: (Set<MapStylePreference> next) {
-                  if (next.isEmpty) return;
-                  MapStylePreferenceService.setPreference(next.first);
-                },
-              ),
-            ],
-          ),
+        return DsChoiceSetting<MapStylePreference>(
+          title: 'Map style',
+          description: preference == MapStylePreference.light
+              ? 'Always the light map, even when the app is dark.'
+              : preference == MapStylePreference.dark
+                  ? 'Always the dark map.'
+                  : 'The map follows the app theme.',
+          options: const [
+            DsChoice(MapStylePreference.light, 'Light',
+                icon: Icons.light_mode_outlined),
+            DsChoice(MapStylePreference.dark, 'Dark',
+                icon: Icons.dark_mode_outlined),
+            DsChoice(MapStylePreference.matchApp, 'Match app',
+                icon: Icons.brightness_auto),
+          ],
+          selected: preference,
+          onChanged: MapStylePreferenceService.setPreference,
         );
       },
     );

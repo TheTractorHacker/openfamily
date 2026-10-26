@@ -7,6 +7,7 @@ import '../models/user_profile.dart';
 import '../services/api_client.dart';
 import '../theme/app_theme.dart';
 import '../widgets/ds/ds.dart';
+import 'security_widgets.dart' show SecurePasswordField;
 
 /// The authenticated user's account profile and private profile photo.
 ///
@@ -339,29 +340,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<void> _removeAvatar() async {
     if (_avatarSaving || _nameSaving || _profile?.hasAvatar != true) return;
 
-    final bool? confirmed = await showDialog<bool>(
-      context: context,
-      builder: (BuildContext context) => AlertDialog(
-        title: const Text('Remove profile photo?'),
-        content: const Text(
+    final bool confirmed = await showDsConfirm(
+      context,
+      title: 'Remove profile photo?',
+      message:
           'Your photo will be removed from this device view and your server.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: AppColors.sosRed,
-            ),
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Remove'),
-          ),
-        ],
-      ),
+      confirmLabel: 'Remove',
+      destructive: true,
     );
-    if (confirmed != true || !mounted) return;
+    if (!confirmed || !mounted) return;
 
     setState(() {
       // Any older refresh must not reintroduce the avatar while deletion is
@@ -444,157 +431,183 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   Widget build(BuildContext context) {
     final UserProfile? profile = _profile;
+    final ColorScheme cs = Theme.of(context).colorScheme;
+    final bool locked = _nameSaving || _avatarSaving;
     return Scaffold(
       appBar: AppBar(title: const Text('Profile')),
-      body: _loading
-          ? const DsSkeletonList(rows: 4, avatar: true)
-          : profile == null
-              ? _ProfileLoadError(message: _error, onRetry: _loadProfile)
-              : RefreshIndicator(
-                  onRefresh: _loadProfile,
-                  child: ListView(
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    padding: const EdgeInsets.fromLTRB(
-                        AppSpace.xxl, AppSpace.xxl, AppSpace.xxl, AppSpace.xxxl),
-                    children: [
-                      _AvatarEditor(
-                        name: profile.name,
-                        avatarBytes: _pendingAvatarBytes ?? _avatarBytes,
-                        saving: _avatarSaving,
-                      ),
-                      const SizedBox(height: 20),
-                      TextField(
-                        controller: _nameController,
-                        enabled: !_nameSaving && !_avatarSaving,
-                        textCapitalization: TextCapitalization.words,
-                        onChanged: _onNameChanged,
-                        decoration: const InputDecoration(
-                          labelText: 'Name',
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: _phoneController,
-                        enabled: !_nameSaving && !_avatarSaving,
-                        keyboardType: TextInputType.phone,
-                        onChanged: _onNameChanged,
-                        decoration: const InputDecoration(
-                          labelText: 'Phone (SMS alerts)',
-                          hintText: '+15551234567',
-                        ),
-                      ),
-                      if (_nameError != null) DsMessage(_nameError!),
-                      const SizedBox(height: 12),
-                      DsBusyButton(
-                        label: 'Save changes',
-                        busy: _nameSaving,
-                        onPressed:
-                            _nameSaving || _avatarSaving ? null : _saveName,
-                      ),
-                      const SizedBox(height: 16),
-                      InputDecorator(
-                        decoration: const InputDecoration(
-                          labelText: 'Email',
-                        ),
-                        child: Text(profile.email),
-                      ),
-                      const SizedBox(height: 16),
-                      InputDecorator(
-                        decoration: const InputDecoration(
-                          labelText: 'Family role',
-                        ),
-                        child: Text(_roleLabel(profile.role)),
-                      ),
-                      const SizedBox(height: 20),
-                      Wrap(
-                        alignment: WrapAlignment.center,
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          DsPillButton(
-                            style: DsPillStyle.tonal,
-                            onPressed: _avatarSaving || _nameSaving
-                                ? null
-                                : _chooseAndUploadAvatar,
-                            icon: Icons.photo_library_outlined,
-                            label:
-                                !profile.hasAvatar ? 'Add photo' : 'Change photo',
+      body: SafeArea(
+        child: _loading
+            ? const DsSkeletonList(rows: 4, avatar: true)
+            : profile == null
+                ? _ProfileLoadError(message: _error, onRetry: _loadProfile)
+                : RefreshIndicator(
+                    onRefresh: _loadProfile,
+                    child: Center(
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 560),
+                        child: ListView(
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          padding: const EdgeInsets.fromLTRB(
+                            AppSpace.xxl,
+                            AppSpace.xl,
+                            AppSpace.xxl,
+                            AppSpace.xxxl,
                           ),
-                          if (profile.hasAvatar)
-                            TextButton.icon(
-                              onPressed: _avatarSaving || _nameSaving
-                                  ? null
-                                  : _removeAvatar,
-                              icon: const Icon(Icons.delete_outline),
-                              label: const Text('Remove photo'),
-                              style: TextButton.styleFrom(
-                                foregroundColor: AppColors.sosRed,
+                          children: [
+                            _AvatarEditor(
+                              name: profile.name,
+                              avatarBytes: _pendingAvatarBytes ?? _avatarBytes,
+                              saving: _avatarSaving,
+                            ),
+                            const SizedBox(height: AppSpace.lg),
+                            Wrap(
+                              alignment: WrapAlignment.center,
+                              spacing: AppSpace.sm,
+                              runSpacing: AppSpace.sm,
+                              children: [
+                                DsPillButton(
+                                  style: DsPillStyle.tonal,
+                                  onPressed:
+                                      locked ? null : _chooseAndUploadAvatar,
+                                  icon: Icons.photo_library_outlined,
+                                  label: !profile.hasAvatar
+                                      ? 'Add photo'
+                                      : 'Change photo',
+                                ),
+                                if (profile.hasAvatar)
+                                  DsPillButton(
+                                    style: DsPillStyle.outlined,
+                                    onPressed: locked ? null : _removeAvatar,
+                                    icon: Icons.delete_outline,
+                                    label: 'Remove photo',
+                                  ),
+                              ],
+                            ),
+                            if (_avatarError != null) ...[
+                              const SizedBox(height: AppSpace.lg),
+                              _AvatarError(
+                                message: _avatarError!,
+                                onRetry: _loadProfile,
+                              ),
+                            ],
+                            _section('About you', first: true),
+                            TextField(
+                              controller: _nameController,
+                              enabled: !locked,
+                              textCapitalization: TextCapitalization.words,
+                              onChanged: _onNameChanged,
+                              decoration:
+                                  const InputDecoration(labelText: 'Name'),
+                            ),
+                            const SizedBox(height: AppSpace.md),
+                            TextField(
+                              controller: _phoneController,
+                              enabled: !locked,
+                              keyboardType: TextInputType.phone,
+                              onChanged: _onNameChanged,
+                              decoration: const InputDecoration(
+                                labelText: 'Phone (SMS alerts)',
+                                hintText: '+15551234567',
                               ),
                             ),
-                        ],
-                      ),
-                      if (_avatarError != null) ...[
-                        const SizedBox(height: 16),
-                        _AvatarError(
-                          message: _avatarError!,
-                          onRetry: _loadProfile,
+                            if (_nameError != null) DsMessage(_nameError!),
+                            const SizedBox(height: AppSpace.md),
+                            DsBusyButton(
+                              label: 'Save changes',
+                              busy: _nameSaving,
+                              onPressed: locked ? null : _saveName,
+                            ),
+                            _section('Account'),
+                            DsRowGroup(
+                              children: [
+                                DsListRow(
+                                  leading: DsListRow.iconTile(
+                                    context,
+                                    Icons.mail_outline,
+                                  ),
+                                  title: profile.email,
+                                  subtitle: 'Email',
+                                  semanticLabel: 'Email: ${profile.email}',
+                                ),
+                                DsListRow(
+                                  leading: DsListRow.iconTile(
+                                    context,
+                                    Icons.shield_outlined,
+                                  ),
+                                  title: _roleLabel(profile.role),
+                                  subtitle: 'Family role',
+                                  semanticLabel:
+                                      'Family role: ${_roleLabel(profile.role)}',
+                                ),
+                              ],
+                            ),
+                            _section('Change password'),
+                            SecurePasswordField(
+                              controller: _currentPasswordController,
+                              label: 'Current password',
+                              enabled: !_passwordSaving,
+                            ),
+                            const SizedBox(height: AppSpace.md),
+                            SecurePasswordField(
+                              controller: _newPasswordController,
+                              label: 'New password',
+                              enabled: !_passwordSaving,
+                            ),
+                            const SizedBox(height: AppSpace.md),
+                            SecurePasswordField(
+                              controller: _confirmPasswordController,
+                              label: 'Confirm new password',
+                              enabled: !_passwordSaving,
+                            ),
+                            if (_passwordError != null)
+                              DsMessage(_passwordError!),
+                            const SizedBox(height: AppSpace.md),
+                            DsBusyButton(
+                              label: 'Update password',
+                              busy: _passwordSaving,
+                              style: DsPillStyle.outlined,
+                              onPressed: _changePassword,
+                            ),
+                            _section('Profile photo privacy'),
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Icon(
+                                  Icons.lock_outline,
+                                  size: 18,
+                                  color: cs.onSurfaceVariant,
+                                ),
+                                const SizedBox(width: AppSpace.sm),
+                                Expanded(
+                                  child: Text(
+                                    'Your photo is stored privately on your '
+                                    'OpenFamily server and shared only with '
+                                    'authenticated family members and platform '
+                                    'administrators.',
+                                    style: AppType.secondary.copyWith(
+                                      color: cs.onSurfaceVariant,
+                                      height: 1.4,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
                         ),
-                      ],
-                      const SizedBox(height: 28),
-                      const Divider(),
-                      const SizedBox(height: 16),
-                      Text('Change password', style: AppType.headline),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: _currentPasswordController,
-                        obscureText: true,
-                        decoration: const InputDecoration(
-                          labelText: 'Current password',
-                        ),
                       ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: _newPasswordController,
-                        obscureText: true,
-                        decoration: const InputDecoration(
-                          labelText: 'New password',
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: _confirmPasswordController,
-                        obscureText: true,
-                        decoration: const InputDecoration(
-                          labelText: 'Confirm new password',
-                        ),
-                      ),
-                      if (_passwordError != null) DsMessage(_passwordError!),
-                      const SizedBox(height: 12),
-                      DsBusyButton(
-                        label: 'Update password',
-                        busy: _passwordSaving,
-                        style: DsPillStyle.outlined,
-                        onPressed: _changePassword,
-                      ),
-                      const SizedBox(height: 28),
-                      const Divider(),
-                      const SizedBox(height: 16),
-                      Text('Profile photo privacy', style: AppType.headline),
-                      const SizedBox(height: 6),
-                      Text(
-                        'Your photo is stored privately on your OpenFamily server '
-                        'and shared only with authenticated family members and '
-                        'platform administrators.',
-                        style: AppType.secondary.copyWith(
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                          height: 1.35,
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
-                ),
+      ),
     );
   }
+
+  Widget _section(String title, {bool first = false}) => DsSectionHeader(
+        title,
+        padding: EdgeInsets.only(
+          top: first ? AppSpace.xxl : AppSpace.xxxl,
+          bottom: AppSpace.sm,
+        ),
+      );
 
   static String _roleLabel(String role) {
     if (role.isEmpty) return 'Member';
@@ -712,25 +725,15 @@ class _AvatarError extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: AppColors.sosRed.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(AppRadius.md),
-      ),
-      child: Row(
-        children: [
-          const Icon(Icons.error_outline, color: AppColors.sosRed),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              message,
-              style: const TextStyle(color: AppColors.sosRed),
-            ),
-          ),
-          TextButton(onPressed: onRetry, child: const Text('Retry')),
-        ],
-      ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        DsMessage(message),
+        Align(
+          alignment: AlignmentDirectional.centerEnd,
+          child: TextButton(onPressed: onRetry, child: const Text('Retry')),
+        ),
+      ],
     );
   }
 }

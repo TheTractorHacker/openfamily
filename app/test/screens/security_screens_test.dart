@@ -9,6 +9,7 @@ import 'package:openfamily/screens/security_screen.dart';
 import 'package:openfamily/screens/sessions_screen.dart';
 import 'package:openfamily/screens/two_factor_screen.dart';
 import 'package:openfamily/services/api_client.dart';
+import 'package:openfamily/widgets/ds/ds.dart';
 
 import '../support/fake_security_api.dart';
 
@@ -20,6 +21,10 @@ const AccountInfo _off = AccountInfo(
     id: 'me', email: 'a@b.c', role: 'member', totpEnabled: false);
 const AccountInfo _on =
     AccountInfo(id: 'me', email: 'a@b.c', role: 'admin', totpEnabled: true);
+
+bool _pillEnabled(WidgetTester tester, String label) => tester
+    .widget<DsPillButton>(find.widgetWithText(DsPillButton, label).first)
+    .onPressed != null;
 
 void _tall(WidgetTester tester) {
   tester.view.physicalSize = const Size(800, 3000);
@@ -68,12 +73,10 @@ void main() {
       expect(find.text('AAAAA-BBBBB'), findsOneWidget);
 
       // Done is disabled until the box is ticked.
-      FilledButton done = tester.widget(find.widgetWithText(FilledButton, 'Done'));
-      expect(done.onPressed, isNull);
+      expect(_pillEnabled(tester, 'Done'), isFalse);
       await tester.tap(find.byType(CheckboxListTile));
       await tester.pump();
-      done = tester.widget(find.widgetWithText(FilledButton, 'Done'));
-      expect(done.onPressed, isNotNull);
+      expect(_pillEnabled(tester, 'Done'), isTrue);
       await tester.tap(find.text('Done'));
       await tester.pumpAndSettle();
       expect(popped, isTrue);
@@ -158,7 +161,7 @@ void main() {
       await tester.ensureVisible(find.text('Log out everywhere'));
       await tester.tap(find.text('Log out everywhere'));
       await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(FilledButton, 'Log out everywhere').last);
+      await tester.tap(find.widgetWithText(DsPillButton, 'Log out everywhere').last);
       await tester.pumpAndSettle();
       expect(api.calls, contains('logoutAll'));
       expect(signedOut, isTrue);
@@ -174,14 +177,14 @@ void main() {
       await tester.enterText(_field('Current password'), 'old');
       await tester.enterText(_field('New password'), 'newpassword1');
       await tester.enterText(_field('Confirm new password'), 'nope');
-      await tester.tap(find.byType(FilledButton));
+      await tester.tap(find.byType(DsPillButton));
       await tester.pump();
       expect(find.text('New passwords do not match.'), findsOneWidget);
 
       await tester.enterText(_field('Confirm new password'), 'newpassword1');
       await tester.enterText(
           _field('Authenticator or recovery code'), '123456');
-      await tester.tap(find.byType(FilledButton));
+      await tester.tap(find.byType(DsPillButton));
       await tester.pumpAndSettle();
       expect(api.lastArgs,
           {'current': 'old', 'next': 'newpassword1', 'totp': '123456'});
@@ -197,7 +200,7 @@ void main() {
       await tester.enterText(_field('Reset code'), 'abcde-fghjk');
       await tester.enterText(_field('New password'), 'newpassword1');
       await tester.enterText(_field('Confirm new password'), 'newpassword1');
-      await tester.tap(find.byType(FilledButton));
+      await tester.tap(find.byType(DsPillButton));
       await tester.pumpAndSettle();
       expect(api.lastArgs['code'], 'ABCDE-FGHJK');
       expect(find.text('Password updated'), findsOneWidget);
@@ -212,7 +215,7 @@ void main() {
       await tester.enterText(_field('Reset code'), 'x');
       await tester.enterText(_field('New password'), 'newpassword1');
       await tester.enterText(_field('Confirm new password'), 'newpassword1');
-      await tester.tap(find.byType(FilledButton));
+      await tester.tap(find.byType(DsPillButton));
       await tester.pumpAndSettle();
       expect(find.text('invalid or expired reset code'), findsOneWidget);
     });
@@ -228,7 +231,7 @@ void main() {
       expect(find.text('Me'), findsNothing);
       await tester.tap(find.text('Issue code'));
       await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(FilledButton, 'Issue code'));
+      await tester.tap(find.widgetWithText(DsPillButton, 'Issue code'));
       await tester.pumpAndSettle();
       expect(api.lastArgs['id'], 'kid');
       expect(find.text('ABCDE-FGHJK'), findsOneWidget);
@@ -246,9 +249,7 @@ void main() {
         api: api,
         onDeleted: (_) async => deleted = true,
       )));
-      FilledButton btn =
-          tester.widget(find.widgetWithText(FilledButton, 'Delete my account'));
-      expect(btn.onPressed, isNull);
+      expect(_pillEnabled(tester, 'Delete my account'), isFalse);
 
       await tester.enterText(_field('Password'), 'pw');
       await tester.enterText(
@@ -256,11 +257,11 @@ void main() {
       await tester.ensureVisible(find.byType(CheckboxListTile));
       await tester.tap(find.byType(CheckboxListTile));
       await tester.pump();
-      await tester.ensureVisible(find.byType(FilledButton));
-      await tester.tap(find.byType(FilledButton));
+      await tester.ensureVisible(find.byType(DsPillButton));
+      await tester.tap(find.byType(DsPillButton));
       await tester.pumpAndSettle();
       expect(find.text('This cannot be undone.'), findsOneWidget);
-      await tester.tap(find.widgetWithText(FilledButton, 'Delete my account').last);
+      await tester.tap(find.widgetWithText(DsPillButton, 'Delete my account').last);
       await tester.pumpAndSettle();
       expect(api.lastArgs, {'password': 'pw', 'totp': '123456'});
       expect(deleted, isTrue);
@@ -276,10 +277,10 @@ void main() {
       await tester.ensureVisible(find.byType(CheckboxListTile));
       await tester.tap(find.byType(CheckboxListTile));
       await tester.pump();
-      await tester.ensureVisible(find.byType(FilledButton));
-      await tester.tap(find.byType(FilledButton));
+      await tester.ensureVisible(find.byType(DsPillButton));
+      await tester.tap(find.byType(DsPillButton));
       await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(FilledButton, 'Delete my account').last);
+      await tester.tap(find.widgetWithText(DsPillButton, 'Delete my account').last);
       await tester.pumpAndSettle();
       expect(find.textContaining('Promote another admin'), findsOneWidget);
     });

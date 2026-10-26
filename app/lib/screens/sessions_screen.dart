@@ -5,6 +5,8 @@ import '../services/api_client.dart';
 import '../services/auth_service.dart';
 import '../services/security_api.dart';
 import '../services/security_format.dart';
+import '../theme/app_theme.dart';
+import '../widgets/ds/ds.dart';
 import 'security_widgets.dart';
 import 'welcome_screen.dart';
 
@@ -79,27 +81,15 @@ class _SessionsScreenState extends State<SessionsScreen> {
   }
 
   Future<void> _logoutAll() async {
-    final bool? ok = await showDialog<bool>(
-      context: context,
-      builder: (BuildContext c) => AlertDialog(
-        title: const Text('Log out everywhere?'),
-        content: const Text(
-          'Every device, including this one, will be signed out and will '
-          'need to sign in again.',
-        ),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.of(c).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(c).pop(true),
-            child: const Text('Log out everywhere'),
-          ),
-        ],
-      ),
+    final bool ok = await showDsConfirm(
+      context,
+      title: 'Log out everywhere?',
+      message: 'Every device, including this one, will be signed out and '
+          'will need to sign in again.',
+      confirmLabel: 'Log out everywhere',
+      destructive: true,
     );
-    if (ok != true || !mounted) return;
+    if (!ok || !mounted) return;
     setState(() => _loggingOut = true);
     try {
       await widget.api.logoutAll();
@@ -128,73 +118,73 @@ class _SessionsScreenState extends State<SessionsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Active sessions')),
-      body: SafeArea(child: _body()),
-    );
-  }
-
-  Widget _body() {
     final List<SessionInfo>? sessions = _sessions;
     if (sessions == null) {
-      return LoadStateView(
-        error: _loadError,
-        offline: _offline,
-        onRetry: _load,
+      return SecurityPage(
+        title: 'Active sessions',
+        children: <Widget>[
+          LoadStateView(error: _loadError, offline: _offline, onRetry: _load),
+        ],
       );
     }
-    return RefreshIndicator(
-      onRefresh: _load,
-      child: ListView(
-        padding: const EdgeInsets.all(16),
-        children: <Widget>[
-          Text(
-            'Devices signed in to your account. Signing one out ends its '
-            'access within about 15 minutes at most.',
-            style: Theme.of(context).textTheme.bodyMedium,
-          ),
-          const SizedBox(height: 12),
-          if (_loadError != null) ErrorText(_loadError!),
-          if (sessions.isEmpty)
-            const Padding(
-              padding: EdgeInsets.all(24),
-              child: Center(child: Text('No active sessions.')),
-            ),
-          for (final SessionInfo s in sessions)
-            Card(
-              child: ListTile(
-                minVerticalPadding: 12,
-                leading: const Icon(Icons.smartphone),
-                title: Text(describeUserAgent(s.userAgent)),
-                subtitle: Text(
-                  'Last used ${relativeTime(s.lastUsedAt)}\n'
-                  'Signed in ${relativeTime(s.createdAt)}',
+    return SecurityPage(
+      title: 'Active sessions',
+      heading: 'Where you are signed in',
+      subtitle: 'Devices signed in to your account. Signing one out ends its '
+          'access within about 15 minutes at most.',
+      appBarActions: <Widget>[
+        IconButton(
+          tooltip: 'Refresh sessions',
+          constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+          icon: const Icon(Icons.refresh),
+          onPressed: _load,
+        ),
+      ],
+      actions: <Widget>[
+        BusyButton(
+          label: 'Log out everywhere',
+          icon: Icons.logout,
+          onPressed: _logoutAll,
+          busy: _loggingOut,
+          danger: true,
+        ),
+      ],
+      children: <Widget>[
+        if (_loadError != null) ErrorText(_loadError!),
+        if (sessions.isEmpty)
+          const DsEmptyState(
+            icon: Icons.devices_outlined,
+            title: 'No active sessions',
+          )
+        else
+          DsRowGroup(
+            children: <Widget>[
+              for (final SessionInfo s in sessions)
+                DsListRow(
+                  leading: DsListRow.iconTile(context, Icons.smartphone),
+                  title: describeUserAgent(s.userAgent),
+                  subtitle: 'Last used ${relativeTime(s.lastUsedAt)}\n'
+                      'Signed in ${relativeTime(s.createdAt)}',
+                  trailing: _revoking.contains(s.id)
+                      ? const SizedBox(
+                          width: 24,
+                          height: 24,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : IconButton(
+                          tooltip:
+                              'Sign out ${describeUserAgent(s.userAgent)}',
+                          constraints: const BoxConstraints(
+                            minWidth: kMinTarget,
+                            minHeight: kMinTarget,
+                          ),
+                          icon: const Icon(Icons.logout),
+                          onPressed: () => _revoke(s),
+                        ),
                 ),
-                isThreeLine: true,
-                trailing: _revoking.contains(s.id)
-                    ? const SizedBox(
-                        width: 24,
-                        height: 24,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : IconButton(
-                        tooltip: 'Sign out ${describeUserAgent(s.userAgent)}',
-                        constraints:
-                            const BoxConstraints(minWidth: 48, minHeight: 48),
-                        icon: const Icon(Icons.logout),
-                        onPressed: () => _revoke(s),
-                      ),
-              ),
-            ),
-          const SizedBox(height: 16),
-          BusyButton(
-            label: 'Log out everywhere',
-            onPressed: _logoutAll,
-            busy: _loggingOut,
-            danger: true,
+            ],
           ),
-        ],
-      ),
+      ],
     );
   }
 }

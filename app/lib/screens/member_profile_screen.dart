@@ -7,6 +7,7 @@ import '../models/member.dart';
 import '../services/api_client.dart';
 import '../services/location_refresh_service.dart';
 import '../theme/app_theme.dart';
+import '../widgets/ds/ds.dart';
 import '../widgets/member_admin_section.dart';
 import '../widgets/member_avatar_bubble.dart';
 import '../widgets/movement_icon.dart';
@@ -26,98 +27,110 @@ class MemberProfileScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final ColorScheme cs = Theme.of(context).colorScheme;
     return Scaffold(
       appBar: AppBar(title: Text(member.name)),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-        children: [
-          // Header: avatar + name + status.
-          Row(
-            children: [
-              StatusAvatar(member: member, size: 64),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+      body: SafeArea(
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 560),
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpace.xxl,
+                AppSpace.lg,
+                AppSpace.xxl,
+                AppSpace.xxl,
+              ),
+              children: [
+                // Header: avatar + name + status (icon and words).
+                Row(
                   children: [
-                    Text(
-                      member.name,
-                      style: const TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      member.status.description,
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: member.status.color,
-                        fontWeight: FontWeight.w600,
+                    StatusAvatar(member: member, size: 64),
+                    const SizedBox(width: AppSpace.lg),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Semantics(
+                            header: true,
+                            child: Text(member.name, style: AppType.title),
+                          ),
+                          const SizedBox(height: AppSpace.xs),
+                          Text(
+                            member.status.description,
+                            style: AppType.secondary.copyWith(
+                              color: cs.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ],
                 ),
-              ),
-            ],
-          ),
-          if (member.position != null) ...[
-            const SizedBox(height: 20),
-            // A live map pinning the member, with the blue circle showing the
-            // range (GPS accuracy) around their fix.
-            _AccuracyMapPreview(member: member),
-          ],
-          const SizedBox(height: 24),
-          _DetailRow(
-            icon: Icon(_batteryIcon(), size: 22, color: _batteryColor()),
-            label: 'Battery',
-            value: member.batteryPercent > 0
-                ? '${member.batteryPercent}%'
-                : 'Offline',
-          ),
-          _DetailRow(
-            icon: const Icon(Icons.schedule, size: 22, color: AppColors.purple),
-            label: 'ETA',
-            value: member.eta ?? '—',
-          ),
-          _DetailRow(
-            icon: MovementIcon(
-              movement: member.movement,
-              size: 22,
-              color: member.movement == MovementType.none
-                  ? Theme.of(context).colorScheme.onSurfaceVariant
-                  : null,
+                if (member.position != null) ...[
+                  const SizedBox(height: AppSpace.xl),
+                  // A live map pinning the member, with the blue circle
+                  // showing the range (GPS accuracy) around their fix.
+                  _AccuracyMapPreview(member: member),
+                ],
+                const SizedBox(height: AppSpace.xl),
+                DsRowGroup(
+                  children: [
+                    _DetailRow(
+                      icon: DsListRow.iconTile(
+                        context,
+                        _batteryIcon(),
+                        color: _batteryColor(),
+                      ),
+                      label: 'Battery',
+                      value: member.batteryPercent > 0
+                          ? '${member.batteryPercent}%'
+                          : 'Offline',
+                    ),
+                    _DetailRow(
+                      icon: DsListRow.iconTile(context, Icons.schedule),
+                      label: 'ETA',
+                      value: member.eta ?? '—',
+                    ),
+                    _DetailRow(
+                      icon: _MovementTile(member: member),
+                      label: 'Status',
+                      value: _drivingStatus(),
+                    ),
+                    _DetailRow(
+                      icon: DsListRow.iconTile(
+                        context,
+                        Icons.gps_fixed,
+                        color: AppColors.accuracyBlue,
+                      ),
+                      label: 'Accuracy',
+                      value: _accuracyLabel,
+                    ),
+                    _DetailRow(
+                      icon: DsListRow.iconTile(context, Icons.place_outlined),
+                      label: 'Address',
+                      value: member.address,
+                    ),
+                  ],
+                ),
+                MemberAdminSection(
+                  memberId: member.id,
+                  memberName: member.name,
+                ),
+                const SizedBox(height: AppSpace.lg),
+                _LocationRefreshButton(memberId: member.id),
+                const SizedBox(height: AppSpace.lg),
+                DsRowGroup(
+                  children: [
+                    // Day Detail (location history) entry point.
+                    _DayDetailButton(member: member),
+                    TripsEntryButton(member: member),
+                  ],
+                ),
+              ],
             ),
-            label: 'Status',
-            value: _drivingStatus(),
           ),
-          _DetailRow(
-            icon: const Icon(
-              Icons.gps_fixed,
-              size: 22,
-              color: AppColors.accuracyBlue,
-            ),
-            label: 'Accuracy',
-            value: _accuracyLabel,
-          ),
-          _DetailRow(
-            icon: const Icon(
-              Icons.place_outlined,
-              size: 22,
-              color: AppColors.purple,
-            ),
-            label: 'Address',
-            value: member.address,
-          ),
-          MemberAdminSection(memberId: member.id, memberName: member.name),
-          const SizedBox(height: 16),
-          _LocationRefreshButton(memberId: member.id),
-          const SizedBox(height: 12),
-          // Day Detail (location history) entry point.
-          _DayDetailButton(member: member),
-          const SizedBox(height: 12),
-          TripsEntryButton(member: member),
-        ],
+        ),
       ),
     );
   }
@@ -204,24 +217,18 @@ class _LocationRefreshButtonState extends State<_LocationRefreshButton> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        OutlinedButton.icon(
-          onPressed: _sending ? null : _request,
-          icon: _sending
-              ? const SizedBox.square(
-                  dimension: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : const Icon(Icons.refresh),
-          label: const Text('Update location'),
+        DsBusyButton(
+          label: 'Update location',
+          icon: Icons.refresh,
+          style: DsPillStyle.tonal,
+          busy: _sending,
+          onPressed: _request,
         ),
-        if (_status != null) ...<Widget>[
-          const SizedBox(height: 6),
-          Text(
+        if (_status != null)
+          DsMessage(
             _status!,
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.bodySmall,
+            tone: _sending ? DsTone.info : DsTone.success,
           ),
-        ],
       ],
     );
   }
@@ -239,7 +246,7 @@ class _AccuracyMapPreview extends StatelessWidget {
     final LatLng center = member.position!;
     final double metres = _radiusFor();
     return ClipRRect(
-      borderRadius: BorderRadius.circular(16),
+      borderRadius: BorderRadius.circular(AppRadius.lg),
       child: SizedBox(
         height: 200,
         width: double.infinity,
@@ -304,36 +311,45 @@ class _DetailRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Row(
-        children: [
-          SizedBox(width: 22, child: Center(child: icon)),
-          const SizedBox(width: 14),
-          SizedBox(
-            width: 72,
-            child: Text(
-              label,
-              style: TextStyle(
-                fontSize: 14,
+    return DsListRow(
+      leading: icon,
+      title: value,
+      subtitle: label,
+      semanticLabel: '$label: $value',
+    );
+  }
+}
+
+/// Movement glyph in the same tile shape as the other detail rows.
+class _MovementTile extends StatelessWidget {
+  const _MovementTile({required this.member});
+
+  final Member member;
+
+  @override
+  Widget build(BuildContext context) {
+    final BrandTheme brand = BrandTheme.of(context);
+    return Container(
+      width: 40,
+      height: 40,
+      decoration: BoxDecoration(
+        color: brand.accentInk.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(AppRadius.md),
+      ),
+      child: Center(
+        child: member.movement == MovementType.none
+            ? Icon(
+                Icons.pause_circle_outline,
+                size: 22,
                 color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
-            ),
-          ),
-          Expanded(
-            child: Text(
-              value,
-              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
-            ),
-          ),
-        ],
+              )
+            : MovementIcon(movement: member.movement, size: 22),
       ),
     );
   }
 }
 
-/// The purple location-pin "Day Detail" entry point at the bottom of the
-/// profile, opening the location-history timeline.
+/// The "Day Detail" entry point opening the location-history timeline.
 class _DayDetailButton extends StatelessWidget {
   const _DayDetailButton({required this.member});
 
@@ -341,54 +357,18 @@ class _DayDetailButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: BrandTheme.of(context).sheet,
-      borderRadius: BorderRadius.circular(14),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(14),
-        onTap: () {
-          Navigator.of(context).push(
-            MaterialPageRoute<void>(
-              builder: (_) => DayDetailScreen(member: member),
-            ),
-          );
-        },
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-          child: Row(
-            children: [
-              Icon(
-                Icons.location_on,
-                color: BrandTheme.of(context).accentInk,
-                size: 24,
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  'Day Detail',
-                  style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                    color: BrandTheme.of(context).accentInk,
-                  ),
-                ),
-              ),
-              Text(
-                'Location history',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
-              ),
-              const SizedBox(width: 4),
-              Icon(
-                Icons.chevron_right,
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
-            ],
+    return DsListRow(
+      leading: DsListRow.iconTile(context, Icons.location_on),
+      title: 'Day Detail',
+      subtitle: 'Location history',
+      chevron: true,
+      onTap: () {
+        Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => DayDetailScreen(member: member),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }

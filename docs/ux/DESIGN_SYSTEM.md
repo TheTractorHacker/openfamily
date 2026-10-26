@@ -48,6 +48,9 @@ control has a tooltip/semantic label.
 | `DsOptionCard` | Big tappable choice (create / join). One semantic button. |
 | `DsBusyButton` | `DsPillButton` that swaps to "Please wait" while busy. |
 | `DsSkeleton`, `DsSkeletonList` | Loading placeholders; static when the OS removes animations. |
+| `showDsConfirm` | Confirm dialog. `destructive: true` adds a warning icon and the danger pill; buttons stack and the body scrolls at large text. Use for delete account, log out everywhere, remove member. |
+| `DsRowGroup` | Rounded card of `DsListRow`s with dividers, for use inside `DsPage`. |
+| `DsChoiceSetting` | Pick one of a few values (theme, map style, units): segmented control, or check-marked rows at text over 130%. |
 | `OnboardingStepIndicator` | "Step X of Y" with segments, used as `DsPage(step:, totalSteps:)`. |
 
 ## App shell
@@ -129,3 +132,17 @@ sharing chip. Selecting a row still only selects it.
 
 Goldens: `test/goldens/m3_*.png` (SOS, alert status, trips, report, places in
 light, dark and 200% text).
+
+## Third wave (account, people, settings)
+
+Change password, delete account, sessions, two-factor, issue reset code,
+member edit / profile, people, profile, server, privacy, add locations,
+settings and the circles screens now share the same page, row-group, confirm
+and state widgets. `SecurityPage` is a `DsPage`; `BusyButton` renders
+`DsBusyButton` (`danger` = the system's danger pill).
+
+The Material 3 FAB is flat (`floatingActionButtonTheme` elevation 0): its
+default black shadow showed as a black ring around the lime button on Night.
+
+Goldens: `test/goldens/acct_*.png` (light, dark and 200% text), from
+`test/goldens/account_golden_test.dart`.

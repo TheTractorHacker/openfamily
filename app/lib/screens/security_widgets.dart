@@ -100,7 +100,9 @@ class ErrorText extends StatelessWidget {
   Widget build(BuildContext context) => DsMessage(message);
 }
 
-/// Primary action button: 48dp+ tall, shows progress while busy.
+/// Primary action button: 48dp+ tall, shows progress while busy. Renders
+/// with the design system's pill; [danger] uses the system's destructive
+/// style.
 class BusyButton extends StatelessWidget {
   const BusyButton({
     super.key,
@@ -108,40 +110,23 @@ class BusyButton extends StatelessWidget {
     required this.onPressed,
     this.busy = false,
     this.danger = false,
+    this.icon,
   });
 
   final String label;
   final VoidCallback? onPressed;
   final bool busy;
   final bool danger;
+  final IconData? icon;
 
   @override
-  Widget build(BuildContext context) {
-    return FilledButton(
-      style: FilledButton.styleFrom(
-        minimumSize: const Size.fromHeight(kMinTarget),
-        padding: const EdgeInsets.symmetric(
-          horizontal: AppSpace.xl,
-          vertical: AppSpace.md,
-        ),
-        backgroundColor: danger ? AppColors.sosRed : null,
-        foregroundColor: danger ? Colors.white : null,
-        textStyle: AppType.body.copyWith(fontWeight: FontWeight.w700),
-      ),
-      onPressed: busy ? null : onPressed,
-      child: busy
-          ? Semantics(
-              label: 'Working',
-              liveRegion: true,
-              child: const SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              ),
-            )
-          : Text(label, textAlign: TextAlign.center),
-    );
-  }
+  Widget build(BuildContext context) => DsBusyButton(
+        label: label,
+        onPressed: onPressed,
+        busy: busy,
+        icon: icon,
+        style: danger ? DsPillStyle.danger : DsPillStyle.filled,
+      );
 }
 
 /// Full-area loading / error (with Retry) state.
@@ -190,7 +175,7 @@ class CopyableValue extends StatelessWidget {
       container: true,
       label: label,
       child: Container(
-        padding: const EdgeInsets.only(left: 12),
+        padding: const EdgeInsets.only(left: AppSpace.md),
         decoration: BoxDecoration(
           color: BrandTheme.of(context).sheet,
           border: Border.all(color: cs.outlineVariant),
@@ -200,7 +185,7 @@ class CopyableValue extends StatelessWidget {
           children: <Widget>[
             Expanded(
               child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 12),
+                padding: const EdgeInsets.symmetric(vertical: AppSpace.md),
                 child: SelectableText(
                   display ?? value,
                   style: const TextStyle(
@@ -231,7 +216,8 @@ class CopyableValue extends StatelessWidget {
   }
 }
 
-/// Callout box for warnings / explanations.
+/// Callout box for warnings / explanations. Always icon AND words; [danger]
+/// uses the system's destructive red, otherwise the calm warning orange.
 class Callout extends StatelessWidget {
   const Callout({super.key, required this.icon, required this.text, this.danger = false});
   final IconData icon;
@@ -241,49 +227,76 @@ class Callout extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final Color tint = danger ? AppColors.sosRed : AppColors.statusOrange;
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: tint.withValues(alpha: 0.12),
-        border: Border.all(color: tint.withValues(alpha: 0.5)),
-        borderRadius: BorderRadius.circular(AppRadius.md),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Icon(icon, color: tint, semanticLabel: danger ? 'Warning' : 'Note'),
-          const SizedBox(width: 12),
-          Expanded(child: Text(text, style: AppType.secondary.copyWith(
-            color: Theme.of(context).colorScheme.onSurface,
-            fontWeight: FontWeight.w600,
-          ))),
-        ],
+    return Semantics(
+      container: true,
+      label: '${danger ? 'Warning' : 'Note'}: $text',
+      excludeSemantics: true,
+      child: Container(
+        padding: const EdgeInsets.all(AppSpace.md),
+        decoration: BoxDecoration(
+          color: tint.withValues(alpha: 0.12),
+          border: Border.all(color: tint.withValues(alpha: 0.5)),
+          borderRadius: BorderRadius.circular(AppRadius.md),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Icon(icon, color: tint),
+            const SizedBox(width: AppSpace.md),
+            Expanded(
+              child: Text(
+                text,
+                style: AppType.secondary.copyWith(
+                  color: Theme.of(context).colorScheme.onSurface,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
 }
 
-/// Standard scrolling page body for security forms.
+/// Standard page for security forms: a [DsPage] with an optional heading and
+/// pinned [actions] (which scroll with the content at large text).
 class SecurityPage extends StatelessWidget {
-  const SecurityPage({super.key, required this.title, required this.children});
+  const SecurityPage({
+    super.key,
+    required this.title,
+    required this.children,
+    this.heading,
+    this.subtitle,
+    this.actions = const <Widget>[],
+    this.step,
+    this.totalSteps,
+    this.appBarActions,
+  });
+
   final String title;
   final List<Widget> children;
+  final int? step;
+  final int? totalSteps;
+  final List<Widget>? appBarActions;
+
+  /// Big heading above [children]; [subtitle] is the calm supporting line.
+  final String? heading;
+  final String? subtitle;
+  final List<Widget> actions;
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: Text(title)),
-      body: SafeArea(
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 560),
-            child: ListView(
-              padding: const EdgeInsets.all(AppSpace.xxl),
-              children: children,
-            ),
-          ),
-        ),
-      ),
+    return DsPage(
+      title: title,
+      actions: actions,
+      step: step,
+      totalSteps: totalSteps,
+      appBarActions: appBarActions,
+      children: <Widget>[
+        if (heading != null) DsHeading(heading!, subtitle: subtitle),
+        ...children,
+      ],
     );
   }
 }

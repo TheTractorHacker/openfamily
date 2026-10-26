@@ -5,6 +5,8 @@ import '../models/security_models.dart';
 import '../services/otpauth_launcher.dart';
 import '../services/security_api.dart';
 import '../services/security_format.dart';
+import '../theme/app_theme.dart';
+import '../widgets/ds/ds.dart';
 import 'security_widgets.dart';
 
 enum _Step { password, verify, recovery, disable }
@@ -155,28 +157,74 @@ class _TwoFactorScreenState extends State<TwoFactorScreen> {
           );
         }
       },
-      child: SecurityPage(
-        title: 'Two-factor authentication',
-        children: <Widget>[
-          if (_step == _Step.password) ..._passwordStep(),
-          if (_step == _Step.verify) ..._verifyStep(),
-          if (_step == _Step.recovery) ..._recoveryStep(),
-          if (_step == _Step.disable) ..._disableStep(),
-          if (_error != null) ErrorText(_error!),
-        ],
-      ),
+      child: switch (_step) {
+        _Step.password => SecurityPage(
+            title: 'Two-factor authentication',
+            step: 1,
+            totalSteps: 3,
+            heading: 'Add a second step',
+            subtitle: 'Sign in with a 6-digit code from an authenticator app '
+                'as well as your password. Confirm your password to begin.',
+            actions: <Widget>[
+              BusyButton(
+                label: 'Continue',
+                onPressed: _startSetup,
+                busy: _busy,
+              ),
+            ],
+            children: <Widget>[..._passwordStep(), ..._errorRow()],
+          ),
+        _Step.verify => SecurityPage(
+            title: 'Two-factor authentication',
+            step: 2,
+            totalSteps: 3,
+            heading: 'Add it to your app',
+            subtitle: 'Add this account to your authenticator app, then enter '
+                'the 6-digit code it shows. Two-factor stays off until you '
+                'confirm.',
+            actions: <Widget>[
+              BusyButton(label: 'Turn on', onPressed: _enable, busy: _busy),
+            ],
+            children: <Widget>[..._verifyStep(), ..._errorRow()],
+          ),
+        _Step.recovery => SecurityPage(
+            title: 'Two-factor authentication',
+            step: 3,
+            totalSteps: 3,
+            heading: 'Save your recovery codes',
+            actions: <Widget>[
+              BusyButton(
+                label: 'Done',
+                icon: Icons.check,
+                onPressed:
+                    _saved ? () => Navigator.of(context).pop(_changed) : null,
+              ),
+            ],
+            children: <Widget>[..._recoveryStep(), ..._errorRow()],
+          ),
+        _Step.disable => SecurityPage(
+            title: 'Two-factor authentication',
+            heading: 'Two-factor is on',
+            subtitle: 'To turn it off, confirm with your password and a '
+                'current code or an unused recovery code.',
+            actions: <Widget>[
+              BusyButton(
+                label: 'Turn off two-factor',
+                onPressed: _disable,
+                busy: _busy,
+                danger: true,
+              ),
+            ],
+            children: <Widget>[..._disableStep(), ..._errorRow()],
+          ),
+      },
     );
   }
 
+  List<Widget> _errorRow() =>
+      _error == null ? const <Widget>[] : <Widget>[ErrorText(_error!)];
+
   List<Widget> _passwordStep() => <Widget>[
-        Text('Step 1 of 3', style: Theme.of(context).textTheme.labelLarge),
-        const SizedBox(height: 8),
-        Text(
-          'Add a second step when signing in: a 6-digit code from an '
-          'authenticator app. Confirm your password to begin.',
-          style: Theme.of(context).textTheme.bodyLarge,
-        ),
-        const SizedBox(height: 20),
         SecurePasswordField(
           controller: _password,
           label: 'Password',
@@ -184,61 +232,47 @@ class _TwoFactorScreenState extends State<TwoFactorScreen> {
           textInputAction: TextInputAction.done,
           onSubmitted: _startSetup,
         ),
-        const SizedBox(height: 20),
-        BusyButton(label: 'Continue', onPressed: _startSetup, busy: _busy),
       ];
 
   List<Widget> _verifyStep() {
     final TotpSetup s = _setup!;
     return <Widget>[
-      Text('Step 2 of 3', style: Theme.of(context).textTheme.labelLarge),
-      const SizedBox(height: 8),
-      Text(
-        'Add this account to your authenticator app, then enter the 6-digit '
-        'code it shows. Two-factor stays off until you confirm.',
-        style: Theme.of(context).textTheme.bodyLarge,
-      ),
-      const SizedBox(height: 16),
       CopyableValue(
         value: s.secret,
         display: formatSecret(s.secret),
         label: 'Setup key',
       ),
-      const SizedBox(height: 12),
+      const SizedBox(height: AppSpace.md),
       if (OtpauthLauncher.isSupported || widget.openAuthenticator != null)
-        OutlinedButton.icon(
-          style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+        DsPillButton(
+          style: DsPillStyle.outlined,
           onPressed: _openApp,
-          icon: const Icon(Icons.open_in_new),
-          label: const Text('Open in authenticator app'),
+          icon: Icons.open_in_new,
+          label: 'Open in authenticator app',
         ),
-      const SizedBox(height: 20),
+      const SizedBox(height: AppSpace.xl),
       CodeField(
         controller: _code,
         label: '6-digit code',
         enabled: !_busy,
         onSubmitted: _enable,
       ),
-      const SizedBox(height: 20),
-      BusyButton(label: 'Turn on', onPressed: _enable, busy: _busy),
     ];
   }
 
   List<Widget> _recoveryStep() => <Widget>[
-        Text('Step 3 of 3', style: Theme.of(context).textTheme.labelLarge),
-        const SizedBox(height: 8),
         const Callout(
           icon: Icons.warning_amber_rounded,
           text: 'Two-factor is on. These one-time recovery codes are shown '
               'only once. Each works a single time if you lose your '
               'authenticator. Store them somewhere safe.',
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: AppSpace.lg),
         Semantics(
           label: 'Recovery codes',
           child: Wrap(
-            spacing: 8,
-            runSpacing: 8,
+            spacing: AppSpace.sm,
+            runSpacing: AppSpace.sm,
             children: <Widget>[
               for (final String c in _recovery)
                 Chip(
@@ -250,20 +284,20 @@ class _TwoFactorScreenState extends State<TwoFactorScreen> {
             ],
           ),
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: AppSpace.md),
         CopyableValue(
           value: _recovery.join('\n'),
           display: 'All ${_recovery.length} codes',
           label: 'Recovery codes',
         ),
-        const SizedBox(height: 8),
-        OutlinedButton.icon(
-          style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+        const SizedBox(height: AppSpace.sm),
+        DsPillButton(
+          style: DsPillStyle.outlined,
           onPressed: _share,
-          icon: const Icon(Icons.ios_share),
-          label: const Text('Share or save'),
+          icon: Icons.ios_share,
+          label: 'Share or save',
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: AppSpace.sm),
         CheckboxListTile(
           contentPadding: EdgeInsets.zero,
           controlAffinity: ListTileControlAffinity.leading,
@@ -271,33 +305,15 @@ class _TwoFactorScreenState extends State<TwoFactorScreen> {
           onChanged: (bool? v) => setState(() => _saved = v ?? false),
           title: const Text('I saved these recovery codes'),
         ),
-        const SizedBox(height: 8),
-        BusyButton(
-          label: 'Done',
-          onPressed: _saved ? () => Navigator.of(context).pop(_changed) : null,
-        ),
       ];
 
   List<Widget> _disableStep() => <Widget>[
-        Text(
-          'Two-factor authentication is on. To turn it off, confirm with your '
-          'password and a current code or an unused recovery code.',
-          style: Theme.of(context).textTheme.bodyLarge,
-        ),
-        const SizedBox(height: 20),
         SecurePasswordField(
           controller: _password,
           label: 'Password',
           enabled: !_busy,
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: AppSpace.lg),
         CodeField(controller: _code, enabled: !_busy, onSubmitted: _disable),
-        const SizedBox(height: 20),
-        BusyButton(
-          label: 'Turn off two-factor',
-          onPressed: _disable,
-          busy: _busy,
-          danger: true,
-        ),
       ];
 }
