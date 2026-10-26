@@ -32,9 +32,9 @@ per recipient and channel (`push`, `ws`, `sms`):
 
 | State | Meaning |
 |---|---|
-| `queued` | accepted by the server, not yet handed to a provider |
+| `queued` | accepted by the server, not yet handed to a provider (for direct push: waiting for the phone to connect) |
 | `sent` | the provider accepted it (ntfy/APNs for push, Twilio API for SMS). This is not proof the phone received it |
-| `delivered` | queued onto the recipient's live WebSocket (`ws` only) |
+| `delivered` | queued onto the recipient's live WebSocket (`ws`), or acknowledged by the phone over the built-in direct push channel (`push`; see [push.md](push.md)) |
 | `failed` | see `error`: `invalid_phone`, `provider_error`, `rejected_by_provider`, `sms_not_configured`, or a `limit_*` code |
 | `acknowledged` | the recipient confirmed with `POST /alerts/{id}/ack` |
 
