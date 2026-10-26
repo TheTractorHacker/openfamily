@@ -14,6 +14,7 @@ const (
 	exportPerUser    = 2
 	exportWindow     = time.Hour
 	exportMaxPoints  = 2_000_000
+	exportMaxEvents  = 200_000
 	exportFlushEvery = 2000
 )
 
@@ -96,6 +97,42 @@ func (s *Server) ExportMe(w http.ResponseWriter, r *http.Request) {
 	}
 	prows.Close()
 
+	type drivingEventOut struct {
+		ID        string    `json:"id"`
+		TripID    *string   `json:"trip_id"`
+		DeviceID  *string   `json:"device_id"`
+		Source    string    `json:"source"`
+		Kind      string    `json:"kind"`
+		StartedAt time.Time `json:"started_at"`
+		EndedAt   time.Time `json:"ended_at"`
+		Magnitude float64   `json:"magnitude"`
+		Lat       *float64  `json:"lat"`
+		Lon       *float64  `json:"lon"`
+	}
+	drivingEvents := []drivingEventOut{}
+	erows, err := s.Pool.Query(ctx, `
+		SELECT id::text, trip_id::text, device_id::text, source, kind, started_at, ended_at, magnitude, lat, lon
+		FROM trip_events WHERE user_id = $1 ORDER BY started_at LIMIT $2`, claims.UserID, exportMaxEvents)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load driving events")
+		return
+	}
+	for erows.Next() {
+		var e drivingEventOut
+		if err := erows.Scan(&e.ID, &e.TripID, &e.DeviceID, &e.Source, &e.Kind, &e.StartedAt, &e.EndedAt, &e.Magnitude, &e.Lat, &e.Lon); err != nil {
+			erows.Close()
+			writeError(w, http.StatusInternalServerError, "failed to load driving events")
+			return
+		}
+		drivingEvents = append(drivingEvents, e)
+	}
+	erows.Close()
+	var sensorEnabled bool
+	if err := s.Pool.QueryRow(ctx, `SELECT driving_sensor_enabled FROM users WHERE id = $1`, claims.UserID).Scan(&sensorEnabled); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load driving settings")
+		return
+	}
+
 	lrows, err := s.Pool.Query(ctx, `
 		SELECT l.device_id, l.ts, ST_Y(l.geom), ST_X(l.geom), l.accuracy_meters, l.altitude_meters,
 		       l.speed_mps, l.heading_deg, l.battery_pct, l.motion_state, l.source
@@ -127,6 +164,10 @@ func (s *Server) ExportMe(w http.ResponseWriter, r *http.Request) {
 	bw.Write(mustJSON(devices))
 	bw.WriteString(`,"places_created":`)
 	bw.Write(mustJSON(places))
+	bw.WriteString(`,"driving_sensor_enabled":`)
+	bw.Write(mustJSON(sensorEnabled))
+	bw.WriteString(`,"driving_events":`)
+	bw.Write(mustJSON(drivingEvents))
 	bw.WriteString(`,"locations":[`)
 
 	type pointOut struct {

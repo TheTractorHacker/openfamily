@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/TheTractorHacker/openfamily/backend/internal/config"
 )
@@ -29,10 +30,12 @@ const (
 type Store struct {
 	Pool   *pgxpool.Pool
 	Params Params
+	// Events holds the driving event thresholds (env-configurable).
+	EventParams EventParams
 }
 
 // NewStore returns a Store with default segmentation parameters.
-func NewStore(pool *pgxpool.Pool) *Store { return &Store{Pool: pool, Params: DefaultParams()} }
+func NewStore(pool *pgxpool.Pool) *Store { return &Store{Pool: pool, Params: DefaultParams(), EventParams: DefaultEventParams()} }
 
 // Row is a stored trip as returned by the API. Speeds are GPS estimates in
 // meters per second; convert to km/h or mph on the client.
@@ -98,17 +101,52 @@ const upsertSQL = `
 	    mode = EXCLUDED.mode, speed_source = EXCLUDED.speed_source,
 	    start_lat = EXCLUDED.start_lat, start_lon = EXCLUDED.start_lon,
 	    end_lat = EXCLUDED.end_lat, end_lon = EXCLUDED.end_lon,
-	    point_count = EXCLUDED.point_count, version = EXCLUDED.version, updated_at = now()`
+	    point_count = EXCLUDED.point_count, version = EXCLUDED.version, updated_at = now()
+	RETURNING id::text`
 
+// upsertTrips writes trips and REPLACES each trip's events in the same
+// transaction, so recomputation is idempotent.
 func upsertTrips(ctx context.Context, tx pgx.Tx, userID, familyID string, trips []Trip) error {
 	for _, t := range trips {
-		if _, err := tx.Exec(ctx, upsertSQL, userID, t.DeviceID, familyID, t.StartedAt, t.EndedAt, t.DistanceM,
+		var id string
+		if err := tx.QueryRow(ctx, upsertSQL, userID, t.DeviceID, familyID, t.StartedAt, t.EndedAt, t.DistanceM,
 			t.MaxSpeedMps, t.AvgSpeedMps, t.Mode, t.SpeedSource,
-			t.StartLat, t.StartLon, t.EndLat, t.EndLon, t.PointCount, AlgorithmVersion); err != nil {
+			t.StartLat, t.StartLon, t.EndLat, t.EndLon, t.PointCount, AlgorithmVersion).Scan(&id); err != nil {
 			return err
 		}
+		// Only GPS-derived events are replaced; sensor events survive recompute.
+		if _, err := tx.Exec(ctx, `DELETE FROM trip_events WHERE trip_id = $1::uuid AND source = 'gps'`, id); err != nil {
+			return err
+		}
+		for _, e := range t.Events {
+			if _, err := tx.Exec(ctx, `INSERT INTO trip_events (trip_id, user_id, kind, started_at, ended_at, magnitude, lat, lon)
+				VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8)`,
+				id, userID, e.Kind, e.StartedAt, e.EndedAt, e.Magnitude, e.Lat, e.Lon); err != nil {
+				return err
+			}
+		}
 	}
-	return nil
+	// Attach sensor events that arrived before (or independently of) the trips.
+	return LinkSensorEvents(ctx, tx, userID)
+}
+
+// Execer is satisfied by pgx.Tx and *pgxpool.Pool.
+type Execer interface {
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+}
+
+// LinkSensorEvents attaches the user's unattached sensor events to the trip
+// whose [started_at, ended_at] contains the event start. Idempotent.
+func LinkSensorEvents(ctx context.Context, db Execer, userID string) error {
+	_, err := db.Exec(ctx, `
+		UPDATE trip_events e SET trip_id = t.id
+		FROM (SELECT DISTINCT ON (e2.id) e2.id AS eid, t2.id
+		      FROM trip_events e2 JOIN trips t2 ON t2.user_id = e2.user_id
+		        AND e2.started_at >= t2.started_at AND e2.started_at <= t2.ended_at
+		      WHERE e2.user_id = $1::uuid AND e2.source = 'sensor' AND e2.trip_id IS NULL
+		      ORDER BY e2.id, t2.started_at) t
+		WHERE e.id = t.eid`, userID)
+	return err
 }
 
 // ProcessUser incrementally segments a user's new locations since their
@@ -154,6 +192,8 @@ func (s *Store) ProcessUser(ctx context.Context, userID, familyID string) (int, 
 		p.FinalizeOpen = true
 		res = Segment(pts, p)
 	}
+
+	attachEvents(res.Trips, pts, s.EventParams, s.Params)
 
 	newWM := res.SafeUntil.Add(-watermarkOverlap)
 	if n := len(res.Trips); n > 0 && res.Trips[n-1].EndedAt.After(newWM) {
@@ -211,11 +251,19 @@ func (s *Store) ComputeRange(ctx context.Context, userID, familyID string, from,
 			keep = append(keep, t)
 		}
 	}
+	attachEvents(keep, pts, s.EventParams, s.Params)
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
 		return 0, err
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
+	// Sensor events are not derived from the track: detach them so the trip
+	// delete (which cascades to GPS events) does not take them along. They are
+	// re-linked by upsertTrips.
+	if _, err := tx.Exec(ctx, `UPDATE trip_events SET trip_id = NULL WHERE source = 'sensor' AND user_id = $1
+		AND trip_id IN (SELECT id FROM trips WHERE user_id = $1 AND started_at >= $2 AND started_at < $3)`, userID, from, to); err != nil {
+		return 0, err
+	}
 	if _, err := tx.Exec(ctx, `DELETE FROM trips WHERE user_id = $1 AND started_at >= $2 AND started_at < $3`, userID, from, to); err != nil {
 		return 0, err
 	}
@@ -282,6 +330,38 @@ func (s *Store) Route(ctx context.Context, t Row, max int) ([]RoutePoint, error)
 	}
 	pts, _ = Clean(pts, s.Params)
 	return Downsample(pts, max), nil
+}
+
+// EventRow is a stored driving event as returned by the API.
+type EventRow struct {
+	ID        string    `json:"id"`
+	Kind      string    `json:"kind"`
+	StartedAt time.Time `json:"started_at"`
+	EndedAt   time.Time `json:"ended_at"`
+	Magnitude float64   `json:"magnitude"`
+	// Lat/Lon are null for sensor events recorded without a location fix.
+	Lat    *float64 `json:"lat"`
+	Lon    *float64 `json:"lon"`
+	Source string   `json:"source"`
+}
+
+// Events returns a trip's stored events, oldest first (never nil).
+func (s *Store) Events(ctx context.Context, tripID string) ([]EventRow, error) {
+	rows, err := s.Pool.Query(ctx, `SELECT id::text, kind, started_at, ended_at, magnitude, lat, lon, source
+		FROM trip_events_effective WHERE trip_id = $1::uuid ORDER BY started_at, id`, tripID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []EventRow{}
+	for rows.Next() {
+		var e EventRow
+		if err := rows.Scan(&e.ID, &e.Kind, &e.StartedAt, &e.EndedAt, &e.Magnitude, &e.Lat, &e.Lon, &e.Source); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
 }
 
 // Downsample keeps at most max evenly spaced points, always the first and last.
@@ -493,6 +573,10 @@ func (w *Worker) Pass(ctx context.Context) {
 	if ctx.Err() == nil {
 		if _, err := w.Store.Pool.Exec(ctx, `DELETE FROM trips WHERE started_at < $1`, now.Add(-retention)); err != nil {
 			slog.Warn("trips: retention prune failed", "err", err)
+		}
+		// Also purges sensor events that never found a trip.
+		if _, err := w.Store.Pool.Exec(ctx, `DELETE FROM trip_events WHERE started_at < $1`, now.Add(-retention)); err != nil {
+			slog.Warn("trips: event retention prune failed", "err", err)
 		}
 	}
 }

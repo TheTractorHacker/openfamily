@@ -25,3 +25,24 @@ func TestDBMaxConns(t *testing.T) {
 		}
 	}
 }
+
+func TestDrivingThresholds(t *testing.T) {
+	t.Setenv("DRIVING_SPEEDING_MPS", "")
+	t.Setenv("DRIVING_SPEEDING_SECONDS", "")
+	t.Setenv("DRIVING_HARD_BRAKE_MPS2", "")
+	t.Setenv("DRIVING_RAPID_ACCEL_MPS2", "")
+	if DrivingSpeedingMps() != 35.76 || DrivingSpeedingSeconds() != 30 || DrivingHardBrakeMps2() != 3.5 || DrivingRapidAccelMps2() != 3.5 {
+		t.Fatal("defaults changed")
+	}
+	t.Setenv("DRIVING_SPEEDING_MPS", "31.3")
+	t.Setenv("DRIVING_SPEEDING_SECONDS", "45")
+	t.Setenv("DRIVING_HARD_BRAKE_MPS2", "-4.2") // sign is ignored
+	t.Setenv("DRIVING_RAPID_ACCEL_MPS2", "junk")
+	if DrivingSpeedingMps() != 31.3 || DrivingSpeedingSeconds() != 45 || DrivingHardBrakeMps2() != 4.2 || DrivingRapidAccelMps2() != 3.5 {
+		t.Fatal("env not applied")
+	}
+	t.Setenv("DRIVING_SPEEDING_SECONDS", "0")
+	if DrivingSpeedingSeconds() != 30 {
+		t.Fatal("zero should fall back")
+	}
+}

@@ -121,6 +121,9 @@ type Trip struct {
 	EndLat      float64 `json:"end_lat"`
 	EndLon      float64 `json:"end_lon"`
 	PointCount  int     `json:"point_count"`
+	// Events are driving risk events (driving legs only); persisted with the
+	// trip, not part of its JSON.
+	Events []Event `json:"-"`
 }
 
 // DurationS is the trip duration in seconds.

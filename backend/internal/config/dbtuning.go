@@ -1,6 +1,7 @@
 package config
 
 import (
+	"math"
 	"os"
 	"strconv"
 	"time"
@@ -39,6 +40,48 @@ func getenvPositiveInt(key string, fallback int) int {
 	if v := os.Getenv(key); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			return n
+		}
+	}
+	return fallback
+}
+
+// Driving event thresholds (see docs/driving.md). Read from the environment on
+// each call; invalid or non-positive values fall back to the defaults.
+const (
+	DefaultDrivingSpeedingMps     = 35.76 // 80 mph
+	DefaultDrivingSpeedingSeconds = 30.0
+	DefaultDrivingHardBrakeMps2   = 3.5
+	DefaultDrivingRapidAccelMps2  = 3.5
+)
+
+// DrivingSpeedingMps is the speed above which a drive counts as speeding
+// (env DRIVING_SPEEDING_MPS, metres per second).
+func DrivingSpeedingMps() float64 {
+	return getenvPositiveFloat("DRIVING_SPEEDING_MPS", DefaultDrivingSpeedingMps)
+}
+
+// DrivingSpeedingSeconds is how long speed must stay above the limit for one
+// speeding event (env DRIVING_SPEEDING_SECONDS).
+func DrivingSpeedingSeconds() float64 {
+	return getenvPositiveFloat("DRIVING_SPEEDING_SECONDS", DefaultDrivingSpeedingSeconds)
+}
+
+// DrivingHardBrakeMps2 is the deceleration magnitude of a hard brake
+// (env DRIVING_HARD_BRAKE_MPS2; a leading minus sign is accepted and ignored).
+func DrivingHardBrakeMps2() float64 {
+	return getenvPositiveFloat("DRIVING_HARD_BRAKE_MPS2", DefaultDrivingHardBrakeMps2)
+}
+
+// DrivingRapidAccelMps2 is the acceleration of a rapid start
+// (env DRIVING_RAPID_ACCEL_MPS2).
+func DrivingRapidAccelMps2() float64 {
+	return getenvPositiveFloat("DRIVING_RAPID_ACCEL_MPS2", DefaultDrivingRapidAccelMps2)
+}
+
+func getenvPositiveFloat(key string, fallback float64) float64 {
+	if v := os.Getenv(key); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && !math.IsNaN(f) && !math.IsInf(f, 0) && f != 0 {
+			return math.Abs(f)
 		}
 	}
 	return fallback
