@@ -278,6 +278,8 @@ func main() {
 		r.Get("/push/stream", srv.PushStream)
 		r.Post("/push/ack", srv.AckPush)
 		r.Post("/locations", srv.IngestLocation)
+		// Live boost: "I am looking at this member" (docs/live-tracking.md).
+		r.Post("/locations/watch", srv.WatchMember)
 		// Motion-sensor driving events (docs/driving.md).
 		r.Post("/trips/sensor-events", srv.IngestSensorEvents)
 		// Offline backfill: points queued while the device had no data,

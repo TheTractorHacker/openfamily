@@ -35,16 +35,16 @@ A fix whose `ts` is not newer than the stored position is rejected (400) on
 
 ## Stationary dedup (unchanged intent)
 
-A fix is collapsed (HTTP 200 `{"status":"deduplicated"}`, a `presence` frame
+A fix is collapsed (HTTP 200 `{"status":"deduplicated","ts":...,"live":bool}`, a `presence` frame
 instead of `location`) only when it is within 10 m of the stored position AND
 `speed_mps` is absent or <= 1.5. Any fix with `speed_mps` > 1.5 or moved
->= 10 m is stored and broadcast every time.
+>= 10 m (radius widens to the fix's own `accuracy_meters`, capped at 25 m, when it is worse than 10 m) is stored and broadcast every time.
 
 ## Rate limits
 
 - `POST /locations`: 300 per minute per user (5 Hz sustained headroom; 1 Hz
   needs 60). Runaway loops still get 429.
-- `POST /locations/batch`: 10 per minute per user, up to 500 points each.
+- `POST /locations/batch`: 60 per minute per user, up to 500 points each.
 - `POST /locations/watch`: 30 per minute per user (1 call per ~15 s is normal).
 
 ## Watch / live boost
@@ -72,10 +72,12 @@ Response 200:
   ```json
   {"type":"live_boost","ttl_s":60}
   ```
-  At most one command per target per 30 s regardless of watcher count.
+  At most one command per target per 30 s regardless of watcher count. While
+  watches keep renewing, the command is re-sent about every 45 s (ttl 60 s) so a
+  push-only device stays boosted.
   It carries NO coordinates and no viewer identity.
 - Foreground reporters without push learn the state from the ingest response:
-  `POST /locations` 201/200 bodies gain `"live": true` while boosted
+  `POST /locations` 201 and 200 (deduplicated) bodies gain `"live": true` while boosted
   (omitted/false otherwise). Reporter should send every ~1-2 s while
   `live` is true or `live_boost` was received (until ttl), else its normal
   cadence.
@@ -86,3 +88,24 @@ Boost only exists while someone with permission is actively looking (watch
 TTL 45 s, renewed by the viewer's open map). A member who paused sharing
 cannot be boosted; the server also refuses. Push payloads never contain
 position. State is in memory only; a restart simply ends boosts.
+
+## Hot path notes (per accepted fix)
+
+Database round trips for `POST /locations` (moving fix): 1 transaction =
+BEGIN, device-ownership check + user row lock (one statement), last-position
+read, `locations` INSERT, then member_positions upsert + device heartbeat
+pipelined in one round trip, COMMIT. The audit-log row is written at most once
+per user per minute. After the ack, the WebSocket broadcast costs ONE query
+(own + sharing circles via `OwnAndSharingCircles`) and no per-viewer queries;
+geofence evaluation runs asynchronously on a bounded worker pool.
+
+### Measured
+
+`BenchmarkIngestMoving` (`backend/internal/handlers/live_test.go`, real
+TimescaleDB pg16 in Docker on a heavily loaded shared host, 1000-fix runs):
+about 8 ms per moving-fix `POST /locations` (full handler, including commit),
+i.e. one core could sustain >100 fixes/s; 1 Hz x several members is negligible.
+Before replacing the `users ... FOR UPDATE` row lock with a per-user advisory
+lock the same benchmark measured ~280 ms/op on the same host (the row lock
+dirtied the hot `users` page and forced a WAL write per fix).
+Run: `TEST_DATABASE_URL=... go test ./internal/handlers -run x -bench IngestMoving`.

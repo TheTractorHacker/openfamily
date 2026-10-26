@@ -20,20 +20,28 @@ const (
 	maxTSSkew = 5 * time.Minute
 	maxTSAge  = 15 * time.Minute
 
-	// Ingest throttle per user. Normal reporters emit a point every few
-	// seconds; the cap only trips on runaway loops or deliberate flooding.
-	ingestPerWindow = 120
+	// Ingest throttle per user. A live reporter (driving or watched) sends a
+	// fix every 1-2 s (60-120/min) and retries after a network blip can add
+	// more; 300/min is 5 Hz of headroom over 1 Hz. The cap only trips on
+	// runaway loops or deliberate flooding.
+	ingestPerWindow = 300
 	ingestWindow    = time.Minute
 
 	// stationaryDedupMeters is how close a new point must be to the stored
 	// last-known position for it to count as "not moved". Such points skip the
 	// locations INSERT (a phone parked at home would otherwise write a row per
-	// reporting interval — up to ~1440 rows/day) and instead only refresh
-	// devices.last_seen / member_positions.updated_at, then announce liveness
-	// with a `presence` WebSocket frame. The threshold is above typical GPS
-	// noise (~5-15 m) so jitter while standing still still dedups, but well
-	// below real movement.
-	stationaryDedupMeters = 25.0
+	// reporting interval) and instead only refresh devices.last_seen /
+	// member_positions.updated_at, then announce liveness with a `presence`
+	// WebSocket frame. Moving fixes are NEVER collapsed: see isStationaryFix.
+	stationaryDedupMeters = 10.0
+
+	// stationaryDedupMaxMeters caps the noise-widened dedup radius used when
+	// the fix itself reports poor accuracy (typical indoor GPS jitter).
+	stationaryDedupMaxMeters = 25.0
+
+	// movingSpeedMPS is the reported speed above which a fix is always stored
+	// and broadcast, even if it is within the dedup radius (slow traffic).
+	movingSpeedMPS = 1.5
 )
 
 // IngestLocation stores a single location point for a device owned by the
@@ -89,23 +97,13 @@ func (s *Server) IngestLocation(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Verify the device belongs to the caller.
-	var ownerID string
-	err := s.Pool.QueryRow(r.Context(), `
-		SELECT user_id FROM devices WHERE id = $1`, req.DeviceID).Scan(&ownerID)
-	if err != nil {
-		writeError(w, http.StatusNotFound, "device not found")
-		return
-	}
-	if ownerID != claims.UserID {
-		writeError(w, http.StatusForbidden, "device does not belong to you")
-		return
-	}
-
-	// Store the point atomically with a per-user monotonicity check. Locking
-	// the user row serializes concurrent ingests for the same user, so the
-	// read-then-insert of the last timestamp cannot race, and the check spans
-	// all of the user's devices (geofence state is per-user, not per-device).
+	// Store the point atomically with a per-user monotonicity check. One
+	// statement verifies the device belongs to the caller AND takes a per-user
+	// advisory lock (a row lock on users would dirty the hot users page and write
+	// WAL on every fix), which serializes concurrent ingests for the same user so the
+	// read-then-insert of the last timestamp cannot race; the check spans all
+	// of the user's devices (geofence state is per-user, not per-device).
+	ownerID := claims.UserID
 	tx, err := s.Pool.Begin(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to begin transaction")
@@ -115,7 +113,23 @@ func (s *Server) IngestLocation(w http.ResponseWriter, r *http.Request) {
 
 	var lockedID string
 	var dbFamilyID *string
-	if err := tx.QueryRow(r.Context(), `SELECT id, family_id FROM users WHERE id = $1 FOR UPDATE`, ownerID).Scan(&lockedID, &dbFamilyID); err != nil {
+	if err := tx.QueryRow(r.Context(), `
+		SELECT u.id, u.family_id
+		FROM devices d JOIN users u ON u.id = d.user_id
+		WHERE d.id = $1 AND d.user_id = $2
+		  AND pg_advisory_xact_lock(hashtextextended('loc:' || u.id::text, 0)) IS NOT NULL`, req.DeviceID, ownerID).Scan(&lockedID, &dbFamilyID); err != nil {
+		// Not the caller's device (or no such device): distinguish 404/403
+		// without holding any lock.
+		var other string
+		if qerr := s.Pool.QueryRow(r.Context(), `
+			SELECT user_id FROM devices WHERE id = $1`, req.DeviceID).Scan(&other); qerr != nil {
+			writeError(w, http.StatusNotFound, "device not found")
+			return
+		}
+		if other != ownerID {
+			writeError(w, http.StatusForbidden, "device does not belong to you")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "failed to lock user")
 		return
 	}
@@ -149,7 +163,7 @@ func (s *Server) IngestLocation(w http.ResponseWriter, r *http.Request) {
 	// user stands still. No audit entry — this fires per reporting interval and
 	// would flood the audit log with non-events.
 	if mpLat != nil && mpLon != nil &&
-		haversineMeters(*mpLat, *mpLon, req.Lat, req.Lon) < stationaryDedupMeters {
+		isStationaryFix(haversineMeters(*mpLat, *mpLon, req.Lat, req.Lon), req.SpeedMPS, req.AccuracyMeters) {
 		if _, err := tx.Exec(r.Context(), `
 			UPDATE devices SET last_seen = now() WHERE id = $1`, req.DeviceID); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to update device")
@@ -179,6 +193,7 @@ func (s *Server) IngestLocation(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"status": "deduplicated",
 			"ts":     ts,
+			"live":   s.liveBoosted(ownerID),
 		})
 		return
 	}
@@ -201,6 +216,7 @@ func (s *Server) IngestLocation(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"status": "deduplicated",
 			"ts":     ts,
+			"live":   s.liveBoosted(ownerID),
 		})
 		return
 	}
@@ -209,24 +225,29 @@ func (s *Server) IngestLocation(w http.ResponseWriter, r *http.Request) {
 	// locations hypertable, which is subject to 90-day retention). The WHERE
 	// clause skips the update if the stored position is already newer, so an
 	// out-of-order point can never regress a member's last-known position.
-	if _, err := tx.Exec(r.Context(), `
-		INSERT INTO member_positions (user_id, lat, lon, ts, battery_pct, speed_mps, motion_state, accuracy_meters, device_id, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
+	// The upsert and the device heartbeat go out as one pipelined round trip.
+	b := &pgx.Batch{}
+	b.Queue(`
+		INSERT INTO member_positions (user_id, lat, lon, ts, battery_pct, speed_mps, motion_state, accuracy_meters, device_id, heading_deg, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now())
 		ON CONFLICT (user_id) DO UPDATE SET
 			lat = EXCLUDED.lat, lon = EXCLUDED.lon, ts = EXCLUDED.ts,
 			battery_pct = EXCLUDED.battery_pct, speed_mps = EXCLUDED.speed_mps,
 			motion_state = EXCLUDED.motion_state, accuracy_meters = EXCLUDED.accuracy_meters,
-			device_id = EXCLUDED.device_id, updated_at = now()
+			device_id = EXCLUDED.device_id, heading_deg = EXCLUDED.heading_deg, updated_at = now()
 		WHERE member_positions.ts < EXCLUDED.ts`,
 		ownerID, req.Lat, req.Lon, ts, req.BatteryPct, req.SpeedMPS,
-		nullIfEmpty(req.MotionState), req.AccuracyMeters, req.DeviceID,
-	); err != nil {
+		nullIfEmpty(req.MotionState), req.AccuracyMeters, req.DeviceID, req.HeadingDeg)
+	b.Queue(`UPDATE devices SET last_seen = now() WHERE id = $1`, req.DeviceID)
+	br := tx.SendBatch(r.Context(), b)
+	_, upErr := br.Exec()
+	_, devErr := br.Exec()
+	closeErr := br.Close()
+	if upErr != nil || closeErr != nil {
 		writeError(w, http.StatusInternalServerError, "failed to store member position")
 		return
 	}
-
-	if _, err := tx.Exec(r.Context(), `
-		UPDATE devices SET last_seen = now() WHERE id = $1`, req.DeviceID); err != nil {
+	if devErr != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update device")
 		return
 	}
@@ -242,8 +263,12 @@ func (s *Server) IngestLocation(w http.ResponseWriter, r *http.Request) {
 	if dbFamilyID != nil {
 		auditFamilyID = *dbFamilyID
 	}
-	s.logAudit(r.Context(), ownerID, auditFamilyID, "location_ingest",
-		fmt.Sprintf("device=%s", req.DeviceID), clientIP(r))
+	// Throttled to one row per user per minute: at 1 Hz an unthrottled audit
+	// INSERT would double the write load and flood the audit log.
+	if s.viewAudit == nil || s.viewAudit.Allow("ingestaudit:"+ownerID, 1, time.Minute) {
+		s.logAudit(r.Context(), ownerID, auditFamilyID, "location_ingest",
+			fmt.Sprintf("device=%s", req.DeviceID), clientIP(r))
+	}
 
 	// Evaluate geofences for the device owner against the new point in a
 	// goroutine so the client's ack is not delayed by evaluation. A background
@@ -271,12 +296,13 @@ func (s *Server) IngestLocation(w http.ResponseWriter, r *http.Request) {
 			LastSeenAt:     time.Now().UTC(),
 			BatteryPct:     req.BatteryPct,
 			SpeedMPS:       req.SpeedMPS,
+			HeadingDeg:     req.HeadingDeg,
 			MotionState:    motionState,
 			AccuracyMeters: req.AccuracyMeters,
 		})
 	})
 
-	writeJSON(w, http.StatusCreated, models.Location{
+	writeJSON(w, http.StatusCreated, locationAck{Live: s.liveBoosted(ownerID), Location: models.Location{
 		DeviceID:       req.DeviceID,
 		TS:             ts,
 		Lat:            req.Lat,
@@ -288,7 +314,31 @@ func (s *Server) IngestLocation(w http.ResponseWriter, r *http.Request) {
 		BatteryPct:     req.BatteryPct,
 		MotionState:    req.MotionState,
 		Source:         req.Source,
-	})
+	}})
+}
+
+// locationAck is the 201 body: the stored point plus the additive `live`
+// flag (true while a permitted viewer is watching this user; see watch.go).
+type locationAck struct {
+	models.Location
+	Live bool `json:"live,omitempty"`
+}
+
+// isStationaryFix reports whether a fix may be collapsed into the stored
+// position: it must be within the dedup radius AND not moving. The radius is
+// stationaryDedupMeters, widened up to stationaryDedupMaxMeters when the fix
+// reports a worse accuracy (so GPS jitter while standing still dedups). A
+// fix with speed above movingSpeedMPS, or moved at least the radius, is a
+// moving fix and is stored and broadcast every time.
+func isStationaryFix(distMeters float64, speedMPS, accuracyMeters *float64) bool {
+	if speedMPS != nil && *speedMPS > movingSpeedMPS {
+		return false
+	}
+	radius := stationaryDedupMeters
+	if accuracyMeters != nil && *accuracyMeters > radius {
+		radius = min(*accuracyMeters, stationaryDedupMaxMeters)
+	}
+	return distMeters < radius
 }
 
 func nullIfEmpty(s string) any {

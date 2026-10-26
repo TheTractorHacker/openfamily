@@ -136,6 +136,34 @@ func (a *Authz) SharingCircles(ctx context.Context, subjectID string) ([]string,
 		WHERE user_id = $1 AND sharing_enabled ORDER BY circle_id`, subjectID)
 }
 
+// OwnAndSharingCircles returns, in ONE round trip, all of subject's circles
+// and the subset where they currently share their location. It is the hot-path
+// equivalent of CircleIDs + SharingCircles for per-fix live broadcasts.
+func (a *Authz) OwnAndSharingCircles(ctx context.Context, subjectID string) (own, sharing []string, err error) {
+	if !ValidID(subjectID) {
+		return nil, nil, nil
+	}
+	rows, err := a.db.Query(ctx, `
+		SELECT circle_id::text, sharing_enabled FROM circle_members
+		WHERE user_id = $1 ORDER BY joined_at, circle_id`, subjectID)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		var sh bool
+		if err := rows.Scan(&id, &sh); err != nil {
+			return nil, nil, err
+		}
+		own = append(own, id)
+		if sh {
+			sharing = append(sharing, id)
+		}
+	}
+	return own, sharing, rows.Err()
+}
+
 // LocationVisibility lists every co-member of viewer within circleIDs
 // (restricted to circles the viewer actually belongs to, so a forged id adds
 // nothing) and whether viewer may see that member's location. The viewer is

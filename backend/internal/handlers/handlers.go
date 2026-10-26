@@ -131,6 +131,11 @@ type Server struct {
 	// family snapshot shows a member has gone quiet (one attempt per member
 	// per watchdog cooldown, independent of the user-facing cooldown).
 	staleWatchdog *staleRequestGate
+
+	// liveWatch tracks who is currently watching whom (live boost); in memory.
+	liveWatch *liveWatchRegistry
+	// liveBoostSend overrides command delivery (tests); nil uses push.
+	liveBoostSend func(ctx context.Context, userID string, body []byte) bool
 }
 
 // New builds a Server.
@@ -143,6 +148,7 @@ func New(pool *pgxpool.Pool, tm *auth.TokenManager, push push.Dispatcher) *Serve
 		viewAudit:        sms.NewLimiter(),
 		locationRequests: newLocationRequestGate(locationRequestCooldown),
 		staleWatchdog:    newStaleRequestGate(staleRequestCooldown),
+		liveWatch:        newLiveWatchRegistry(),
 	}
 }
 

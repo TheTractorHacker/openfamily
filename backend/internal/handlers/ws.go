@@ -31,6 +31,7 @@ type wsMember struct {
 	TS              *time.Time  `json:"ts"`
 	BatteryPct      *float64    `json:"battery_pct"`
 	SpeedMPS        *float64    `json:"speed_mps"`
+	HeadingDeg      *float64    `json:"heading_deg"`
 	MotionState     *string     `json:"motion_state"`
 	AccuracyMeters  *float64    `json:"accuracy_meters"`
 	// LastSeenAt is the most recent device heartbeat/ingest time across all of
@@ -56,6 +57,7 @@ type wsLocation struct {
 	LastSeenAt     time.Time `json:"last_seen_at"`
 	BatteryPct     *float64  `json:"battery_pct"`
 	SpeedMPS       *float64  `json:"speed_mps"`
+	HeadingDeg     *float64  `json:"heading_deg"`
 	MotionState    *string   `json:"motion_state"`
 	AccuracyMeters *float64  `json:"accuracy_meters"`
 	// CircleID labels the frame for circle-aware clients (set per delivery by
@@ -324,7 +326,7 @@ func (s *Server) circleMembersSnapshot(ctx context.Context, circleIDs []string, 
 	rows, err := s.Pool.Query(ctx, `
 		SELECT u.id, u.email, u.name, u.role,
 		       u.avatar_data IS NOT NULL, u.avatar_version, u.avatar_updated_at,
-		       mp.lat, mp.lon, mp.ts, mp.battery_pct, mp.speed_mps, mp.motion_state, mp.accuracy_meters,
+		       mp.lat, mp.lon, mp.ts, mp.battery_pct, mp.speed_mps, mp.motion_state, mp.accuracy_meters, mp.heading_deg,
 		       d.last_seen
 		FROM users u
 		LEFT JOIN member_positions mp ON mp.user_id = u.id
@@ -350,12 +352,13 @@ func (s *Server) circleMembersSnapshot(ctx context.Context, circleIDs []string, 
 			lat, lon        *float64
 			ts              *time.Time
 			battery, speed  *float64
+			heading         *float64
 			motion          *string
 			accuracy        *float64
 			lastSeenAt      *time.Time
 		)
 		if err := rows.Scan(&id, &email, &name, &role, &hasAvatar, &avatarVersion, &avatarUpdatedAt,
-			&lat, &lon, &ts, &battery, &speed, &motion, &accuracy, &lastSeenAt); err != nil {
+			&lat, &lon, &ts, &battery, &speed, &motion, &accuracy, &heading, &lastSeenAt); err != nil {
 			return nil, err
 		}
 		m := wsMember{
@@ -370,6 +373,7 @@ func (s *Server) circleMembersSnapshot(ctx context.Context, circleIDs []string, 
 			TS:              ts,
 			BatteryPct:      battery,
 			SpeedMPS:        speed,
+			HeadingDeg:      heading,
 			MotionState:     motion,
 			AccuracyMeters:  accuracy,
 			LastSeenAt:      lastSeenAt,
@@ -397,8 +401,8 @@ func (s *Server) circleMembersSnapshot(ctx context.Context, circleIDs []string, 
 
 // redactLocation clears every location-derived field (the member stays listed).
 func (m *wsMember) redactLocation() {
-	m.Lat, m.Lon, m.TS, m.BatteryPct, m.SpeedMPS, m.MotionState, m.AccuracyMeters, m.LastSeenAt =
-		nil, nil, nil, nil, nil, nil, nil, nil
+	m.Lat, m.Lon, m.TS, m.BatteryPct, m.SpeedMPS, m.HeadingDeg, m.MotionState, m.AccuracyMeters, m.LastSeenAt =
+		nil, nil, nil, nil, nil, nil, nil, nil, nil
 }
 
 // broadcastLocation fans out a live location update to the owner's family AND
@@ -414,14 +418,9 @@ func (s *Server) broadcastLocation(ownerID string, loc wsLocation) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	shared, err := circles.New(s.Pool).SharingCircles(ctx, ownerID)
+	own, shared, err := circles.New(s.Pool).OwnAndSharingCircles(ctx, ownerID)
 	if err != nil {
 		slog.Warn("location broadcast: resolve circles failed", "err", err, "user_id", ownerID)
-		return
-	}
-	own, err := circles.New(s.Pool).CircleIDs(ctx, ownerID)
-	if err != nil {
-		slog.Warn("location broadcast: resolve own circles failed", "err", err, "user_id", ownerID)
 		return
 	}
 	loc.CircleID = ""
