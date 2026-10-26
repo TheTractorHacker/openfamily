@@ -16,6 +16,7 @@ import '../widgets/ds/ds.dart';
 import '../widgets/units_setting_tile.dart';
 import 'profile_screen.dart';
 import 'circles_screen.dart';
+import 'driving_detection_screen.dart';
 import 'families_screen.dart';
 import 'server_config_screen.dart';
 import 'welcome_screen.dart';
@@ -411,6 +412,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 onChanged: _biometricUpdating ? null : _setLockGrace,
               ),
             const DsSectionHeader('Location'),
+            DsListRow(
+              leading: DsListRow.iconTile(context, Icons.speed_outlined),
+              title: 'Driving detection',
+              subtitle: 'Motion-sensor braking and acceleration events',
+              chevron: true,
+              onTap: () => push(const DrivingDetectionScreen()),
+            ),
             DsToggleRow(
               icon: Icons.location_on_outlined,
               title: 'Location sharing',
