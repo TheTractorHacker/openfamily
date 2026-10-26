@@ -10,6 +10,10 @@
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION"/>
     <!-- Motion & fitness (activity recognition) — only on devices with Play Services. -->
     <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION"/>
+    <!-- Driving detection (docs/driving-sensors.md) adds NO permission: the
+         accelerometer and gyroscope are not permission-protected, 50 Hz is
+         below the 200 Hz HIGH_SAMPLING_RATE_SENSORS limit, ACTIVITY_RECOGNITION
+         is not needed for raw sensors, and the screen broadcasts need none. -->
     <!-- Background location service (foreground service + wake lock + boot restart). -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <!-- Android 14+ (API 34+): required to start a location foreground service. -->

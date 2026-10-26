@@ -58,6 +58,14 @@ dependencies:
   connectivity_plus: ^6.1.0
   flutter_local_notifications: ^22.3.0
   unifiedpush: ^6.2.0
+  # Accelerometer + gyroscope for on-device hard-brake / rapid-acceleration
+  # detection (SensorManager on Android; no Google Play Services). Sampled only
+  # while the GPS says the user is driving; raw samples never leave the phone.
+  sensors_plus: ^7.1.1
+  # Android screen on/off/unlock broadcasts (optional "screen activity while
+  # moving" estimate). Local plugin, no permissions.
+  driving_native:
+    path: packages/driving_native
 
 dev_dependencies:
   flutter_test:

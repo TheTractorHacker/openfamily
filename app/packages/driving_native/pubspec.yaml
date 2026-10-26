@@ -1,0 +1,23 @@
+name: driving_native
+description: >-
+  Android-only EventChannels for OpenFamily's driving detection: a 1 Hz GPS
+  speed feed (platform LocationManager, no Play Services) and screen on / off /
+  user-present broadcasts. Registered in every FlutterEngine, so it also works
+  in the headless background-location isolate. No new permissions.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+  flutter: ">=3.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: app.openfamily.driving_native
+        pluginClass: DrivingNativePlugin
