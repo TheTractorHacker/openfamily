@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 
 import '../models/circle.dart';
@@ -5,8 +6,10 @@ import '../models/member.dart';
 import '../models/place.dart';
 import '../theme/app_theme.dart';
 import '../utils/member_status.dart';
+import '../services/perf/perf_monitor.dart';
 import 'ds/ds.dart';
 import 'member_avatar_bubble.dart';
+import 'visible_value_builder.dart';
 
 /// Loads saved places for the Places tab. Injected in tests.
 typedef PlacesLoader = Future<List<Place>> Function();
@@ -24,6 +27,7 @@ class LocationTabView extends StatefulWidget {
     required this.members,
     required this.placesLoader,
     this.circles = const <Circle>[],
+    this.membersListenable,
     this.selfId,
     this.sharingPaused = false,
     this.selectedCircleId,
@@ -55,6 +59,12 @@ class LocationTabView extends StatefulWidget {
   final String circleName;
   final List<Circle> circles;
   final List<Member> members;
+
+  /// Live roster. When given, ONLY the People list listens to it (and skips
+  /// rebuilds while the tab is hidden); the rest of the tab (map, floating
+  /// controls, sheet chrome) is untouched by roster updates. [members] is
+  /// then just the initial value.
+  final ValueListenable<List<Member>>? membersListenable;
   final String? selfId;
   final bool sharingPaused;
 
@@ -107,6 +117,7 @@ class _LocationTabViewState extends State<LocationTabView> {
 
   final DraggableScrollableController _sheet = DraggableScrollableController();
   final ValueNotifier<double> _extent = ValueNotifier<double>(0);
+
   int _tab = 0;
   String? _selectedId;
 
@@ -292,6 +303,7 @@ class _LocationTabViewState extends State<LocationTabView> {
 
   @override
   Widget build(BuildContext context) {
+    PerfMonitor.instance.countBuild('LocationTabView');
     final BrandTheme brand = BrandTheme.of(context);
     return Scaffold(
       resizeToAvoidBottomInset: false,
@@ -467,9 +479,13 @@ class _LocationTabViewState extends State<LocationTabView> {
   }
 
   Widget _buildFloating(BuildContext context, double h, double peek) {
+    // The row itself is built once per tab rebuild and passed as the
+    // builder's `child`, so a drag frame only repositions it.
+    final Widget row = _floatingRow(context);
     return ValueListenableBuilder<double>(
       valueListenable: _extent,
-      builder: (BuildContext context, double raw, _) {
+      child: row,
+      builder: (BuildContext context, double raw, Widget? child) {
         final double extent = raw < peek ? peek : raw;
         final bool visible = extent < 0.62;
         return Positioned(
@@ -481,7 +497,7 @@ class _LocationTabViewState extends State<LocationTabView> {
             child: AnimatedOpacity(
               opacity: visible ? 1 : 0,
               duration: AppMotion.of(context, AppMotion.fast),
-              child: _floatingRow(context),
+              child: child,
             ),
           ),
         );
@@ -561,7 +577,7 @@ class _LocationTabViewState extends State<LocationTabView> {
           ),
         ),
         if (_tab == 0)
-          ..._peopleSlivers(context)
+          ..._peopleSection(context)
         else
           ..._placesSlivers(context),
         SliverToBoxAdapter(
@@ -573,8 +589,53 @@ class _LocationTabViewState extends State<LocationTabView> {
     );
   }
 
-  List<Widget> _peopleSlivers(BuildContext context) {
-    if (widget.error != null && widget.members.isEmpty) {
+  /// The People slivers. With a live [LocationTabView.membersListenable] they
+  /// sit behind a listener of their own, so roster updates rebuild nothing
+  /// else in the tab.
+  List<Widget> _peopleSection(BuildContext context) {
+    final ValueListenable<List<Member>>? live = widget.membersListenable;
+    if (live == null) return _peopleSlivers(context, widget.members);
+    return <Widget>[
+      VisibleValueBuilder<List<Member>>(
+        valueListenable: live,
+        builder: (BuildContext ctx, List<Member> ms, _) {
+          PerfMonitor.instance.countBuild('PeopleList');
+          return SliverMainAxisGroup(slivers: _peopleSlivers(ctx, ms));
+        },
+      ),
+    ];
+  }
+
+  /// Person rows by member id. A row's widget is reused (and therefore NOT
+  /// rebuilt) while its member instance and flags are unchanged, so a
+  /// location frame for one person rebuilds one row, not the whole list.
+  final Map<String, _RowMemo> _rows = <String, _RowMemo>{};
+
+  Widget _personRow(Member m) {
+    final bool self = m.id == widget.selfId;
+    final bool paused = self && widget.sharingPaused;
+    final bool selected = m.id == _selectedId;
+    final _RowMemo? memo = _rows[m.id];
+    if (memo != null &&
+        identical(memo.member, m) &&
+        memo.paused == paused &&
+        memo.selected == selected) {
+      return memo.widget;
+    }
+    final Widget w = _PersonRow(
+      key: ValueKey<String>('person-${m.id}'),
+      member: m,
+      paused: paused,
+      selected: selected,
+      onTap: () => _select(m),
+      onDetails: () => widget.onOpenMember?.call(m),
+    );
+    _rows[m.id] = _RowMemo(m, paused, selected, w);
+    return w;
+  }
+
+  List<Widget> _peopleSlivers(BuildContext context, List<Member> members) {
+    if (widget.error != null && members.isEmpty) {
       // Compact on purpose: the retry must be visible at the sheet's peek.
       return <Widget>[
         SliverToBoxAdapter(
@@ -593,7 +654,7 @@ class _LocationTabViewState extends State<LocationTabView> {
         ),
       ];
     }
-    if (widget.loading && widget.members.isEmpty) {
+    if (widget.loading && members.isEmpty) {
       return const <Widget>[
         SliverToBoxAdapter(
           child: Padding(
@@ -616,7 +677,11 @@ class _LocationTabViewState extends State<LocationTabView> {
         ),
       ];
     }
-    final List<Member> ms = widget.members;
+    final List<Member> ms = members;
+    if (_rows.length > ms.length) {
+      final Set<String> ids = <String>{for (final Member m in ms) m.id};
+      _rows.removeWhere((String id, _) => !ids.contains(id));
+    }
     return <Widget>[
       if (widget.error != null)
         SliverToBoxAdapter(
@@ -635,17 +700,7 @@ class _LocationTabViewState extends State<LocationTabView> {
         ),
       SliverList.builder(
         itemCount: ms.length,
-        itemBuilder: (BuildContext ctx, int i) {
-          final Member m = ms[i];
-          final bool self = m.id == widget.selfId;
-          return _PersonRow(
-            member: m,
-            paused: self && widget.sharingPaused,
-            selected: m.id == _selectedId,
-            onTap: () => _select(m),
-            onDetails: () => widget.onOpenMember?.call(m),
-          );
-        },
+        itemBuilder: (BuildContext ctx, int i) => _personRow(ms[i]),
       ),
       SliverToBoxAdapter(
         child: DsListRow(
@@ -912,8 +967,17 @@ class _LocationOffBanner extends StatelessWidget {
   }
 }
 
+class _RowMemo {
+  const _RowMemo(this.member, this.paused, this.selected, this.widget);
+  final Member member;
+  final bool paused;
+  final bool selected;
+  final Widget widget;
+}
+
 class _PersonRow extends StatelessWidget {
   const _PersonRow({
+    super.key,
     required this.member,
     required this.paused,
     required this.selected,
@@ -929,6 +993,7 @@ class _PersonRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    PerfMonitor.instance.countBuild('PersonRow');
     final String status = memberStatusLine(member, sharingPaused: paused);
     final String? battery = memberBatteryAlert(member);
     final String? updated = memberUpdatedLabel(member);

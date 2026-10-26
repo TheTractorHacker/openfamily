@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../models/member.dart';
+import '../services/perf/perf_monitor.dart';
 import '../theme/app_theme.dart';
 import 'circle_tab_screen.dart';
 import 'driving_tab_screen.dart';
@@ -90,14 +91,30 @@ class _AppShellState extends State<AppShell> {
   void _select(AppTab t) {
     if (t == _tab) return;
     HapticFeedback.selectionClick();
+    PerfMonitor.instance.setShellTab(t.name);
     setState(() {
       _tab = t;
       _visited.add(t);
     });
   }
 
+  /// Tab bodies, created once on first visit. Handing the framework the SAME
+  /// widget instance on every shell rebuild (each tab switch is a setState)
+  /// means switching tabs no longer rebuilds all visited tabs, map included.
+  final Map<AppTab, Widget> _bodies = <AppTab, Widget>{};
+
+  @override
+  void didUpdateWidget(AppShell old) {
+    super.didUpdateWidget(old);
+    if (!identical(old.tabBuilders, widget.tabBuilders)) _bodies.clear();
+  }
+
   Widget _body(AppTab t) {
     if (!_visited.contains(t)) return const SizedBox.shrink();
+    return _bodies[t] ??= _createBody(t);
+  }
+
+  Widget _createBody(AppTab t) {
     final WidgetBuilder? override = widget.tabBuilders?[t];
     if (override != null) return Builder(builder: override);
     switch (t) {

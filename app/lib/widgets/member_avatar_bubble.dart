@@ -155,10 +155,26 @@ class StatusAvatar extends StatefulWidget {
 class _StatusAvatarState extends State<StatusAvatar> {
   Future<Uint8List?>? _avatarFuture;
 
+  /// Bytes already cached when this widget was (re)configured, so the photo
+  /// is part of the first frame.
+  Uint8List? _initialBytes;
+
+  /// Decoded images are cached by the framework's ImageCache under a
+  /// [ResizeImage] key, so one decode serves every avatar widget of a member.
+  static const int _decodeScale = 2;
+
+  double _dpr = 1;
+
   @override
   void initState() {
     super.initState();
     _loadAvatar();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _dpr = MediaQuery.devicePixelRatioOf(context);
   }
 
   @override
@@ -170,9 +186,30 @@ class _StatusAvatarState extends State<StatusAvatar> {
   }
 
   void _loadAvatar() {
+    _initialBytes = MemberAvatarCache.instance.peek(widget.member);
     _avatarFuture = widget.member.hasAvatar
         ? MemberAvatarCache.instance.load(widget.member)
         : null;
+    // Decode as soon as the bytes land, so sibling avatar widgets of the same
+    // member (marker, list row, cluster) find the decoded image in the cache.
+    _avatarFuture?.then((Uint8List? bytes) {
+      if (bytes == null || !mounted) return;
+      precacheImage(_providerFor(bytes, _dpr), context, onError: (_, __) {});
+    }, onError: (Object _) {});
+  }
+
+  /// Decodes at (about) display size instead of the file's native size: a
+  /// multi-megapixel profile photo shown in a 44 dp circle used to be decoded
+  /// to a 48 MB bitmap and held in the image cache.
+  ImageProvider _providerFor(Uint8List bytes, double devicePixelRatio) {
+    final int px = (widget.size * devicePixelRatio * _decodeScale).ceil();
+    return ResizeImage(
+      MemoryImage(bytes),
+      width: px,
+      height: px,
+      policy: ResizeImagePolicy.fit,
+      allowUpscaling: false,
+    );
   }
 
   bool _avatarMetadataChanged(Member before, Member after) {
@@ -240,13 +277,15 @@ class _StatusAvatarState extends State<StatusAvatar> {
     final Future<Uint8List?>? avatarFuture = _avatarFuture;
     if (avatarFuture == null) return _initials();
 
+    final double dpr = _dpr;
     return FutureBuilder<Uint8List?>(
       future: avatarFuture,
+      initialData: _initialBytes,
       builder: (BuildContext context, AsyncSnapshot<Uint8List?> snapshot) {
         final Uint8List? bytes = snapshot.data;
         if (bytes == null) return _initials();
-        return Image.memory(
-          bytes,
+        return Image(
+          image: _providerFor(bytes, dpr),
           fit: BoxFit.cover,
           gaplessPlayback: true,
           errorBuilder: (_, __, ___) => _initials(),

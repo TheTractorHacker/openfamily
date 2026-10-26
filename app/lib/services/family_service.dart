@@ -12,6 +12,7 @@ import 'alert_service.dart';
 import 'api_client.dart';
 import 'member_avatar_cache.dart';
 import 'member_mapper.dart';
+import 'perf/perf_monitor.dart';
 import 'place_service.dart';
 import 'server_config.dart';
 import 'token_storage.dart';
@@ -84,6 +85,49 @@ class FamilyService {
   /// owner can refresh circle state.
   void Function()? onSharingChanged;
 
+  /// Minimum spacing of UI notifications caused by live frames. A burst of
+  /// `location` / `presence` frames (a driving family can push several per
+  /// second) used to trigger one full map + sheet rebuild per frame; they are
+  /// now coalesced into at most one notification per window (~4.5 per second)
+  /// that carries the latest roster. The first frame after a quiet period is
+  /// delivered immediately, and snapshots (REST fetch, `members` frame, circle
+  /// switch) are never delayed.
+  static const Duration uiCoalesceWindow = Duration(milliseconds: 220);
+
+  Timer? _coalesceTimer;
+  bool _coalescePending = false;
+
+  /// Delivers the roster to the UI right now and (re)opens the coalesce window.
+  void _emitNow() {
+    _coalescePending = false;
+    _coalesceTimer?.cancel();
+    _coalesceTimer = null;
+    PerfMonitor.instance.recordWsUiUpdate();
+    onMembersChanged?.call(_members);
+  }
+
+  /// Rate-limited delivery for live frames: leading edge immediate, then at
+  /// most one trailing delivery per [uiCoalesceWindow] with the newest data.
+  void _emitCoalesced() {
+    if (_disposed) return;
+    if (_coalesceTimer != null) {
+      _coalescePending = true;
+      return;
+    }
+    PerfMonitor.instance.recordWsUiUpdate();
+    onMembersChanged?.call(_members);
+    _coalesceTimer = Timer(uiCoalesceWindow, _onCoalesceWindowEnd);
+  }
+
+  void _onCoalesceWindowEnd() {
+    _coalesceTimer = null;
+    if (_disposed || !_coalescePending) return;
+    _coalescePending = false;
+    PerfMonitor.instance.recordWsUiUpdate();
+    onMembersChanged?.call(_members);
+    _coalesceTimer = Timer(uiCoalesceWindow, _onCoalesceWindowEnd);
+  }
+
   /// The circle the member list and stream are scoped to: null = legacy
   /// (primary circle, unscoped), `all`, or a circle id.
   String? _circleId;
@@ -114,6 +158,18 @@ class FamilyService {
 
   /// App-level ping timer, created with the socket and torn down with it.
   Timer? _pingTimer;
+
+  /// Resets the reconnect backoff only after a connection has stayed up for
+  /// [_stableAfter]. Resetting on the first frame let a server that accepts
+  /// and immediately drops the socket be retried every second forever.
+  Timer? _stableTimer;
+  static const Duration _stableAfter = Duration(seconds: 10);
+
+  /// Coalesces bursts of OS connectivity events (Wi-Fi / cellular flaps) into
+  /// one reconnect.
+  Timer? _connectivityDebounce;
+  static const Duration _connectivityDebounceWindow =
+      Duration(milliseconds: 800);
 
   /// Inbound-silence watchdog timer, created with the socket.
   Timer? _watchdogTimer;
@@ -158,11 +214,11 @@ class FamilyService {
     _circleId = circleId;
     final int gen = ++_scopeGeneration;
     _members = <Member>[];
-    onMembersChanged?.call(_members);
+    _emitNow();
     _sendSubscribe();
     try {
       await fetchMembers();
-      if (gen == _scopeGeneration && !_disposed) onMembersChanged?.call(_members);
+      if (gen == _scopeGeneration && !_disposed) _emitNow();
     } catch (_) {
       // The subscribe snapshot or the next reconnect recovers.
     }
@@ -217,6 +273,9 @@ class FamilyService {
   Future<List<Member>> fetchMembers() async {
     final int gen = _scopeGeneration;
     final String? scope = _circleId;
+    // Places are independent of the roster: request them side by side (the
+    // place list is cached briefly, so most calls cost no request at all).
+    final Future<void> placesLoad = _refreshPlaces();
     final dynamic data = await ApiClient.get(
       scope == null
           ? '/family/members'
@@ -226,7 +285,7 @@ class FamilyService {
     final List<Member> mapped = list
         .map((dynamic e) => memberFromJson(e as Map<String, dynamic>))
         .toList();
-    await _refreshPlaces();
+    await placesLoad;
     if (gen != _scopeGeneration) return _members; // superseded by a newer scope
     return _replaceMembers(mapped);
   }
@@ -263,7 +322,7 @@ class FamilyService {
     if (_disposed) return;
     try {
       await fetchMembers();
-      onMembersChanged?.call(_members);
+      _emitNow();
     } catch (_) {
       // Keep the previous snapshot; the reconnect chain and connectivity
       // watcher will retry.
@@ -287,7 +346,7 @@ class FamilyService {
       }
       if (changed) {
         _members = refreshed;
-        onMembersChanged?.call(_members);
+        _emitCoalesced();
       }
     });
   }
@@ -333,6 +392,7 @@ class FamilyService {
     // traffic so the server sees liveness, and monitor inbound silence so the
     // client detects a dead path even when every write "succeeds" into the
     // void (TCP send buffers swallow writes to a black hole).
+    _stableTimer = Timer(_stableAfter, () => _attempt = 0);
     _pingTimer = Timer.periodic(_pingInterval, (_) => _sendPing());
     _watchdogTimer = Timer.periodic(_pingInterval, (_) => _checkLiveness());
   }
@@ -364,6 +424,8 @@ class FamilyService {
   /// Cancels the socket's timers and subscription and closes the channel, so
   /// reconnects/start cycles can never leak a half-open socket.
   void _teardownSocket() {
+    _stableTimer?.cancel();
+    _stableTimer = null;
     _pingTimer?.cancel();
     _pingTimer = null;
     _watchdogTimer?.cancel();
@@ -385,15 +447,21 @@ class FamilyService {
   void debugHandleFrame(String raw) => _onFrame(raw);
 
   void _onFrame(dynamic raw) {
+    final bool applied = _handleFrame(raw);
+    PerfMonitor.instance.recordWsFrame(applied: applied);
+  }
+
+  /// Parses and applies one frame; true when it changed state.
+  bool _handleFrame(dynamic raw) {
     // Any frame — even a malformed or unknown one — proves the connection
     // path is alive, so reset the watchdog before parsing.
     _lastInboundFrameAt = DateTime.now();
-    if (raw is! String) return;
+    if (raw is! String) return false;
     final Map<String, dynamic> map;
     try {
       map = jsonDecode(raw) as Map<String, dynamic>;
     } catch (_) {
-      return; // Ignore malformed frames.
+      return false; // Ignore malformed frames.
     }
 
     // A frame labelled with another circle (a late snapshot from before a
@@ -403,22 +471,22 @@ class FamilyService {
             map['type'] == 'location' ||
             map['type'] == 'presence') &&
         !frameInScope(_circleId, label is String ? label : null)) {
-      return;
+      return false;
     }
 
     switch (map['type']) {
       case 'circle_removed':
         final dynamic gone = map['circle_id'];
         if (gone is String && gone.isNotEmpty) onCircleGone?.call(gone);
-        break;
+        return true;
       case 'error':
         if (map['code'] == 'circle_not_found' && _circleId != null) {
           onCircleGone?.call(_circleId!);
         }
-        break;
+        return true;
       case 'sharing':
         onSharingChanged?.call();
-        break;
+        return true;
       case 'welcome':
         final String? id = map['user_id'] as String?;
         if (id != null) {
@@ -426,7 +494,7 @@ class FamilyService {
           AlertEvents.selfUserId = id;
           onUserId?.call(id);
         }
-        break;
+        return true;
       case 'members':
         final List<dynamic> list =
             (map['members'] as List<dynamic>?) ?? const [];
@@ -434,68 +502,69 @@ class FamilyService {
             .map((dynamic e) => memberFromJson(e as Map<String, dynamic>))
             .toList();
         _replaceMembers(mapped);
-        _attempt = 0; // Successful connection — reset reconnect backoff.
-        onMembersChanged?.call(_members);
-        break;
+        // Backoff is reset by [_stableTimer] once the connection holds.
+        _emitNow();
+        return true;
       case 'location':
-        _applyLocation(map);
-        break;
+        return _applyLocation(map);
       case 'presence':
-        _applyPresence(map);
-        break;
+        return _applyPresence(map);
       case 'avatar':
-        _applyAvatar(map);
-        break;
+        return _applyAvatar(map);
       case 'alert':
       case 'alert_ack':
         AlertEvents.handleFrame(map);
-        break;
+        return true;
     }
+    return false;
   }
 
-  void _applyLocation(Map<String, dynamic> map) {
+  bool _applyLocation(Map<String, dynamic> map) {
     final String? id = map['user_id'] as String?;
-    if (id == null) return;
+    if (id == null) return false;
     final int index = _members.indexWhere((Member m) => m.id == id);
-    if (index < 0) return;
+    if (index < 0) return false;
     _members[index] = applyPlaceAddress(
       memberFromLocationUpdate(_members[index], map),
       _places,
     );
-    onMembersChanged?.call(_members);
+    _emitCoalesced();
+    return true;
   }
 
   /// Applies a `presence` liveness frame (no position change): refreshes the
   /// member's "last seen" so a stationary but reporting member does not flip
   /// to grey "stopped".
-  void _applyPresence(Map<String, dynamic> map) {
+  bool _applyPresence(Map<String, dynamic> map) {
     final String? id = map['user_id'] as String?;
-    if (id == null) return;
+    if (id == null) return false;
     final int index = _members.indexWhere((Member m) => m.id == id);
-    if (index < 0) return;
+    if (index < 0) return false;
     final Member updated = applyPlaceAddress(
       memberFromPresenceUpdate(_members[index], map),
       _places,
     );
-    if (identical(updated, _members[index])) return;
+    if (identical(updated, _members[index])) return false;
     _members[index] = updated;
-    onMembersChanged?.call(_members);
+    _emitCoalesced();
+    return true;
   }
 
   /// Applies an `avatar` metadata frame and clears the old private image bytes
   /// so visible avatar widgets fetch the replacement immediately.
-  void _applyAvatar(Map<String, dynamic> map) {
+  bool _applyAvatar(Map<String, dynamic> map) {
     final String? id = map['user_id'] as String?;
-    if (id == null) return;
+    if (id == null) return false;
     final int index = _members.indexWhere((Member m) => m.id == id);
-    if (index < 0) return;
+    if (index < 0) return false;
 
     final Member updated = memberFromAvatarUpdate(_members[index], map);
-    if (identical(updated, _members[index])) return;
+    if (identical(updated, _members[index])) return false;
 
     MemberAvatarCache.instance.invalidate(id);
     _members[index] = updated;
-    onMembersChanged?.call(_members);
+    _emitCoalesced();
+    return true;
   }
 
   /// Replaces the member snapshot while releasing private image bytes for
@@ -565,7 +634,7 @@ class FamilyService {
       if (_disposed) return;
       try {
         await fetchMembers();
-        onMembersChanged?.call(_members);
+        _emitNow();
       } catch (_) {
         // Keep the previous members; the next reconnect will retry the fetch.
       }
@@ -616,9 +685,11 @@ class FamilyService {
       return;
     }
     // Network regained (or a Wi-Fi ⇄ cellular handoff): a fresh connection
-    // revalidates DNS, routing, and NAT mappings immediately. idempotent —
-    // teardown runs before every connect.
-    _forceReconnect();
+    // revalidates DNS, routing, and NAT mappings. Flapping networks emit
+    // several events in a row, so they are debounced into one reconnect.
+    // Idempotent — teardown runs before every connect.
+    _connectivityDebounce?.cancel();
+    _connectivityDebounce = Timer(_connectivityDebounceWindow, _forceReconnect);
   }
 
   /// Tears down the current socket (if any) and reconnects immediately with
@@ -638,10 +709,14 @@ class FamilyService {
     _started = false;
     _connectivitySub?.cancel();
     _connectivitySub = null;
+    _connectivityDebounce?.cancel();
+    _connectivityDebounce = null;
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
     _stalenessTimer?.cancel();
     _stalenessTimer = null;
+    _coalesceTimer?.cancel();
+    _coalesceTimer = null;
     _teardownSocket();
     MemberAvatarCache.instance.clear();
   }

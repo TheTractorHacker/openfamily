@@ -1,6 +1,8 @@
 import 'dart:async';
 
+
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' hide Circle;
@@ -19,6 +21,7 @@ import '../services/location_reporter.dart';
 import '../services/location_outbox.dart';
 import '../services/location_service.dart';
 import '../services/location_sharing_service.dart';
+import '../services/perf/perf_monitor.dart';
 import '../services/permission_service.dart';
 import '../services/place_service.dart';
 import '../services/push_service.dart';
@@ -27,6 +30,7 @@ import '../theme/app_theme.dart';
 import '../utils/member_clustering.dart';
 import '../widgets/location_tab_view.dart';
 import '../widgets/member_avatar_bubble.dart';
+import '../widgets/visible_value_builder.dart';
 import 'check_in_screen.dart';
 import 'invite_screen.dart';
 import 'join_circle_screen.dart';
@@ -101,6 +105,13 @@ class _MapScreenState extends State<MapScreen>
   final FamilyService _familyService = FamilyService();
   List<Member> _members = <Member>[];
 
+  /// What the map layers and the People list render: the roster with the
+  /// caller relabeled "You", republished (a fresh list) whenever the service
+  /// emits. Live WebSocket frames update ONLY this notifier, so they never
+  /// rebuild [MapScreen], the tab view, the tile layer or the sheet chrome.
+  final ValueNotifier<List<Member>> _roster =
+      ValueNotifier<List<Member>>(const <Member>[]);
+
   /// Live roster exposed to the pushed People screen so its status chips stay
   /// live off the map's single WebSocket subscription (no second connection).
   late final ValueNotifier<List<Member>> _membersListenable =
@@ -156,30 +167,41 @@ class _MapScreenState extends State<MapScreen>
     _load();
     _checkLocation();
     _initLocationSharing();
-    PushService.sync();
-    unawaited(_refreshServerFeatures());
+    // Push registration and the operator-config refresh are not needed to
+    // paint the map; they start after the first frame so their platform
+    // channel work and requests do not compete with it. (The config request
+    // is shared with the session gate's through ApiClient's cache.)
     // One-time Android battery-optimization guidance (keeps background
     // updates alive when the app is closed). No-op elsewhere. Runs after the
     // first frame so the activity is visible.
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      PushService.sync();
+      unawaited(_refreshServerFeatures());
       _suggestBatteryOptimization();
     });
   }
 
   void _onMembersChanged(List<Member> members) {
     if (!mounted) return;
-    setState(() {
-      _members = members;
-      _membersListenable.value = members;
-      // Re-collapse expanded clusters whose members have moved apart.
-      _pruneExpandedClusters();
-    });
+    _members = members;
+    // Identity semantics unchanged: the shared notifier fires on snapshots.
+    _membersListenable.value = members;
+    // Re-collapse expanded clusters whose members have moved apart.
+    _pruneExpandedClusters();
+    _publishRoster();
   }
 
   void _onUserId(String userId) {
     if (!mounted) return;
     setState(() => _userId = userId);
+    _publishRoster();
     widget.userIdSink?.value = userId;
+  }
+
+  /// Pushes the current roster to the map layers and the People list.
+  void _publishRoster() {
+    _roster.value = _liveMembers();
   }
 
   /// Retries the initial family load automatically when the network returns
@@ -213,15 +235,22 @@ class _MapScreenState extends State<MapScreen>
     try {
       // Scope first: fetchMembers and the socket URL both read it.
       _familyService.scopeTo(scope);
-      final String name = scope == null
-          ? await _familyService.fetchFamilyName()
-          : _selection.nameOr(_familyName);
-      final List<Member> members = await _familyService.fetchMembers();
+      // The family name and the roster do not depend on each other: request
+      // them together (one round trip instead of two in front of the map).
+      final Future<String> nameLoad = scope == null
+          ? _familyService.fetchFamilyName()
+          : Future<String>.value(_selection.nameOr(_familyName));
+      final Future<List<Member>> membersLoad = _familyService.fetchMembers();
+      final List<Object> loaded =
+          await Future.wait<Object>(<Future<Object>>[nameLoad, membersLoad]);
+      final String name = loaded[0] as String;
+      final List<Member> members = loaded[1] as List<Member>;
       if (!mounted) return;
+      _members = members;
+      _membersListenable.value = members;
+      _publishRoster();
       setState(() {
         _familyName = name;
-        _members = members;
-        _membersListenable.value = members;
         _hasFamily = true;
         _loading = false;
       });
@@ -237,11 +266,12 @@ class _MapScreenState extends State<MapScreen>
         return;
       }
       if (e.status == 404) {
+        _members = <Member>[];
+        _membersListenable.value = const <Member>[];
+        _publishRoster();
         setState(() {
           _hasFamily = false;
           _familyName = 'No family';
-          _members = <Member>[];
-          _membersListenable.value = const <Member>[];
           _loading = false;
           _error = null;
         });
@@ -347,6 +377,7 @@ class _MapScreenState extends State<MapScreen>
     _reporter.stop();
     _familyService.dispose();
     _cameraAnim?.dispose();
+    _roster.dispose();
     if (widget.membersSink == null) _membersListenable.dispose();
     super.dispose();
   }
@@ -412,28 +443,29 @@ class _MapScreenState extends State<MapScreen>
     }
   }
 
-  /// Members with the caller's own member relabeled as "You".
-  List<Member> _liveMembers() {
-    if (_userId == null) return _members;
-    return _members
-        .map((Member m) => m.id == _userId ? m.copyWith(name: 'You') : m)
-        .toList();
+  // The relabeled copy of the caller is memoised on the source instance so an
+  // unchanged caller keeps an identical Member across roster emissions (lets
+  // the person row and marker caches below skip rebuilding it).
+  Member? _youSource;
+  Member? _youLive;
+
+  Member _asYou(Member m) {
+    if (identical(m, _youSource)) return _youLive!;
+    final Member live = m.copyWith(name: 'You');
+    _youSource = m;
+    _youLive = live;
+    return live;
   }
 
-  /// Whether to draw the blue accuracy/range circle around this member: when
-  /// we have a live accuracy value, or the member is in the approximate
-  /// GPS-accuracy state (which implies significant uncertainty).
-  bool _showRange(Member m) =>
-      m.position != null &&
-      ((m.accuracyMeters != null && m.accuracyMeters! > 0) ||
-          m.status == MemberStatus.gpsIssue);
-
-  /// The radius (meters) of the blue range circle for this member — the real
-  /// GPS accuracy when known, otherwise the broader-zone fallback.
-  double _rangeFor(Member m) =>
-      (m.accuracyMeters != null && m.accuracyMeters! > 0)
-          ? m.accuracyMeters!
-          : kApproxZoneRadiusMeters;
+  /// Members with the caller's own member relabeled as "You" (always a fresh
+  /// list, so it can be published to a [ValueNotifier]).
+  List<Member> _liveMembers() {
+    final String? uid = _userId;
+    return <Member>[
+      for (final Member m in _members)
+        if (uid != null && m.id == uid) _asYou(m) else m,
+    ];
+  }
 
   /// Smoothly animates the camera to [center] at [zoom].
   void _animateTo(LatLng center, double zoom) {
@@ -624,10 +656,9 @@ class _MapScreenState extends State<MapScreen>
     Navigator.of(context)
         .push(MaterialPageRoute<void>(builder: (_) => const CirclesScreen()))
         .then((_) {
-      if (mounted) {
-        _loadCircles();
-        _load();
-      }
+      // _load() reloads the circle list itself; calling _loadCircles() as
+      // well sent the same request twice.
+      if (mounted) _load();
     });
   }
 
@@ -689,14 +720,14 @@ class _MapScreenState extends State<MapScreen>
 
   @override
   Widget build(BuildContext context) {
-    final List<Member> members = _liveMembers();
-
+    PerfMonitor.instance.countBuild('MapScreen');
     return LocationTabView(
       circleName: _selection.effectiveId == null
           ? _familyName
           : _selection.nameOr(_familyName),
       circles: _circles,
-      members: members,
+      members: _roster.value,
+      membersListenable: _roster,
       selfId: _userId,
       sharingPaused:
           !LocationSharingService.enabled.value || _selection.sharingPaused,
@@ -725,33 +756,41 @@ class _MapScreenState extends State<MapScreen>
       onJoinCircle: _openJoinCircle,
       onOpenPlaces: _openPlaces,
       map: FlutterMap(
-            mapController: _mapController,
-            options: MapOptions(
-              initialCenter: const LatLng(37.7749, -122.4194),
-              initialZoom: 13,
-              minZoom: 3,
-              maxZoom: 18,
-              interactionOptions: const InteractionOptions(
-                flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
-              ),
-              onMapReady: () {
-                _camera = _mapController.camera;
-                _lastZoom = _mapController.camera.zoom;
-                _mapReady = true;
-                _fitToMembers();
-              },
-              onPositionChanged: (camera, hasGesture) =>
-                  _onCameraChanged(camera, hasGesture),
-            ),
-            children: [
-              OpenFamilyTileLayer(satellite: _satellite),
-              // Blue "range" circle for members whose location accuracy is
-              // known (or who are in the approximate GPS-accuracy state).
-              // The radius is the member's real GPS accuracy in meters, so the
-              // circle shows how uncertain the fix is. Drawn for every member
-              // that has a live accuracy value; approximate/flagged members
-              // fall back to the broader-zone radius.
-              CircleLayer(
+        mapController: _mapController,
+        options: MapOptions(
+          initialCenter: const LatLng(37.7749, -122.4194),
+          initialZoom: 13,
+          minZoom: 3,
+          maxZoom: 18,
+          interactionOptions: const InteractionOptions(
+            flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
+          ),
+          onMapReady: () {
+            _camera = _mapController.camera;
+            _lastZoom = _mapController.camera.zoom;
+            _mapReady = true;
+            _fitToMembers();
+          },
+          onPositionChanged: (camera, hasGesture) =>
+              _onCameraChanged(camera, hasGesture),
+        ),
+        children: [
+          // Own repaint boundary + const widgets: the (expensive) base map is
+          // not repainted or rebuilt when markers change.
+          RepaintBoundary(
+            child: _satellite
+                ? const OpenFamilyTileLayer(satellite: true)
+                : const OpenFamilyTileLayer(),
+          ),
+          // Blue "range" circle for members whose location accuracy is known
+          // (or who are in the approximate GPS-accuracy state). The radius is
+          // the member's real GPS accuracy in meters. Range circles and
+          // member bubbles live behind the roster notifier, so a WebSocket
+          // frame rebuilds only these two layers.
+          VisibleValueBuilder<List<Member>>(
+            valueListenable: _roster,
+            builder: (BuildContext context, List<Member> members, _) {
+              return CircleLayer(
                 circles: [
                   for (final Member m in members)
                     if (_showRange(m))
@@ -760,26 +799,48 @@ class _MapScreenState extends State<MapScreen>
                         radius: _rangeFor(m),
                         useRadiusInMeter: true,
                         color: AppColors.accuracyBlue.withValues(alpha: 0.12),
-                        borderColor: AppColors.accuracyBlue.withValues(
-                          alpha: 0.5,
-                        ),
+                        borderColor:
+                            AppColors.accuracyBlue.withValues(alpha: 0.5),
                         borderStrokeWidth: 2,
                       ),
                 ],
-              ),
-              // Member bubbles, clustered by on-screen proximity at
-              // the current zoom (rebuilds as the camera moves).
-              _MemberMarkerLayer(
+              );
+            },
+          ),
+          // Member bubbles, clustered by on-screen proximity at the current
+          // zoom (rebuilds as the camera moves, reusing cached bubbles).
+          VisibleValueBuilder<List<Member>>(
+            valueListenable: _roster,
+            builder: (BuildContext context, List<Member> members, _) {
+              PerfMonitor.instance.countBuild('MapMarkers');
+              return MemberMarkerLayer(
                 members: members,
                 expandedClusters: _expandedClusters,
                 onMemberTap: _openMemberDetails,
                 onClusterTap: _expandCluster,
-              ),
-            ],
+              );
+            },
           ),
+        ],
+      ),
     );
   }
 }
+
+/// Whether to draw the blue accuracy/range circle around this member: when
+/// we have a live accuracy value, or the member is in the approximate
+/// GPS-accuracy state (which implies significant uncertainty).
+bool _showRange(Member m) =>
+    m.position != null &&
+    ((m.accuracyMeters != null && m.accuracyMeters! > 0) ||
+        m.status == MemberStatus.gpsIssue);
+
+/// The radius (meters) of the blue range circle for this member — the real
+/// GPS accuracy when known, otherwise the broader-zone fallback.
+double _rangeFor(Member m) =>
+    (m.accuracyMeters != null && m.accuracyMeters! > 0)
+        ? m.accuracyMeters!
+        : kApproxZoneRadiusMeters;
 
 /// Interpolates between two [LatLng]s for smooth camera animation.
 class _LatLngTween extends Tween<LatLng> {
@@ -799,9 +860,13 @@ class _LatLngTween extends Tween<LatLng> {
 ///
 /// Lives inside [FlutterMap]'s children so it can read the camera via
 /// [MapCamera.of], which also subscribes it to camera changes (it rebuilds on
-/// every pan/zoom).
-class _MemberMarkerLayer extends StatelessWidget {
-  const _MemberMarkerLayer({
+/// every pan/zoom). The bubble widgets themselves are cached per member
+/// instance: while panning, only marker POSITIONS are recomputed; an
+/// unchanged member's bubble subtree (shadows, ring, avatar) is not rebuilt
+/// because the very same widget instance is handed back to the framework.
+@visibleForTesting
+class MemberMarkerLayer extends StatefulWidget {
+  const MemberMarkerLayer({
     required this.members,
     required this.expandedClusters,
     required this.onMemberTap,
@@ -814,19 +879,57 @@ class _MemberMarkerLayer extends StatelessWidget {
   final void Function(String clusterId, LatLng centroid) onClusterTap;
 
   @override
+  State<MemberMarkerLayer> createState() => _MemberMarkerLayerState();
+}
+
+class _MemberMarkerLayerState extends State<MemberMarkerLayer> {
+  /// Bubble widgets by cache key, valid for the roster they were built from.
+  Map<Object, Widget> _bubbles = <Object, Widget>{};
+
+  Widget _memberBubble(Member m, Map<Object, Widget> next) {
+    // Keyed by the Member instance: a new instance (any field changed) gets
+    // a freshly built bubble, an unchanged one reuses the old widget.
+    final Object key = m;
+    final Widget bubble = _bubbles[key] ??
+        MemberAvatarBubble(
+          member: m,
+          onTap: () => widget.onMemberTap(m),
+        );
+    next[key] = bubble;
+    return bubble;
+  }
+
+  Widget _clusterBubble(BubblePlacement p, Map<Object, Widget> next) {
+    final Object key = Object.hashAll(<Object?>[
+      p.clusterId,
+      p.position,
+      ...p.clusterMembers.map(identityHashCode),
+    ]);
+    final Widget bubble = _bubbles[key] ??
+        ClusterBubble(
+          members: p.clusterMembers,
+          onTap: () => widget.onClusterTap(p.clusterId!, p.position),
+        );
+    next[key] = bubble;
+    return bubble;
+  }
+
+  @override
   Widget build(BuildContext context) {
+    PerfMonitor.instance.countBuild('MapMarkerLayer');
     final MapCamera camera = MapCamera.of(context);
     final List<BubblePlacement> placements = placeBubbles(
-      members,
+      widget.members,
       toScreenOffset: (latLng) {
         final p = camera.latLngToScreenPoint(latLng);
         return Offset(p.x, p.y);
       },
       toLatLng: camera.offsetToCrs,
-      expandedClusterIds: expandedClusters,
+      expandedClusterIds: widget.expandedClusters,
     );
 
-    return MarkerLayer(
+    final Map<Object, Widget> next = <Object, Widget>{};
+    final MarkerLayer layer = MarkerLayer(
       markers: [
         for (final BubblePlacement p in placements)
           if (p.isCluster)
@@ -835,10 +938,7 @@ class _MemberMarkerLayer extends StatelessWidget {
               width: 140,
               height: 90,
               alignment: Alignment.center,
-              child: ClusterBubble(
-                members: p.clusterMembers,
-                onTap: () => onClusterTap(p.clusterId!, p.position),
-              ),
+              child: _clusterBubble(p, next),
             )
           else
             Marker(
@@ -846,13 +946,12 @@ class _MemberMarkerLayer extends StatelessWidget {
               width: MemberAvatarBubble.markerWidth,
               height: MemberAvatarBubble.markerSizeFor(p.member!).height,
               alignment: MemberAvatarBubble.markerAlignmentFor(p.member!),
-              child: MemberAvatarBubble(
-                member: p.member!,
-                onTap: () => onMemberTap(p.member!),
-              ),
+              child: _memberBubble(p.member!, next),
             ),
       ],
     );
+    // Entries not used this pass belong to members that moved on.
+    _bubbles = next;
+    return layer;
   }
 }
-

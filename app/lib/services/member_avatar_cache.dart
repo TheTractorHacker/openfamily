@@ -1,5 +1,7 @@
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
+
 import '../models/member.dart';
 import 'api_client.dart';
 
@@ -21,6 +23,26 @@ class MemberAvatarCache {
       <_MemberAvatarCacheKey, Future<Uint8List?>>{};
   final Map<String, int> _memberGenerations = <String, int>{};
   int _generation = 0;
+
+  /// Bytes already in memory for [member]'s current avatar version, or null.
+  /// Lets avatar widgets paint the photo on their very first frame instead of
+  /// flashing initials while an already-completed future resolves.
+  Uint8List? peek(Member member) {
+    if (!member.hasAvatar || member.id.isEmpty) return null;
+    return _images[_MemberAvatarCacheKey(
+      memberId: member.id,
+      avatarVersion: member.avatarVersion,
+    )];
+  }
+
+  /// Seeds the cache (tests).
+  @visibleForTesting
+  void debugPut(Member member, Uint8List bytes) {
+    _images[_MemberAvatarCacheKey(
+      memberId: member.id,
+      avatarVersion: member.avatarVersion,
+    )] = bytes;
+  }
 
   /// Returns the avatar bytes for [member], or null if they do not have one.
   ///
