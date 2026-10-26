@@ -10,16 +10,61 @@ import 'api_client.dart';
 class PlaceService {
   PlaceService._();
 
+  /// How long a fetched place list is reused. Places change rarely, but the
+  /// list used to be re-requested on every roster fetch (startup, circle
+  /// switch, reconnect, resume) and again by the Places tab.
+  static const Duration cacheTtl = Duration(seconds: 30);
+
+  static List<Place>? _cache;
+  static DateTime? _cachedAt;
+  static Future<List<Place>>? _inFlight;
+
+  /// Clock for the cache; tests override it.
+  static DateTime Function() clock = DateTime.now;
+
+  /// Drops the cached list (after any create / update / delete, logout).
+  static void invalidateCache() {
+    _cache = null;
+    _cachedAt = null;
+  }
+
   /// Fetches all places for the current family.
-  static Future<List<Place>> fetchPlaces() async {
+  ///
+  /// Cached for [cacheTtl] and single-flighted; [force] always asks the
+  /// server (used by the Places screen, which must show fresh data).
+  static Future<List<Place>> fetchPlaces({bool force = false}) {
+    final List<Place>? cached = _cache;
+    final DateTime? at = _cachedAt;
+    if (!force &&
+        cached != null &&
+        at != null &&
+        clock().difference(at) < cacheTtl) {
+      return Future<List<Place>>.value(List<Place>.of(cached));
+    }
+    final Future<List<Place>>? pending = _inFlight;
+    if (!force && pending != null) {
+      return pending.then((List<Place> l) => List<Place>.of(l));
+    }
+    final Future<List<Place>> f = _fetchFresh();
+    _inFlight = f;
+    f.whenComplete(() {
+      if (identical(_inFlight, f)) _inFlight = null;
+    }).ignore();
+    return f.then((List<Place> l) => List<Place>.of(l));
+  }
+
+  static Future<List<Place>> _fetchFresh() async {
     final dynamic data = await ApiClient.get('/family/places');
     if (data is! List) {
       throw const ApiException(0, 'Unexpected places response.');
     }
-    return data
+    final List<Place> places = data
         .map((dynamic e) => _fromBackend(e as Map<String, dynamic>))
         .whereType<Place>()
         .toList();
+    _cache = places;
+    _cachedAt = clock();
+    return places;
   }
 
   /// Creates a place and returns the created [Place] (with its server id).
@@ -41,7 +86,9 @@ class PlaceService {
     if (address != null && address.isNotEmpty) {
       body['address'] = address;
     }
+    invalidateCache();
     final dynamic data = await ApiClient.post('/family/places', body: body);
+    invalidateCache();
     final Place? place = _fromBackend(data as Map<String, dynamic>);
     if (place == null) {
       throw const ApiException(0, 'Unexpected place response.');
@@ -68,7 +115,9 @@ class PlaceService {
       if (radiusMeters != null) 'radius_meters': radiusMeters,
       if (address != null) 'address': address,
     };
+    invalidateCache();
     final dynamic data = await ApiClient.patch('/family/places/$id', body: body);
+    invalidateCache();
     final Place? place = _fromBackend(data as Map<String, dynamic>);
     if (place == null) {
       throw const ApiException(0, 'Unexpected place response.');
@@ -78,7 +127,9 @@ class PlaceService {
 
   /// Deletes a place by id.
   static Future<void> deletePlace(String id) async {
+    invalidateCache();
     await ApiClient.delete('/family/places/$id');
+    invalidateCache();
   }
 
   /// Maps backend JSON to a [Place], or null when required fields are missing.

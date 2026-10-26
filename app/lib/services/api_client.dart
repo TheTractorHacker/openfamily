@@ -2,9 +2,11 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show compute;
 import 'package:http/http.dart' as http;
 
 import '../models/user_profile.dart';
+import 'perf/perf_monitor.dart';
 import 'server_config.dart';
 import 'session_gate.dart';
 import 'token_storage.dart';
@@ -41,6 +43,9 @@ class SessionExpiredException implements Exception {
   @override
   String toString() => 'SessionExpiredException: $message';
 }
+
+/// Top-level so it can run on a worker isolate.
+dynamic _decodeJsonBytes(Uint8List bytes) => jsonDecode(utf8.decode(bytes));
 
 /// A thin HTTP client for the OpenFamily backend.
 ///
@@ -214,10 +219,61 @@ class ApiClient {
     return data as Map<String, dynamic>;
   }
 
+  /// How long a successful `GET /config` answer is reused. The document is
+  /// operator-level (tile URLs, push transports) and changes only when the
+  /// server is reconfigured, yet startup used to fetch it three times (session
+  /// gate, push sync, map screen).
+  static const Duration configTtl = Duration(minutes: 5);
+
+  static Map<String, dynamic>? _configCache;
+  static String? _configCacheBase;
+  static DateTime? _configCachedAt;
+  static Future<Map<String, dynamic>>? _configInFlight;
+
+  /// Clock for the config cache; tests override it.
+  static DateTime Function() configClock = DateTime.now;
+
+  /// Drops the cached `/config` (server URL changed, explicit refresh).
+  static void invalidateConfig() {
+    _configCache = null;
+    _configCachedAt = null;
+  }
+
   /// GET /config → public ntfy/APNs/tile settings for the generic APK.
-  static Future<Map<String, dynamic>> getPushConfig() async {
-    final dynamic data = await _send('GET', _uri('/config'), auth: false);
-    return data as Map<String, dynamic>;
+  ///
+  /// Cached for [configTtl] per server URL and single-flighted, so concurrent
+  /// callers share one request. [force] bypasses the cache. A failed request
+  /// is never cached.
+  static Future<Map<String, dynamic>> getPushConfig({bool force = false}) {
+    final String base = ServerConfig.instance.apiBaseUrl;
+    final Map<String, dynamic>? cached = _configCache;
+    final DateTime? at = _configCachedAt;
+    if (!force &&
+        cached != null &&
+        at != null &&
+        _configCacheBase == base &&
+        configClock().difference(at) < configTtl) {
+      return Future<Map<String, dynamic>>.value(
+          Map<String, dynamic>.of(cached));
+    }
+    final Future<Map<String, dynamic>>? inFlight = _configInFlight;
+    if (inFlight != null && _configCacheBase == base && !force) {
+      return inFlight.then(
+          (Map<String, dynamic> m) => Map<String, dynamic>.of(m));
+    }
+    _configCacheBase = base;
+    final Future<Map<String, dynamic>> f = () async {
+      final dynamic data = await _send('GET', _uri('/config'), auth: false);
+      final Map<String, dynamic> map = data as Map<String, dynamic>;
+      _configCache = map;
+      _configCachedAt = configClock();
+      return map;
+    }();
+    _configInFlight = f;
+    f.whenComplete(() {
+      if (identical(_configInFlight, f)) _configInFlight = null;
+    }).ignore();
+    return f.then((Map<String, dynamic> m) => Map<String, dynamic>.of(m));
   }
 
   /// GET /healthz → throws when the server is unreachable or not OK.
@@ -455,7 +511,7 @@ class ApiClient {
       contentType: 'application/json',
       auth: auth,
     );
-    return _decode(response);
+    return _decodeMaybeOffThread(response);
   }
 
   /// Sends a request whose response is not necessarily JSON, transparently
@@ -545,6 +601,24 @@ class ApiClient {
 
     final Object? encoded = bytes ?? (body == null ? null : jsonEncode(body));
 
+    // Lightweight instrumentation: method + normalised path + duration only.
+    final Stopwatch sw = Stopwatch()..start();
+    int status = 0;
+    try {
+      final http.Response r = await _dispatch(method, uri, headers, encoded);
+      status = r.statusCode;
+      return r;
+    } finally {
+      PerfMonitor.instance.recordHttp(method, uri.path, sw.elapsedMilliseconds, status);
+    }
+  }
+
+  static Future<http.Response> _dispatch(
+    String method,
+    Uri uri,
+    Map<String, String> headers,
+    Object? encoded,
+  ) async {
     try {
       switch (method) {
         case 'GET':
@@ -699,6 +773,24 @@ class ApiClient {
       // anything about whether the session is still valid.
       return const SessionGateRefreshOutcome.unreachable();
     }
+  }
+
+  /// Responses at least this large are UTF-8 + JSON decoded on a worker
+  /// isolate. On a phone, decoding ~1 MB of JSON blocks the UI isolate for
+  /// several frames (trip reports, history trails, long trip lists); below the
+  /// threshold the isolate round trip costs more than the decode.
+  static const int isolateDecodeThreshold = 128 * 1024;
+
+  /// Same result as [_decode], without blocking the UI isolate for big bodies.
+  static Future<dynamic> _decodeMaybeOffThread(http.Response response) async {
+    if (response.statusCode >= 200 &&
+        response.statusCode < 300 &&
+        response.bodyBytes.length >= isolateDecodeThreshold) {
+      final Uint8List bytes = response.bodyBytes;
+      // compute() runs inline on web, where isolates do not exist.
+      return compute<Uint8List, dynamic>(_decodeJsonBytes, bytes);
+    }
+    return _decode(response);
   }
 
   /// Decodes a response body, throwing [ApiException] on non-2xx statuses.

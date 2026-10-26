@@ -1,6 +1,7 @@
 import 'api_client.dart';
 import 'background_location_service.dart';
 import 'biometric_service.dart';
+import 'place_service.dart';
 import 'token_storage.dart';
 
 /// Thrown when the backend requires a TOTP code (2FA) to complete login.
@@ -112,6 +113,8 @@ class AuthService {
     // isolate never reports with a dead session.
     await BackgroundLocationService.stop();
     await TokenStorage.clear();
+    // Family-scoped caches must never outlive the account.
+    PlaceService.invalidateCache();
   }
 
   static Future<void> _loginAndPersist({
@@ -139,6 +142,7 @@ class AuthService {
     // A fresh session is now active: re-arm the session-expired redirect so a
     // later expiry fires it again.
     ApiClient.markSessionActive();
+    PlaceService.invalidateCache();
     // Background location reporting is started by MapScreen once it is shown
     // (and the app is in the foreground), not here.
   }

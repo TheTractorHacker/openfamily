@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -9,6 +11,7 @@ import 'services/api_client.dart';
 import 'services/auth_service.dart';
 import 'services/background_credential_store.dart';
 import 'services/background_location_service.dart';
+import 'services/perf/perf_monitor.dart';
 import 'services/push_service.dart';
 import 'services/server_config.dart';
 import 'services/session_gate.dart';
@@ -26,15 +29,28 @@ import 'widgets/openfamily_brand.dart';
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 Future<void> main() async {
+  final PerfMonitor perf = PerfMonitor.instance..markMainStart();
   WidgetsFlutterBinding.ensureInitialized();
+  perf
+    ..attach()
+    ..watchFirstFrame();
   // Deliberately draw behind the status and gesture bars (enforced on
-  // Android 15+ anyway); every screen pads via MediaQuery insets.
-  await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+  // Android 15+ anyway); every screen pads via MediaQuery insets. Not awaited:
+  // it is a fire-and-forget platform call and must not delay the first frame.
+  unawaited(SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge));
   // Plugin callbacks must be registered before the first frame so a
   // UnifiedPush/APNs token arriving at launch is not dropped.
   PushService.initialize();
-  await ThemePreferenceService.load();
-  await MapStylePreferenceService.load();
+  // The three stored settings the first frame depends on (theme, map style,
+  // server URL) are read together instead of one after another.
+  await perf.timeStep(
+    'prefs',
+    () => Future.wait<void>(<Future<void>>[
+      ThemePreferenceService.load(),
+      MapStylePreferenceService.load(),
+      ServerConfig.instance.load(),
+    ]),
+  );
   runApp(const OpenFamilyApp());
 }
 
@@ -89,6 +105,7 @@ class _OpenFamilyAppState extends State<OpenFamilyApp> {
           title: 'OpenFamily',
           debugShowCheckedModeBanner: false,
           navigatorKey: navigatorKey,
+          navigatorObservers: <NavigatorObserver>[PerfRouteObserver()],
           theme: buildLightTheme(),
           darkTheme: buildDarkTheme(),
           themeMode: preference.themeMode,
@@ -124,43 +141,36 @@ class _SessionGateState extends State<_SessionGate> {
   late final Future<_GateResult> _result = _init();
 
   Future<_GateResult> _init() async {
-    // Load the runtime server URL (shared_preferences → ServerConfig).
+    final PerfMonitor perf = PerfMonitor.instance;
+    // Load the runtime server URL (shared_preferences → ServerConfig). Already
+    // done in main(); this returns immediately then.
     await ServerConfig.instance.load();
 
-    // Drop plaintext background credentials left by older builds (MOB-002).
-    await BackgroundCredentialStore.migrateLegacyPrefs();
-
-    // Remove the path-only local photo pointer used by an older avatar
-    // implementation. Current avatars are private authenticated bytes and are
-    // never persisted as a device file path.
-    try {
-      await TokenStorage.removeLegacyProfilePhotoPath();
-    } catch (_) {
-      // A secure-storage hiccup should not prevent the app from starting; a
-      // later launch or logout will retry this idempotent cleanup.
-    }
-
     if (!ServerConfig.instance.isConfigured) {
+      // Housekeeping only; nothing else to wait for.
+      unawaited(_housekeeping());
       return _GateResult.needsServerConfig;
     }
 
-    await TileConfig.instance.refresh();
-
-    // Keep the background isolate's secure copy of the base URL and device id
-    // current.
-    try {
-      await BackgroundCredentialStore.sync(
-        apiBaseUrl: ServerConfig.instance.apiBaseUrl,
-        deviceId: await TokenStorage.readDeviceId() ?? '',
-      );
-    } catch (_) {
-      // Secure-storage hiccup: the next login/start retries.
-    }
+    // Everything below is independent of each other, so it runs together
+    // instead of as a chain of awaits in front of the first screen:
+    //  * housekeeping: legacy credential cleanup + syncing the background
+    //    isolate's copy of the base URL and device id;
+    //  * the operator config (tile style), which the map needs anyway;
+    //  * the session check (token reads and, when needed, a refresh call).
+    final List<Object?> results = await perf.timeStep(
+      'gate',
+      () => Future.wait<Object?>(<Future<Object?>>[
+        _housekeeping(),
+        TileConfig.instance.refresh().then<Object?>((_) => null),
+        ApiClient.checkSession(),
+      ]),
+    );
+    final SessionGateResult session = results[2] as SessionGateResult;
     // The gate refreshes the session through the 30-day refresh token when
     // the 15-minute access token has expired, and it never destroys the
     // session on a transport failure — only a definitive server rejection
     // (or an empty token store) clears local credentials.
-    final SessionGateResult session = await ApiClient.checkSession();
     switch (session) {
       case SessionGateResult.valid:
       case SessionGateResult.unreachable:
@@ -176,6 +186,36 @@ class _SessionGateState extends State<_SessionGate> {
       case SessionGateResult.none:
         return _GateResult.noSession;
     }
+  }
+
+  /// Best-effort local cleanup and background-credential sync; never throws.
+  Future<Object?> _housekeeping() async {
+    // Drop plaintext background credentials left by older builds (MOB-002).
+    await BackgroundCredentialStore.migrateLegacyPrefs();
+
+    // Remove the path-only local photo pointer used by an older avatar
+    // implementation. Current avatars are private authenticated bytes and are
+    // never persisted as a device file path.
+    try {
+      await TokenStorage.removeLegacyProfilePhotoPath();
+    } catch (_) {
+      // A secure-storage hiccup should not prevent the app from starting; a
+      // later launch or logout will retry this idempotent cleanup.
+    }
+
+    if (!ServerConfig.instance.isConfigured) return null;
+
+    // Keep the background isolate's secure copy of the base URL and device id
+    // current.
+    try {
+      await BackgroundCredentialStore.sync(
+        apiBaseUrl: ServerConfig.instance.apiBaseUrl,
+        deviceId: await TokenStorage.readDeviceId() ?? '',
+      );
+    } catch (_) {
+      // Secure-storage hiccup: the next login/start retries.
+    }
+    return null;
   }
 
   @override

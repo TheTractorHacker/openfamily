@@ -82,7 +82,7 @@ class _PlacesScreenState extends State<PlacesScreen> {
       }
       final List<dynamic> results = await Future.wait<dynamic>([
         _familyService.fetchFamily(),
-        PlaceService.fetchPlaces(),
+        PlaceService.fetchPlaces(force: true),
         GeofenceService.fetchGeofences(),
       ]);
       final FamilyInfo family = results[0] as FamilyInfo;
