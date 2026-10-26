@@ -84,4 +84,28 @@ class BackgroundLocator {
 
     await _channel.invokeMethod(Keys.METHOD_PLUGIN_UPDATE_NOTIFICATION, arg);
   }
+
+  /// Changes the running service's location request (interval, displacement
+  /// filter, accuracy) in place, without restarting the foreground service.
+  /// Returns false when the service is not running or the native side does
+  /// not support the call (older build), so the caller can fall back.
+  static Future<bool> updateLocationRequest({
+    required int intervalMs,
+    required double distanceFilter,
+    required bool highAccuracy,
+  }) async {
+    try {
+      final bool? ok = await _channel.invokeMethod<bool>(
+        Keys.METHOD_PLUGIN_UPDATE_LOCATION_REQUEST,
+        {
+          Keys.ARG_REQUEST_INTERVAL_MS: intervalMs,
+          Keys.ARG_REQUEST_DISTANCE_FILTER: distanceFilter,
+          Keys.ARG_REQUEST_HIGH_ACCURACY: highAccuracy,
+        },
+      );
+      return ok ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
 }

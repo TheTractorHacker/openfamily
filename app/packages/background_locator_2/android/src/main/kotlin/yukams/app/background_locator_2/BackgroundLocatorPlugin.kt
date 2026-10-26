@@ -249,6 +249,18 @@ class BackgroundLocatorPlugin
             Keys.METHOD_PLUGIN_UN_REGISTER_LOCATION_UPDATE -> {
                 unRegisterPlugin(context!!, result)
             }
+            Keys.METHOD_PLUGIN_UPDATE_LOCATION_REQUEST -> {
+                val args: Map<Any, Any>? = call.arguments()
+                val intervalMs = (args?.get(Keys.ARG_REQUEST_INTERVAL_MS) as? Number)?.toLong()
+                val distance = (args?.get(Keys.ARG_REQUEST_DISTANCE_FILTER) as? Number)?.toFloat() ?: 0f
+                val high = (args?.get(Keys.ARG_REQUEST_HIGH_ACCURACY) as? Boolean) ?: true
+                val service = IsolateHolderService.activeInstance
+                if (intervalMs == null || intervalMs <= 0 || service == null) {
+                    result.success(false)
+                } else {
+                    result.success(service.updateLocationRequest(intervalMs, distance, high))
+                }
+            }
             Keys.METHOD_PLUGIN_IS_REGISTER_LOCATION_UPDATE -> isServiceRunning(result)
             Keys.METHOD_PLUGIN_IS_SERVICE_RUNNING -> isServiceRunning(result)
             Keys.METHOD_PLUGIN_UPDATE_NOTIFICATION -> {
