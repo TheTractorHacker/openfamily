@@ -131,17 +131,16 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
           ),
         ),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
+        Wrap(
+          alignment: WrapAlignment.center,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: <Widget>[
-            Flexible(
-              child: Text(
+            Text(
                 "Don't have an account?",
                 style: AppType.secondary.copyWith(
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
               ),
-            ),
             TextButton(
               onPressed: () => Navigator.of(context).push(
                 MaterialPageRoute<void>(builder: (_) => const SignUpScreen()),

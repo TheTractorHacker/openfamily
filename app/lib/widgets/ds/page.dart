@@ -36,6 +36,19 @@ class DsPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // With very large text the pinned action area would eat the screen, so
+    // the actions scroll with the content instead.
+    final bool inline = MediaQuery.textScalerOf(context).scale(16) > 16 * 1.4;
+    final Widget actionColumn = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        for (int i = 0; i < actions.length; i++) ...<Widget>[
+          if (i > 0) const SizedBox(height: AppSpace.sm),
+          actions[i],
+        ],
+      ],
+    );
     return Scaffold(
       appBar: AppBar(
         title: Text(title),
@@ -62,10 +75,16 @@ class DsPage extends StatelessWidget {
                       AppSpace.xxl,
                       AppSpace.lg,
                     ),
-                    children: children,
+                    children: <Widget>[
+                      ...children,
+                      if (inline && actions.isNotEmpty) ...<Widget>[
+                        const SizedBox(height: AppSpace.xl),
+                        actionColumn,
+                      ],
+                    ],
                   ),
                 ),
-                if (actions.isNotEmpty)
+                if (!inline && actions.isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.fromLTRB(
                       AppSpace.xxl,
@@ -73,16 +92,7 @@ class DsPage extends StatelessWidget {
                       AppSpace.xxl,
                       AppSpace.lg,
                     ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      mainAxisSize: MainAxisSize.min,
-                      children: <Widget>[
-                        for (int i = 0; i < actions.length; i++) ...<Widget>[
-                          if (i > 0) const SizedBox(height: AppSpace.sm),
-                          actions[i],
-                        ],
-                      ],
-                    ),
+                    child: actionColumn,
                   ),
               ],
             ),

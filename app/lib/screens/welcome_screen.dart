@@ -162,14 +162,21 @@ class _PageView extends StatelessWidget {
   Widget build(BuildContext context) {
     final BrandTheme brand = BrandTheme.of(context);
     final ColorScheme cs = Theme.of(context).colorScheme;
-    return SingleChildScrollView(
-      padding: const EdgeInsets.symmetric(
-        horizontal: AppSpace.xxl,
-        vertical: AppSpace.xxl,
-      ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: <Widget>[
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints box) =>
+          SingleChildScrollView(
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpace.xxl,
+          vertical: AppSpace.xxl,
+        ),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            minHeight: (box.maxHeight - 2 * AppSpace.xxl)
+                .clamp(0.0, double.infinity),
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: <Widget>[
           ExcludeSemantics(
             child: Container(
               width: 120,
@@ -200,7 +207,9 @@ class _PageView extends StatelessWidget {
               height: 1.4,
             ),
           ),
-        ],
+            ],
+          ),
+        ),
       ),
     );
   }

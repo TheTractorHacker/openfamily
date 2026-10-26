@@ -277,7 +277,6 @@ ThemeData _buildTheme({
       style: TextButton.styleFrom(
         minimumSize: const Size(kMinTarget, kMinTarget),
         foregroundColor: brand.accentInk,
-        textStyle: const TextStyle(fontWeight: FontWeight.w700),
       ),
     ),
     filledButtonTheme: FilledButtonThemeData(
@@ -288,8 +287,18 @@ ThemeData _buildTheme({
         shape: const StadiumBorder(),
       ),
     ),
+    cardTheme: CardThemeData(
+      color: brand.sheet,
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        side: BorderSide(color: muted.withValues(alpha: 0.3)),
+      ),
+    ),
     outlinedButtonTheme: OutlinedButtonThemeData(
       style: OutlinedButton.styleFrom(
+        foregroundColor: brand.accentInk,
         minimumSize: const Size(64, kMinTarget),
         shape: const StadiumBorder(),
         side: BorderSide(color: muted.withValues(alpha: 0.5)),

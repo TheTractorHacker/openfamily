@@ -139,17 +139,16 @@ class _SignUpScreenState extends State<SignUpScreen> {
       totalSteps: 6,
       actions: <Widget>[
         DsBusyButton(label: 'Continue', busy: _submitting, onPressed: _submit),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
+        Wrap(
+          alignment: WrapAlignment.center,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: <Widget>[
-            Flexible(
-              child: Text(
+            Text(
                 'Already have an account?',
                 style: AppType.secondary.copyWith(
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
               ),
-            ),
             TextButton(
               onPressed: () => Navigator.of(context).push(
                 MaterialPageRoute<void>(builder: (_) => const LoginScreen()),

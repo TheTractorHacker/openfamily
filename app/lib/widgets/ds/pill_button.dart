@@ -26,7 +26,12 @@ class DsPillButton extends StatelessWidget {
   final bool floating;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => LayoutBuilder(
+        builder: (BuildContext context, BoxConstraints c) =>
+            _build(context, c.hasTightWidth),
+      );
+
+  Widget _build(BuildContext context, bool stretched) {
     final BrandTheme brand = BrandTheme.of(context);
     final ColorScheme cs = Theme.of(context).colorScheme;
     Color bg;
@@ -48,7 +53,8 @@ class DsPillButton extends StatelessWidget {
         fg = Colors.white;
     }
     final Widget child = Row(
-      mainAxisSize: MainAxisSize.min,
+      mainAxisSize: stretched ? MainAxisSize.max : MainAxisSize.min,
+      mainAxisAlignment: MainAxisAlignment.center,
       children: <Widget>[
         if (icon != null) ...<Widget>[
           Icon(icon, size: 20),
