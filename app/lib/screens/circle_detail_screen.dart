@@ -251,7 +251,7 @@ class _CircleDetailScreenState extends State<CircleDetailScreen> {
     CircleInvite? created;
     final bool ok = await _run(() async {
       created = await _service.createInvite(_circle.id);
-    });
+    }, done: 'Invite code created');
     if (ok && created != null && mounted) {
       setState(() => _invites = <CircleInvite>[created!, ..._invites]);
     }

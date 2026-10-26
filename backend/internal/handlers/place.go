@@ -6,7 +6,9 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -70,6 +72,29 @@ const (
 	minPlaceRadiusMeters = 76.0
 	maxPlaceRadiusMeters = 3219.0
 )
+
+// Text limits shared by create and update.
+const (
+	maxPlaceNameRunes    = 100
+	maxPlaceAddressRunes = 500
+)
+
+// placeTextError returns a validation message for an invalid name or address
+// (empty string when fine). Create and update both use it so they cannot drift.
+func placeTextError(name *string, address *string) string {
+	if name != nil {
+		if strings.TrimSpace(*name) == "" {
+			return "name cannot be empty"
+		}
+		if utf8.RuneCountInString(*name) > maxPlaceNameRunes {
+			return "name must be at most 100 characters"
+		}
+	}
+	if address != nil && utf8.RuneCountInString(*address) > maxPlaceAddressRunes {
+		return "address must be at most 500 characters"
+	}
+	return ""
+}
 
 // validRadius reports whether r is within the allowed radius range.
 func validRadius(r float64) bool {
@@ -240,6 +265,10 @@ func (s *Server) CreatePlace(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "name is required")
 		return
 	}
+	if msg := placeTextError(&req.Name, &req.Address); msg != "" {
+		writeError(w, http.StatusBadRequest, msg)
+		return
+	}
 	if req.Lat < -90 || req.Lat > 90 || req.Lon < -180 || req.Lon > 180 {
 		writeError(w, http.StatusBadRequest, "lat/lon out of range")
 		return
@@ -357,8 +386,14 @@ func (s *Server) UpdatePlace(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if req.Name != nil && *req.Name == "" {
-		writeError(w, http.StatusBadRequest, "name cannot be empty")
+	if msg := placeTextError(req.Name, req.Address); msg != "" {
+		writeError(w, http.StatusBadRequest, msg)
+		return
+	}
+	if req.RadiusMeters.set && req.RadiusMeters.value == nil {
+		// Create requires a radius, so an update must not remove it either: a
+		// place without a radius can never fire a geofence.
+		writeError(w, http.StatusBadRequest, "radius_meters cannot be null")
 		return
 	}
 	if req.Type != nil && !validPlaceType(*req.Type) {

@@ -26,11 +26,18 @@ class PlacesSnapshot {
 /// The Places / geofences list screen. Lists saved Places with their radius
 /// and an arrive/leave alert toggle, and lets the user add a new Place.
 class PlacesScreen extends StatefulWidget {
-  const PlacesScreen({super.key, this.loader});
+  const PlacesScreen({super.key, this.loader, this.updater, this.deleter});
 
   /// Replaces the network load (tests and screenshots). Returns the places
   /// with their alert state already applied, plus the caller's role and id.
   final Future<PlacesSnapshot> Function()? loader;
+
+  /// Replaces the PATCH call (tests). Receives the place with its edited
+  /// values and returns what the server saved.
+  final Future<Place> Function(Place edited)? updater;
+
+  /// Replaces the DELETE call (tests).
+  final Future<void> Function(String placeId)? deleter;
 
   @override
   State<PlacesScreen> createState() => _PlacesScreenState();
@@ -116,6 +123,103 @@ class _PlacesScreenState extends State<PlacesScreen> {
     return 'Couldn\'t load places. Please try again.';
   }
 
+  /// A sentence for a failed edit/delete: permission, vanished place, clash
+  /// with another place, offline, or the server's own text.
+  String _changeError(Object e, String verb) {
+    if (e is ApiException) {
+      switch (e.status) {
+        case 403:
+          return 'You can\'t $verb this place. Only the person who added it '
+              '(or a family admin) can.';
+        case 404:
+          return 'This place no longer exists. The list was refreshed.';
+        case 409:
+          return 'This place was changed by someone else. The list was '
+              'refreshed: try again.';
+        case 0:
+          return '${e.message} Your change was not saved.';
+        default:
+          return e.message;
+      }
+    }
+    return 'Couldn\'t $verb this place. Please try again.';
+  }
+
+  bool _refreshNeeded(Object e) =>
+      e is ApiException && (e.status == 404 || e.status == 409);
+
+  bool _editing = false;
+
+  /// Opens the picker pre-filled with [place]; on save, updates optimistically
+  /// and rolls back if the server refuses.
+  Future<void> _editPlace(Place place) async {
+    if (_editing) return;
+    final Place? edited = await Navigator.of(context).push<Place>(
+      MaterialPageRoute<Place>(
+        builder: (_) => PlacePickerScreen(
+          placeName: place.name,
+          icon: place.icon,
+          type: place.type,
+          initial: place,
+        ),
+      ),
+    );
+    if (edited == null || !mounted) return;
+    final List<Place> before = List<Place>.of(_places ?? const <Place>[]);
+    final int index = before.indexWhere((Place p) => p.id == place.id);
+    if (index < 0) return;
+    // Alerts belong to the geofence, not the picker: keep them as they were.
+    final Place optimistic = edited.copyWith(
+      alertsOn: place.alertsOn,
+      geofenceId: place.geofenceId ?? Place.clearGeofence,
+    );
+    setState(() {
+      _editing = true;
+      _places = <Place>[...before]..[index] = optimistic;
+    });
+    try {
+      final Place saved = await (widget.updater ??
+          (Place p) => PlaceService.updatePlace(
+                p.id,
+                name: p.name,
+                type: p.type,
+                lat: p.position.latitude,
+                lon: p.position.longitude,
+                radiusMeters: p.radiusMeters,
+                address: p.address,
+              ))(optimistic);
+      if (!mounted) return;
+      setState(() {
+        final List<Place> now = List<Place>.of(_places ?? before);
+        final int i = now.indexWhere((Place p) => p.id == place.id);
+        if (i >= 0) {
+          now[i] = saved.copyWith(
+            icon: Place.iconForType(saved.type),
+            alertsOn: place.alertsOn,
+            geofenceId: place.geofenceId ?? Place.clearGeofence,
+          );
+        }
+        _places = now;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Place updated')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _places = before); // roll back
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(_changeError(e, 'edit'))),
+      );
+      if (_refreshNeeded(e)) _load();
+    } finally {
+      if (mounted) {
+        setState(() => _editing = false);
+      } else {
+        _editing = false;
+      }
+    }
+  }
+
   Future<void> _addPlace() async {
     final Place? picked = await Navigator.of(context).push<Place>(
       MaterialPageRoute<Place>(
@@ -165,7 +269,7 @@ class _PlacesScreenState extends State<PlacesScreen> {
     );
     if (confirmed != true || !mounted) return;
     try {
-      await PlaceService.deletePlace(place.id);
+      await (widget.deleter ?? PlaceService.deletePlace)(place.id);
       if (!mounted) return;
       setState(() {
         _places = _places!.where((Place p) => p.id != place.id).toList();
@@ -173,8 +277,9 @@ class _PlacesScreenState extends State<PlacesScreen> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(_errorMessage(e))),
+        SnackBar(content: Text(_changeError(e, 'delete'))),
       );
+      if (_refreshNeeded(e)) _load();
     }
   }
 
@@ -286,6 +391,7 @@ class _PlacesScreenState extends State<PlacesScreen> {
             onToggleAlerts: _canManage ? () => _toggleAlerts(i) : null,
             toggling: _toggling,
             onDelete: _canManage ? () => _deletePlace(places[i]) : null,
+            onEdit: _canManage ? () => _editPlace(places[i]) : null,
           ),
         if (_canManage) _AddPlaceTile(onTap: _addPlace),
       ],
@@ -299,7 +405,10 @@ class _PlaceTile extends StatelessWidget {
     required this.onToggleAlerts,
     required this.toggling,
     required this.onDelete,
+    this.onEdit,
   });
+
+  final VoidCallback? onEdit;
 
   final Place place;
   final VoidCallback? onToggleAlerts;
@@ -328,6 +437,7 @@ class _PlaceTile extends StatelessWidget {
         leading: DsListRow.iconTile(context, place.icon),
         title: place.name,
         subtitle: subtitle,
+        onTap: onEdit,
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
           mainAxisAlignment: MainAxisAlignment.end,
@@ -341,6 +451,16 @@ class _PlaceTile extends StatelessWidget {
                 ),
                 icon: Icon(alertsIcon, color: alertsColor),
                 onPressed: toggling ? null : onToggleAlerts,
+              ),
+            if (onEdit != null)
+              IconButton(
+                tooltip: 'Edit place',
+                constraints: const BoxConstraints(
+                  minWidth: kMinTarget,
+                  minHeight: kMinTarget,
+                ),
+                icon: Icon(Icons.edit_outlined, color: cs.onSurfaceVariant),
+                onPressed: onEdit,
               ),
             if (onDelete != null)
               IconButton(
@@ -365,8 +485,9 @@ class _PlaceTile extends StatelessWidget {
           leading: DsListRow.iconTile(context, place.icon),
           title: place.name,
           subtitle: subtitle,
+          onTap: onEdit,
         ),
-        if (onToggleAlerts != null || onDelete != null)
+        if (onToggleAlerts != null || onDelete != null || onEdit != null)
           Padding(
             padding: const EdgeInsets.only(
               left: AppSpace.xl,
@@ -387,6 +508,19 @@ class _PlaceTile extends StatelessWidget {
                       onPressed: toggling ? null : onToggleAlerts,
                       icon: Icon(alertsIcon),
                       label: Text(alertsLabel),
+                    ),
+                  ),
+                if (onEdit != null)
+                  Tooltip(
+                    message: 'Edit place',
+                    child: TextButton.icon(
+                      style: TextButton.styleFrom(
+                        minimumSize: const Size(kMinTarget, kMinTarget),
+                        foregroundColor: cs.onSurfaceVariant,
+                      ),
+                      onPressed: onEdit,
+                      icon: const Icon(Icons.edit_outlined),
+                      label: const Text('Edit'),
                     ),
                   ),
                 if (onDelete != null)
