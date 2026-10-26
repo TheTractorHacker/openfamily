@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../services/api_client.dart';
 import '../services/member_edit_service.dart';
 import '../services/security_format.dart';
+import '../theme/app_theme.dart';
 import 'security_widgets.dart';
 
 /// Family admins edit a member's name and phone. Pops with the saved
@@ -71,49 +72,42 @@ class _MemberEditScreenState extends State<MemberEditScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Edit member')),
-      body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.all(16),
-          children: <Widget>[
-            Text(
-              'Change how this person appears to your family. Their email, '
-              'password and role are not changed here.',
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _name,
-              enabled: !_saving,
-              textCapitalization: TextCapitalization.words,
-              textInputAction: TextInputAction.next,
-              decoration: InputDecoration(
-                labelText: 'Name',
-                errorText: _nameError,
-              ),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _phone,
-              enabled: !_saving,
-              keyboardType: TextInputType.phone,
-              textInputAction: TextInputAction.done,
-              onSubmitted: (_) => _save(),
-              decoration: InputDecoration(
-                labelText: 'Phone',
-                hintText: '+15551234567',
-                helperText: 'International format. Leave empty to remove.',
-                helperMaxLines: 2,
-                errorText: _phoneError,
-              ),
-            ),
-            if (_error != null) ErrorText(_error!),
-            const SizedBox(height: 20),
-            BusyButton(label: 'Save', busy: _saving, onPressed: _save),
-          ],
+    return SecurityPage(
+      title: 'Edit member',
+      heading: 'Edit ${widget.initialName}',
+      subtitle: 'Change how this person appears to your family. Their email, '
+          'password and role are not changed here.',
+      actions: <Widget>[
+        BusyButton(label: 'Save', busy: _saving, onPressed: _save),
+      ],
+      children: <Widget>[
+        TextField(
+          controller: _name,
+          enabled: !_saving,
+          textCapitalization: TextCapitalization.words,
+          textInputAction: TextInputAction.next,
+          decoration: InputDecoration(
+            labelText: 'Name',
+            errorText: _nameError,
+          ),
         ),
-      ),
+        const SizedBox(height: AppSpace.lg),
+        TextField(
+          controller: _phone,
+          enabled: !_saving,
+          keyboardType: TextInputType.phone,
+          textInputAction: TextInputAction.done,
+          onSubmitted: (_) => _save(),
+          decoration: InputDecoration(
+            labelText: 'Phone',
+            hintText: '+15551234567',
+            helperText: 'International format. Leave empty to remove.',
+            helperMaxLines: 2,
+            errorText: _phoneError,
+          ),
+        ),
+        if (_error != null) ErrorText(_error!),
+      ],
     );
   }
 }

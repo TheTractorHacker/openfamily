@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import '../models/security_models.dart';
 import '../services/security_api.dart';
 import '../services/security_format.dart';
+import '../theme/app_theme.dart';
+import '../widgets/ds/ds.dart';
 import 'security_widgets.dart';
 
 /// Family admins issue a one-time password reset code for a member.
@@ -54,27 +56,14 @@ class _IssueResetCodeScreenState extends State<IssueResetCodeScreen> {
   }
 
   Future<void> _issue(ResettableMember m) async {
-    final bool? ok = await showDialog<bool>(
-      context: context,
-      builder: (BuildContext c) => AlertDialog(
-        title: Text('Issue a reset code for ${m.name}?'),
-        content: const Text(
-          'Any earlier unused code for this person stops working. Anyone with '
-          'the code can set a new password, so share it privately.',
-        ),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.of(c).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(c).pop(true),
-            child: const Text('Issue code'),
-          ),
-        ],
-      ),
+    final bool ok = await showDsConfirm(
+      context,
+      title: 'Issue a reset code for ${m.name}?',
+      message: 'Any earlier unused code for this person stops working. Anyone '
+          'with the code can set a new password, so share it privately.',
+      confirmLabel: 'Issue code',
     );
-    if (ok != true || !mounted) return;
+    if (!ok || !mounted) return;
     setState(() {
       _issuingFor = m.id;
       _error = null;
@@ -96,56 +85,53 @@ class _IssueResetCodeScreenState extends State<IssueResetCodeScreen> {
   @override
   Widget build(BuildContext context) {
     final List<ResettableMember>? members = _members;
-    return Scaffold(
-      appBar: AppBar(title: const Text('Issue reset code')),
-      body: SafeArea(
-        child: members == null
-            ? LoadStateView(
-                error: _loadError,
-                offline: _offline,
-                onRetry: _load,
-              )
-            : ListView(
-                padding: const EdgeInsets.all(16),
-                children: <Widget>[
-                  Text(
-                    'If someone in your family forgot their password, issue '
-                    'a one-time code and give it to them. They enter it under '
-                    '"Have a reset code?" on the log-in screen.',
-                    style: Theme.of(context).textTheme.bodyMedium,
-                  ),
-                  const SizedBox(height: 12),
-                  if (_result != null) ..._resultCard(),
-                  if (_error != null) ErrorText(_error!),
-                  if (members.isEmpty)
-                    const Padding(
-                      padding: EdgeInsets.all(24),
-                      child: Center(child: Text('No other members yet.')),
-                    ),
-                  for (final ResettableMember m in members)
-                    ListTile(
-                      minVerticalPadding: 12,
-                      leading: const Icon(Icons.person_outline),
-                      title: Text(m.name),
-                      subtitle: Text(m.role),
-                      trailing: _issuingFor == m.id
-                          ? const SizedBox(
-                              width: 24,
-                              height: 24,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : TextButton(
-                              style: TextButton.styleFrom(
-                                minimumSize: const Size(48, 48),
-                              ),
-                              onPressed:
-                                  _issuingFor == null ? () => _issue(m) : null,
-                              child: const Text('Issue code'),
-                            ),
-                    ),
-                ],
-              ),
-      ),
+    if (members == null) {
+      return SecurityPage(
+        title: 'Issue reset code',
+        children: <Widget>[
+          LoadStateView(error: _loadError, offline: _offline, onRetry: _load),
+        ],
+      );
+    }
+    return SecurityPage(
+      title: 'Issue reset code',
+      heading: 'Help someone get back in',
+      subtitle: 'If someone in your family forgot their password, issue a '
+          'one-time code and give it to them. They enter it under "Have a '
+          'reset code?" on the log-in screen.',
+      children: <Widget>[
+        if (_result != null) ..._resultCard(),
+        if (_error != null) ErrorText(_error!),
+        if (members.isEmpty)
+          const DsEmptyState(
+            icon: Icons.group_outlined,
+            title: 'No other members yet',
+            message: 'Invite someone to your family and they will show up '
+                'here.',
+          )
+        else
+          DsRowGroup(
+            children: <Widget>[
+              for (final ResettableMember m in members)
+                DsListRow(
+                  leading: DsListRow.iconTile(context, Icons.person_outline),
+                  title: m.name,
+                  subtitle: m.role,
+                  trailing: _issuingFor == m.id
+                      ? const SizedBox(
+                          width: 24,
+                          height: 24,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : TextButton(
+                          onPressed:
+                              _issuingFor == null ? () => _issue(m) : null,
+                          child: const Text('Issue code'),
+                        ),
+                ),
+            ],
+          ),
+      ],
     );
   }
 
@@ -154,25 +140,34 @@ class _IssueResetCodeScreenState extends State<IssueResetCodeScreen> {
     final String until = r.expiresAt == null
         ? 'in about 30 minutes'
         : 'at ${TimeOfDay.fromDateTime(r.expiresAt!).format(context)}';
+    final ColorScheme cs = Theme.of(context).colorScheme;
     return <Widget>[
-      Card(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Text('Code for $_resultName',
-                  style: Theme.of(context).textTheme.titleMedium),
-              const SizedBox(height: 8),
-              CopyableValue(value: r.code, label: 'Reset code'),
-              const SizedBox(height: 8),
-              Text('Works once, expires $until.'),
-              if (r.smsNote != null) Text(r.smsNote!),
-            ],
-          ),
+      Container(
+        padding: const EdgeInsets.all(AppSpace.lg),
+        decoration: BoxDecoration(
+          color: BrandTheme.of(context).sheet,
+          borderRadius: BorderRadius.circular(AppRadius.lg),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text('Code for $_resultName', style: AppType.headline),
+            const SizedBox(height: AppSpace.sm),
+            CopyableValue(value: r.code, label: 'Reset code'),
+            const SizedBox(height: AppSpace.sm),
+            Text(
+              'Works once, expires $until.',
+              style: AppType.secondary.copyWith(color: cs.onSurfaceVariant),
+            ),
+            if (r.smsNote != null)
+              Text(
+                r.smsNote!,
+                style: AppType.secondary.copyWith(color: cs.onSurfaceVariant),
+              ),
+          ],
         ),
       ),
-      const SizedBox(height: 8),
+      const SizedBox(height: AppSpace.lg),
     ];
   }
 }

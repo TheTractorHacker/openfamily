@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:openfamily/widgets/ds/ds.dart';
 import 'package:openfamily/screens/member_edit_screen.dart';
 import 'package:openfamily/services/api_client.dart';
 import 'package:openfamily/services/member_edit_service.dart';
@@ -127,7 +128,10 @@ void main() {
             service: FakeMemberEditService())),
       ));
       expect(tester.takeException(), isNull);
-      expect(tester.getSize(find.byType(FilledButton)).height,
+      // At large text the action scrolls with the content.
+      await tester.scrollUntilVisible(find.byType(DsPillButton), 200,
+          scrollable: find.byType(Scrollable).first);
+      expect(tester.getSize(find.byType(DsPillButton)).height,
           greaterThanOrEqualTo(48));
     });
   });
@@ -166,6 +170,10 @@ void main() {
       await tester.pump();
       expect(clip, '+15550001111');
       expect(find.text('Phone number copied'), findsOneWidget);
+      // Let the snackbar go so it does not cover the pinned Save button.
+      ScaffoldMessenger.of(tester.element(find.byType(Scaffold).first))
+          .clearSnackBars();
+      await tester.pumpAndSettle();
 
       await tester.tap(find.text('Edit Bob'));
       await tester.pumpAndSettle();

@@ -5,6 +5,7 @@ import '../services/auth_service.dart';
 import '../services/security_api.dart';
 import '../services/security_format.dart';
 import '../theme/app_theme.dart';
+import '../widgets/ds/ds.dart';
 import 'security_widgets.dart';
 import 'welcome_screen.dart';
 
@@ -52,28 +53,14 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
       setState(() => _error = 'Enter a code from your authenticator app.');
       return;
     }
-    final bool? sure = await showDialog<bool>(
-      context: context,
-      builder: (BuildContext c) => AlertDialog(
-        title: const Text('Delete forever?'),
-        content: const Text('This cannot be undone.'),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.of(c).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: AppColors.sosRed,
-              foregroundColor: Colors.white,
-            ),
-            onPressed: () => Navigator.of(c).pop(true),
-            child: const Text('Delete my account'),
-          ),
-        ],
-      ),
+    final bool sure = await showDsConfirm(
+      context,
+      title: 'Delete forever?',
+      message: 'This cannot be undone.',
+      confirmLabel: 'Delete my account',
+      destructive: true,
     );
-    if (sure != true || !mounted) return;
+    if (!sure || !mounted) return;
     setState(() {
       _busy = true;
       _error = null;
@@ -112,56 +99,91 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final ColorScheme cs = Theme.of(context).colorScheme;
     return SecurityPage(
       title: 'Delete account',
+      heading: 'Delete your account',
+      subtitle: 'This is permanent. Read what goes with it before you '
+          'continue.',
+      actions: <Widget>[
+        BusyButton(
+          label: 'Delete my account',
+          icon: Icons.delete_forever,
+          danger: true,
+          busy: _busy,
+          onPressed: _understood ? _submit : null,
+        ),
+      ],
       children: <Widget>[
         const Callout(
           icon: Icons.delete_forever,
           danger: true,
           text: 'Deleting your account is permanent and cannot be undone.',
         ),
-        const SizedBox(height: 16),
-        Text('What gets deleted', style: Theme.of(context).textTheme.titleMedium),
-        const SizedBox(height: 8),
-        const Text(
-          '• Your profile, photo and sign-in details\n'
-          '• Your devices and every stored location point\n'
-          '• Your emergency contacts and active sessions\n'
-          '• Your family too, if you are its only member',
+        const SizedBox(height: AppSpace.xl),
+        const DsSectionHeader(
+          'What gets deleted',
+          padding: EdgeInsets.only(bottom: AppSpace.xs),
         ),
-        const SizedBox(height: 12),
-        const Text(
+        const _Bullet('Your profile, photo and sign-in details'),
+        const _Bullet('Your devices and every stored location point'),
+        const _Bullet('Your emergency contacts and active sessions'),
+        const _Bullet('Your family too, if you are its only member'),
+        const SizedBox(height: AppSpace.md),
+        Text(
           'If you are the last admin of a family that still has other '
           'people, promote someone else first. Want a copy of your data? '
           'Download it from Security before deleting.',
+          style: AppType.secondary.copyWith(
+            color: cs.onSurfaceVariant,
+            height: 1.4,
+          ),
         ),
-        const SizedBox(height: 20),
+        const SizedBox(height: AppSpace.xl),
         SecurePasswordField(
           controller: _password,
           label: 'Password',
           enabled: !_busy,
         ),
         if (widget.totpEnabled) ...<Widget>[
-          const SizedBox(height: 16),
+          const SizedBox(height: AppSpace.lg),
           CodeField(controller: _code, enabled: !_busy),
         ],
-        const SizedBox(height: 8),
+        const SizedBox(height: AppSpace.sm),
         CheckboxListTile(
           contentPadding: EdgeInsets.zero,
           controlAffinity: ListTileControlAffinity.leading,
           value: _understood,
-          onChanged: _busy ? null : (bool? v) => setState(() => _understood = v ?? false),
+          onChanged: _busy
+              ? null
+              : (bool? v) => setState(() => _understood = v ?? false),
           title: const Text('I understand this is permanent'),
         ),
         if (_error != null) ErrorText(_error!),
-        const SizedBox(height: 12),
-        BusyButton(
-          label: 'Delete my account',
-          danger: true,
-          busy: _busy,
-          onPressed: _understood ? _submit : null,
-        ),
       ],
+    );
+  }
+}
+
+class _Bullet extends StatelessWidget {
+  const _Bullet(this.text);
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: AppSpace.xs),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          const Padding(
+            padding: EdgeInsets.only(top: AppSpace.xs),
+            child: Icon(Icons.close_rounded, size: 16),
+          ),
+          const SizedBox(width: AppSpace.sm),
+          Expanded(child: Text(text, style: AppType.body)),
+        ],
+      ),
     );
   }
 }
