@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:openfamily/services/api_client.dart';
 import 'package:openfamily/services/driving/driving_events_service.dart';
 import 'package:openfamily/services/driving/driving_settings.dart';
 import 'package:openfamily/services/driving/driving_event_outbox.dart';
@@ -86,5 +87,33 @@ void main() {
     expect(await DrivingSettings.disclosureSeen(), isFalse);
     await DrivingSettings.markDisclosureSeen();
     expect(await DrivingSettings.disclosureSeen(), isTrue);
+  });
+
+  test('request body carries phone_use_enabled and a change is re-sent',
+      () async {
+    final FakeSensorEventsApi api = FakeSensorEventsApi();
+    final DrivingEventsService svc = DrivingEventsService(api);
+    expect(
+      ApiClient.sensorEventsBody(const <Map<String, dynamic>>[],
+          sensorEnabled: true, phoneUseEnabled: false),
+      <String, dynamic>{
+        'events': <Map<String, dynamic>>[],
+        'sensor_enabled': true,
+        'phone_use_enabled': false,
+      },
+    );
+    expect(await svc.syncOptIn(), isTrue);
+    expect(api.phoneFlags, <bool>[false]);
+    expect(await svc.syncOptIn(), isTrue);
+    expect(api.phoneFlags, hasLength(1), reason: 'already in sync');
+    await DrivingSettings.setPhoneUseEnabled(true);
+    expect(await DrivingSettings.serverSynced(), isFalse);
+    expect(await svc.syncOptIn(), isTrue);
+    expect(api.phoneFlags, <bool>[false, true]);
+    expect(api.flags, <bool>[true, true]);
+    // A stale ack for the old phone value does not mark it synced.
+    await DrivingSettings.setPhoneUseEnabled(false);
+    await DrivingSettings.markSynced(true, phoneUse: true);
+    expect(await DrivingSettings.serverSynced(), isFalse);
   });
 }

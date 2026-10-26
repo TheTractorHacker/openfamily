@@ -31,6 +31,7 @@ abstract class SensorEventsApi {
   Future<SensorEventsResult> post(
     List<Map<String, dynamic>> events, {
     required bool sensorEnabled,
+    required bool phoneUseEnabled,
   });
 }
 
@@ -42,9 +43,11 @@ class SessionSensorEventsApi implements SensorEventsApi {
   Future<SensorEventsResult> post(
     List<Map<String, dynamic>> events, {
     required bool sensorEnabled,
+    required bool phoneUseEnabled,
   }) async {
     return SensorEventsResult.fromJson(
-        await ApiClient.postSensorEvents(events, sensorEnabled: sensorEnabled));
+        await ApiClient.postSensorEvents(events,
+            sensorEnabled: sensorEnabled, phoneUseEnabled: phoneUseEnabled));
   }
 }
 
@@ -56,6 +59,7 @@ class IngestKeySensorEventsApi implements SensorEventsApi {
   Future<SensorEventsResult> post(
     List<Map<String, dynamic>> events, {
     required bool sensorEnabled,
+    required bool phoneUseEnabled,
   }) async {
     final String? base = await BackgroundCredentialStore.readApiBaseUrl();
     final String? device = await BackgroundCredentialStore.readDeviceId();
@@ -76,6 +80,7 @@ class IngestKeySensorEventsApi implements SensorEventsApi {
         ingestKey: key,
         events: events,
         sensorEnabled: sensorEnabled,
+        phoneUseEnabled: phoneUseEnabled,
       ),
     );
   }
@@ -97,7 +102,9 @@ class DrivingEventsService {
     return DrivingEventOutbox.drain(
       send: (List<Map<String, dynamic>> batch) async {
         try {
-          await api.post(batch, sensorEnabled: true);
+          await api.post(batch,
+              sensorEnabled: true,
+              phoneUseEnabled: await DrivingSettings.phoneUseEnabled());
           return DrivingSendOutcome.ok;
         } on ApiException catch (e) {
           final bool transient = e.status == 401 ||
@@ -117,13 +124,23 @@ class DrivingEventsService {
   /// it off also discards anything still queued on the device.
   Future<void> setServerOptIn(bool enabled) async {
     if (!enabled) await DrivingEventOutbox.clear();
-    await api.post(const <Map<String, dynamic>>[], sensorEnabled: enabled);
+    await api.post(const <Map<String, dynamic>>[],
+        sensorEnabled: enabled,
+        phoneUseEnabled: enabled && await DrivingSettings.phoneUseEnabled());
+  }
+
+  /// Tells the server whether phone-use detection (screen activity while the
+  /// car moves) is on. Needs the sensor to be on. The server rejects
+  /// phone_use events unless this was sent as true.
+  Future<void> setServerPhoneUse(bool enabled) async {
+    await api.post(const <Map<String, dynamic>>[],
+        sensorEnabled: true, phoneUseEnabled: enabled);
   }
 
   /// Makes sure the server knows the effective on-device setting. Detection is
   /// on by default, so on first run (or after an update) the preference is
   /// missing and the server has not been told: this sends
-  /// `sensor_enabled=true` once and then persists the effective value. It
+  /// `sensor_enabled=true` (and the phone-use flag) once and then persists the effective value. It
   /// also redelivers a switch-off whose first call failed. A failed call
   /// leaves the state unsynced so the next call retries. Never throws.
   /// Returns true when the server is known to be in sync.
@@ -132,8 +149,10 @@ class DrivingEventsService {
       if (await DrivingSettings.serverSynced()) return true;
       final bool enabled = await DrivingSettings.sensorEnabled();
       if (!enabled) await DrivingEventOutbox.clear();
-      await api.post(const <Map<String, dynamic>>[], sensorEnabled: enabled);
-      await DrivingSettings.markSynced(enabled);
+      final bool phone = enabled && await DrivingSettings.phoneUseEnabled();
+      await api.post(const <Map<String, dynamic>>[],
+          sensorEnabled: enabled, phoneUseEnabled: phone);
+      await DrivingSettings.markSynced(enabled, phoneUse: phone);
       return true;
     } catch (_) {
       return false;

@@ -89,8 +89,29 @@ class _DrivingDetectionScreenState extends State<DrivingDetectionScreen> {
   }
 
   Future<void> _setPhone(bool value) async {
-    await DrivingSettings.setPhoneUseEnabled(value);
-    if (mounted) setState(() => _phone = value);
+    setState(() => _error = null);
+    try {
+      if (value) {
+        // Tell the server first: it rejects phone-use events until it knows.
+        await _service.setServerPhoneUse(true);
+        await DrivingSettings.setPhoneUseEnabled(true);
+      } else {
+        await DrivingSettings.setPhoneUseEnabled(false);
+        await _service.setServerPhoneUse(false);
+      }
+      await DrivingSettings.markSynced(true, phoneUse: value);
+      if (mounted) setState(() => _phone = value);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _phone = false;
+        _error = value
+            ? "Couldn't reach the server, so phone use stays off. "
+                'Try again when you are online.'
+            : 'Phone use is off on this phone. The server could not be told '
+                'right now; the app will tell it as soon as it can.';
+      });
+    }
   }
 
   @override
