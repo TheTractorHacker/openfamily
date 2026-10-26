@@ -80,6 +80,10 @@ void _golden(
       await t.pumpWidget(
         _app(screen(), dark ? buildDarkTheme() : buildLightTheme(), scale),
       );
+      // Let asset images (logo) decode before the first frame is captured.
+      await t.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 300)),
+      );
       if (settle) {
         await t.pumpAndSettle();
       } else {
