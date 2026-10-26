@@ -272,7 +272,7 @@ class DrivingEventChip extends StatelessWidget {
             children: <Widget>[
               if (count == null)
                 Text(
-                  'Not tracked yet',
+                  'Off',
                   style: AppType.secondary.copyWith(
                     fontWeight: FontWeight.w700,
                     color: cs.onSurfaceVariant,
