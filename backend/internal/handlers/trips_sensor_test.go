@@ -36,6 +36,9 @@ func TestValidateSensorEvent(t *testing.T) {
 		"future":          mod(func(e *sensorEventIn) { e.StartedAt = ts(6 * time.Minute); e.EndedAt = e.StartedAt }),
 		"end before":      mod(func(e *sensorEventIn) { e.EndedAt = ts(-2 * time.Minute) }),
 		"too long":        mod(func(e *sensorEventIn) { e.EndedAt = ts(-time.Minute + 5*time.Minute + time.Second) }),
+		"brake 11s":       mod(func(e *sensorEventIn) { e.EndedAt = ts(-time.Minute + 11*time.Second) }),
+		"accel 5 min":     mod(func(e *sensorEventIn) { e.Kind = "rapid_accel"; e.EndedAt = ts(-time.Minute + 5*time.Minute) }),
+		"phone over 5min": mod(func(e *sensorEventIn) { e.Kind = "phone_use"; e.EndedAt = ts(-time.Minute + 5*time.Minute + time.Second) }),
 		"no magnitude":    mod(func(e *sensorEventIn) { e.Magnitude = nil }),
 		"negative":        mod(func(e *sensorEventIn) { e.Magnitude = f64(-0.1) }),
 		"accel too big":   mod(func(e *sensorEventIn) { e.Magnitude = f64(30.5) }),
@@ -53,7 +56,8 @@ func TestValidateSensorEvent(t *testing.T) {
 		"phone 300":   mod(func(e *sensorEventIn) { e.Kind = "phone_use"; e.Magnitude = f64(300) }),
 		"accel 30":    mod(func(e *sensorEventIn) { e.Magnitude = f64(30) }),
 		"skew":        mod(func(e *sensorEventIn) { e.StartedAt = ts(4 * time.Minute); e.EndedAt = ts(4 * time.Minute) }),
-		"5 min exact": mod(func(e *sensorEventIn) { e.EndedAt = ts(-time.Minute + 5*time.Minute) }),
+		"brake 10s":   mod(func(e *sensorEventIn) { e.EndedAt = ts(-time.Minute + 10*time.Second) }),
+		"phone 5 min": mod(func(e *sensorEventIn) { e.Kind = "phone_use"; e.EndedAt = ts(-time.Minute + 5*time.Minute) }),
 		"with fix":    mod(func(e *sensorEventIn) { e.Lat, e.Lon = f64(-90), f64(180) }),
 	}
 	for name, e := range good {
@@ -562,5 +566,37 @@ func TestSensorExportDeletionAndRetention(t *testing.T) {
 	}
 	if e.countEvents(e.b1, "source='sensor'") != 1 {
 		t.Error("other user's events were affected")
+	}
+}
+
+// One self-reported sensor event must never stand in for many real ones: long
+// braking events are rejected, and a valid one only replaces the GPS event at
+// its own moment.
+func TestSensorEventCannotHideDistantGPSEvents(t *testing.T) {
+	e := setupSensorEnv(t)
+	ctx := context.Background()
+	st := trips.NewStore(e.pool)
+	e.must2(st.ProcessUser(ctx, e.a1, e.famA))
+	tid, ts, _ := e.tripOf(e.a1)
+	base := ts.Add(30 * time.Second)
+	for _, off := range []time.Duration{0, 20 * time.Second, 40 * time.Second, 60 * time.Second} {
+		_, err := e.pool.Exec(ctx, `INSERT INTO trip_events (trip_id,user_id,kind,started_at,ended_at,magnitude,lat,lon) VALUES ($1,$2,'hard_brake',$3,$3,4,40,-75)`, tid, e.a1, base.Add(off))
+		e.must(err)
+	}
+	// A 5-minute "braking" event that would have covered every GPS event is rejected.
+	code, out := e.post(e.bearer(e.a1), evBody("true", evJSON("hard_brake", base, 5*time.Minute, 6)))
+	if code != 200 || num(out, "accepted") != 0 || num(out, "rejected") != 1 {
+		t.Fatalf("long event: %d %v", code, out)
+	}
+	if hb := memberEvents(e.reportJSON(e.a2, e.famA), e.a1)["hard_brake"].(float64); hb != 4 {
+		t.Fatalf("after rejected long event want 4 GPS events, got %v", hb)
+	}
+	// A valid 8 s sensor event hides only the GPS event at its own start.
+	code, out = e.post(e.bearer(e.a1), evBody("true", evJSON("hard_brake", base, 8*time.Second, 6)))
+	if code != 200 || num(out, "accepted") != 1 {
+		t.Fatalf("valid event: %d %v", code, out)
+	}
+	if hb := memberEvents(e.reportJSON(e.a2, e.famA), e.a1)["hard_brake"].(float64); hb != 4 {
+		t.Fatalf("want 3 visible GPS + 1 sensor = 4, got %v", hb)
 	}
 }

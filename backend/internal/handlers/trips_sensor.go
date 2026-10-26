@@ -19,7 +19,10 @@ const (
 	sensorMaxBody     = 64 << 10
 	sensorMaxAge      = 7 * 24 * time.Hour
 	sensorSkew        = 5 * time.Minute
-	sensorMaxDuration = 5 * time.Minute
+	sensorMaxDuration = 5 * time.Minute // phone_use only
+	// A braking or acceleration episode lasts seconds. A long one is rejected so a
+	// single self-reported event can never stand in for many real ones.
+	sensorMaxBrakeAccelDuration = 10 * time.Second
 	sensorMaxAccel    = 30.0  // m/s^2
 	sensorMaxPhoneS   = 300.0 // seconds of interaction
 	sensorRateLimit   = 30
@@ -66,7 +69,11 @@ func validateSensorEvent(in sensorEventIn, now time.Time) (sensorEvent, bool) {
 	if start.After(now.Add(sensorSkew)) || start.Before(now.Add(-sensorMaxAge)) {
 		return ev, false
 	}
-	if end.Before(start) || end.Sub(start) > sensorMaxDuration {
+	maxDur := sensorMaxDuration
+	if in.Kind != trips.EventPhoneUse {
+		maxDur = sensorMaxBrakeAccelDuration
+	}
+	if end.Before(start) || end.Sub(start) > maxDur {
 		return ev, false
 	}
 	if in.Magnitude == nil || !finite(*in.Magnitude) || *in.Magnitude < 0 || *in.Magnitude > max {
