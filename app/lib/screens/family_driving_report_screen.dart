@@ -12,7 +12,6 @@ import '../widgets/driving_event_chips.dart';
 import '../widgets/driving_event_sheet.dart';
 import '../widgets/driving_report_cards.dart';
 import '../widgets/ds/ds.dart';
-import '../widgets/trip_widgets.dart';
 import 'trips_screen.dart';
 
 /// The Driving tab: the family's weekly driving report. Event chips, summary
@@ -271,10 +270,22 @@ class _State extends State<FamilyDrivingReportScreen> {
       if (_loading) return const <Widget>[DrivingReportSkeleton()];
       final TripsException e = _error!;
       return <Widget>[
-        SizedBox(
-          height: 320,
-          child: TripsMessageView.error(e, onRetry: _load),
-        ),
+        const SizedBox(height: AppSpace.xl),
+        if (e.kind == TripsFailure.offline)
+          DsErrorState(
+            icon: Icons.cloud_off_rounded,
+            title: 'You are offline',
+            message:
+                'The driving report needs a connection to the server. '
+                'Pull down or try again once you are back online.',
+            onRetry: _load,
+          )
+        else
+          DsErrorState(
+            title: 'Could not load the report',
+            message: e.message,
+            onRetry: _load,
+          ),
       ];
     }
     final String phrase = periodPhrase(_preset);

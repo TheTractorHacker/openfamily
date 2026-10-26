@@ -192,9 +192,12 @@ class DrivingEventSheet extends StatelessWidget {
               ),
             ],
             const SizedBox(height: AppSpace.xl),
-            DsPillButton(
-              label: 'Got it',
-              onPressed: () => Navigator.of(context).pop(),
+            SizedBox(
+              width: double.infinity,
+              child: DsPillButton(
+                label: 'Got it',
+                onPressed: () => Navigator.of(context).pop(),
+              ),
             ),
           ],
         ),

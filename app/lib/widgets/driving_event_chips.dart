@@ -58,22 +58,38 @@ class DrivingEventChips extends StatelessWidget {
     final bool big = MediaQuery.textScalerOf(context).scale(16) > 16 * 1.15;
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints c) {
-        final int cols = (big || c.maxWidth < 330) ? 2 : 4;
+        // Labels like "Rapid acceleration" need room: 2x2 on phones.
+        final int cols = (!big && c.maxWidth >= 520) ? 4 : 2;
         const double gap = AppSpace.sm;
         final double w = (c.maxWidth - gap * (cols - 1)) / cols;
-        return Wrap(
-          spacing: gap,
-          runSpacing: gap,
+        final List<DrivingEventKind> kinds = DrivingEventKind.values;
+        return Column(
           children: <Widget>[
-            for (final DrivingEventKind k in DrivingEventKind.values)
-              SizedBox(
-                width: w,
-                child: DrivingEventChip(
-                  kind: k,
-                  count: report.totals.events.of(k),
-                  previous: report.previousTotals.events.of(k),
-                  phrase: phrase,
-                  onTap: () => onTap(k),
+            for (int r = 0; r < kinds.length; r += cols)
+              Padding(
+                padding: EdgeInsets.only(top: r == 0 ? 0 : gap),
+                child: IntrinsicHeight(
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: <Widget>[
+                      for (int k = r; k < r + cols; k++) ...<Widget>[
+                        if (k > r) const SizedBox(width: gap),
+                        SizedBox(
+                          width: w,
+                          child: k < kinds.length
+                              ? DrivingEventChip(
+                                  kind: kinds[k],
+                                  count: report.totals.events.of(kinds[k]),
+                                  previous:
+                                      report.previousTotals.events.of(kinds[k]),
+                                  phrase: phrase,
+                                  onTap: () => onTap(kinds[k]),
+                                )
+                              : null,
+                        ),
+                      ],
+                    ],
+                  ),
                 ),
               ),
           ],
