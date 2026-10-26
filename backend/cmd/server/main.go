@@ -19,6 +19,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/TheTractorHacker/openfamily/backend/internal/auth"
 	"github.com/TheTractorHacker/openfamily/backend/internal/config"
+	"github.com/TheTractorHacker/openfamily/backend/internal/geocode"
 	"github.com/TheTractorHacker/openfamily/backend/internal/db"
 	handlers "github.com/TheTractorHacker/openfamily/backend/internal/handlers"
 	mid "github.com/TheTractorHacker/openfamily/backend/internal/middleware"
@@ -79,6 +80,18 @@ func main() {
 	srv.SatelliteTileURL = cfg.SatelliteTileURL
 	srv.MapStyleURL = cfg.MapStyleURL
 	srv.APNsConfigured = cfg.APNsKeyFile != ""
+	if geo, err := geocode.New(geocode.Settings{
+		URL: cfg.GeocoderURL, Type: cfg.GeocoderType, Lang: cfg.GeocoderLang,
+		AllowPrivate: cfg.GeocoderAllowPrivate, Version: config.BuildVersion(),
+	}); err != nil {
+		slog.Warn("geocoder disabled: invalid configuration", "reason", err.Error())
+	} else if geo != nil {
+		srv.Geocoder = geo
+		slog.Info("geocoder enabled", "type", cfg.GeocoderType, "autocomplete", geo.Autocomplete())
+		if geo.Public() {
+			slog.Warn("GEOCODER_URL is the public nominatim.openstreetmap.org: autocomplete is disabled and explicit searches are limited to 1/second per its usage policy; prefer a self-hosted Photon")
+		}
+	}
 	srv.SMSEnv = sms.Settings{
 		AccountSID:    cfg.TwilioAccountSID,
 		AuthToken:     cfg.TwilioAuthToken,
@@ -226,6 +239,9 @@ func main() {
 		r.Post("/family/places", srv.CreatePlace)
 		r.Patch("/family/places/{id}", srv.UpdatePlace)
 		r.Delete("/family/places/{id}", srv.DeletePlace)
+
+		r.Get("/geocode/search", srv.GeocodeSearch)
+		r.Get("/geocode/reverse", srv.GeocodeReverse)
 
 		r.Get("/audit", srv.ListAudit)
 

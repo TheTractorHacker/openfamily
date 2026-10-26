@@ -16,6 +16,10 @@ const (
 	defaultDatabaseURL = "postgres://openfamily:openfamily@localhost:5432/openfamily?sslmode=disable"
 	insecureJWTSecret  = "change-me-in-production"
 
+	// DefaultGeocoderURL is the public Photon instance used when GEOCODER_URL
+	// is entirely unset. An explicitly empty GEOCODER_URL disables geocoding.
+	DefaultGeocoderURL = "https://photon.komoot.io"
+
 	// DefaultTileURL is the public OSM raster template. Operators override
 	// TILE_URL when they want another provider or a self-hosted endpoint.
 	DefaultTileURL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -96,6 +100,20 @@ type Config struct {
 	// MapStyleURL is an optional vector style JSON (MapLibre/OpenMapTiles) URL
 	// advertised on GET /config. Empty = the app uses its built-in OpenFreeMap.
 	MapStyleURL string
+
+	// GeocoderURL (GEOCODER_URL) is the base URL of a Photon- or
+	// Nominatim-compatible geocoder. Unset = the public Photon
+	// (https://photon.komoot.io); explicitly empty disables address search and
+	// automatic address detection. PRIVACY: place addresses and coordinates the
+	// user types or pins are sent to this provider, through this server only.
+	GeocoderURL string
+	// GeocoderType is "photon" (default) or "nominatim" (GEOCODER_TYPE).
+	GeocoderType string
+	// GeocoderLang optionally pins the result language (GEOCODER_LANG, e.g. "en").
+	GeocoderLang string
+	// GeocoderAllowPrivate permits a loopback/private-network geocoder
+	// (GEOCODER_ALLOW_PRIVATE=true) for a self-hosted instance beside the API.
+	GeocoderAllowPrivate bool
 
 	// APNs push notification credentials (optional; empty KeyFile disables APNs).
 	APNsKeyFile    string
@@ -205,6 +223,10 @@ func Load() Config {
 		TileURL:               getenv("TILE_URL", DefaultTileURL),
 		SatelliteTileURL:      getenv("SATELLITE_TILE_URL", DefaultSatelliteTileURL),
 		MapStyleURL:           getenv("MAP_STYLE_URL", ""),
+		GeocoderURL:           strings.TrimSpace(getenvPresent("GEOCODER_URL", DefaultGeocoderURL)),
+		GeocoderType:          strings.ToLower(strings.TrimSpace(getenv("GEOCODER_TYPE", "photon"))),
+		GeocoderLang:          strings.TrimSpace(getenv("GEOCODER_LANG", "")),
+		GeocoderAllowPrivate:  getenvBool("GEOCODER_ALLOW_PRIVATE", false),
 		APNsKeyFile:           getenv("APNS_KEY_FILE", ""),
 		APNsKeyID:             getenv("APNS_KEY_ID", ""),
 		APNsTeamID:            getenv("APNS_TEAM_ID", ""),
@@ -281,6 +303,15 @@ func getenvBool(key string, fallback bool) bool {
 		if b, err := strconv.ParseBool(v); err == nil {
 			return b
 		}
+	}
+	return fallback
+}
+
+// getenvPresent is like getenv but an explicitly set empty value wins over the
+// fallback (used where "" means "disabled").
+func getenvPresent(key, fallback string) string {
+	if v, ok := os.LookupEnv(key); ok {
+		return v
 	}
 	return fallback
 }

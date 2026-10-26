@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"testing"
 )
 
@@ -63,5 +64,19 @@ func TestValidateProductionDBSSL(t *testing.T) {
 		if err := c.Validate(); (err != nil) != tc.wantErr {
 			t.Errorf("%q allowOK=%v: err=%v wantErr=%v", tc.url, tc.allowOK, err, tc.wantErr)
 		}
+	}
+}
+
+func TestGeocoderDefaultsAndDisable(t *testing.T) {
+	os.Unsetenv("GEOCODER_URL")
+	if got := Load().GeocoderURL; got != DefaultGeocoderURL {
+		t.Fatalf("unset => %q", got)
+	}
+	if got := Load().GeocoderType; got != "photon" {
+		t.Fatalf("type %q", got)
+	}
+	t.Setenv("GEOCODER_URL", "")
+	if got := Load().GeocoderURL; got != "" {
+		t.Fatalf("explicit empty must disable, got %q", got)
 	}
 }

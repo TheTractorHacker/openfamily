@@ -74,6 +74,43 @@ MAP_STYLE_URL=https://maps.example.com/styles/liberty.json
 TILE_URL=https://tiles.example.com/{z}/{x}/{y}{r}.png
 ```
 
+## Address search and automatic address detection
+
+Creating or editing a place offers (a) an address filled in automatically when
+you drop or move the pin (reverse geocoding) and (b) autocomplete suggestions
+while you type an address. The app calls only your OpenFamily server
+(`GET /geocode/search`, `GET /geocode/reverse`, signed-in users only,
+rate-limited per user); the server queries one geocoder provider.
+
+**Default: on, using the public Photon at `https://photon.komoot.io`.** That
+means the address text people type and the coordinates of places they pin are
+sent from your server to photon.komoot.io, which also sees your server's IP.
+The phone never contacts it. The server sends only a descriptive User-Agent
+(`OpenFamily/<version> (self-hosted)`), forwards no user identity, tokens or
+client IP, caches results in memory, and never logs query text or
+coordinates (only counts, status and latency). Lookups happen only while a
+user is editing a place, not for live location tracking.
+
+Settings (server environment):
+
+| Variable | Meaning |
+| --- | --- |
+| `GEOCODER_URL` | Provider base URL. Unset = public Photon. **Set to empty to disable** (the app then hides search and the server answers 503). |
+| `GEOCODER_TYPE` | `photon` (default) or `nominatim`. |
+| `GEOCODER_LANG` | Optional result language, e.g. `en`. |
+| `GEOCODER_ALLOW_PRIVATE` | `true` to allow a loopback/private-network provider (self-hosted next to the API). Otherwise private and loopback targets are refused (SSRF guard), `http` is refused, redirects are never followed. |
+
+`GET /config` reports only `geocoder: {"enabled", "autocomplete"}`, never the URL.
+
+Self-hosting: run Photon (github.com/komoot/photon; it needs an OpenSearch
+index built from a Nominatim dump or the published country extracts) or
+Nominatim (nominatim.org) on your network and set, for example,
+`GEOCODER_URL=http://photon:2322` plus `GEOCODER_ALLOW_PRIVATE=true`. The
+public `nominatim.openstreetmap.org` prohibits autocomplete: if you point a
+`nominatim` type at it, autocomplete is disabled, only explicit searches are
+allowed, limited to one request per second, and a startup warning is logged.
+Public Photon is a shared fair-use service with no uptime guarantee.
+
 ## Not verified in code review
 
 Visual quality and rendering performance of vector mode on real devices have
