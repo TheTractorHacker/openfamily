@@ -67,6 +67,18 @@ class AlertRouter with WidgetsBindingObserver {
     return true;
   }
 
+  /// Opens one alert by id (tap on a direct-push notification). Falls back to
+  /// the newest active alert when it cannot be loaded.
+  Future<void> openById(String id) async {
+    if (id.isEmpty) return checkActive();
+    try {
+      final AlertDetail d = await service.detail(id);
+      if (!show(d.summary)) return;
+    } catch (_) {
+      await checkActive();
+    }
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) unawaited(checkActive());

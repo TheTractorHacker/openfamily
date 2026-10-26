@@ -50,6 +50,17 @@ type Notification struct {
 
 	// UnifiedPushEndpoint is the ntfy/UnifiedPush endpoint (Android only).
 	UnifiedPushEndpoint string
+
+	// Direct routes the message through the built-in direct channel (see
+	// direct.go) instead of UnifiedPush/APNs. DeviceID and UserID identify the
+	// outbox the event is queued in; AlertID (optional) links it to the
+	// alert_deliveries rows; DedupeID (optional, generated when empty) is the id
+	// the app dedupes on.
+	Direct   bool
+	DeviceID string
+	UserID   string
+	AlertID  string
+	DedupeID string
 }
 
 // Dispatcher delivers push notifications. It is an interface so tests can
@@ -221,8 +232,13 @@ type APNsConfig struct {
 // DispatcherImpl is the production Dispatcher. It delivers Android messages
 // via UnifiedPush and iOS messages via APNs.
 type DispatcherImpl struct {
-	apns *apnsClient // nil when APNs is not configured
+	apns   *apnsClient // nil when APNs is not configured
+	direct *DirectBroker
 }
+
+// SetDirect enables the built-in direct channel. Without it, direct
+// notifications fail permanently (the caller then falls back to UnifiedPush).
+func (d *DispatcherImpl) SetDirect(b *DirectBroker) { d.direct = b }
 
 // NewDispatcher builds a Dispatcher. When cfg has no key file, APNs delivery
 // is disabled and iOS notifications are logged and skipped.
@@ -243,6 +259,12 @@ func NewDispatcher(cfg APNsConfig) *DispatcherImpl {
 
 // Dispatch routes a notification to the correct transport based on platform.
 func (d *DispatcherImpl) Dispatch(ctx context.Context, n Notification) error {
+	if n.Direct {
+		if d.direct == nil {
+			return &PermanentError{Err: errors.New("push: direct channel disabled")}
+		}
+		return d.direct.Enqueue(ctx, n)
+	}
 	switch n.Platform {
 	case "android":
 		return d.dispatchUnifiedPush(ctx, n)

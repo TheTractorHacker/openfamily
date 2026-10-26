@@ -304,6 +304,7 @@ class ApiClient {
     required String deviceId,
     String? pushToken,
     String? unifiedpushEndpoint,
+    String? pushTransport,
   }) async {
     final String id = deviceId.trim();
     if (id.isEmpty) {
@@ -314,6 +315,7 @@ class ApiClient {
     if (unifiedpushEndpoint != null) {
       body['unifiedpush_endpoint'] = unifiedpushEndpoint;
     }
+    if (pushTransport != null) body['push_transport'] = pushTransport;
     await _send(
       'PATCH',
       _uri('/devices/${Uri.encodeComponent(id)}'),

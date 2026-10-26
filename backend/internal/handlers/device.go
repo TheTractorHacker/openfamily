@@ -30,6 +30,7 @@ func (s *Server) RegisterDevice(w http.ResponseWriter, r *http.Request) {
 		Name                string `json:"name"`
 		PushToken           string `json:"push_token,omitempty"`
 		UnifiedPushEndpoint string `json:"unifiedpush_endpoint,omitempty"`
+		PushTransport       string `json:"push_transport,omitempty"`
 		AppVersion          string `json:"app_version,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -41,6 +42,10 @@ func (s *Server) RegisterDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if msg := validateDevicePushFields(req.Platform, req.PushToken, req.UnifiedPushEndpoint); msg != "" {
+		writeError(w, http.StatusBadRequest, msg)
+		return
+	}
+	if msg := s.validatePushTransport(req.Platform, req.PushTransport); msg != "" {
 		writeError(w, http.StatusBadRequest, msg)
 		return
 	}
@@ -61,12 +66,12 @@ func (s *Server) RegisterDevice(w http.ResponseWriter, r *http.Request) {
 		AppVersion string `json:"app_version"`
 	}
 	err = s.Pool.QueryRow(r.Context(), `
-		INSERT INTO devices (user_id, platform, name, push_token, unifiedpush_endpoint, app_version, ingest_key_hash, ingest_key_expires_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		INSERT INTO devices (user_id, platform, name, push_token, unifiedpush_endpoint, app_version, ingest_key_hash, ingest_key_expires_at, push_transport)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		RETURNING id, user_id, platform, name, app_version`,
 		claims.UserID, req.Platform, req.Name, req.PushToken, req.UnifiedPushEndpoint, req.AppVersion,
 		middleware.EncodeIngestKeyHash(middleware.HashDeviceIngestKey(ingestKey)),
-		newIngestKeyExpiry(),
+		newIngestKeyExpiry(), req.PushTransport,
 	).Scan(&device.ID, &device.UserID, &device.Platform, &device.Name, &device.AppVersion)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to register device")
@@ -145,6 +150,7 @@ func (s *Server) DeleteDevice(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "device not found")
 		return
 	}
+	s.Direct.CloseDevice(id)
 	s.logAudit(r.Context(), claims.UserID, "", "device.deleted", "deleted device "+id, clientIP(r))
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -166,22 +172,24 @@ func (s *Server) UpdateDevice(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		PushToken           *string `json:"push_token"`
 		UnifiedPushEndpoint *string `json:"unifiedpush_endpoint"`
+		PushTransport       *string `json:"push_transport"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if req.PushToken == nil && req.UnifiedPushEndpoint == nil {
-		writeError(w, http.StatusBadRequest, "provide push_token or unifiedpush_endpoint")
+	if req.PushToken == nil && req.UnifiedPushEndpoint == nil && req.PushTransport == nil {
+		writeError(w, http.StatusBadRequest, "provide push_token, unifiedpush_endpoint or push_transport")
 		return
 	}
 
 	var platform string
 	var curToken, curEndpoint *string
+	var transport string
 	err := s.Pool.QueryRow(r.Context(), `
-		SELECT platform, push_token, unifiedpush_endpoint
+		SELECT platform, push_token, unifiedpush_endpoint, push_transport
 		FROM devices WHERE id = $1 AND user_id = $2`, id, claims.UserID,
-	).Scan(&platform, &curToken, &curEndpoint)
+	).Scan(&platform, &curToken, &curEndpoint, &transport)
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, http.StatusNotFound, "device not found")
 		return
@@ -199,15 +207,24 @@ func (s *Server) UpdateDevice(w http.ResponseWriter, r *http.Request) {
 	if req.UnifiedPushEndpoint != nil {
 		endpoint = strings.TrimSpace(*req.UnifiedPushEndpoint)
 	}
+	if req.PushTransport != nil {
+		transport = strings.TrimSpace(*req.PushTransport)
+	}
 	if msg := validateDevicePushFields(platform, token, endpoint); msg != "" {
 		writeError(w, http.StatusBadRequest, msg)
 		return
 	}
+	if req.PushTransport != nil {
+		if msg := s.validatePushTransport(platform, transport); msg != "" {
+			writeError(w, http.StatusBadRequest, msg)
+			return
+		}
+	}
 
 	_, err = s.Pool.Exec(r.Context(), `
-		UPDATE devices SET push_token = NULLIF($1, ''), unifiedpush_endpoint = NULLIF($2, '')
+		UPDATE devices SET push_token = NULLIF($1, ''), unifiedpush_endpoint = NULLIF($2, ''), push_transport = $5
 		WHERE id = $3 AND user_id = $4`,
-		token, endpoint, id, claims.UserID)
+		token, endpoint, id, claims.UserID, transport)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update device")
 		return

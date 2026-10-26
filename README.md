@@ -73,8 +73,10 @@ Commercial family trackers send live coordinates to someone else's cloud and
 monetize the result. OpenFamily is the opposite posture:
 
 - **You own the data.** Locations, places, and history live in your Postgres.
-- **Android push is self-hosted.** [UnifiedPush](https://unifiedpush.org/) via
-  [ntfy](https://ntfy.sh/) — no Firebase, no Google account on the phone.
+- **Android push is self-hosted.** A built-in direct channel delivers alerts
+  over your own server with nothing extra to install; [UnifiedPush](https://unifiedpush.org/)
+  via [ntfy](https://ntfy.sh/) is optional. No Firebase, no Google account on the
+  phone. See [docs/push.md](docs/push.md).
 - **Maps are OpenStreetMap, not Google.** The app renders OSM tiles with
   [flutter_map](https://docs.fleaflet.dev/); the admin panel uses
   [Leaflet](https://leafletjs.com/). There is no Google Maps SDK and no

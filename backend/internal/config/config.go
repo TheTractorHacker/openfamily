@@ -76,6 +76,11 @@ type Config struct {
 	// modes.
 	VerbosePush bool
 
+	// DirectPush enables the built-in direct push channel (DIRECT_PUSH,
+	// default true): the app keeps an authenticated stream open and the server
+	// delivers alerts over it, with no ntfy/FCM dependency. See docs/push.md.
+	DirectPush bool
+
 	// NtfyBaseURL is the public ntfy origin (no trailing slash) exposed by
 	// GET /config so a generic APK can register UnifiedPush without a
 	// dart-define. Empty means the client should skip ntfy-specific hints.
@@ -195,6 +200,7 @@ func Load() Config {
 		DBSSLDisableOK:        getenvBool("DB_SSL_DISABLE_OK", false),
 		InsecureHTTP:          getenvBool("INSECURE_HTTP", false),
 		VerbosePush:           getenvBool("VERBOSE_PUSH", false),
+		DirectPush:            getenvBool("DIRECT_PUSH", true),
 		NtfyBaseURL:           strings.TrimRight(getenv("NTFY_BASE_URL", ""), "/"),
 		TileURL:               getenv("TILE_URL", DefaultTileURL),
 		SatelliteTileURL:      getenv("SATELLITE_TILE_URL", DefaultSatelliteTileURL),

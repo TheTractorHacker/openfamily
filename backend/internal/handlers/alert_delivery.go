@@ -155,19 +155,21 @@ func (s *Server) broadcastAlert(ctx context.Context, a alertRow) {
 // provider (ntfy/APNs) accepted it, failed if every device failed.
 func (s *Server) pushFamilyAlert(ctx context.Context, familyID, senderID, alertID, title, body string) (sent, failed int) {
 	rows, err := s.Pool.Query(ctx, `
-		SELECT u.id, u.name, d.platform, d.push_token, d.unifiedpush_endpoint
+		SELECT u.id, u.name, d.platform, d.push_token, d.unifiedpush_endpoint, d.id, d.push_transport
 		FROM devices d
 		JOIN users u ON u.id = d.user_id
 		WHERE u.family_id = $1 AND u.id <> $2
 		  AND ((d.platform = 'ios' AND d.push_token IS NOT NULL AND d.push_token <> '')
-		       OR (d.platform = 'android' AND d.unifiedpush_endpoint IS NOT NULL AND d.unifiedpush_endpoint <> ''))`,
+		       OR (d.platform = 'android' AND d.unifiedpush_endpoint IS NOT NULL AND d.unifiedpush_endpoint <> '')
+		       OR (d.platform = 'android' AND d.push_transport = 'direct'))`,
 		familyID, senderID)
 	if err != nil {
 		slog.Error("alert: list devices", "err", err)
 		return 0, 0
 	}
 	type dev struct {
-		platform, token, endpoint string
+		platform, token, endpoint, id string
+		direct                        bool
 	}
 	type target struct {
 		name string
@@ -178,7 +180,8 @@ func (s *Server) pushFamilyAlert(ctx context.Context, familyID, senderID, alertI
 	for rows.Next() {
 		var uid, name, platform string
 		var token, endpoint *string
-		if err := rows.Scan(&uid, &name, &platform, &token, &endpoint); err != nil {
+		var devID, transport string
+		if err := rows.Scan(&uid, &name, &platform, &token, &endpoint, &devID, &transport); err != nil {
 			continue
 		}
 		t := targets[uid]
@@ -187,7 +190,8 @@ func (s *Server) pushFamilyAlert(ctx context.Context, familyID, senderID, alertI
 			targets[uid] = t
 			order = append(order, uid)
 		}
-		t.devs = append(t.devs, dev{platform, derefOrEmpty(token), derefOrEmpty(endpoint)})
+		t.devs = append(t.devs, dev{platform, derefOrEmpty(token), derefOrEmpty(endpoint), devID,
+			platform == "android" && transport == "direct" && s.Direct != nil})
 	}
 	rows.Close()
 
@@ -197,13 +201,27 @@ func (s *Server) pushFamilyAlert(ctx context.Context, familyID, senderID, alertI
 			s.recordDelivery(ctx, alertID, uid, "", t.name, chanPush, stQueued, "")
 		}
 		ok, code := false, errCodeProvider
+		// directOnly stays true while every accepted delivery is a direct
+		// enqueue: that is "queued" until the device streams it (sent) and acks
+		// it (delivered), which the stream handler records.
+		directOnly := true
 		for _, d := range t.devs {
-			err := s.dispatchWithRetry(ctx, push.Notification{
+			n := push.Notification{
 				Title: title, Body: body, Platform: d.platform,
 				PushToken: d.token, UnifiedPushEndpoint: d.endpoint,
-			})
+			}
+			if d.direct {
+				n = directNotification(n, d.id, uid, alertID, "")
+				if alertID != "" {
+					n.DedupeID = "alert:" + alertID
+				}
+			}
+			err := s.dispatchBest(ctx, n)
 			if err == nil {
 				ok = true
+				if !d.direct || (d.endpoint != "" && !s.Direct.IsConnected(d.id)) {
+					directOnly = false
+				}
 			} else if push.IsPermanent(err) {
 				code = errCodeRejected
 			}
@@ -214,6 +232,9 @@ func (s *Server) pushFamilyAlert(ctx context.Context, familyID, senderID, alertI
 			failed++
 		}
 		if alertID != "" {
+			if ok && directOnly {
+				continue // stays queued; the stream records sent/delivered
+			}
 			if ok {
 				s.recordDelivery(ctx, alertID, uid, "", t.name, chanPush, stSent, "")
 			} else {
@@ -473,6 +494,7 @@ func (s *Server) AckAlert(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		prior = &at
+		s.Direct.AckAlertForUser(r.Context(), a.ID, claims.UserID)
 		if s.hub != nil {
 			if payload, err := json.Marshal(map[string]any{
 				"type": "alert_ack", "alert_id": a.ID, "user_id": claims.UserID, "name": name, "acknowledged_at": at,

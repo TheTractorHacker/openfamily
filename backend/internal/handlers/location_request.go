@@ -144,7 +144,8 @@ func (s *Server) RequestMemberLocation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to load member devices")
 		return
 	}
-	if (len(endpoints) == 0 && len(iosTokens) == 0) || s.Push == nil {
+	directIDs := s.directDeviceIDs(r.Context(), targetID)
+	if (len(endpoints) == 0 && len(iosTokens) == 0 && len(directIDs) == 0) || s.Push == nil {
 		writeError(w, http.StatusConflict, "member has no reachable device")
 		return
 	}
@@ -276,6 +277,23 @@ func (s *Server) iosPushTokens(ctx context.Context, userID string) ([]string, er
 // executed in the background — never shown as an alert). Returns true when at
 // least one transport accepted the request.
 func (s *Server) dispatchLocationRequest(parent context.Context, body []byte, userID string) bool {
+	// Built-in direct channel first: a live stream delivers immediately. A
+	// device that is not connected still gets the command queued (short TTL),
+	// and the other transports below are tried too.
+	queuedDirect := false
+	for _, id := range s.directDeviceIDs(parent, userID) {
+		dispatchCtx, cancel := context.WithTimeout(parent, 12*time.Second)
+		err := s.Push.Dispatch(dispatchCtx, directNotification(push.Notification{
+			Title: "OpenFamily location refresh", Body: string(body), Silent: true, Platform: "android",
+		}, id, userID, "", ""))
+		cancel()
+		if err == nil {
+			queuedDirect = true
+			if s.Direct.IsConnected(id) {
+				return true
+			}
+		}
+	}
 	endpoints, err := s.androidPushEndpoints(parent, userID)
 	if err != nil {
 		slog.Warn("location request: load android endpoints", "err", err)
@@ -311,7 +329,7 @@ func (s *Server) dispatchLocationRequest(parent context.Context, body []byte, us
 			return true
 		}
 	}
-	return false
+	return queuedDirect
 }
 
 // staleRequestGate rate-limits automatic refresh attempts per member. Unlike

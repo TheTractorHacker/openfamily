@@ -32,6 +32,7 @@ func (s *Server) revokeIngestKeys(ctx context.Context, userID string) error {
 	_, err := s.Pool.Exec(ctx, `
 		UPDATE devices SET ingest_key_hash = NULL, ingest_key_expires_at = NULL
 		WHERE user_id = $1 AND ingest_key_hash IS NOT NULL`, userID)
+	s.Direct.CloseUser(userID)
 	return err
 }
 

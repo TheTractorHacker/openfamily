@@ -62,6 +62,7 @@ services:
       INGEST_KEY_TTL: ${INGEST_KEY_TTL:-2160h}
       INSECURE_HTTP: ${INSECURE_HTTP:-false}
       VERBOSE_PUSH: ${VERBOSE_PUSH:-false}
+      DIRECT_PUSH: ${DIRECT_PUSH:-true}
       PLATFORM_ADMIN_EMAIL: ${PLATFORM_ADMIN_EMAIL:-}
       PLATFORM_ADMIN_PASSWORD: ${PLATFORM_ADMIN_PASSWORD:-}
       # Advertised to the app via GET /config so a generic APK can register
