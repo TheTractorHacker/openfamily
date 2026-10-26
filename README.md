@@ -588,6 +588,7 @@ For a fully private map, host your own tiles. The simplest option is
 | GET | `/trips/summary?user_id&period&date&tz&speed_threshold_mps` | Driving report for a `day`, `week` (Mon-Sun) or `month`: trip count, distance, drive time, max/avg speed, speed events above the threshold (default 31.3 m/s), stops between trips |
 | GET | `/trips/report?period&start&utc_offset_minutes&circle_id` | Family driving report for a `week` (Mon-Sun, default) or `month`: drives, distance, top speed and speeding / hard-brake / rapid-acceleration event counts per member and in total, with the previous period for trends. Needs a shared circle and the member sharing location. See [docs/driving.md](docs/driving.md) |
 | GET | `/trips/{id}/events` | Driving events of one trip (404 for outsiders and when the member does not share location). `GET /trips/{id}` also returns `events` |
+| POST | `/trips/sensor-events` | Upload driving events detected by the phone's motion sensor (`hard_brake`, `rapid_accel`, `phone_use`; max 100 events / 64 KB), plus the optional `sensor_enabled` opt-in/out. Auth like `/locations` (device ingest key or access token). Idempotent; returns `accepted`/`duplicate`/`rejected`. See [docs/driving.md](docs/driving.md) |
 | POST | `/trips/compute?from&to` | Recompute your own trips for a range of at most 7 days (replaces stored trips that started in it) |
 | POST | `/families` | Create a family (caller becomes admin) |
 | GET | `/family` | Get your family |

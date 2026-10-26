@@ -9,7 +9,7 @@ for the people in a circle.
 | `speeding` | Speed above the limit for a sustained time | max speed, m/s |
 | `hard_brake` | Sudden deceleration while moving | m/s^2 (positive) |
 | `rapid_accel` | Sudden acceleration to a moving speed | m/s^2 |
-| `phone_use` | Reserved. Never detected; shown as `null` in reports | - |
+| `phone_use` | Phone handled while driving. Only from the phone sensor (below); `null` in reports for members who have not enabled the sensor | interaction duration, s |
 
 Events only exist inside legs classified as `driving` (walking, cycling and
 slow transit never produce events).
@@ -61,6 +61,66 @@ effect are returned in the report (`thresholds`). The older per-request
 - `GET /trips/{id}/events` lists a trip's events. `GET /trips/{id}` includes
   the same list as `events`.
 
+## Phone sensor events
+
+The Android app can detect `hard_brake`, `rapid_accel` and `phone_use` with the
+motion sensor and upload them. Each user opts in once (per user, not per
+device); the opt-in is stored in `users.driving_sensor_enabled`.
+
+### `POST /trips/sensor-events`
+
+Authenticated exactly like `POST /locations`: `X-Device-Key: <device_id>.<key>`
+(bound to its device and user; a body naming another `device_id` is 403) or a
+normal Bearer access token. Body, at most 64 KB (413 above):
+
+```json
+{"events":[{"kind":"hard_brake","started_at":"2026-10-21T12:00:00Z",
+            "ended_at":"2026-10-21T12:00:02Z","magnitude":4.2,
+            "lat":40.1,"lon":-75.2}],
+ "sensor_enabled": true}
+```
+
+- `kind`: `hard_brake`, `rapid_accel` or `phone_use`.
+- `started_at` / `ended_at`: RFC3339; start within the last 7 days and at most
+  5 minutes in the future; end not before start, duration at most 5 minutes.
+- `magnitude`: m/s^2 in 0-30 for braking and acceleration; for `phone_use`
+  the interaction duration in seconds, 0-300.
+- `lat` / `lon`: both or neither (null), within -90..90 / -180..180.
+- At most 100 events per request (400 above). `events` may be empty when
+  `sensor_enabled` is given. 30 requests per minute per device (429).
+- `sensor_enabled` (optional) sets the opt-in. `false` turns the feature off:
+  later events are not stored (counted as `rejected`) and existing ones are
+  kept. Events are only stored while the opt-in is true, so the first upload
+  should carry `"sensor_enabled": true`.
+
+Response `200`: `{"accepted":n,"duplicate":n,"rejected":n,"sensor_enabled":bool}`.
+Events are deduplicated on (user, kind, started_at), so retrying a request is
+safe. Invalid events are counted in `rejected`; the others are still stored.
+The audit log records counts only.
+
+### Linking and merging
+
+- A sensor event is attached to the trip whose `[started_at, ended_at]`
+  contains its start. If it arrives before the trip exists (or the trip is
+  recomputed later) it stays unattached and is linked when the trip is stored.
+  Unattached events still count in the report.
+- Recomputing a trip (`POST /trips/compute`, the background job) replaces only
+  `source = 'gps'` events; sensor events survive.
+- **Sensor wins.** When a GPS-derived and a sensor event of the same user and
+  kind overlap within +-4 s, only the sensor event is counted. GPS rows stay
+  stored. The rule lives in one place, the SQL view `trip_events_effective`
+  (migration 000101), which the report and the trip events query read.
+
+### Report and trip changes
+
+- `GET /trips/report` counts include sensor events. `phone_use` is a number
+  for members with the sensor enabled and `null` for everyone else;
+  `totals.events.phone_use` (and `previous_totals`) is the sum over enabled
+  members, `null` if there are none. New field `sensor_members`: the user ids
+  (of members the viewer can see) with the sensor enabled.
+- Every event of `GET /trips/{id}/events` (and `GET /trips/{id}`) has `source`
+  (`gps` or `sensor`); `lat` / `lon` are `null` for sensor events without a fix.
+
 ## Accuracy limits
 
 These are estimates from phone GPS, not measurements, and not for enforcement.
@@ -71,8 +131,9 @@ These are estimates from phone GPS, not measurements, and not for enforcement.
 - GPS speed is smoothed and noisy; occasional false events and missed events
   are expected. Tunnels, urban canyons and poor accuracy reduce quality.
 - A passenger in a car is indistinguishable from a driver.
-- An on-device motion sensor (accelerometer / gyroscope) and phone-use
-  detection are a later phase; `phone_use` is reserved until then.
+- Sensor events (below) are far more precise for braking and acceleration,
+  but depend on the phone being in the car, mounted or not, and on the user
+  having enabled the feature.
 
 ## Privacy
 
@@ -80,6 +141,8 @@ Events carry a time and a location, so they are as sensitive as trips. A
 viewer sees a member's events (and counts in the report) only when they share
 a circle with that member AND the member shares their location in that circle.
 Outsiders and members with sharing off get 404 and are left out of the report;
-a member always sees their own events. Events are deleted with their trip and
-with the user, and old trips (and their events) are pruned after
-`LOCATION_RETENTION_DAYS`.
+a member always sees their own events. Events are deleted with the
+user, included in `GET /me/export` (`driving_events`, `driving_sensor_enabled`)
+and pruned, including unattached sensor events, once older than
+`LOCATION_RETENTION_DAYS`. Sensor events are read through the same circle
+rules as trips.
