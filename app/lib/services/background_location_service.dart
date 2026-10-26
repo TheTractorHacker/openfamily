@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show Platform;
 
 import 'package:background_locator_2/background_locator.dart';
 import 'package:background_locator_2/location_dto.dart';
@@ -12,6 +13,9 @@ import 'package:geolocator/geolocator.dart'
 import 'package:http/http.dart' as http;
 
 import 'background_credential_store.dart';
+import 'fix_quality.dart';
+import 'live_boost.dart';
+import 'tracking_cadence.dart';
 import 'direct_push_service.dart';
 import 'driving/driving_background.dart';
 import 'location_outbox.dart';
@@ -56,6 +60,10 @@ Future<void> onHeartbeatTick() async {
   try {
     // Keep this isolate's direct-push connection (alerts without ntfy) alive.
     DirectPushService.ensureRunningInBackground();
+    _initCadence();
+    // No fixes may have arrived (stationary / deferred GPS): let expired
+    // boosts and stale drive state fall back to the slow profile.
+    unawaited(_applyProfile(_cadence.profile(DateTime.now().toUtc())));
     final _BackgroundCredentials? credentials = await _readCredentials();
     if (credentials == null) return;
 
@@ -71,6 +79,104 @@ Future<void> onHeartbeatTick() async {
   }
 }
 
+// --- adaptive cadence state (per isolate) ---------------------------------
+
+/// Policy for this (background) isolate. Fed by the fixes it receives.
+final TrackingCadence _cadence = TrackingCadence()..setBackground(true);
+final ProfileApplier _applier = ProfileApplier(_cadence.config);
+final FixQualityFilter _fixFilter = FixQualityFilter();
+bool _cadenceInitialized = false;
+
+bool _posting = false;
+Map<String, dynamic>? _pendingBody;
+DateTime? _lastPostAt;
+DateTime? _lastSentTs;
+DateTime? _lastDrainAt;
+DateTime? _batteryReadAt;
+int? _batteryCache;
+bool _chargingCache = false;
+DateTime? _boostReadAt;
+DateTime? _presenceReadAt;
+bool _presenceCache = false;
+
+/// Minimum spacing of outbox drains while posts keep succeeding (at 1 Hz a
+/// drain per post would hammer shared_preferences).
+const Duration _drainEvery = Duration(seconds: 10);
+
+void _initCadence() {
+  if (_cadenceInitialized) return;
+  _cadenceInitialized = true;
+  // The service is registered with the stationary profile; record it as the
+  // applied one so the first fix does not needlessly re-request updates.
+  final DateTime now = DateTime.now().toUtc();
+  _applier.markApplied(
+    _cadence.profile(now),
+    now.subtract(_cadence.config.minApplyGap),
+  );
+  LiveBoost.register(_cadence, onBoost: () {
+    unawaited(_applyProfile(_cadence.profile(DateTime.now().toUtc())));
+  });
+}
+
+/// Pushes [profile] to the native location request if it changed (debounced
+/// by [ProfileApplier]). Prefers the in-place native update; falls back to a
+/// full re-registration on Android builds without it. Never throws.
+Future<void> _applyProfile(CadenceProfile profile) async {
+  try {
+    final DateTime now = DateTime.now().toUtc();
+    final CadenceProfile? next = _applier.next(profile, now);
+    if (next == null) return;
+    _applier.markApplied(next, now);
+    final int ms = next.gpsInterval.inMilliseconds;
+    final bool ok = await BackgroundLocator.updateLocationRequest(
+      intervalMs: ms <= 0 ? 1000 : ms,
+      distanceFilter: next.distanceFilterM,
+      highAccuracy: next.highAccuracy,
+    );
+    if (!ok && Platform.isAndroid) {
+      await BackgroundLocationService._register(next);
+    }
+  } catch (_) {
+    // Never throw from the background callback.
+  }
+}
+
+Future<void> _refreshBatteryIfStale(DateTime now) async {
+  final DateTime? at = _batteryReadAt;
+  if (at != null && now.difference(at) < const Duration(seconds: 30)) return;
+  _batteryReadAt = now;
+  _batteryCache = await _readBattery();
+  try {
+    final BatteryState st =
+        await Battery().batteryState.timeout(const Duration(seconds: 5));
+    _chargingCache =
+        st == BatteryState.charging || st == BatteryState.full;
+  } catch (_) {
+    _chargingCache = false;
+  }
+  _cadence.setBattery(_batteryCache, charging: _chargingCache);
+}
+
+/// Picks up a boost persisted by the other isolate (e.g. the direct-push
+/// command landed in the UI isolate).
+Future<void> _refreshPersistedBoost(DateTime now) async {
+  final DateTime? at = _boostReadAt;
+  if (at != null && now.difference(at) < const Duration(seconds: 5)) return;
+  _boostReadAt = now;
+  final DateTime? until = await LiveBoost.readActive(now);
+  if (until != null) _cadence.startBoost(until.difference(now), now);
+}
+
+Future<bool> _foregroundReporterAlive(DateTime now) async {
+  final DateTime? at = _presenceReadAt;
+  if (at != null && now.difference(at) < const Duration(seconds: 3)) {
+    return _presenceCache;
+  }
+  _presenceReadAt = now;
+  _presenceCache = await ForegroundPresence.isFresh(now);
+  return _presenceCache;
+}
+
 /// Top-level location callback, invoked by the plugin in the background isolate.
 ///
 /// Must be top-level (or a static method) and annotated `@pragma('vm:entry-point')`
@@ -81,6 +187,7 @@ Future<void> onLocationUpdate(LocationDto location) async {
     // Skip spoofed locations (Android mock-location detection).
     if (location.isMocked) return;
     DirectPushService.ensureRunningInBackground();
+    _initCadence();
 
     // Arms the on-device driving detection (opt-in, no-op unless enabled).
     unawaited(DrivingBackground.onLocationFix(
@@ -89,30 +196,122 @@ Future<void> onLocationUpdate(LocationDto location) async {
       lon: location.longitude,
     ));
 
+    final DateTime now = DateTime.now().toUtc();
+    await _refreshBatteryIfStale(now);
+    await _refreshPersistedBoost(now);
+
+    final DateTime fixTs = DateTime.fromMillisecondsSinceEpoch(
+      location.time.toInt(),
+      isUtc: true,
+    );
+    final FixVerdict verdict = _fixFilter.check(
+      ts: fixTs,
+      lat: location.latitude,
+      lon: location.longitude,
+      accuracyM: location.accuracy,
+      speedMps: location.speed,
+      lastSentTs: _lastSentTs,
+    );
+    if (verdict != FixVerdict.ok) return;
+
+    _cadence.onFix(
+      now: now,
+      speedMps: location.speed,
+      motionState: location.motionState,
+    );
+    final CadenceProfile profile = _cadence.profile(now);
+    unawaited(_applyProfile(profile));
+
+    // Post gate: the profile's minimum spacing, and no doubled traffic while
+    // the foreground reporter is alive and running a fast profile.
+    final DateTime? lastPost = _lastPostAt;
+    if (lastPost != null && now.difference(lastPost) < profile.minPostInterval) {
+      return;
+    }
+    if (profile.isFast && await _foregroundReporterAlive(now)) return;
+
     final _BackgroundCredentials? credentials = await _readCredentials();
     if (credentials == null) return;
 
-    final int? batteryPct = await _readBattery();
     final Map<String, dynamic> body =
-        _buildBody(location, credentials.deviceId, batteryPct);
+        _buildBody(location, credentials.deviceId, _batteryCache);
 
-    final bool sent = await _report(credentials, '/locations', body);
-    if (sent) {
-      // Connectivity is alive: opportunistically deliver anything the device
-      // queued while it was offline. Bounded so one tick does not flood the
-      // radio; subsequent successful reports keep draining.
-      await LocationOutbox.drain(
-        send: (List<Map<String, dynamic>> batch) =>
-            _sendLocationBatch(credentials, batch),
-      );
-    } else {
-      // Offline (or auth hiccup): park the fix for backfill instead of
-      // dropping it — the batch endpoint accepts points older than the live
-      // feed's 15-minute freshness rule.
-      await LocationOutbox.enqueue(body);
+    // One request at a time: keep only the newest pending fix; the one it
+    // replaces goes to the outbox and ships through the batch path.
+    if (_posting) {
+      final Map<String, dynamic>? replaced = _pendingBody;
+      _pendingBody = body;
+      if (replaced != null) await LocationOutbox.enqueue(replaced);
+      return;
     }
+    await _sendAndDrain(credentials, body);
   } catch (_) {
     // Never throw from the background callback.
+  }
+}
+
+Future<void> _sendAndDrain(
+  _BackgroundCredentials credentials,
+  Map<String, dynamic> first,
+) async {
+  Map<String, dynamic>? body = first;
+  _posting = true;
+  try {
+    while (body != null) {
+      _lastPostAt = DateTime.now().toUtc();
+      final _PostResult r = await _postLocation(credentials, body);
+      if (r.ok) {
+        final DateTime? ts = DateTime.tryParse('${body['ts']}')?.toUtc();
+        if (ts != null) _lastSentTs = ts;
+        if (r.live) {
+          final DateTime n = DateTime.now().toUtc();
+          _cadence.startBoost(_cadence.config.liveFlagBoost, n);
+          unawaited(_applyProfile(_cadence.profile(n)));
+        }
+        final DateTime n = DateTime.now().toUtc();
+        final DateTime? lastDrain = _lastDrainAt;
+        if (lastDrain == null || n.difference(lastDrain) >= _drainEvery) {
+          _lastDrainAt = n;
+          // Bounded so one tick does not flood the radio.
+          await LocationOutbox.drain(
+            send: (List<Map<String, dynamic>> batch) =>
+                _sendLocationBatch(credentials, batch),
+          );
+        }
+      } else {
+        // Offline (or auth hiccup): park the fix for backfill.
+        await LocationOutbox.enqueue(body);
+      }
+      body = _pendingBody;
+      _pendingBody = null;
+    }
+  } finally {
+    _posting = false;
+  }
+}
+
+class _PostResult {
+  const _PostResult(this.ok, this.live);
+  final bool ok;
+  final bool live;
+}
+
+/// POSTs one location; reports success and the server's `"live": true` hint.
+Future<_PostResult> _postLocation(
+  _BackgroundCredentials credentials,
+  Map<String, dynamic> body,
+) async {
+  try {
+    final http.Response response = await _post(
+      credentials.apiBaseUrl,
+      _ingestHeaders(credentials),
+      '/locations',
+      body,
+    );
+    final bool ok = response.statusCode == 201 || response.statusCode == 200;
+    return _PostResult(ok, ok && LiveBoost.responseIsLive(response.body));
+  } catch (_) {
+    return const _PostResult(false, false);
   }
 }
 
@@ -240,7 +439,11 @@ Map<String, dynamic> _buildBody(
   if (location.accuracy > 0) body['accuracy_meters'] = location.accuracy;
   // Altitude is valid below sea level (negative), so send any finite value.
   if (location.altitude.isFinite) body['altitude_meters'] = location.altitude;
-  if (location.speed > 0) body['speed_mps'] = location.speed;
+  body.addAll(speedFields(
+    speedMps: location.speed,
+    speedAccuracyMps: location.speedAccuracy,
+    accuracyM: location.accuracy,
+  ));
   if (location.heading >= 0) body['heading_deg'] = location.heading;
   return body;
 }
@@ -301,17 +504,29 @@ class BackgroundLocationService {
       // and let the plugin surface any remaining problem.
     }
     if (!_shouldRun) return;
+    await _register(TrackingCadence().profile(DateTime.now().toUtc())
+        // Fresh policy in background mode = the stationary profile.
+        );
+  }
+
+  /// Registers (or re-registers) the plugin with the request described by
+  /// [profile]. Used at start and as the fallback when the in-place native
+  /// update is unavailable. Never throws.
+  static Future<void> _register(CadenceProfile profile) async {
+    final int seconds = (profile.gpsInterval.inMilliseconds / 1000).ceil();
     try {
       await BackgroundLocator.registerLocationUpdate(
         onLocationUpdate,
         heartbeatCallback: onHeartbeatTick,
-        androidSettings: const AndroidSettings(
-          accuracy: LocationAccuracy.HIGH,
-          interval: 60,
-          distanceFilter: 0,
+        androidSettings: AndroidSettings(
+          accuracy: profile.highAccuracy
+              ? LocationAccuracy.HIGH
+              : LocationAccuracy.BALANCED,
+          interval: seconds < 1 ? 60 : seconds,
+          distanceFilter: profile.distanceFilterM,
           wakeLockTime: 60,
           client: LocationClient.google,
-          androidNotificationSettings: AndroidNotificationSettings(
+          androidNotificationSettings: const AndroidNotificationSettings(
             notificationChannelName: 'OpenFamily',
             notificationTitle: 'OpenFamily',
             notificationMsg: 'Sharing your location with your family',

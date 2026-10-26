@@ -11,6 +11,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'alert_router.dart';
 import 'background_credential_store.dart';
+import 'live_boost.dart';
 import 'location_refresh_service.dart';
 
 // OpenFamily "direct" push: the app keeps ONE authenticated Server-Sent Events
@@ -257,6 +258,12 @@ class DirectPushDispatcher {
   final Future<void> Function(String command) _runCommand;
 
   static Future<void> _defaultCommand(String command) async {
+    // {"type":"live_boost","ttl_s":60}: a viewer is watching, report at 1 Hz.
+    final Duration? boost = LiveBoost.parseCommand(command);
+    if (boost != null) {
+      await LiveBoost.apply(boost);
+      return;
+    }
     await LocationRefreshService.handlePush(command);
   }
 

@@ -50,6 +50,21 @@ class Keys {
         @JvmStatic
         val METHOD_PLUGIN_UPDATE_NOTIFICATION = "LocatorPlugin.updateNotification"
 
+        /** Re-requests location updates with a new interval / distance filter /
+         *  accuracy WITHOUT restarting the foreground service (adaptive
+         *  cadence: 1 Hz while driving or live-boosted, slow when stationary). */
+        @JvmStatic
+        val METHOD_PLUGIN_UPDATE_LOCATION_REQUEST = "LocatorPlugin.updateLocationRequest"
+
+        @JvmStatic
+        val ARG_REQUEST_INTERVAL_MS = "request_interval_ms"
+
+        @JvmStatic
+        val ARG_REQUEST_DISTANCE_FILTER = "request_distance_filter"
+
+        @JvmStatic
+        val ARG_REQUEST_HIGH_ACCURACY = "request_high_accuracy"
+
         @JvmStatic
         val ARG_INIT_CALLBACK = "initCallback"
 

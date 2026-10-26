@@ -1,11 +1,17 @@
 import 'dart:async';
 
 import 'package:battery_plus/battery_plus.dart';
+import 'package:flutter/foundation.dart'
+    show TargetPlatform, defaultTargetPlatform, visibleForTesting;
 import 'package:geolocator/geolocator.dart';
 
 import 'api_client.dart';
 import 'device_service.dart';
+import 'fix_quality.dart';
+import 'live_boost.dart';
 import 'location_outbox.dart';
+import 'perf/perf_monitor.dart';
+import 'tracking_cadence.dart';
 
 /// Periodically reports the device's foreground GPS position to the backend
 /// (`POST /locations`) so the family can see where the user is.
@@ -79,15 +85,15 @@ class LocationReporter {
   /// background service's reporting cadence.
   static const Duration _heartbeatInterval = Duration(seconds: 60);
 
-  /// Minimum interval between POST attempts (safety net against flooding).
-  /// Shortened while an SOS is active so family sees fresher points.
-  static Duration minPostInterval = const Duration(seconds: 5);
+  /// Whether an SOS burst is active (process-wide; the SOS screen sets it).
+  static bool _sosActive = false;
 
   static Timer? _sosBurstTimer;
 
-  /// Reports more often for a few minutes after SOS. No-op if already bursting.
+  /// Reports more often for a few minutes after SOS: the cadence policy's
+  /// `sos` tier (2 s) wins over every other tier.
   static void startSosBurst({Duration last = const Duration(minutes: 5)}) {
-    minPostInterval = const Duration(seconds: 2);
+    _sosActive = true;
     _sosBurstTimer?.cancel();
     _sosBurstTimer = Timer(last, stopSosBurst);
   }
@@ -95,7 +101,96 @@ class LocationReporter {
   static void stopSosBurst() {
     _sosBurstTimer?.cancel();
     _sosBurstTimer = null;
-    minPostInterval = const Duration(seconds: 5);
+    _sosActive = false;
+  }
+
+  // --- adaptive cadence -----------------------------------------------------
+
+  final TrackingCadence _cadence = TrackingCadence();
+  late final ProfileApplier _applier = ProfileApplier(_cadence.config);
+  final FixQualityFilter _filter = FixQualityFilter();
+
+  /// Re-evaluates the profile every few seconds: covers expiry of a boost /
+  /// SOS and drive-mode exit when no fixes arrive (distance-filtered stream).
+  Timer? _cadenceTimer;
+  static const Duration _cadenceTick = Duration(seconds: 5);
+
+  DateTime? _batteryReadAt;
+  int? _batteryCache;
+  DateTime? _lastDrainAt;
+  static const Duration _drainEvery = Duration(seconds: 10);
+
+  /// Latest profile (read by tests / the Performance screen).
+  CadenceProfile? get currentProfile => _applier.applied;
+
+  /// Geolocator settings for [p]. Pure; exposed for tests.
+  @visibleForTesting
+  static LocationSettings settingsFor(CadenceProfile p) {
+    final int df = p.distanceFilterM.round();
+    final LocationAccuracy acc =
+        p.highAccuracy ? LocationAccuracy.high : LocationAccuracy.medium;
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.android:
+        return AndroidSettings(
+          accuracy: acc,
+          distanceFilter: df,
+          intervalDuration:
+              p.gpsInterval > Duration.zero ? p.gpsInterval : null,
+        );
+      case TargetPlatform.iOS:
+      case TargetPlatform.macOS:
+        return AppleSettings(accuracy: acc, distanceFilter: df);
+      default:
+        return LocationSettings(accuracy: acc, distanceFilter: df);
+    }
+  }
+
+  Future<void> _refreshBattery(DateTime now) async {
+    final DateTime? at = _batteryReadAt;
+    if (at != null && now.difference(at) < const Duration(seconds: 30)) return;
+    _batteryReadAt = now;
+    try {
+      _batteryCache = await _battery.batteryLevel;
+    } catch (_) {
+      _batteryCache = null; // battery_plus is unsupported on web.
+    }
+    bool charging = false;
+    try {
+      final BatteryState st = await _battery.batteryState;
+      charging = st == BatteryState.charging || st == BatteryState.full;
+    } catch (_) {}
+    _cadence.setBattery(_batteryCache, charging: charging);
+  }
+
+  /// Syncs external inputs (SOS, persisted boost from the other isolate,
+  /// battery) into the policy, then reconfigures the GPS stream if the
+  /// profile changed (debounced). Never throws.
+  Future<void> _reevaluate() async {
+    if (!_active) return;
+    try {
+      final DateTime now = DateTime.now().toUtc();
+      _cadence.setSos(_sosActive);
+      await _refreshBattery(now);
+      final DateTime? until = await LiveBoost.readActive(now);
+      if (until != null) _cadence.startBoost(until.difference(now), now);
+      unawaited(ForegroundPresence.mark(now));
+      _applyDesiredProfile(now);
+    } catch (_) {}
+  }
+
+  void _applyDesiredProfile(DateTime now) {
+    if (!_active) return;
+    final CadenceProfile desired = _cadence.profile(now);
+    PerfMonitor.instance.cadenceProfile = desired.label;
+    final CadenceProfile? next = _applier.next(desired, now);
+    if (next == null) return;
+    _applier.markApplied(next, now);
+    if (_subscription != null) unawaited(_startStream(_generation));
+  }
+
+  /// Instance boost entry used by the live-boost hook.
+  void _onBoost() {
+    _applyDesiredProfile(DateTime.now().toUtc());
   }
 
   /// Ensures the device is registered, then starts the position stream.
@@ -111,6 +206,10 @@ class LocationReporter {
       _heartbeatInterval,
       (_) => _sendHeartbeat(),
     );
+    _cadenceTimer?.cancel();
+    _cadenceTimer = Timer.periodic(_cadenceTick, (_) => _reevaluate());
+    LiveBoost.register(_cadence, onBoost: _onBoost);
+    unawaited(ForegroundPresence.mark(DateTime.now().toUtc()));
     await _startStream(_generation);
   }
 
@@ -192,11 +291,13 @@ class LocationReporter {
 
     Stream<Position> stream;
     try {
+      final DateTime now = DateTime.now().toUtc();
+      _cadence.setSos(_sosActive);
+      final CadenceProfile profile = _cadence.profile(now);
+      if (_applier.applied == null) _applier.markApplied(profile, now);
+      PerfMonitor.instance.cadenceProfile = profile.label;
       stream = Geolocator.getPositionStream(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
-          distanceFilter: 10,
-        ),
+        locationSettings: settingsFor(_applier.applied ?? profile),
       );
     } catch (_) {
       // Permission denied / services off / platform error. Retry later so a
@@ -211,7 +312,7 @@ class LocationReporter {
     if (!_active || _generation != gen) return;
 
     _subscription = stream.listen(
-      _onPosition,
+      (Position p) => _onPosition(p),
       onError: (Object _) {
         _subscription?.cancel();
         _subscription = null;
@@ -236,18 +337,81 @@ class LocationReporter {
     });
   }
 
+  /// The `POST /locations` body for [position]. Pure; exposed for tests.
+  ///
+  /// `speed_mps` is the GPS Doppler speed as reported, including 0 when the
+  /// receiver says 0 and the fix is accurate (see [speedFields]).
+  @visibleForTesting
+  static Map<String, dynamic> buildBody(
+    Position position, {
+    required String? deviceId,
+    int? batteryPct,
+  }) {
+    final Map<String, dynamic> body = <String, dynamic>{
+      'device_id': deviceId,
+      'ts': position.timestamp.toUtc().toIso8601String(),
+      'lat': position.latitude,
+      'lon': position.longitude,
+      'motion_state': '',
+      'source': 'foreground',
+    };
+    if (batteryPct != null) body['battery_pct'] = batteryPct;
+    if (position.accuracy > 0) body['accuracy_meters'] = position.accuracy;
+    // Altitude is valid below sea level (negative), so send any finite value.
+    if (position.altitude.isFinite) {
+      body['altitude_meters'] = position.altitude;
+    }
+    body.addAll(speedFields(
+      speedMps: position.speed,
+      speedAccuracyMps: position.speedAccuracy,
+      accuracyM: position.accuracy,
+    ));
+    // Note: geolocator reports heading as 0.0 when unknown on some
+    // platforms, so a 0 heading may mean "unknown" — acceptable since the
+    // backend treats heading as optional.
+    if (position.heading >= 0) body['heading_deg'] = position.heading;
+    return body;
+  }
+
+  /// Entry point for stream fixes: sanity-filters, feeds the cadence policy,
+  /// then hands the fix to [_deliver].
+  Future<void> _onPosition(Position position) async {
+    if (!_active) return;
+    final DateTime now = DateTime.now().toUtc();
+    final FixVerdict verdict = _filter.check(
+      ts: position.timestamp,
+      lat: position.latitude,
+      lon: position.longitude,
+      accuracyM: position.accuracy,
+      speedMps: position.speed,
+      lastSentTs: _lastSentTs,
+    );
+    if (verdict != FixVerdict.ok) return;
+    _cadence.onFix(now: now, speedMps: position.speed);
+    _cadence.setSos(_sosActive);
+    _applyDesiredProfile(now);
+    await _deliver(position);
+  }
+
   /// Builds and POSTs a location report for a single [Position].
   ///
-  /// Updates are serialized (one POST at a time), throttled (min interval), and
-  /// deduped (monotonic timestamps) before being sent. A position that arrives
-  /// while a POST is in flight is remembered and backfilled once the POST
-  /// completes, so a slow POST doesn't lose a fix. The backfill bypasses the
-  /// rate limiter so the user's final position is always reported.
-  Future<void> _onPosition(Position position, {bool bypassRateLimit = false}) async {
-    // Serialize: if a POST is in flight, remember this position as the latest
-    // pending one and return; it is processed when the current POST completes.
+  /// Updates are serialized (one POST at a time), throttled (the active
+  /// profile's minimum interval), and deduped (monotonic timestamps). A
+  /// position that arrives while a POST is in flight becomes the single
+  /// pending one; the pending fix it replaces is parked in the outbox and
+  /// ships through the batch endpoint, so a slow network never piles up
+  /// requests and never loses a point. The pending fix is sent once the
+  /// current POST completes, bypassing the rate limiter so the final position
+  /// is always reported.
+  Future<void> _deliver(Position position, {bool bypassRateLimit = false}) async {
     if (_posting) {
+      final Position? replaced = _pendingPosition;
       _pendingPosition = position;
+      if (replaced != null) {
+        unawaited(LocationOutbox.enqueue(
+          buildBody(replaced, deviceId: _deviceId, batteryPct: _batteryCache),
+        ));
+      }
       return;
     }
 
@@ -255,55 +419,38 @@ class LocationReporter {
     final DateTime ts = position.timestamp.toUtc();
     if (_lastSentTs != null && !ts.isAfter(_lastSentTs!)) return;
 
-    // Rate limit: skip if too soon since the last POST attempt (unless this is
-    // a backfill, which should always go through).
     if (!bypassRateLimit) {
       final DateTime now = DateTime.now().toUtc();
-      if (_lastPostTime != null &&
-          now.difference(_lastPostTime!) < minPostInterval) {
+      final Duration gate = _cadence.profile(now).minPostInterval;
+      if (_lastPostTime != null && now.difference(_lastPostTime!) < gate) {
         return;
       }
     }
 
     _posting = true;
     _lastPostTime = DateTime.now().toUtc();
-    // Declared outside the try so the failure paths below can park it in the
-    // offline outbox verbatim.
-    Map<String, dynamic> body = <String, dynamic>{
-      'device_id': _deviceId,
-      'ts': ts.toIso8601String(),
-      'lat': position.latitude,
-      'lon': position.longitude,
-      'motion_state': '',
-      'source': 'foreground',
-    };
+    Map<String, dynamic> body =
+        buildBody(position, deviceId: _deviceId, batteryPct: null);
     try {
-      int? batteryPct;
-      try {
-        batteryPct = await _battery.batteryLevel;
-      } catch (_) {
-        // battery_plus is unsupported on web; report without battery_pct rather
-        // than letting a battery read failure drop the location report.
-        batteryPct = null;
-      }
+      await _refreshBattery(DateTime.now().toUtc());
+      body = buildBody(position, deviceId: _deviceId, batteryPct: _batteryCache);
 
-      if (batteryPct != null) body['battery_pct'] = batteryPct;
-      if (position.accuracy > 0) body['accuracy_meters'] = position.accuracy;
-      // Altitude is valid below sea level (negative), so send any finite value.
-      if (position.altitude.isFinite) {
-        body['altitude_meters'] = position.altitude;
-      }
-      if (position.speed > 0) body['speed_mps'] = position.speed;
-      // Note: geolocator reports heading as 0.0 when unknown on some
-      // platforms, so a 0 heading may mean "unknown" — acceptable since the
-      // backend treats heading as optional.
-      if (position.heading >= 0) body['heading_deg'] = position.heading;
-
-      await ApiClient.post('/locations', body: body);
+      final dynamic res = await ApiClient.post('/locations', body: body);
       _lastSentTs = ts;
+      PerfMonitor.instance.recordFixSent();
+      if (LiveBoost.responseIsLive(res)) {
+        final DateTime n = DateTime.now().toUtc();
+        _cadence.startBoost(_cadence.config.liveFlagBoost, n);
+        _applyDesiredProfile(n);
+      }
       // Connectivity works — opportunistically deliver anything the device
-      // queued while it was offline, starting with the freshest points.
-      unawaited(LocationOutbox.drain(send: sendOutboxBatchViaApi));
+      // queued while it was offline (throttled: at 1 Hz a drain per post
+      // would hammer storage).
+      final DateTime n = DateTime.now().toUtc();
+      if (_lastDrainAt == null || n.difference(_lastDrainAt!) >= _drainEvery) {
+        _lastDrainAt = n;
+        unawaited(LocationOutbox.drain(send: sendOutboxBatchViaApi));
+      }
     } on SessionExpiredException {
       // The app root handles the redirect; stop reporting for this session.
       // The report is not queued: no session, no device identity to ingest
@@ -337,14 +484,12 @@ class LocationReporter {
     // backgrounded), don't backfill.
     if (!_active) return;
 
-    // Backfill the latest position captured while we were posting. The
-    // backfill bypasses the rate limiter so the final position is always sent.
     final Position? pending = _pendingPosition;
     _pendingPosition = null;
     if (pending != null) {
       final DateTime pendingTs = pending.timestamp.toUtc();
       if (_lastSentTs == null || pendingTs.isAfter(_lastSentTs!)) {
-        await _onPosition(pending, bypassRateLimit: true);
+        await _deliver(pending, bypassRateLimit: true);
       }
     }
   }
@@ -354,10 +499,16 @@ class LocationReporter {
     _active = false;
     _heartbeatTimer?.cancel();
     _heartbeatTimer = null;
+    _cadenceTimer?.cancel();
+    _cadenceTimer = null;
     _restartTimer?.cancel();
     _restartTimer = null;
     _subscription?.cancel();
     _subscription = null;
     _pendingPosition = null;
+    LiveBoost.unregister(_cadence);
+    _applier.reset();
+    _filter.reset();
+    unawaited(ForegroundPresence.clear());
   }
 }

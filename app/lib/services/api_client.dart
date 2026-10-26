@@ -1174,4 +1174,29 @@ class ApiClient {
       if (client == null) c.close();
     }
   }
+
+  // ---------------------------------------------------------------------------
+  // Live tracking (viewer side)
+  // ---------------------------------------------------------------------------
+
+  /// `POST /locations/watch`: tells the backend this viewer is looking at
+  /// [userId]'s live pin, so it can ask that member's phone to boost to 1 Hz.
+  /// Throws like any other call; see [watchMemberQuiet] for the no-throw form.
+  static Future<dynamic> watchMember(String userId, {String? circleId}) {
+    return post('/locations/watch', body: <String, dynamic>{
+      'user_id': userId,
+      if (circleId != null && circleId.isNotEmpty) 'circle_id': circleId,
+    });
+  }
+
+  /// [watchMember] that never throws (a failed watch just means no boost).
+  /// Returns true when the request was accepted.
+  static Future<bool> watchMemberQuiet(String userId, {String? circleId}) async {
+    try {
+      await watchMember(userId, circleId: circleId);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
 }

@@ -254,6 +254,40 @@ class PerfMonitor {
     rebuilds[name] = (rebuilds[name] ?? 0) + 1;
   }
 
+  // --- location reporting cadence (always on, tiny) ----------------------
+
+  /// Label of the active location cadence profile (e.g. `driving`,
+  /// `stationary`, `walking+lowbat`); set by the foreground reporter.
+  String cadenceProfile = 'n/a';
+
+  final Map<int, int> _fixMinutes = <int, int>{};
+  int fixesSent = 0;
+
+  /// One location fix was POSTed successfully.
+  void recordFixSent() {
+    fixesSent++;
+    final int idx = clock().millisecondsSinceEpoch ~/ 60000;
+    _fixMinutes[idx] = (_fixMinutes[idx] ?? 0) + 1;
+    if (_fixMinutes.length > 30) {
+      final List<int> keys = _fixMinutes.keys.toList()..sort();
+      for (final int k in keys.take(_fixMinutes.length - 30)) {
+        _fixMinutes.remove(k);
+      }
+    }
+  }
+
+  /// Fixes sent during the last full minute (0 when none).
+  int get fixesLastMinute {
+    final int idx = clock().millisecondsSinceEpoch ~/ 60000;
+    return _fixMinutes[idx - 1] ?? 0;
+  }
+
+  /// Fixes sent in the current (partial) minute.
+  int get fixesThisMinute {
+    final int idx = clock().millisecondsSinceEpoch ~/ 60000;
+    return _fixMinutes[idx] ?? 0;
+  }
+
   // --- WebSocket (recording only) ----------------------------------------
 
   int wsReceived = 0;
@@ -375,6 +409,8 @@ class PerfMonitor {
     wsApplied = 0;
     wsUiUpdates = 0;
     _wsMinutes.clear();
+    _fixMinutes.clear();
+    fixesSent = 0;
     _http.clear();
   }
 
@@ -415,6 +451,9 @@ class PerfMonitor {
     b.writeln('websocket: received $wsReceived, applied $wsApplied,'
         ' ui updates $wsUiUpdates'
         ' (per minute ${f(pm.received)} / ${f(pm.applied)} / ${f(pm.ui)})');
+    b.writeln('location reporting: profile $cadenceProfile,'
+        ' fixes sent $fixesSent (this minute $fixesThisMinute,'
+        ' last minute $fixesLastMinute)');
     final List<EndpointStats> http = endpointStats();
     b.writeln('http: ${_http.length} requests');
     for (final EndpointStats s in http) {

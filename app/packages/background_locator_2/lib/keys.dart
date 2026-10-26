@@ -16,6 +16,11 @@ class Keys {
       'LocatorPlugin.isServiceRunning';
   static const String METHOD_PLUGIN_UPDATE_NOTIFICATION =
       'LocatorPlugin.updateNotification';
+  static const String METHOD_PLUGIN_UPDATE_LOCATION_REQUEST =
+      'LocatorPlugin.updateLocationRequest';
+  static const String ARG_REQUEST_INTERVAL_MS = 'request_interval_ms';
+  static const String ARG_REQUEST_DISTANCE_FILTER = 'request_distance_filter';
+  static const String ARG_REQUEST_HIGH_ACCURACY = 'request_high_accuracy';
 
   static const String ARG_IS_MOCKED = 'is_mocked';
   static const String ARG_LATITUDE = 'latitude';

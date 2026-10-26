@@ -29,6 +29,10 @@ import androidx.core.app.ActivityCompat
 // Kept below the 60s location interval so the CPU can sleep between updates.
 private const val UPDATE_WAKE_LOCK_MS = 30_000L
 
+// Requests at or below this interval (drive mode / live boost) are never
+// downgraded to the stationary profile.
+private const val FAST_REQUEST_MS = 10_000L
+
 class IsolateHolderService : MethodChannel.MethodCallHandler, LocationUpdateListener, Service() {
     companion object {
         @JvmStatic
@@ -443,6 +447,7 @@ class IsolateHolderService : MethodChannel.MethodCallHandler, LocationUpdateList
      */
     @Synchronized
     private fun applyMotionProfileInternal(moving: Boolean) {
+        activityMoving = moving
         val base = activeRequest ?: return
         if (moving == !isStillProfile) return
 
@@ -468,6 +473,54 @@ class IsolateHolderService : MethodChannel.MethodCallHandler, LocationUpdateList
         }
 
         context?.let { startLocationClient(it, profile) }
+    }
+
+    /** Last movement classification from activity recognition (true until a
+     *  STILL transition is seen). */
+    private var activityMoving = true
+
+    /**
+     * Adaptive cadence entry point (called from Dart through the plugin
+     * channel): replaces the configured request with a new interval /
+     * displacement filter / accuracy and re-requests location updates, without
+     * restarting the service. A fast request (<= [FAST_REQUEST_MS], i.e. drive
+     * or live boost) always runs as-is, even if activity recognition says
+     * STILL; a slow request keeps the low-power stationary profile when the
+     * device is classified STILL, so the existing stationary behaviour and
+     * the liveness alarm are unchanged.
+     */
+    @Synchronized
+    fun updateLocationRequest(intervalMs: Long, distanceFilter: Float, highAccuracy: Boolean): Boolean {
+        if (!isServiceRunning) return false
+        val ctx = context ?: return false
+        val base = LocationRequestOptions(
+            interval = intervalMs,
+            accuracy = if (highAccuracy) LocationRequest.PRIORITY_HIGH_ACCURACY
+            else LocationRequest.PRIORITY_BALANCED_POWER_ACCURACY,
+            distanceFilter = distanceFilter,
+        )
+        activeRequest = base
+        val still = intervalMs > FAST_REQUEST_MS && !activityMoving
+        val profile = if (still) {
+            LocationRequestOptions(
+                interval = maxOf(base.interval, ActivityTransitionsManager.STILL_INTERVAL_MS),
+                accuracy = LocationRequest.PRIORITY_BALANCED_POWER_ACCURACY,
+                distanceFilter = 0f,
+            )
+        } else {
+            base
+        }
+        isStillProfile = still
+        googleFallbackRunnable?.let { serviceHandler.removeCallbacks(it) }
+        googleFallbackRunnable = null
+        usingGoogleLocationClient = false
+        try {
+            locatorClient?.removeLocationUpdates()
+        } catch (_: Exception) {
+            // The previous client may not have registered a callback.
+        }
+        startLocationClient(ctx, profile)
+        return true
     }
 
     private fun startLocationClient(context: Context, request: LocationRequestOptions) {        when (PreferencesManager.getLocationClient(context)) {
