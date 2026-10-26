@@ -41,7 +41,14 @@ control has a tooltip/semantic label.
 | `DsSheetScaffold` / `DsDragHandle` | Rounded sheet surface with handle and optional title/header. |
 | `DsSegmentedTabs` | Equal-width pill tabs (People / Places). |
 | `DsStatusChip` | One glanceable fact ("Battery 18%"). |
-| `DsEmptyState`, `DsErrorState`, `DsOfflineBanner` | Calm, illustration-free states with an optional action. |
+| `DsEmptyState`, `DsErrorState`, `DsOfflineBanner` | Calm, illustration-free states with an optional action. `DsErrorState` takes an `icon` (cloud-off for offline). |
+| `DsPage` | Form / onboarding page: app bar (+ step indicator), readable-width scrolling body, pinned actions. At text larger than 140% the actions scroll with the content. |
+| `DsHeading` | Page title + calm supporting line (semantic header). |
+| `DsMessage` | Inline error / success / info with icon AND words, live region. |
+| `DsOptionCard` | Big tappable choice (create / join). One semantic button. |
+| `DsBusyButton` | `DsPillButton` that swaps to "Please wait" while busy. |
+| `DsSkeleton`, `DsSkeletonList` | Loading placeholders; static when the OS removes animations. |
+| `OnboardingStepIndicator` | "Step X of Y" with segments, used as `DsPage(step:, totalSteps:)`. |
 
 ## App shell
 
@@ -72,3 +79,20 @@ code (works before the shell mounts). There is deliberately no chat button;
   test/goldens` writes `test/goldens/*.png` (Roboto loaded from the SDK).
   They are skipped unless `OF_GOLDENS=1`, so a normal `flutter test` does not
   compare pixels.
+
+## Second wave (onboarding, auth, family, security)
+
+Welcome (three value-prop pages), sign up, sign in (with the two-factor /
+recovery-code step), reset password, create-or-join, create family, join,
+invite, permissions (location Always, notifications, motion, Android battery
+optimization), family, profile, circles, circle detail / create and the
+security screens all use `DsPage`, themed inputs (`inputDecorationTheme`: filled
+sheet colour, 12dp radius, `accentInk` focus ring) and the shared states.
+`security_widgets.dart` keeps its names (`BusyButton`, `ErrorText`,
+`LoadStateView`, `Callout`) but renders with the design system.
+
+The invite screen leaves a keyed empty slot (`invite-qr-slot`) between the code
+and the actions for the QR code / join link of issue #40.
+
+Goldens for these screens live in `test/goldens/r2_*.png` (light, dark, and
+200% text for welcome, sign in and permissions).

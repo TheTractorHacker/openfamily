@@ -446,7 +446,6 @@ class _ManualContactDialogState extends State<_ManualContactDialog> {
             textCapitalization: TextCapitalization.words,
             decoration: InputDecoration(
               labelText: 'Name',
-              border: const OutlineInputBorder(),
               errorText: _nameError,
             ),
           ),
@@ -456,7 +455,6 @@ class _ManualContactDialogState extends State<_ManualContactDialog> {
             keyboardType: TextInputType.phone,
             decoration: InputDecoration(
               labelText: 'Phone',
-              border: const OutlineInputBorder(),
               errorText: _phoneError,
             ),
           ),

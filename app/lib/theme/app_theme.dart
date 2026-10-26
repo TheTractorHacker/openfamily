@@ -241,6 +241,44 @@ ThemeData _buildTheme({
       elevation: 0,
       systemOverlayStyle: overlay,
     ),
+    inputDecorationTheme: InputDecorationTheme(
+      filled: true,
+      fillColor: brand.sheet,
+      contentPadding: const EdgeInsets.symmetric(
+        horizontal: AppSpace.lg,
+        vertical: AppSpace.lg,
+      ),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        borderSide: BorderSide(color: muted.withValues(alpha: 0.45)),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        borderSide: BorderSide(color: muted.withValues(alpha: 0.45)),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        borderSide: BorderSide(color: brand.accentInk, width: 2),
+      ),
+      errorBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        borderSide: const BorderSide(color: AppColors.sosRed, width: 1.5),
+      ),
+      focusedErrorBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        borderSide: const BorderSide(color: AppColors.sosRed, width: 2),
+      ),
+      floatingLabelStyle: TextStyle(
+        color: brand.accentInk,
+        fontWeight: FontWeight.w700,
+      ),
+    ),
+    textButtonTheme: TextButtonThemeData(
+      style: TextButton.styleFrom(
+        minimumSize: const Size(kMinTarget, kMinTarget),
+        foregroundColor: brand.accentInk,
+      ),
+    ),
     filledButtonTheme: FilledButtonThemeData(
       style: FilledButton.styleFrom(
         backgroundColor: primary,
@@ -249,8 +287,18 @@ ThemeData _buildTheme({
         shape: const StadiumBorder(),
       ),
     ),
+    cardTheme: CardThemeData(
+      color: brand.sheet,
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        side: BorderSide(color: muted.withValues(alpha: 0.3)),
+      ),
+    ),
     outlinedButtonTheme: OutlinedButtonThemeData(
       style: OutlinedButton.styleFrom(
+        foregroundColor: brand.accentInk,
         minimumSize: const Size(64, kMinTarget),
         shape: const StadiumBorder(),
         side: BorderSide(color: muted.withValues(alpha: 0.5)),

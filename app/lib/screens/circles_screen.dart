@@ -4,6 +4,7 @@ import '../models/circle.dart';
 import '../services/circle_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/circle_widgets.dart';
+import '../widgets/ds/ds.dart';
 import 'circle_create_screen.dart';
 import 'circle_detail_screen.dart';
 
@@ -75,7 +76,6 @@ class _CirclesScreenState extends State<CirclesScreen> {
           onChanged: (String v) => draft = v,
           decoration: const InputDecoration(
             labelText: 'Invite code',
-            border: OutlineInputBorder(),
           ),
         ),
         actions: <Widget>[
@@ -135,7 +135,7 @@ class _CirclesScreenState extends State<CirclesScreen> {
 
   Widget _body() {
     if (_loading && _circles == null) {
-      return const Center(child: CircularProgressIndicator());
+      return const DsSkeletonList(rows: 4);
     }
     final CircleException? err = _error;
     if (err != null && _circles == null) {
@@ -181,6 +181,7 @@ class _CircleTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final bool sharing = circle.sharingEnabled;
+    final ColorScheme cs = Theme.of(context).colorScheme;
     final String members =
         '${circle.memberCount} ${circle.memberCount == 1 ? 'member' : 'members'}';
     return Semantics(
@@ -189,59 +190,57 @@ class _CircleTile extends StatelessWidget {
           '$members, location ${sharing ? 'shared' : 'not shared'}',
       excludeSemantics: true,
       onTap: onTap,
-      child: Card(
-        margin: const EdgeInsets.symmetric(vertical: 4),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(12),
-          onTap: onTap,
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(minHeight: 72),
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Row(
-                children: <Widget>[
-                  CircleIconAvatar(circle: circle),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        Text(circle.name,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                                fontSize: 16, fontWeight: FontWeight.w700)),
-                        const SizedBox(height: 4),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 4,
-                          crossAxisAlignment: WrapCrossAlignment.center,
-                          children: <Widget>[
-                            RoleBadge(role: circle.role),
-                            Text(members,
-                                style: const TextStyle(
-                                    fontSize: 13, color: AppColors.textMuted)),
-                            Row(mainAxisSize: MainAxisSize.min, children: <Widget>[
-                              Icon(
-                                sharing
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: AppSpace.xs),
+        child: Material(
+          color: BrandTheme.of(context).sheet,
+          borderRadius: BorderRadius.circular(AppRadius.lg),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(AppRadius.lg),
+            onTap: onTap,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(minHeight: 72),
+              child: Padding(
+                padding: const EdgeInsets.all(AppSpace.md),
+                child: Row(
+                  children: <Widget>[
+                    CircleIconAvatar(circle: circle),
+                    const SizedBox(width: AppSpace.md),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Text(circle.name,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: AppType.headline),
+                          const SizedBox(height: AppSpace.xs),
+                          Wrap(
+                            spacing: AppSpace.sm,
+                            runSpacing: AppSpace.xs,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: <Widget>[
+                              RoleBadge(role: circle.role),
+                              Text(members,
+                                  style: AppType.secondary
+                                      .copyWith(color: cs.onSurfaceVariant)),
+                              DsStatusChip(
+                                label: sharing ? 'Sharing' : 'Paused',
+                                icon: sharing
                                     ? Icons.location_on
                                     : Icons.location_off_outlined,
-                                size: 15,
                                 color: sharing
                                     ? AppColors.statusGreen
                                     : AppColors.statusGrey,
                               ),
-                              const SizedBox(width: 3),
-                              Text(sharing ? 'Sharing' : 'Paused',
-                                  style: const TextStyle(fontSize: 13)),
-                            ]),
-                          ],
-                        ),
-                      ],
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                  const Icon(Icons.chevron_right, color: AppColors.textMuted),
-                ],
+                    Icon(Icons.chevron_right, color: cs.onSurfaceVariant),
+                  ],
+                ),
               ),
             ),
           ),

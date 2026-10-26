@@ -331,7 +331,6 @@ class _PlacePickerScreenState extends State<PlacePickerScreen> {
                       labelText: 'Name',
                       hintText: 'e.g. Grandma',
                       prefixIcon: const Icon(Icons.label_outline),
-                      border: const OutlineInputBorder(),
                     ),
                   ),
                   const SizedBox(height: 8),
@@ -350,7 +349,6 @@ class _PlacePickerScreenState extends State<PlacePickerScreen> {
                           : 'Address (optional)',
                       hintText: 'e.g. 123 Maple St',
                       prefixIcon: const Icon(Icons.place_outlined),
-                      border: const OutlineInputBorder(),
                       suffixIcon: !GeocodingService.isEnabled
                           ? null
                           : _searching

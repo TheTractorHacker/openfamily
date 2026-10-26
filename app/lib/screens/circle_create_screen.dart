@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 
 import '../models/circle.dart';
 import '../services/circle_service.dart';
+import '../theme/app_theme.dart';
 import '../widgets/circle_widgets.dart';
+import '../widgets/ds/ds.dart';
 
 /// Creates an additional circle via `POST /circles` (name + icon). Pops with
 /// the created [Circle].
@@ -55,72 +57,58 @@ class _CircleCreateScreenState extends State<CircleCreateScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('New circle')),
-      body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.all(24),
+    return DsPage(
+      title: 'New circle',
+      actions: <Widget>[
+        DsBusyButton(label: 'Create circle', busy: _busy, onPressed: _create),
+      ],
+      children: <Widget>[
+        const DsHeading(
+          'Name your circle',
+          subtitle: 'A circle is a group you choose to share your location '
+              'with. You can make as many as you like.',
+        ),
+        TextField(
+          controller: _name,
+          autofocus: true,
+          maxLength: 100,
+          textCapitalization: TextCapitalization.words,
+          decoration: InputDecoration(
+            labelText: 'Circle name',
+            hintText: 'Friends, Soccer team, Grandparents',
+            errorText: _error,
+          ),
+          onSubmitted: (_) => _create(),
+        ),
+        const SizedBox(height: AppSpace.lg),
+        const DsSectionHeader('Icon'),
+        Wrap(
+          spacing: AppSpace.sm,
+          runSpacing: AppSpace.sm,
           children: <Widget>[
-            TextField(
-              controller: _name,
-              autofocus: true,
-              maxLength: 100,
-              textCapitalization: TextCapitalization.words,
-              decoration: InputDecoration(
-                labelText: 'Circle name',
-                hintText: 'Friends, Soccer team, Grandparents',
-                border: const OutlineInputBorder(),
-                errorText: _error,
-              ),
-              onSubmitted: (_) => _create(),
-            ),
-            const SizedBox(height: 16),
-            const Text('Icon',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: <Widget>[
-                for (final String icon in kCircleIcons)
-                  Semantics(
-                    button: true,
-                    selected: icon == _icon,
-                    label: 'Icon $icon',
-                    child: ChoiceChip(
-                      showCheckmark: false,
-                      materialTapTargetSize: MaterialTapTargetSize.padded,
-                      label: SizedBox(
-                        width: 32,
-                        height: 32,
-                        child: Center(
-                          child:
-                              Text(icon, style: const TextStyle(fontSize: 22)),
-                        ),
-                      ),
-                      selected: icon == _icon,
-                      onSelected: _busy
-                          ? null
-                          : (_) => setState(() => _icon = icon),
+            for (final String icon in kCircleIcons)
+              Semantics(
+                button: true,
+                selected: icon == _icon,
+                label: 'Icon $icon',
+                child: ChoiceChip(
+                  showCheckmark: icon == _icon,
+                  materialTapTargetSize: MaterialTapTargetSize.padded,
+                  label: SizedBox(
+                    width: 32,
+                    height: 32,
+                    child: Center(
+                      child: Text(icon, style: const TextStyle(fontSize: 22)),
                     ),
                   ),
-              ],
-            ),
-            const SizedBox(height: 28),
-            FilledButton(
-              style: FilledButton.styleFrom(minimumSize: const Size(48, 52)),
-              onPressed: _busy ? null : _create,
-              child: _busy
-                  ? const SizedBox(
-                      width: 22,
-                      height: 22,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Text('Create circle'),
-            ),
+                  selected: icon == _icon,
+                  onSelected:
+                      _busy ? null : (_) => setState(() => _icon = icon),
+                ),
+              ),
           ],
         ),
-      ),
+      ],
     );
   }
 }

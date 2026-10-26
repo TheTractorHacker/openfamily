@@ -1,120 +1,215 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_map/flutter_map.dart';
-import 'package:latlong2/latlong.dart';
 
-import '../widgets/openfamily_map_layers.dart';
 import '../theme/app_theme.dart';
+import '../widgets/dot_grid.dart';
+import '../widgets/ds/ds.dart';
 import '../widgets/openfamily_brand.dart';
 import 'login_screen.dart';
 import 'sign_up_screen.dart';
 
-/// The onboarding entry point: a brand hero with "Get Started" (sign-up) and
-/// "Log In" (existing users).
+/// The onboarding entry point: three short value-prop pages, then
+/// "Create account" and "Sign in".
 ///
-/// Map-first: a subtle, non-interactive live map sits behind the hero so the
-/// brand promise ("know where your family is") is visible from the first
-/// screen. The map is a neutral world view — it deliberately does NOT request
-/// the user's location here, because the OS permission prompt belongs in the
-/// sequenced permissions step (requesting it here would leak a dialog out of
-/// the flow and double-prompt on iOS).
-class WelcomeScreen extends StatelessWidget {
+/// Deliberately no map and no location request here: the OS permission
+/// prompt belongs in the sequenced permissions step.
+class WelcomeScreen extends StatefulWidget {
   const WelcomeScreen({super.key});
 
-  /// Neutral world view for the hero map (no location request on this screen).
-  static const LatLng _center = LatLng(0, 0);
-  static const double _zoom = 2;
+  @override
+  State<WelcomeScreen> createState() => _WelcomeScreenState();
+}
+
+class _Page {
+  const _Page(this.icon, this.title, this.body);
+  final IconData icon;
+  final String title;
+  final String body;
+}
+
+const List<_Page> _pages = <_Page>[
+  _Page(
+    Icons.location_on_outlined,
+    'Know where your family is',
+    'See the people you love on one calm map, and let them see you, only '
+        'when you share.',
+  ),
+  _Page(
+    Icons.notifications_none,
+    'Gentle heads-ups',
+    'Get a note when someone arrives home or leaves school. Nothing noisy, '
+        'never marketing.',
+  ),
+  _Page(
+    Icons.shield_outlined,
+    'Private by design',
+    'Self-hosted. No ads. Your location stays in your family, on your own '
+        'server.',
+  ),
+];
+
+class _WelcomeScreenState extends State<WelcomeScreen> {
+  final PageController _controller = PageController();
+  int _index = 0;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _push(Widget screen) => Navigator.of(context).push(
+        MaterialPageRoute<void>(builder: (_) => screen),
+      );
 
   @override
   Widget build(BuildContext context) {
+    final BrandTheme brand = BrandTheme.of(context);
+    final ColorScheme cs = Theme.of(context).colorScheme;
     return Scaffold(
-      body: Stack(
-        children: [
-          // Subtle map background (non-interactive).
-          Positioned.fill(
-            child: FlutterMap(
-              options: const MapOptions(
-                initialCenter: _center,
-                initialZoom: _zoom,
-                interactionOptions: InteractionOptions(
-                  flags: InteractiveFlag.none,
-                ),
-              ),
-              children: [
-                const OpenFamilyTileLayer(),
-              ],
-            ),
-          ),
-          // Soft wash so the hero text stays readable over the map. Kept light
-          // (0.55) so the map-first promise reads through — the map is the
-          // hero, not a faint backdrop.
-          Positioned.fill(
-            child: Container(color: Colors.white.withValues(alpha: 0.55)),
-          ),
-          SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.all(24),
+      body: DotGridBackground(
+        child: SafeArea(
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 520),
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  const Spacer(),
-                  const Center(
-                    child: OpenFamilyMark(
-                      size: 112,
-                      brightness: Brightness.light,
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                  Text(
-                    'OpenFamily',
-                    textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.headlineLarge?.copyWith(
-                          fontWeight: FontWeight.w800,
-                          // Map wash is always light; Night onSurface is white.
-                          color: AppColors.iceInk,
+                children: <Widget>[
+                  const SizedBox(height: AppSpace.xl),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: <Widget>[
+                      const OpenFamilyMark(size: 40),
+                      const SizedBox(width: AppSpace.md),
+                      Flexible(
+                        child: Semantics(
+                          header: true,
+                          child: const Text(
+                            'OpenFamily',
+                            style: TextStyle(
+                              fontSize: 22,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
                         ),
-                  ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Know where your family is — privately.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 16, color: AppColors.iceMuted),
-                  ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Self-hosted. No ads. Your location stays in your family.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 13, color: AppColors.iceMuted),
-                  ),
-                  const Spacer(),
-                  FilledButton(
-                    onPressed: () => Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                        builder: (_) => const SignUpScreen(),
                       ),
-                    ),
-                    child: const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 14),
-                      child:
-                          Text('Get Started', style: TextStyle(fontSize: 16)),
+                    ],
+                  ),
+                  Expanded(
+                    child: PageView.builder(
+                      controller: _controller,
+                      itemCount: _pages.length,
+                      onPageChanged: (int i) => setState(() => _index = i),
+                      itemBuilder: (BuildContext context, int i) =>
+                          _PageView(page: _pages[i]),
                     ),
                   ),
-                  const SizedBox(height: 12),
-                  TextButton(
-                    style: TextButton.styleFrom(
-                      foregroundColor: AppColors.iceInk,
+                  Semantics(
+                    label: 'Page ${_index + 1} of ${_pages.length}',
+                    excludeSemantics: true,
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: <Widget>[
+                        for (int i = 0; i < _pages.length; i++)
+                          AnimatedContainer(
+                            duration: AppMotion.of(context, AppMotion.fast),
+                            margin: const EdgeInsets.symmetric(
+                              horizontal: AppSpace.xs,
+                            ),
+                            width: i == _index ? 24 : 8,
+                            height: 8,
+                            decoration: BoxDecoration(
+                              color: i == _index
+                                  ? brand.accent
+                                  : cs.onSurface.withValues(alpha: 0.2),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                          ),
+                      ],
                     ),
-                    onPressed: () => Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                        builder: (_) => const LoginScreen(),
-                      ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.all(AppSpace.xxl),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: <Widget>[
+                        DsPillButton(
+                          label: 'Create account',
+                          onPressed: () => _push(const SignUpScreen()),
+                        ),
+                        const SizedBox(height: AppSpace.sm),
+                        DsPillButton(
+                          label: 'Sign in',
+                          style: DsPillStyle.outlined,
+                          onPressed: () => _push(const LoginScreen()),
+                        ),
+                      ],
                     ),
-                    child: const Text('Log In'),
                   ),
                 ],
               ),
             ),
           ),
-        ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PageView extends StatelessWidget {
+  const _PageView({required this.page});
+  final _Page page;
+
+  @override
+  Widget build(BuildContext context) {
+    final BrandTheme brand = BrandTheme.of(context);
+    final ColorScheme cs = Theme.of(context).colorScheme;
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints box) =>
+          SingleChildScrollView(
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpace.xxl,
+          vertical: AppSpace.xxl,
+        ),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            minHeight: (box.maxHeight - 2 * AppSpace.xxl)
+                .clamp(0.0, double.infinity),
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: <Widget>[
+          ExcludeSemantics(
+            child: Container(
+              width: 120,
+              height: 120,
+              decoration: BoxDecoration(
+                color: brand.accent,
+                borderRadius: BorderRadius.circular(AppRadius.xl),
+              ),
+              child: Icon(page.icon, size: 60, color: brand.onAccent),
+            ),
+          ),
+          const SizedBox(height: AppSpace.xxxl),
+          Semantics(
+            header: true,
+            child: Text(
+              page.title,
+              textAlign: TextAlign.center,
+              style: AppType.title.copyWith(fontSize: 28),
+            ),
+          ),
+          const SizedBox(height: AppSpace.md),
+          Text(
+            page.body,
+            textAlign: TextAlign.center,
+            style: AppType.body.copyWith(
+              fontWeight: FontWeight.w500,
+              color: cs.onSurfaceVariant,
+              height: 1.4,
+            ),
+          ),
+            ],
+          ),
+        ),
       ),
     );
   }

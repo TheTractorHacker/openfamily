@@ -175,7 +175,6 @@ class _CheckInScreenState extends State<CheckInScreen> {
           decoration: const InputDecoration(
             labelText: 'Add a note (optional)',
             hintText: 'e.g. "Picked up the kids"',
-            border: OutlineInputBorder(),
           ),
         ),
         if (_error != null) ...[

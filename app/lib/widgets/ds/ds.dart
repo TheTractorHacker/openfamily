@@ -3,6 +3,7 @@ library;
 
 export 'list_row.dart';
 export 'map_round_button.dart';
+export 'page.dart';
 export 'pill_button.dart';
 export 'section_header.dart';
 export 'segmented_tabs.dart';

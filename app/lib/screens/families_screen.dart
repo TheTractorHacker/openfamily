@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../services/api_client.dart';
 import '../services/family_service.dart';
 import '../theme/app_theme.dart';
+import '../widgets/ds/ds.dart';
 import 'invite_screen.dart';
 import 'join_circle_screen.dart';
 import 'app_shell.dart';
@@ -109,7 +110,6 @@ class _FamiliesScreenState extends State<FamiliesScreen> {
           onChanged: (String value) => draft = value,
           decoration: const InputDecoration(
             labelText: 'Family name',
-            border: OutlineInputBorder(),
           ),
         ),
         actions: [
@@ -236,132 +236,120 @@ class _FamiliesScreenState extends State<FamiliesScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Family')),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _error != null
-              ? Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(_error!, textAlign: TextAlign.center),
-                        const SizedBox(height: 16),
-                        FilledButton(onPressed: _load, child: const Text('Retry')),
-                      ],
+      body: SafeArea(child: _body(context)),
+    );
+  }
+
+  Widget _body(BuildContext context) {
+    if (_loading) return const DsSkeletonList(rows: 4);
+    if (_error != null) {
+      return DsErrorState(
+        title: 'Could not load your family',
+        message: _error!,
+        onRetry: _load,
+      );
+    }
+    final FamilyInfo? family = _family;
+    if (family == null) return _NoFamily(onChanged: _load);
+    final BrandTheme brand = BrandTheme.of(context);
+    return RefreshIndicator(
+      onRefresh: _load,
+      child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.only(bottom: AppSpace.xxxl),
+        children: <Widget>[
+          DsListRow(
+            leading: Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                color: brand.accent,
+                borderRadius: BorderRadius.circular(AppRadius.md),
+              ),
+              child: Icon(Icons.group_outlined, color: brand.onAccent),
+            ),
+            title: family.name,
+            subtitle: _roleLabel(family.role),
+            trailing: _isAdmin
+                ? IconButton(
+                    tooltip: 'Rename family',
+                    constraints: const BoxConstraints(
+                      minWidth: kMinTarget,
+                      minHeight: kMinTarget,
                     ),
-                  ),
-                )
-              : _family == null
-                  ? _NoFamily(onChanged: _load)
-                  : ListView(
-                      children: [
-                        ListTile(
-                          leading: const Icon(
-                            Icons.group_outlined,
-                            color: AppColors.purple,
+                    onPressed: _busy ? null : _rename,
+                    icon: const Icon(Icons.edit_outlined),
+                  )
+                : null,
+          ),
+          if (_isAdmin)
+            DsListRow(
+              leading: DsListRow.iconTile(context, Icons.person_add_alt_1),
+              title: 'Invite someone',
+              subtitle: 'Share a code so they can join',
+              chevron: true,
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => InviteScreen(circleName: family.name),
+                ),
+              ),
+            ),
+          const DsSectionHeader('Members'),
+          if (_members.isEmpty)
+            const DsEmptyState(
+              icon: Icons.group_outlined,
+              title: 'No members to show',
+              message: 'Pull down to refresh.',
+            ),
+          for (final _FamilyMember member in _members)
+            DsListRow(
+              leading: CircleAvatar(
+                backgroundColor: brand.accent.withValues(alpha: 0.25),
+                foregroundColor: Theme.of(context).colorScheme.onSurface,
+                child: Text(
+                  member.name.isEmpty ? '?' : member.name[0].toUpperCase(),
+                ),
+              ),
+              title: member.name,
+              subtitle: member.id == family.userId ? 'You' : null,
+              trailing: _isAdmin
+                  ? ConstrainedBox(
+                      constraints: const BoxConstraints(minHeight: kMinTarget),
+                      child: DropdownButton<String>(
+                        value: member.role,
+                        underline: const SizedBox.shrink(),
+                        onChanged: _busy
+                            ? null
+                            : (String? role) {
+                                if (role != null) _setRole(member, role);
+                              },
+                        items: const <DropdownMenuItem<String>>[
+                          DropdownMenuItem(value: 'admin', child: Text('Admin')),
+                          DropdownMenuItem(
+                            value: 'member',
+                            child: Text('Member'),
                           ),
-                          title: Text(_family!.name),
-                          subtitle: Text(_roleLabel(_family!.role)),
-                          trailing: _isAdmin
-                              ? IconButton(
-                                  tooltip: 'Rename',
-                                  onPressed: _busy ? null : _rename,
-                                  icon: const Icon(Icons.edit_outlined),
-                                )
-                              : null,
-                        ),
-                        if (_isAdmin)
-                          ListTile(
-                            leading: const Icon(
-                              Icons.person_add_alt_1,
-                              color: AppColors.purple,
-                            ),
-                            title: const Text('Invite someone'),
-                            trailing: const Icon(Icons.chevron_right),
-                            onTap: () => Navigator.of(context).push(
-                              MaterialPageRoute<void>(
-                                builder: (_) => InviteScreen(
-                                  circleName: _family!.name,
-                                ),
-                              ),
-                            ),
-                          ),
-                        const Divider(height: 1),
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
-                          child: Text(
-                            'MEMBERS',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
-                              letterSpacing: 1,
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .onSurfaceVariant,
-                            ),
-                          ),
-                        ),
-                        for (final _FamilyMember member in _members)
-                          ListTile(
-                            title: Text(member.name),
-                            subtitle: member.id == _family!.userId
-                                ? const Text('You')
-                                : null,
-                            trailing: _isAdmin
-                                ? DropdownButton<String>(
-                                    value: member.role,
-                                    underline: const SizedBox.shrink(),
-                                    onChanged: _busy
-                                        ? null
-                                        : (String? role) {
-                                            if (role != null) {
-                                              _setRole(member, role);
-                                            }
-                                          },
-                                    items: const [
-                                      DropdownMenuItem(
-                                        value: 'admin',
-                                        child: Text('Admin'),
-                                      ),
-                                      DropdownMenuItem(
-                                        value: 'member',
-                                        child: Text('Member'),
-                                      ),
-                                      DropdownMenuItem(
-                                        value: 'child',
-                                        child: Text('Child'),
-                                      ),
-                                    ],
-                                  )
-                                : Text(_roleLabel(member.role)),
-                          ),
-                        const Divider(height: 1),
-                        ListTile(
-                          leading: const Icon(
-                            Icons.logout,
-                            color: AppColors.sosRed,
-                          ),
-                          title: Text(
-                            'Leave family',
-                            style: TextStyle(
-                              color: _isLastAdmin
-                                  ? Theme.of(context)
-                                      .colorScheme
-                                      .onSurfaceVariant
-                                  : AppColors.sosRed,
-                            ),
-                          ),
-                          subtitle: _isLastAdmin
-                              ? const Text(
-                                  'Promote another admin before you leave.',
-                                )
-                              : null,
-                          enabled: !_busy && !_isLastAdmin,
-                          onTap: _leave,
-                        ),
-                      ],
-                    ),
+                          DropdownMenuItem(value: 'child', child: Text('Child')),
+                        ],
+                      ),
+                    )
+                  : DsStatusChip(label: _roleLabel(member.role)),
+            ),
+          const Divider(height: AppSpace.xxl),
+          DsListRow(
+            leading: DsListRow.iconTile(
+              context,
+              Icons.logout,
+              color: _isLastAdmin ? AppColors.statusGrey : AppColors.sosRed,
+            ),
+            title: 'Leave family',
+            destructive: !_isLastAdmin,
+            subtitle:
+                _isLastAdmin ? 'Promote another admin before you leave.' : null,
+            onTap: (_busy || _isLastAdmin) ? null : _leave,
+          ),
+        ],
+      ),
     );
   }
 }
@@ -378,24 +366,16 @@ class _NoFamily extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Icon(Icons.group_outlined, size: 64, color: AppColors.purple),
-          const SizedBox(height: 16),
-          const Text(
+          const DsHeading(
             'You are not in a family yet',
-            style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
-            textAlign: TextAlign.center,
+            subtitle: 'Create a family to invite people, or join one with a '
+                'code.',
+            center: true,
           ),
-          const SizedBox(height: 8),
-          Text(
-            'Create a family to invite people, or join one with a code.',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
-            ),
-          ),
-          const SizedBox(height: 24),
-          FilledButton(
-            onPressed: () async {
+          DsPillButton(
+            label: 'Create a family',
+            onPressed: 
+            () async {
               String draft = '';
               final String? name = await showDialog<String>(
                 context: context,
@@ -409,7 +389,6 @@ class _NoFamily extends StatelessWidget {
                       decoration: const InputDecoration(
                         labelText: 'Family name (optional)',
                         hintText: 'My Family',
-                        border: OutlineInputBorder(),
                       ),
                     ),
                     actions: [
@@ -440,10 +419,11 @@ class _NoFamily extends StatelessWidget {
                 }
               }
             },
-            child: const Text('Create a family'),
           ),
-          const SizedBox(height: 12),
-          OutlinedButton(
+          const SizedBox(height: AppSpace.sm),
+          DsPillButton(
+            label: 'Join with a code',
+            style: DsPillStyle.outlined,
             onPressed: () async {
               final bool? joined = await Navigator.of(context).push<bool>(
                 MaterialPageRoute<bool>(
@@ -452,7 +432,6 @@ class _NoFamily extends StatelessWidget {
               );
               if (joined == true) onChanged();
             },
-            child: const Text('Join with a code'),
           ),
         ],
       ),

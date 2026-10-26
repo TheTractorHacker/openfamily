@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../services/security_format.dart';
 import '../theme/app_theme.dart';
+import '../widgets/ds/ds.dart';
 
 /// Shared building blocks for the Security screens.
 
@@ -45,7 +46,6 @@ class _SecurePasswordFieldState extends State<SecurePasswordField> {
       onSubmitted: widget.onSubmitted == null ? null : (_) => widget.onSubmitted!(),
       decoration: InputDecoration(
         labelText: widget.label,
-        border: const OutlineInputBorder(),
         suffixIcon: IconButton(
           tooltip: _obscure ? 'Show password' : 'Hide password',
           constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
@@ -86,30 +86,18 @@ class CodeField extends StatelessWidget {
         labelText: label,
         helperText: '6-digit code, or a recovery code like ABCDE-FGHJK',
         prefixIcon: const Icon(Icons.pin_outlined),
-        border: const OutlineInputBorder(),
       ),
     );
   }
 }
 
-/// Inline error text announced to screen readers.
+/// Inline error message (icon + words), announced to screen readers.
 class ErrorText extends StatelessWidget {
   const ErrorText(this.message, {super.key});
   final String message;
 
   @override
-  Widget build(BuildContext context) {
-    return Semantics(
-      liveRegion: true,
-      child: Padding(
-        padding: const EdgeInsets.only(top: 12),
-        child: Text(
-          message,
-          style: const TextStyle(color: AppColors.statusRed, fontSize: 14),
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => DsMessage(message);
 }
 
 /// Primary action button: 48dp+ tall, shows progress while busy.
@@ -131,14 +119,20 @@ class BusyButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return FilledButton(
       style: FilledButton.styleFrom(
-        minimumSize: const Size.fromHeight(48),
+        minimumSize: const Size.fromHeight(kMinTarget),
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpace.xl,
+          vertical: AppSpace.md,
+        ),
         backgroundColor: danger ? AppColors.sosRed : null,
         foregroundColor: danger ? Colors.white : null,
+        textStyle: AppType.body.copyWith(fontWeight: FontWeight.w700),
       ),
       onPressed: busy ? null : onPressed,
       child: busy
           ? Semantics(
               label: 'Working',
+              liveRegion: true,
               child: const SizedBox(
                 width: 20,
                 height: 20,
@@ -162,33 +156,16 @@ class LoadStateView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (error == null) {
-      return Center(
-        child: Semantics(
-          label: 'Loading',
-          child: const CircularProgressIndicator(),
-        ),
+      return const Align(
+        alignment: Alignment.topCenter,
+        child: DsSkeletonList(rows: 4, avatar: false),
       );
     }
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            Icon(offline ? Icons.cloud_off : Icons.error_outline, size: 40),
-            const SizedBox(height: 12),
-            Text(error!, textAlign: TextAlign.center),
-            const SizedBox(height: 16),
-            if (onRetry != null)
-              OutlinedButton.icon(
-                style: OutlinedButton.styleFrom(minimumSize: const Size(48, 48)),
-                onPressed: onRetry,
-                icon: const Icon(Icons.refresh),
-                label: const Text('Try again'),
-              ),
-          ],
-        ),
-      ),
+    return DsErrorState(
+      icon: offline ? Icons.cloud_off : Icons.error_outline,
+      title: offline ? 'No connection' : 'Something went wrong',
+      message: error!,
+      onRetry: onRetry,
     );
   }
 }
@@ -215,8 +192,9 @@ class CopyableValue extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.only(left: 12),
         decoration: BoxDecoration(
-          color: cs.surfaceContainerHighest,
-          borderRadius: BorderRadius.circular(12),
+          color: BrandTheme.of(context).sheet,
+          border: Border.all(color: cs.outlineVariant),
+          borderRadius: BorderRadius.circular(AppRadius.md),
         ),
         child: Row(
           children: <Widget>[
@@ -268,14 +246,17 @@ class Callout extends StatelessWidget {
       decoration: BoxDecoration(
         color: tint.withValues(alpha: 0.12),
         border: Border.all(color: tint.withValues(alpha: 0.5)),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(AppRadius.md),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Icon(icon, color: tint),
+          Icon(icon, color: tint, semanticLabel: danger ? 'Warning' : 'Note'),
           const SizedBox(width: 12),
-          Expanded(child: Text(text)),
+          Expanded(child: Text(text, style: AppType.secondary.copyWith(
+            color: Theme.of(context).colorScheme.onSurface,
+            fontWeight: FontWeight.w600,
+          ))),
         ],
       ),
     );
@@ -297,7 +278,7 @@ class SecurityPage extends StatelessWidget {
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 560),
             child: ListView(
-              padding: const EdgeInsets.all(20),
+              padding: const EdgeInsets.all(AppSpace.xxl),
               children: children,
             ),
           ),

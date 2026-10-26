@@ -5,7 +5,7 @@ import 'package:share_plus/share_plus.dart';
 import '../services/invite_service.dart';
 import '../services/server_config.dart';
 import '../theme/app_theme.dart';
-import '../widgets/onboarding_step_indicator.dart';
+import '../widgets/ds/ds.dart';
 
 /// The "Invite" step: explain inviting, then "Send Code" generates an
 /// alphanumeric code and opens the native share sheet (pick a share app →
@@ -35,22 +35,33 @@ class InviteScreen extends StatefulWidget {
 
 class _InviteScreenState extends State<InviteScreen> {
   String? _code;
+  bool _creating = false;
+  String? _error;
 
   Future<void> _sendCode() async {
     String code = _code ?? '';
     if (code.isEmpty) {
+      setState(() {
+        _creating = true;
+        _error = null;
+      });
       try {
         code = await InviteService.createCode();
       } catch (_) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Could not create an invite code')),
-          );
+          setState(() {
+            _creating = false;
+            _error = 'Could not create an invite code. Check your '
+                'connection and try again.';
+          });
         }
         return;
       }
       if (!mounted) return;
-      setState(() => _code = code);
+      setState(() {
+        _creating = false;
+        _code = code;
+      });
     }
     try {
       await Share.share(
@@ -86,118 +97,109 @@ class _InviteScreenState extends State<InviteScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Invite'),
-        bottom: widget.step == null
-            ? null
-            : OnboardingStepIndicator(currentStep: widget.step!, totalSteps: 6),
-      ),
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: _code == null ? _buildInvite() : _buildSendCode(),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildInvite() {
     final String circle = widget.circleName ?? 'your family';
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        const Spacer(),
-        const Icon(Icons.person_add_alt_1, size: 64, color: AppColors.purple),
-        const SizedBox(height: 16),
-        const Text(
-          'Invite your family',
-          textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 24, fontWeight: FontWeight.w700),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          'Share a code so your family can join $circle and appear on your map.',
-          textAlign: TextAlign.center,
-          style: const TextStyle(fontSize: 15, color: AppColors.textMuted),
-        ),
-        const Spacer(),
-        FilledButton(
+    final bool hasCode = _code != null;
+    final ColorScheme cs = Theme.of(context).colorScheme;
+    final BrandTheme brand = BrandTheme.of(context);
+    return DsPage(
+      title: 'Invite',
+      step: widget.step,
+      totalSteps: widget.step == null ? null : 6,
+      actions: <Widget>[
+        DsBusyButton(
+          label: hasCode ? 'Share code' : 'Create invite code',
+          icon: hasCode ? Icons.ios_share : Icons.person_add_alt_1,
+          busy: _creating,
           onPressed: _sendCode,
-          child: const Padding(
-            padding: EdgeInsets.symmetric(vertical: 14),
-            child: Text('Send Code', style: TextStyle(fontSize: 16)),
+        ),
+        if (hasCode)
+          DsPillButton(
+            label: 'Copy code',
+            icon: Icons.copy,
+            style: DsPillStyle.tonal,
+            onPressed: _copyCode,
           ),
+        DsPillButton(
+          label: widget.doneLabel,
+          style: hasCode ? DsPillStyle.outlined : DsPillStyle.tonal,
+          onPressed: _done,
         ),
       ],
-    );
-  }
-
-  Widget _buildSendCode() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        const Spacer(),
-        const Text(
-          'Your invite code',
-          textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+      children: <Widget>[
+        DsHeading(
+          hasCode ? 'Your invite code' : 'Invite your family',
+          subtitle: hasCode
+              ? 'Share it so your family can join $circle. Read it out loud '
+                  'or send it in a message.'
+              : 'Share a code so your family can join $circle and appear on '
+                  'your map.',
         ),
-        const SizedBox(height: 8),
-        const Text(
-          'Share it so your family can join.',
-          textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 14, color: AppColors.textMuted),
-        ),
-        const SizedBox(height: 20),
-        Container(
-          padding: const EdgeInsets.symmetric(vertical: 20),
-          decoration: BoxDecoration(
-            color: AppColors.surfaceTint,
-            borderRadius: BorderRadius.circular(16),
+        if (hasCode) ...<Widget>[
+          Semantics(
+            container: true,
+            label: 'Invite code ${_code!.split('').join(' ')}',
+            excludeSemantics: true,
+            child: Container(
+              padding: const EdgeInsets.symmetric(
+                vertical: AppSpace.xxl,
+                horizontal: AppSpace.lg,
+              ),
+              decoration: BoxDecoration(
+                color: brand.sheet,
+                borderRadius: BorderRadius.circular(AppRadius.lg),
+                border: Border.all(color: cs.outlineVariant),
+              ),
+              child: Column(
+                children: <Widget>[
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      _code!,
+                      style: TextStyle(
+                        fontSize: 40,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 8,
+                        color: brand.accentInk,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: AppSpace.sm),
+                  Text(
+                    ServerConfig.instance.apiBaseUrl,
+                    textAlign: TextAlign.center,
+                    style: AppType.secondary
+                        .copyWith(color: cs.onSurfaceVariant),
+                  ),
+                ],
+              ),
+            ),
           ),
-          child: Column(
-            children: [
-              Text(
-                _code!,
-                style: const TextStyle(
-                  fontSize: 40,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 8,
-                  color: AppColors.purple,
+          const SizedBox(height: AppSpace.lg),
+          // Reserved for issue #40: a QR code and a tap-to-join link for this
+          // invite. Keep this slot between the code and the actions.
+          const KeyedSubtree(
+            key: Key('invite-qr-slot'),
+            child: SizedBox.shrink(),
+          ),
+        ] else
+          Center(
+            child: ExcludeSemantics(
+              child: Container(
+                width: 120,
+                height: 120,
+                decoration: BoxDecoration(
+                  color: brand.accent,
+                  borderRadius: BorderRadius.circular(AppRadius.xl),
+                ),
+                child: Icon(
+                  Icons.person_add_alt_1,
+                  size: 56,
+                  color: brand.onAccent,
                 ),
               ),
-              const SizedBox(height: 8),
-              Text(
-                ServerConfig.instance.apiBaseUrl,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  fontSize: 13,
-                  color: AppColors.textMuted,
-                ),
-              ),
-              const SizedBox(height: 8),
-              TextButton.icon(
-                onPressed: _copyCode,
-                icon: const Icon(Icons.copy, size: 18),
-                label: const Text('Copy code'),
-              ),
-            ],
+            ),
           ),
-        ),
-        const Spacer(),
-        FilledButton(
-          onPressed: _sendCode,
-          child: const Padding(
-            padding: EdgeInsets.symmetric(vertical: 14),
-            child: Text('Send Code', style: TextStyle(fontSize: 16)),
-          ),
-        ),
-        const SizedBox(height: 8),
-        TextButton(
-          onPressed: _done,
-          child: Text(widget.doneLabel),
-        ),
+        if (_error != null) DsMessage(_error!),
       ],
     );
   }

@@ -119,7 +119,6 @@ class _ServerConfigScreenState extends State<ServerConfigScreen> {
                   hintText: 'https://openfamily.example.com',
                   prefixIcon: const Icon(Icons.dns_outlined),
                   errorText: _error,
-                  border: const OutlineInputBorder(),
                 ),
                 keyboardType: TextInputType.url,
                 autocorrect: false,

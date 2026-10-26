@@ -2,8 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../main.dart';
 import '../services/api_client.dart';
-import '../theme/app_theme.dart';
-import '../widgets/onboarding_step_indicator.dart';
+import '../widgets/ds/ds.dart';
 import 'add_locations_screen.dart';
 import 'invite_screen.dart';
 
@@ -74,71 +73,39 @@ class _CreateCircleScreenState extends State<CreateCircleScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Create a new family'),
-        bottom: const OnboardingStepIndicator(currentStep: 4, totalSteps: 6),
-      ),
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const Text(
-                'Name your family',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                'Optional — this is the group your family will see on the map, '
-                'e.g. "Family" or "The Smiths". Leave it blank and we\'ll call '
-                'it "My Family".',
-                style: TextStyle(fontSize: 14, color: AppColors.textMuted),
-              ),
-              const SizedBox(height: 20),
-              TextField(
-                controller: _name,
-                autofocus: true,
-                enabled: !_submitting,
-                textCapitalization: TextCapitalization.words,
-                decoration: const InputDecoration(
-                  labelText: 'Family name (optional)',
-                  hintText: 'My Family',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              if (_error != null) ...[
-                const SizedBox(height: 12),
-                Text(
-                  _error!,
-                  style: const TextStyle(color: AppColors.statusRed),
-                ),
-              ],
-              const Spacer(),
-              FilledButton(
-                onPressed: _submitting ? null : _create,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  child: _submitting
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
-                          ),
-                        )
-                      : const Text(
-                          'Create family',
-                          style: TextStyle(fontSize: 16),
-                        ),
-                ),
-              ),
-            ],
+    return DsPage(
+      title: 'Create a family',
+      step: 4,
+      totalSteps: 6,
+      actions: <Widget>[
+        DsBusyButton(
+          label: 'Create family',
+          busy: _submitting,
+          onPressed: _create,
+        ),
+      ],
+      children: <Widget>[
+        const DsHeading(
+          'Name your family',
+          subtitle: 'Optional. This is the group your family will see on the '
+              'map, like "Family" or "The Smiths". Leave it blank and we\'ll '
+              'call it "My Family".',
+        ),
+        TextField(
+          controller: _name,
+          autofocus: true,
+          enabled: !_submitting,
+          textCapitalization: TextCapitalization.words,
+          textInputAction: TextInputAction.done,
+          onSubmitted: (_) => _create(),
+          decoration: const InputDecoration(
+            labelText: 'Family name (optional)',
+            hintText: 'My Family',
+            prefixIcon: Icon(Icons.home_outlined),
           ),
         ),
-      ),
+        if (_error != null) DsMessage(_error!),
+      ],
     );
   }
 }
