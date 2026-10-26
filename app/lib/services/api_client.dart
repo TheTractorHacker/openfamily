@@ -987,4 +987,29 @@ class ApiClient {
         await patch('/family/members/${Uri.encodeComponent(id)}', body: body);
     return r is Map<String, dynamic> ? r : <String, dynamic>{};
   }
+
+  // --- trip report ---
+
+  /// `GET /trips/report`: the family driving report for one week or month.
+  static Future<dynamic> getTripReport({
+    required String period,
+    required String start,
+    required int utcOffsetMinutes,
+    String? circleId,
+  }) {
+    return get(
+      '/trips/report',
+      query: <String, String>{
+        'period': period,
+        'start': start,
+        'utc_offset_minutes': '$utcOffsetMinutes',
+        if (circleId != null && circleId.isNotEmpty) 'circle_id': circleId,
+      },
+    );
+  }
+
+  /// `GET /trips/{id}/events`.
+  static Future<dynamic> getTripEvents(String id) {
+    return get('/trips/${Uri.encodeComponent(id)}/events');
+  }
 }
