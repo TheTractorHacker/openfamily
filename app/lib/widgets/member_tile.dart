@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/member.dart';
 import '../theme/app_theme.dart';
+import 'ds/status_chip.dart';
 import 'member_avatar_bubble.dart';
 import 'movement_icon.dart';
 
@@ -21,32 +22,34 @@ class MemberTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return InkWell(
       onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 56),
+        child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpace.xl,
+          vertical: AppSpace.md,
+        ),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             StatusAvatar(member: member, size: 44),
-            const SizedBox(width: 12),
+            const SizedBox(width: AppSpace.md),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
                     member.name,
-                    style: const TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                    ),
+                    style: AppType.body,
                   ),
                   const SizedBox(height: 4),
                   // Distinct glanceable fields: battery %, ETA, speed — each
                   // its own chip, never collapsed into one ellipsized line.
                   Wrap(
-                    spacing: 6,
-                    runSpacing: 4,
+                    spacing: AppSpace.sm,
+                    runSpacing: AppSpace.xs,
                     crossAxisAlignment: WrapCrossAlignment.center,
-                    children: _statusChips(),
+                    children: _statusChips(context),
                   ),
                   const SizedBox(height: 4),
                   // Address on its own line.
@@ -65,8 +68,7 @@ class MemberTile extends StatelessWidget {
                               : member.address,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 12,
+                          style: AppType.secondary.copyWith(
                             color: Theme.of(context)
                                 .colorScheme
                                 .onSurfaceVariant,
@@ -85,16 +87,18 @@ class MemberTile extends StatelessWidget {
           ],
         ),
       ),
+      ),
     );
   }
 
   /// Builds the distinct status chips: battery %, ETA, and driving speed.
-  List<Widget> _statusChips() {
+  List<Widget> _statusChips(BuildContext context) {
+    final Color accent = BrandTheme.of(context).accentInk;
     final List<Widget> chips = <Widget>[];
 
     if (member.batteryPercent > 0) {
       chips.add(
-        _StatusChip(
+        DsStatusChip(
           icon: _batteryIcon(),
           color: _batteryColor(),
           label: '${member.batteryPercent}%',
@@ -102,7 +106,7 @@ class MemberTile extends StatelessWidget {
       );
     } else if (member.status == MemberStatus.stopped) {
       chips.add(
-        const _StatusChip(
+        const DsStatusChip(
           icon: Icons.battery_unknown,
           color: AppColors.statusGrey,
           label: 'Offline',
@@ -112,9 +116,9 @@ class MemberTile extends StatelessWidget {
 
     if (member.eta != null) {
       chips.add(
-        _StatusChip(
+        DsStatusChip(
           icon: Icons.schedule,
-          color: AppColors.purple,
+          color: accent,
           label: 'ETA ${member.eta}',
         ),
       );
@@ -122,9 +126,9 @@ class MemberTile extends StatelessWidget {
 
     if (member.movement == MovementType.car && member.speedMph != null) {
       chips.add(
-        _StatusChip(
+        DsStatusChip(
           icon: Icons.directions_car,
-          color: member.isSpeeding ? const Color(0xFFE65100) : AppColors.purple,
+          color: member.isSpeeding ? AppColors.statusOrange : accent,
           label: '${member.speedMph} mph',
         ),
       );
@@ -144,49 +148,5 @@ class MemberTile extends StatelessWidget {
     if (member.batteryPercent <= 20) return AppColors.statusRed;
     if (member.batteryPercent <= 50) return AppColors.statusOrange;
     return AppColors.statusGreen;
-  }
-}
-
-/// A small pill chip showing one glanceable status field (battery %, ETA,
-/// speed) with a leading icon, so each field stays visually distinct.
-class _StatusChip extends StatelessWidget {
-  const _StatusChip({
-    required this.icon,
-    required this.label,
-    this.color = AppColors.purple,
-  });
-
-  final IconData icon;
-  final String label;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    final bool dark = Theme.of(context).brightness == Brightness.dark;
-    final Color foreground = dark && color == AppColors.statusGrey
-        ? Theme.of(context).colorScheme.onSurfaceVariant
-        : color;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: dark ? 0.28 : 0.12),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 13, color: foreground),
-          const SizedBox(width: 4),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: foreground,
-            ),
-          ),
-        ],
-      ),
-    );
   }
 }

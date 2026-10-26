@@ -6,6 +6,7 @@ import '../models/alert.dart';
 import '../services/alert_service.dart';
 import '../services/api_client.dart';
 import '../theme/app_theme.dart';
+import '../widgets/ds/ds.dart';
 
 /// Icon + colour for a delivery state. The icon shape differs per state so
 /// the meaning never depends on colour alone.
@@ -56,9 +57,10 @@ class AlertStatusScreen extends StatelessWidget {
           dialer: dialer,
           pollInterval: pollInterval,
           footer: <Widget>[
-            TextButton(
+            DsPillButton(
+              label: 'Done',
+              style: DsPillStyle.tonal,
               onPressed: () => Navigator.of(context).maybePop(),
-              child: const Text('Done'),
             ),
           ],
         ),
@@ -209,151 +211,176 @@ class _AlertStatusBodyState extends State<AlertStatusBody> {
   @override
   Widget build(BuildContext context) {
     final AlertDetail? d = _detail;
-    final Color muted = Theme.of(context).colorScheme.onSurfaceVariant;
+    final ColorScheme cs = Theme.of(context).colorScheme;
+    final Color muted = cs.onSurfaceVariant;
     final List<RecipientDeliveries> people =
         d?.recipients ?? const <RecipientDeliveries>[];
     return ListView(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+      padding: const EdgeInsets.fromLTRB(
+        AppSpace.xl,
+        AppSpace.lg,
+        AppSpace.xl,
+        AppSpace.xxl,
+      ),
       children: <Widget>[
         Semantics(
           header: true,
           child: Row(
             children: <Widget>[
-              const Icon(Icons.notifications_active_outlined,
-                  size: 32, color: AppColors.statusGreen),
-              const SizedBox(width: 12),
+              const Icon(
+                Icons.notifications_active_outlined,
+                size: 32,
+                color: AppColors.statusGreen,
+              ),
+              const SizedBox(width: AppSpace.md),
               Expanded(
                 child: Text(
                   widget.title ?? '${alertKindLabel(widget.kind)} sent',
-                  style: const TextStyle(
-                      fontSize: 24, fontWeight: FontWeight.w700),
+                  style: AppType.title.copyWith(fontSize: 26),
                 ),
               ),
             ],
           ),
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: AppSpace.md),
         Container(
           key: const ValueKey<String>('alert-honesty-banner'),
-          padding: const EdgeInsets.all(14),
+          padding: const EdgeInsets.all(AppSpace.lg),
           decoration: BoxDecoration(
-            color: BrandTheme.of(context).paper,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Theme.of(context).dividerColor),
+            color: BrandTheme.of(context).sheet,
+            borderRadius: BorderRadius.circular(AppRadius.md),
+            border: Border.all(color: cs.outlineVariant, width: 1.5),
           ),
-          child: Text(
-            kFamilyNotifiedLine,
-            style: const TextStyle(
-                fontSize: 16, fontWeight: FontWeight.w600, height: 1.35),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Icon(Icons.info_outline, color: cs.onSurface),
+              const SizedBox(width: AppSpace.md),
+              Expanded(
+                child: Text(
+                  kFamilyNotifiedLine,
+                  style: AppType.headline.copyWith(
+                    fontWeight: FontWeight.w600,
+                    height: 1.35,
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
-        const SizedBox(height: 12),
-        _CallButton(dialer: widget.dialer, onPressed: _call),
-        const SizedBox(height: 20),
-        Semantics(
-          header: true,
-          child: const Text('Delivery',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
-        ),
-        const SizedBox(height: 4),
+        const SizedBox(height: AppSpace.md),
+        EmergencyCallButton(dialer: widget.dialer, onPressed: _call),
+        const SizedBox(height: AppSpace.xl),
+        const DsSectionHeader('Delivery'),
         if (_loading)
           const Padding(
-            padding: EdgeInsets.symmetric(vertical: 24),
-            child: Center(child: CircularProgressIndicator()),
+            padding: EdgeInsets.only(top: AppSpace.sm),
+            child: DsSkeletonList(rows: 2, avatar: false),
           )
         else ...<Widget>[
-          if (_error != null)
-            _ErrorBox(message: _error!, onRetry: _retry),
+          if (_error != null) _ErrorBox(message: _error!, onRetry: _retry),
           if (d != null) ...<Widget>[
             Semantics(
               liveRegion: true,
-              child: Text(d.summaryLine,
-                  key: const ValueKey<String>('delivery-summary'),
-                  style: TextStyle(fontSize: 14, color: muted)),
+              child: Text(
+                d.summaryLine,
+                key: const ValueKey<String>('delivery-summary'),
+                style: AppType.secondary.copyWith(fontSize: 14, color: muted),
+              ),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: AppSpace.sm),
             if (people.isEmpty)
               Text(
-                  'No delivery details yet. Nobody else in your family may '
-                  'have the app set up for notifications.',
-                  style: TextStyle(color: muted)),
+                'No delivery details yet. Nobody else in your family may '
+                'have the app set up for notifications.',
+                style: AppType.secondary.copyWith(fontSize: 14, color: muted),
+              ),
             for (final RecipientDeliveries p in people)
               RecipientCard(person: p),
             if (people.any((RecipientDeliveries p) => p.anyFailed))
               Padding(
-                padding: const EdgeInsets.only(top: 8),
+                padding: const EdgeInsets.only(top: AppSpace.sm),
                 child: Text(
                   'Some messages did not go through. Call or message those '
                   'people directly, or use the call button above if you '
                   'need help now.',
-                  style: TextStyle(color: muted),
+                  style: AppType.secondary.copyWith(
+                    fontSize: 14,
+                    color: muted,
+                  ),
                 ),
               ),
             if (!d.isSettled && _polls >= _maxPolls)
               Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: OutlinedButton.icon(
+                padding: const EdgeInsets.only(top: AppSpace.sm),
+                child: DsPillButton(
+                  label: 'Refresh status',
+                  icon: Icons.refresh,
+                  style: DsPillStyle.outlined,
                   onPressed: _retry,
-                  icon: const Icon(Icons.refresh),
-                  label: const Text('Refresh status'),
                 ),
               ),
             if (d.hasSms && d.summary.isActive) ...<Widget>[
-              const SizedBox(height: 16),
+              const SizedBox(height: AppSpace.lg),
               if (_revoked)
-                Row(children: <Widget>[
-                  const Icon(Icons.link_off, size: 20),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text('Location link turned off.',
-                        style: TextStyle(color: muted)),
-                  ),
-                ])
+                Row(
+                  children: <Widget>[
+                    const Icon(Icons.link_off, size: 20),
+                    const SizedBox(width: AppSpace.sm),
+                    Expanded(
+                      child: Text(
+                        'Location link turned off.',
+                        style: AppType.secondary.copyWith(
+                          fontSize: 14,
+                          color: muted,
+                        ),
+                      ),
+                    ),
+                  ],
+                )
               else
-                SizedBox(
-                  height: 48,
-                  child: OutlinedButton.icon(
-                    onPressed: _revoking ? null : _revoke,
-                    icon: const Icon(Icons.link_off),
-                    label: const Text('Turn off location link'),
-                  ),
+                DsPillButton(
+                  label: 'Turn off location link',
+                  icon: Icons.link_off,
+                  style: DsPillStyle.outlined,
+                  onPressed: _revoking ? null : _revoke,
                 ),
             ],
           ],
         ],
-        const SizedBox(height: 12),
+        const SizedBox(height: AppSpace.md),
         ...widget.footer,
       ],
     );
   }
 }
 
-class _CallButton extends StatelessWidget {
-  const _CallButton({required this.dialer, required this.onPressed});
+/// The regional emergency dial button. Opens the phone app's dialler with
+/// the local emergency number; it never places the call by itself.
+class EmergencyCallButton extends StatelessWidget {
+  const EmergencyCallButton({
+    super.key,
+    required this.dialer,
+    required this.onPressed,
+  });
   final EmergencyDialer dialer;
   final VoidCallback onPressed;
 
   @override
   Widget build(BuildContext context) {
     if (!dialer.available) {
-      return const Text(
+      return Text(
         'If you are in danger, call your local emergency number now.',
-        style: TextStyle(fontWeight: FontWeight.w600),
+        style: AppType.body.copyWith(height: 1.4),
       );
     }
-    return SizedBox(
-      height: 56,
-      child: FilledButton.icon(
-        key: const ValueKey<String>('call-emergency-button'),
-        style: FilledButton.styleFrom(
-          backgroundColor: AppColors.sosRed,
-          foregroundColor: Colors.white,
-          minimumSize: const Size.fromHeight(56),
-        ),
+    return KeyedSubtree(
+      key: const ValueKey<String>('call-emergency-button'),
+      child: DsPillButton(
+        label: 'Call emergency services',
+        icon: Icons.call,
+        style: DsPillStyle.danger,
         onPressed: onPressed,
-        icon: const Icon(Icons.call),
-        label: const Text('Call emergency services',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
       ),
     );
   }
@@ -368,14 +395,27 @@ class _ErrorBox extends StatelessWidget {
   Widget build(BuildContext context) {
     return Semantics(
       liveRegion: true,
+      container: true,
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        child: Row(
+        padding: const EdgeInsets.symmetric(vertical: AppSpace.sm),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
-            const Icon(Icons.error_outline, color: AppColors.sosRed),
-            const SizedBox(width: 8),
-            Expanded(child: Text(message)),
-            TextButton(onPressed: onRetry, child: const Text('Retry')),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                const Icon(Icons.error_outline, color: AppColors.sosRed),
+                const SizedBox(width: AppSpace.sm),
+                Expanded(child: Text(message, style: AppType.body)),
+              ],
+            ),
+            const SizedBox(height: AppSpace.sm),
+            DsPillButton(
+              label: 'Retry',
+              style: DsPillStyle.tonal,
+              icon: Icons.refresh,
+              onPressed: onRetry,
+            ),
           ],
         ),
       ),
@@ -392,23 +432,25 @@ class RecipientCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final Color muted = Theme.of(context).colorScheme.onSurfaceVariant;
-    return Card(
-      margin: const EdgeInsets.only(top: 8),
-      elevation: 0,
-      color: BrandTheme.of(context).sheet,
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Text(
-              person.isContact ? '${person.name} (emergency contact)' : person.name,
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-            ),
-            for (final AlertDelivery row in person.rows)
-              _DeliveryRow(row: row, muted: muted),
-          ],
-        ),
+    return Container(
+      margin: const EdgeInsets.only(top: AppSpace.sm),
+      padding: const EdgeInsets.all(AppSpace.md),
+      decoration: BoxDecoration(
+        color: BrandTheme.of(context).sheet,
+        borderRadius: BorderRadius.circular(AppRadius.md),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(
+            person.isContact
+                ? '${person.name} (emergency contact)'
+                : person.name,
+            style: AppType.headline,
+          ),
+          for (final AlertDelivery row in person.rows)
+            _DeliveryRow(row: row, muted: muted),
+        ],
       ),
     );
   }
@@ -430,20 +472,25 @@ class _DeliveryRow extends StatelessWidget {
           '${row.state == DeliveryState.failed ? '. ${deliveryErrorLabel(row.error)}' : ''}',
       excludeSemantics: true,
       child: Padding(
-        padding: const EdgeInsets.only(top: 6),
+        padding: const EdgeInsets.only(top: AppSpace.sm),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            Icon(style.icon, size: 20, color: style.color),
-            const SizedBox(width: 8),
+            Icon(style.icon, size: 22, color: style.color),
+            const SizedBox(width: AppSpace.sm),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
-                  Text('$channel: $state'),
+                  Text('$channel: $state', style: AppType.body),
                   if (row.state == DeliveryState.failed)
-                    Text(deliveryErrorLabel(row.error),
-                        style: TextStyle(fontSize: 13, color: muted)),
+                    Text(
+                      deliveryErrorLabel(row.error),
+                      style: AppType.secondary.copyWith(
+                        fontSize: 14,
+                        color: muted,
+                      ),
+                    ),
                 ],
               ),
             ),

@@ -6,6 +6,7 @@ import '../services/api_client.dart';
 import 'alert_status_screen.dart';
 import '../services/location_service.dart';
 import '../theme/app_theme.dart';
+import '../widgets/ds/ds.dart';
 
 /// The Check In flow, reached from the map's `+` action sheet.
 class CheckInScreen extends StatefulWidget {
@@ -47,8 +48,7 @@ class _CheckInScreenState extends State<CheckInScreen> {
     setState(() {
       _lat = position.latitude;
       _lon = position.longitude;
-      _locationLabel =
-          '${position.latitude.toStringAsFixed(4)}, ${position.longitude.toStringAsFixed(4)}';
+      _locationLabel = 'Location found. It is shared when you check in.';
     });
   }
 
@@ -95,70 +95,71 @@ class _CheckInScreenState extends State<CheckInScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Check In')),
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: _sent && _alertId != null
-              ? AlertStatusBody(
-                  alertId: _alertId!,
-                  kind: AlertKind.checkIn,
-                  title: 'Checked in',
-                  footer: [
-                    TextButton(
-                      onPressed: () => Navigator.of(context).pop(),
-                      child: const Text('Done'),
-                    ),
-                  ],
-                )
-              : _sent
-                  ? _buildSent()
-                  : _buildForm(),
+    if (_sent && _alertId != null) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Check In')),
+        body: SafeArea(
+          child: AlertStatusBody(
+            alertId: _alertId!,
+            kind: AlertKind.checkIn,
+            title: 'Checked in',
+            footer: <Widget>[
+              DsPillButton(
+                label: 'Done',
+                style: DsPillStyle.tonal,
+                onPressed: () => Navigator.of(context).pop(),
+              ),
+            ],
+          ),
         ),
-      ),
-    );
+      );
+    }
+    if (_sent) return _buildSent();
+    return _buildForm();
   }
 
   Widget _buildForm() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
+    final ColorScheme cs = Theme.of(context).colorScheme;
+    return DsPage(
+      title: 'Check In',
+      actions: <Widget>[
+        DsBusyButton(
+          label: 'Check In',
+          icon: Icons.check,
+          busy: _sending,
+          onPressed: _sending ? null : _checkIn,
+        ),
+      ],
+      children: <Widget>[
+        const DsHeading(
           'Share your location with your family',
-          style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+          subtitle: 'Your family will see where you are right now.',
         ),
-        const SizedBox(height: 8),
-        const Text(
-          'Your family will see where you are right now.',
-          style: TextStyle(fontSize: 14, color: AppColors.textMuted),
-        ),
-        const SizedBox(height: 20),
         Container(
           width: double.infinity,
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(AppSpace.lg),
           decoration: BoxDecoration(
-            color: AppColors.surfaceTint,
-            borderRadius: BorderRadius.circular(14),
+            color: BrandTheme.of(context).sheet,
+            borderRadius: BorderRadius.circular(AppRadius.lg),
           ),
           child: Row(
-            children: [
-              const Icon(Icons.my_location, color: AppColors.purple, size: 24),
-              const SizedBox(width: 12),
+            children: <Widget>[
+              DsListRow.iconTile(context, Icons.my_location),
+              const SizedBox(width: AppSpace.md),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'You',
-                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      _locationLabel,
-                      style: const TextStyle(
-                        fontSize: 13,
-                        color: AppColors.textMuted,
+                  children: <Widget>[
+                    const Text('You', style: AppType.body),
+                    const SizedBox(height: AppSpace.xxs),
+                    Semantics(
+                      liveRegion: true,
+                      child: Text(
+                        _locationLabel,
+                        style: AppType.secondary.copyWith(
+                          fontSize: 14,
+                          color: cs.onSurfaceVariant,
+                        ),
                       ),
                     ),
                   ],
@@ -167,7 +168,7 @@ class _CheckInScreenState extends State<CheckInScreen> {
             ],
           ),
         ),
-        const SizedBox(height: 20),
+        const SizedBox(height: AppSpace.xl),
         TextField(
           controller: _note,
           maxLines: 3,
@@ -177,51 +178,28 @@ class _CheckInScreenState extends State<CheckInScreen> {
             hintText: 'e.g. "Picked up the kids"',
           ),
         ),
-        if (_error != null) ...[
-          const SizedBox(height: 12),
-          Text(_error!, style: const TextStyle(color: AppColors.sosRed)),
-        ],
-        const Spacer(),
-        SizedBox(
-          width: double.infinity,
-          child: FilledButton(
-            onPressed: _sending ? null : _checkIn,
-            child: _sending
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: Colors.white,
-                    ),
-                  )
-                : const Text('Check In'),
-          ),
-        ),
+        if (_error != null) DsMessage(_error!),
       ],
     );
   }
 
   Widget _buildSent() {
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        const Icon(Icons.check_circle, size: 72, color: AppColors.statusGreen),
-        const SizedBox(height: 16),
-        const Text(
+    return DsPage(
+      title: 'Check In',
+      showBack: false,
+      actions: <Widget>[
+        DsPillButton(label: 'Done', onPressed: () => Navigator.of(context).pop()),
+      ],
+      children: <Widget>[
+        const SizedBox(height: AppSpace.xxl),
+        const Center(
+          child: Icon(Icons.check_circle, size: 72, color: AppColors.statusGreen),
+        ),
+        const SizedBox(height: AppSpace.lg),
+        const DsHeading(
           'Checked in',
-          style: TextStyle(fontSize: 24, fontWeight: FontWeight.w700),
-        ),
-        const SizedBox(height: 8),
-        const Text(
-          'Your family was notified. Emergency services were NOT contacted.',
-          textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 15, color: AppColors.textMuted),
-        ),
-        const SizedBox(height: 24),
-        FilledButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Done'),
+          subtitle: 'Your family was notified. Emergency services were NOT contacted.',
+          center: true,
         ),
       ],
     );

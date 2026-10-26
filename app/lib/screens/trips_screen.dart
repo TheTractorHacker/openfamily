@@ -5,6 +5,7 @@ import '../models/trip.dart';
 import '../services/speed_units.dart';
 import '../services/trips_service.dart';
 import '../theme/app_theme.dart';
+import '../widgets/ds/ds.dart';
 import '../widgets/trip_widgets.dart';
 import 'driving_report_screen.dart';
 import 'trip_detail_screen.dart';
@@ -119,7 +120,7 @@ class _TripsScreenState extends State<TripsScreen> {
           if (_isSelf)
             IconButton(
               tooltip: 'Recalculate my trips',
-              constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+              constraints: const BoxConstraints(minWidth: kMinTarget, minHeight: kMinTarget),
               onPressed: _recomputing ? null : _recompute,
               icon: const Icon(Icons.refresh_rounded),
             ),
@@ -127,34 +128,31 @@ class _TripsScreenState extends State<TripsScreen> {
       ),
       body: Column(
         children: <Widget>[
+          const SizedBox(height: AppSpace.sm),
+          DsSegmentedTabs(
+            labels: const <String>['7 days', '30 days'],
+            selected: _days == 7 ? 0 : 1,
+            onChanged: (int i) {
+              setState(() => _days = i == 0 ? 7 : 30);
+              _load();
+            },
+          ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-            child: Row(
-              children: <Widget>[
-                Expanded(
-                  child: SegmentedButton<int>(
-                    showSelectedIcon: false,
-                    segments: const <ButtonSegment<int>>[
-                      ButtonSegment<int>(value: 7, label: Text('7 days')),
-                      ButtonSegment<int>(value: 30, label: Text('30 days')),
-                    ],
-                    selected: <int>{_days},
-                    onSelectionChanged: (Set<int> s) {
-                      setState(() => _days = s.first);
-                      _load();
-                    },
-                  ),
-                ),
-                const SizedBox(width: 12),
-                OutlinedButton.icon(
-                  style: OutlinedButton.styleFrom(
-                    minimumSize: const Size(48, 48),
-                  ),
-                  onPressed: _openReport,
-                  icon: const Icon(Icons.insights_rounded),
-                  label: const Text('Report'),
-                ),
-              ],
+            padding: const EdgeInsets.fromLTRB(
+              AppSpace.lg,
+              AppSpace.sm,
+              AppSpace.lg,
+              0,
+            ),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: DsPillButton(
+                label: 'Driving report',
+                icon: Icons.insights_rounded,
+                style: DsPillStyle.tonal,
+                semanticLabel: 'Report',
+                onPressed: _openReport,
+              ),
             ),
           ),
           Expanded(child: _body()),
@@ -165,8 +163,12 @@ class _TripsScreenState extends State<TripsScreen> {
 
   Widget _body() {
     if (_loading) {
-      return const Center(
-        child: CircularProgressIndicator(semanticsLabel: 'Loading trips'),
+      return Semantics(
+        label: 'Loading trips',
+        child: const Padding(
+          padding: EdgeInsets.all(AppSpace.lg),
+          child: DsSkeletonList(rows: 4, avatar: false),
+        ),
       );
     }
     return RefreshIndicator(
@@ -194,27 +196,34 @@ class _TripsScreenState extends State<TripsScreen> {
       builder: (BuildContext context, UnitSystem units, _) {
         return ListView(
           physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+          padding: const EdgeInsets.fromLTRB(
+            AppSpace.lg,
+            AppSpace.xs,
+            AppSpace.lg,
+            AppSpace.xxl,
+          ),
           children: <Widget>[
             if (_error != null)
               _StaleBanner(message: _error!.message, onRetry: _load),
             for (final TripDay d in days) ...<Widget>[
               Padding(
-                padding: const EdgeInsets.fromLTRB(4, 14, 4, 8),
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpace.xs,
+                  AppSpace.lg,
+                  AppSpace.xs,
+                  AppSpace.sm,
+                ),
                 child: Semantics(
                   header: true,
                   child: Text(
                     MaterialLocalizations.of(context).formatFullDate(d.day),
-                    style: const TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                    ),
+                    style: AppType.headline,
                   ),
                 ),
               ),
               for (final Trip t in d.trips)
                 Padding(
-                  padding: const EdgeInsets.only(bottom: 10),
+                  padding: const EdgeInsets.only(bottom: AppSpace.md),
                   child: TripCard(
                     trip: t,
                     units: units,
@@ -222,7 +231,7 @@ class _TripsScreenState extends State<TripsScreen> {
                   ),
                 ),
             ],
-            const SizedBox(height: 8),
+            const SizedBox(height: AppSpace.sm),
             const GpsSpeedNote(),
           ],
         );
@@ -239,24 +248,36 @@ class _StaleBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(top: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      decoration: BoxDecoration(
-        color: AppColors.statusOrange.withValues(alpha: 0.14),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(
-        children: <Widget>[
-          const Icon(Icons.cloud_off_rounded, size: 20),
-          const SizedBox(width: 8),
-          Expanded(child: Text('$message Showing the last loaded trips.')),
-          TextButton(
-            style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
-            onPressed: onRetry,
-            child: const Text('Retry'),
-          ),
-        ],
+    return Semantics(
+      liveRegion: true,
+      container: true,
+      child: Container(
+        margin: const EdgeInsets.only(top: AppSpace.sm),
+        padding: const EdgeInsets.all(AppSpace.md),
+        decoration: BoxDecoration(
+          color: AppColors.statusOrange.withValues(alpha: 0.14),
+          borderRadius: BorderRadius.circular(AppRadius.md),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            const Icon(Icons.cloud_off_rounded, size: 22),
+            const SizedBox(width: AppSpace.sm),
+            Expanded(
+              child: Text(
+                '$message Showing the last loaded trips.',
+                style: AppType.body.copyWith(fontWeight: FontWeight.w500),
+              ),
+            ),
+            TextButton(
+              style: TextButton.styleFrom(
+                minimumSize: const Size(kMinTarget, kMinTarget),
+              ),
+              onPressed: onRetry,
+              child: const Text('Retry'),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -274,7 +295,7 @@ class UnitToggleButton extends StatelessWidget {
         final UnitSystem next =
             u == UnitSystem.imperial ? UnitSystem.metric : UnitSystem.imperial;
         return TextButton(
-          style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+          style: TextButton.styleFrom(minimumSize: const Size(kMinTarget, kMinTarget)),
           onPressed: () => UnitPreferenceService.setUnits(next),
           child: Semantics(
             label: 'Units: ${u.speedLabel}. Switch to ${next.speedLabel}',

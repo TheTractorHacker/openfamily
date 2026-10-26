@@ -4,6 +4,7 @@ import '../models/trip.dart';
 import '../services/speed_units.dart';
 import '../services/trips_service.dart';
 import '../theme/app_theme.dart';
+import 'ds/ds.dart';
 
 String tripClock(BuildContext context, DateTime t) =>
     MaterialLocalizations.of(context)
@@ -55,12 +56,15 @@ class TripModeBadge extends StatelessWidget {
   Widget build(BuildContext context) {
     final Color c = _modeColor(context, mode);
     final BorderRadius radius = mode == TripMode.driving
-        ? BorderRadius.circular(8)
+        ? BorderRadius.circular(AppRadius.sm)
         : mode == TripMode.walking
-            ? BorderRadius.circular(20)
-            : BorderRadius.circular(2);
+            ? BorderRadius.circular(AppRadius.pill)
+            : BorderRadius.circular(AppSpace.xxs);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpace.md,
+        vertical: AppSpace.xs + AppSpace.xxs,
+      ),
       decoration: BoxDecoration(
         color: c.withValues(alpha: 0.12),
         border: Border.all(color: c, width: 1.5),
@@ -70,10 +74,14 @@ class TripModeBadge extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
           Icon(tripModeIcon(mode), size: 18, color: c),
-          const SizedBox(width: 6),
+          const SizedBox(width: AppSpace.xs + AppSpace.xxs),
           Text(
             tripModeLabel(mode),
-            style: TextStyle(color: c, fontWeight: FontWeight.w700),
+            style: AppType.secondary.copyWith(
+              fontSize: 14,
+              color: c,
+              fontWeight: FontWeight.w700,
+            ),
           ),
         ],
       ),
@@ -99,13 +107,10 @@ class TripStat extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
-          Text(
-            value,
-            style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
-          ),
+          Text(value, style: AppType.headline),
           Text(
             label,
-            style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
+            style: AppType.secondary.copyWith(color: cs.onSurfaceVariant),
           ),
         ],
       ),
@@ -142,14 +147,14 @@ class TripCard extends StatelessWidget {
       excludeSemantics: true,
       child: Material(
         color: brand.sheet,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(AppRadius.lg),
         child: InkWell(
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(AppRadius.lg),
           onTap: onTap,
           child: ConstrainedBox(
-            constraints: const BoxConstraints(minHeight: 48),
+            constraints: const BoxConstraints(minHeight: kMinTarget),
             child: Padding(
-              padding: const EdgeInsets.all(14),
+              padding: const EdgeInsets.all(AppSpace.lg),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
@@ -157,23 +162,19 @@ class TripCard extends StatelessWidget {
                     children: <Widget>[
                       TripModeBadge(mode: trip.mode),
                       const Spacer(),
-                      Flexible(
-                        child: Text(
-                          '${tripClock(context, trip.startedAt)} - '
-                          '${tripClock(context, trip.endedAt)}',
-                          style: TextStyle(
-                            fontWeight: FontWeight.w600,
-                            color: cs.onSurface,
-                          ),
-                        ),
-                      ),
                       Icon(Icons.chevron_right, color: cs.onSurfaceVariant),
                     ],
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: AppSpace.sm),
+                  Text(
+                    '${tripClock(context, trip.startedAt)} - '
+                    '${tripClock(context, trip.endedAt)}',
+                    style: AppType.body.copyWith(color: cs.onSurface),
+                  ),
+                  const SizedBox(height: AppSpace.md),
                   Wrap(
-                    spacing: 24,
-                    runSpacing: 10,
+                    spacing: AppSpace.xxl,
+                    runSpacing: AppSpace.md,
                     children: <Widget>[
                       TripStat(
                         label: 'Distance',
@@ -256,34 +257,38 @@ class TripsMessageView extends StatelessWidget {
     final ColorScheme cs = Theme.of(context).colorScheme;
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.all(32),
+      padding: const EdgeInsets.all(AppSpace.xxxl),
       children: <Widget>[
-        const SizedBox(height: 48),
+        const SizedBox(height: AppSpace.xxxl),
         Icon(icon, size: 48, color: cs.onSurfaceVariant),
-        const SizedBox(height: 16),
+        const SizedBox(height: AppSpace.lg),
         Semantics(
           header: true,
           child: Text(
             title,
             textAlign: TextAlign.center,
-            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+            style: AppType.headline.copyWith(fontSize: 19),
           ),
         ),
         if (message != null) ...<Widget>[
-          const SizedBox(height: 8),
+          const SizedBox(height: AppSpace.sm),
           Text(
             message!,
             textAlign: TextAlign.center,
-            style: TextStyle(color: cs.onSurfaceVariant),
+            style: AppType.body.copyWith(
+              fontWeight: FontWeight.w500,
+              height: 1.4,
+              color: cs.onSurfaceVariant,
+            ),
           ),
         ],
         if (onRetry != null) ...<Widget>[
-          const SizedBox(height: 20),
+          const SizedBox(height: AppSpace.xl),
           Center(
-            child: FilledButton(
-              style: FilledButton.styleFrom(minimumSize: const Size(48, 48)),
+            child: DsPillButton(
+              label: 'Retry',
+              icon: Icons.refresh,
               onPressed: onRetry,
-              child: const Text('Retry'),
             ),
           ),
         ],
@@ -301,8 +306,7 @@ class GpsSpeedNote extends StatelessWidget {
     return Text(
       'GPS speed is an estimate from phone location fixes, not a measured '
       'vehicle speed.',
-      style: TextStyle(
-        fontSize: 12,
+      style: AppType.secondary.copyWith(
         color: Theme.of(context).colorScheme.onSurfaceVariant,
       ),
     );

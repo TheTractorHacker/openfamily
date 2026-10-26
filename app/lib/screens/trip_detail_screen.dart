@@ -7,6 +7,7 @@ import '../models/trip.dart';
 import '../services/speed_units.dart';
 import '../services/trips_service.dart';
 import '../theme/app_theme.dart';
+import '../widgets/ds/ds.dart';
 import '../widgets/trip_widgets.dart';
 import 'trips_screen.dart' show UnitToggleButton;
 
@@ -97,12 +98,12 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
             onRefresh: _load,
             child: ListView(
               physics: const AlwaysScrollableScrollPhysics(),
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(AppSpace.lg),
               children: <Widget>[
                 _routeSection(t),
-                const SizedBox(height: 16),
+                const SizedBox(height: AppSpace.lg),
                 _summary(context, t, units),
-                const SizedBox(height: 12),
+                const SizedBox(height: AppSpace.md),
                 const GpsSpeedNote(),
               ],
             ),
@@ -114,11 +115,9 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
 
   Widget _routeSection(Trip t) {
     if (_loading) {
-      return const SizedBox(
-        height: 260,
-        child: Center(
-          child: CircularProgressIndicator(semanticsLabel: 'Loading route'),
-        ),
+      return Semantics(
+        label: 'Loading route',
+        child: const DsSkeleton(height: 260, radius: AppRadius.lg),
       );
     }
     if (_error != null) {
@@ -137,10 +136,10 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
   Widget _summary(BuildContext context, Trip t, UnitSystem units) {
     final BrandTheme brand = BrandTheme.of(context);
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(AppSpace.lg),
       decoration: BoxDecoration(
         color: brand.sheet,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(AppRadius.lg),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -148,23 +147,20 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
           Row(
             children: <Widget>[
               TripModeBadge(mode: t.mode),
-              const SizedBox(width: 12),
+              const SizedBox(width: AppSpace.md),
               Expanded(
                 child: Text(
                   '${tripClock(context, t.startedAt)} - '
                   '${tripClock(context, t.endedAt)}',
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                  ),
+                  style: AppType.headline,
                 ),
               ),
             ],
           ),
           const SizedBox(height: 16),
           Wrap(
-            spacing: 28,
-            runSpacing: 14,
+            spacing: AppSpace.xxl,
+            runSpacing: AppSpace.md,
             children: <Widget>[
               TripStat(
                 label: 'Distance',
@@ -185,17 +181,17 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
             ],
           ),
           if (_stops.isNotEmpty) ...<Widget>[
-            const SizedBox(height: 16),
+            const SizedBox(height: AppSpace.lg),
             Semantics(
               header: true,
               child: const Text(
                 'Stops next to this trip',
-                style: TextStyle(fontWeight: FontWeight.w700),
+                style: AppType.headline,
               ),
             ),
             for (final TripStop s in _stops)
               Padding(
-                padding: const EdgeInsets.only(top: 6),
+                padding: const EdgeInsets.only(top: AppSpace.sm),
                 child: Row(
                   children: <Widget>[
                     const Icon(Icons.pause_circle_outline_rounded, size: 20),
@@ -205,6 +201,9 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
                         '${formatTripDuration(Duration(seconds: s.durationS.round()))}'
                         ' stop, ${tripClock(context, s.arrivedAt)} - '
                         '${tripClock(context, s.departedAt)}',
+                        style: AppType.body.copyWith(
+                          fontWeight: FontWeight.w500,
+                        ),
                       ),
                     ),
                   ],
@@ -259,7 +258,7 @@ class TripRouteMap extends StatelessWidget {
       label: 'Map of the ${tripModeLabel(trip.mode).toLowerCase()} trip route '
           'from start to end',
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(AppRadius.lg),
         child: SizedBox(
           height: height,
           child: FlutterMap(

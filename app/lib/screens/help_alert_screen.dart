@@ -6,6 +6,7 @@ import '../services/api_client.dart';
 import 'alert_status_screen.dart';
 import '../services/location_service.dart';
 import '../theme/app_theme.dart';
+import '../widgets/ds/ds.dart';
 
 /// The Help Alert flow, reached from the map's `+` action sheet.
 ///
@@ -82,102 +83,99 @@ class _HelpAlertScreenState extends State<HelpAlertScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Help Alert')),
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: _sent && _alertId != null
-              ? AlertStatusBody(
-                  alertId: _alertId!,
-                  kind: AlertKind.help,
-                  title: 'Help alert sent',
-                  footer: [
-                    TextButton(
-                      onPressed: () => Navigator.of(context).pop(),
-                      child: const Text('Done'),
-                    ),
-                  ],
-                )
-              : _sent
-                  ? _buildSent()
-                  : _buildForm(),
+    if (_sent && _alertId != null) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Help Alert')),
+        body: SafeArea(
+          child: AlertStatusBody(
+            alertId: _alertId!,
+            kind: AlertKind.help,
+            title: 'Help alert sent',
+            footer: <Widget>[
+              DsPillButton(
+                label: 'Done',
+                style: DsPillStyle.tonal,
+                onPressed: () => Navigator.of(context).pop(),
+              ),
+            ],
+          ),
         ),
-      ),
-    );
+      );
+    }
+    if (_sent) return _buildSent();
+    return _buildForm();
   }
 
   Widget _buildForm() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Icon(Icons.campaign_outlined, size: 56, color: AppColors.purple),
-        const SizedBox(height: 16),
-        const Text(
+    final ColorScheme cs = Theme.of(context).colorScheme;
+    return DsPage(
+      title: 'Help Alert',
+      actions: <Widget>[
+        DsBusyButton(
+          label: 'Send Help Alert',
+          icon: Icons.campaign_outlined,
+          busy: _sending,
+          onPressed: _sending ? null : _send,
+        ),
+      ],
+      children: <Widget>[
+        Center(
+          child: Icon(
+            Icons.campaign_outlined,
+            size: 56,
+            color: BrandTheme.of(context).accentInk,
+          ),
+        ),
+        const SizedBox(height: AppSpace.lg),
+        const DsHeading(
           'Ask your family for help',
-          style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+          subtitle: 'Send a non-emergency help alert with your location. Your '
+              'family members get a notification and can see where you are. '
+              'Emergency contacts are not texted.',
         ),
-        const SizedBox(height: 8),
-        const Text(
-          'Send a non-emergency help alert with your location. Your family '
-          'members get a notification and can see where you are. Emergency '
-          'contacts are not texted.',
-          style: TextStyle(fontSize: 14, color: AppColors.textMuted),
-        ),
-        const SizedBox(height: 8),
-        const Text(
-          'For a real emergency, use SOS instead.',
-          style: TextStyle(
-            fontSize: 13,
-            color: AppColors.sosRed,
-            fontWeight: FontWeight.w600,
+        Container(
+          padding: const EdgeInsets.all(AppSpace.lg),
+          decoration: BoxDecoration(
+            color: BrandTheme.of(context).sheet,
+            borderRadius: BorderRadius.circular(AppRadius.md),
+            border: Border.all(color: cs.outlineVariant, width: 1.5),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              const Icon(Icons.sos, color: AppColors.sosRed),
+              const SizedBox(width: AppSpace.md),
+              Expanded(
+                child: Text(
+                  'For a real emergency, use SOS instead.',
+                  style: AppType.body.copyWith(height: 1.4),
+                ),
+              ),
+            ],
           ),
         ),
-        if (_error != null) ...[
-          const SizedBox(height: 16),
-          Text(_error!, style: const TextStyle(color: AppColors.sosRed)),
-        ],
-        const Spacer(),
-        SizedBox(
-          width: double.infinity,
-          child: FilledButton(
-            onPressed: _sending ? null : _send,
-            child: _sending
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: Colors.white,
-                    ),
-                  )
-                : const Text('Send Help Alert'),
-          ),
-        ),
+        if (_error != null) DsMessage(_error!),
       ],
     );
   }
 
   Widget _buildSent() {
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        const Icon(Icons.check_circle, size: 72, color: AppColors.statusGreen),
-        const SizedBox(height: 16),
-        const Text(
+    return DsPage(
+      title: 'Help Alert',
+      showBack: false,
+      actions: <Widget>[
+        DsPillButton(label: 'Done', onPressed: () => Navigator.of(context).pop()),
+      ],
+      children: <Widget>[
+        const SizedBox(height: AppSpace.xxl),
+        const Center(
+          child: Icon(Icons.check_circle, size: 72, color: AppColors.statusGreen),
+        ),
+        const SizedBox(height: AppSpace.lg),
+        const DsHeading(
           'Help alert sent',
-          style: TextStyle(fontSize: 24, fontWeight: FontWeight.w700),
-        ),
-        const SizedBox(height: 8),
-        const Text(
-          'Your family was notified. Emergency services were NOT contacted.',
-          textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 15, color: AppColors.textMuted),
-        ),
-        const SizedBox(height: 24),
-        FilledButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Done'),
+          subtitle: 'Your family was notified. Emergency services were NOT contacted.',
+          center: true,
         ),
       ],
     );

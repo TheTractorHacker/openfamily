@@ -5,6 +5,7 @@ import '../models/trip.dart';
 import '../services/speed_units.dart';
 import '../services/trips_service.dart';
 import '../theme/app_theme.dart';
+import '../widgets/ds/ds.dart';
 import '../widgets/trip_widgets.dart';
 import 'trips_screen.dart' show UnitToggleButton;
 
@@ -122,34 +123,42 @@ class _ThresholdControl extends StatelessWidget {
         (dragValue ?? units.speedFromMps(thresholdMps)).clamp(min, max);
     final String shown = '${current.round()} ${units.speedLabel}';
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-      child: Row(
-        children: <Widget>[
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Text(
-                  'Speed event threshold: $shown',
-                  style: const TextStyle(fontWeight: FontWeight.w600),
-                ),
-                Semantics(
-                  label: 'Speed event threshold',
-                  value: shown,
-                  child: Slider(
-                    min: min,
-                    max: max,
-                    divisions: (max - min).round() ~/ 5,
-                    value: current,
-                    label: shown,
-                    onChanged: onChanged,
-                    onChangeEnd: onChangeEnd,
-                  ),
-                ),
-              ],
+      padding: const EdgeInsets.fromLTRB(
+        AppSpace.lg,
+        AppSpace.sm,
+        AppSpace.lg,
+        0,
+      ),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(
+          AppSpace.lg,
+          AppSpace.md,
+          AppSpace.lg,
+          AppSpace.xs,
+        ),
+        decoration: BoxDecoration(
+          color: BrandTheme.of(context).sheet,
+          borderRadius: BorderRadius.circular(AppRadius.lg),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text('Speed event threshold: $shown', style: AppType.body),
+            Semantics(
+              label: 'Speed event threshold',
+              value: shown,
+              child: Slider(
+                min: min,
+                max: max,
+                divisions: (max - min).round() ~/ 5,
+                value: current,
+                label: shown,
+                onChanged: onChanged,
+                onChangeEnd: onChangeEnd,
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -231,8 +240,12 @@ class _ReportPeriodViewState extends State<ReportPeriodView>
   Widget build(BuildContext context) {
     super.build(context);
     if (_loading) {
-      return const Center(
-        child: CircularProgressIndicator(semanticsLabel: 'Loading report'),
+      return Semantics(
+        label: 'Loading report',
+        child: const Padding(
+          padding: EdgeInsets.all(AppSpace.lg),
+          child: DsSkeletonList(rows: 4, avatar: false),
+        ),
       );
     }
     return RefreshIndicator(onRefresh: () => _load(silent: true), child: _body());
@@ -261,27 +274,48 @@ class _ReportPeriodViewState extends State<ReportPeriodView>
             '${loc.formatShortDate(s.to.subtract(const Duration(seconds: 1)))}';
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+      padding: const EdgeInsets.fromLTRB(
+        AppSpace.lg,
+        AppSpace.sm,
+        AppSpace.lg,
+        AppSpace.xxl,
+      ),
       children: <Widget>[
-        Text(range, style: TextStyle(color: cs.onSurfaceVariant)),
-        const SizedBox(height: 10),
+        Text(
+          range,
+          style: AppType.body.copyWith(color: cs.onSurfaceVariant),
+        ),
+        const SizedBox(height: AppSpace.md),
         if (_error != null)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: Text(
-              '${_error!.message} Showing the last loaded report.',
-              style: const TextStyle(color: AppColors.statusOrange),
+          Semantics(
+            liveRegion: true,
+            container: true,
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: AppSpace.sm),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  const Icon(Icons.cloud_off_rounded, size: 20),
+                  const SizedBox(width: AppSpace.sm),
+                  Expanded(
+                    child: Text(
+                      '${_error!.message} Showing the last loaded report.',
+                      style: AppType.body.copyWith(fontWeight: FontWeight.w500),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         Container(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(AppSpace.lg),
           decoration: BoxDecoration(
             color: brand.sheet,
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(AppRadius.lg),
           ),
           child: Wrap(
-            spacing: 28,
-            runSpacing: 16,
+            spacing: AppSpace.xxl,
+            runSpacing: AppSpace.lg,
             children: <Widget>[
               TripStat(label: 'All trips', value: '${s.tripCount}'),
               TripStat(label: 'Driving trips', value: '${d.tripCount}'),
@@ -315,27 +349,29 @@ class _ReportPeriodViewState extends State<ReportPeriodView>
         ),
         if (d.speedEventsTruncated)
           Padding(
-            padding: const EdgeInsets.only(top: 8),
+            padding: const EdgeInsets.only(top: AppSpace.sm),
             child: Text(
               'Very busy period: speed events were counted for only part of '
               'the trips, so the real number may be higher.',
-              style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
+              style: AppType.secondary.copyWith(color: cs.onSurfaceVariant),
             ),
           ),
         if (s.stops.isNotEmpty) ...<Widget>[
           Padding(
-            padding: const EdgeInsets.fromLTRB(4, 20, 4, 8),
+            padding: const EdgeInsets.fromLTRB(
+              AppSpace.xs,
+              AppSpace.xl,
+              AppSpace.xs,
+              AppSpace.sm,
+            ),
             child: Semantics(
               header: true,
-              child: const Text(
-                'Stops',
-                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
-              ),
+              child: const Text('Stops', style: AppType.headline),
             ),
           ),
           for (final TripStop st in s.stops)
             ConstrainedBox(
-              constraints: const BoxConstraints(minHeight: 48),
+              constraints: const BoxConstraints(minHeight: kMinTarget),
               child: Semantics(
                 container: true,
                 excludeSemantics: true,
@@ -344,11 +380,11 @@ class _ReportPeriodViewState extends State<ReportPeriodView>
                     ', arrived ${tripClock(context, st.arrivedAt)}, left '
                     '${tripClock(context, st.departedAt)}',
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  padding: const EdgeInsets.symmetric(vertical: AppSpace.sm),
                   child: Row(
                     children: <Widget>[
                       const Icon(Icons.pause_circle_outline_rounded),
-                      const SizedBox(width: 12),
+                      const SizedBox(width: AppSpace.md),
                       Expanded(
                         child: Text(
                           '${tripClock(context, st.arrivedAt)} - '
@@ -359,7 +395,7 @@ class _ReportPeriodViewState extends State<ReportPeriodView>
                         formatTripDuration(
                           Duration(seconds: st.durationS.round()),
                         ),
-                        style: const TextStyle(fontWeight: FontWeight.w600),
+                        style: AppType.body,
                       ),
                     ],
                   ),
@@ -367,13 +403,13 @@ class _ReportPeriodViewState extends State<ReportPeriodView>
               ),
             ),
         ],
-        const SizedBox(height: 16),
+        const SizedBox(height: AppSpace.lg),
         const GpsSpeedNote(),
-        const SizedBox(height: 4),
+        const SizedBox(height: AppSpace.xs),
         Text(
           'Periods follow server time (UTC), so a day or week may start '
           'part-way through your local day.',
-          style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
+          style: AppType.secondary.copyWith(color: cs.onSurfaceVariant),
         ),
       ],
     );
