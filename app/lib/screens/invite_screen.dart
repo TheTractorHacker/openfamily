@@ -7,9 +7,8 @@ import '../services/server_config.dart';
 import '../theme/app_theme.dart';
 import '../widgets/ds/ds.dart';
 
-/// The "Invite" step: explain inviting, then "Send Code" generates an
-/// alphanumeric code and opens the native share sheet (pick a share app →
-/// send). The code is also tap-to-copy.
+/// The "Invite" step: "Create invite code" asks the server for a code and
+/// shows it on screen with a Copy button; the share sheet is optional.
 ///
 /// Used by both the map's `+` → Invite flow and onboarding (where [onDone]
 /// continues to the next step).
@@ -20,6 +19,8 @@ class InviteScreen extends StatefulWidget {
     this.onDone,
     this.doneLabel = 'Done',
     this.step,
+    this.createCode,
+    this.shareCode,
   });
 
   final String? circleName;
@@ -28,6 +29,14 @@ class InviteScreen extends StatefulWidget {
 
   /// Onboarding step number (5 of 6). Null when reached outside onboarding.
   final int? step;
+
+  /// Creates a code on the server. Defaults to [InviteService.createCode];
+  /// injectable for tests.
+  final Future<String> Function()? createCode;
+
+  /// Opens the share sheet with the message. Defaults to `Share.share`;
+  /// injectable for tests.
+  final Future<void> Function(String message, String subject)? shareCode;
 
   @override
   State<InviteScreen> createState() => _InviteScreenState();
@@ -38,40 +47,47 @@ class _InviteScreenState extends State<InviteScreen> {
   bool _creating = false;
   String? _error;
 
-  Future<void> _sendCode() async {
-    String code = _code ?? '';
-    if (code.isEmpty) {
-      setState(() {
-        _creating = true;
-        _error = null;
-      });
-      try {
-        code = await InviteService.createCode();
-      } catch (_) {
-        if (mounted) {
-          setState(() {
-            _creating = false;
-            _error = 'Could not create an invite code. Check your '
-                'connection and try again.';
-          });
-        }
-        return;
-      }
+  /// Creates the code (once). The code is put on screen before anything else
+  /// happens; sharing is a separate, optional step.
+  Future<void> _create() async {
+    if (_creating || _code != null) return;
+    setState(() {
+      _creating = true;
+      _error = null;
+    });
+    try {
+      final String code =
+          await (widget.createCode ?? InviteService.createCode)();
       if (!mounted) return;
       setState(() {
         _creating = false;
         _code = code;
       });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _creating = false;
+        _error = describeInviteError(e);
+      });
     }
+  }
+
+  Future<void> _share() async {
+    final String? code = _code;
+    if (code == null) return;
     try {
-      await Share.share(
-        InviteService.shareMessage(code),
-        subject: InviteService.shareSubject,
-      );
+      final Future<void> Function(String, String) share = widget.shareCode ??
+          (String m, String s) => Share.share(m, subject: s);
+      await share(InviteService.shareMessage(code), InviteService.shareSubject);
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not open the share sheet')),
+          const SnackBar(
+            content: Text(
+              'Could not open the share sheet. Your code is on screen: '
+              'tap Copy code and paste it in a message.',
+            ),
+          ),
         );
       }
     }
@@ -80,7 +96,11 @@ class _InviteScreenState extends State<InviteScreen> {
   Future<void> _copyCode() async {
     final String? code = _code;
     if (code == null) return;
-    await Clipboard.setData(ClipboardData(text: code));
+    try {
+      await Clipboard.setData(ClipboardData(text: code));
+    } catch (_) {
+      return;
+    }
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Code copied to clipboard')),
@@ -106,19 +126,26 @@ class _InviteScreenState extends State<InviteScreen> {
       step: widget.step,
       totalSteps: widget.step == null ? null : 6,
       actions: <Widget>[
-        DsBusyButton(
-          label: hasCode ? 'Share code' : 'Create invite code',
-          icon: hasCode ? Icons.ios_share : Icons.person_add_alt_1,
-          busy: _creating,
-          onPressed: _sendCode,
-        ),
-        if (hasCode)
+        if (!hasCode)
+          DsBusyButton(
+            label: _error == null ? 'Create invite code' : 'Try again',
+            icon: Icons.person_add_alt_1,
+            busy: _creating,
+            onPressed: _create,
+          )
+        else ...<Widget>[
           DsPillButton(
             label: 'Copy code',
             icon: Icons.copy,
-            style: DsPillStyle.tonal,
             onPressed: _copyCode,
           ),
+          DsPillButton(
+            label: 'Share code',
+            icon: Icons.ios_share,
+            style: DsPillStyle.tonal,
+            onPressed: _share,
+          ),
+        ],
         DsPillButton(
           label: widget.doneLabel,
           style: hasCode ? DsPillStyle.outlined : DsPillStyle.tonal,
