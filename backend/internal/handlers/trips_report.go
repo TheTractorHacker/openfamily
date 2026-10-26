@@ -17,13 +17,24 @@ import (
 // circle in common with the subject AND the subject must share their location
 // in that circle (circles.Authz.SharedWith).
 
-// eventCounts holds per-kind event counts. PhoneUse is reserved and always
-// null: the server cannot detect it from GPS.
+// eventCounts holds per-kind event counts. PhoneUse comes only from the phone
+// sensor: a number for members with driving_sensor_enabled, otherwise null.
 type eventCounts struct {
 	Speeding   int  `json:"speeding"`
 	HardBrake  int  `json:"hard_brake"`
 	RapidAccel int  `json:"rapid_accel"`
 	PhoneUse   *int `json:"phone_use"`
+
+	phone int // accumulated before the enabled rule is applied
+}
+
+// finalizePhoneUse exposes the phone_use count only for sensor members.
+func (c *eventCounts) finalizePhoneUse(enabled bool) {
+	c.PhoneUse = nil
+	if enabled {
+		n := c.phone
+		c.PhoneUse = &n
+	}
 }
 
 func (c *eventCounts) add(kind string, n int) {
@@ -34,6 +45,8 @@ func (c *eventCounts) add(kind string, n int) {
 		c.HardBrake += n
 	case trips.EventRapidAccel:
 		c.RapidAccel += n
+	case trips.EventPhoneUse:
+		c.phone += n
 	}
 }
 
@@ -54,6 +67,7 @@ type reportMember struct {
 	Events         eventCounts `json:"events"`
 	PreviousEvents eventCounts `json:"previous_events"`
 
+	sensor        bool
 	prevDrives    int
 	prevDistanceM float64
 	prevTopSpeed  float64
@@ -171,14 +185,14 @@ func (s *Server) TripsReport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	members := map[string]*reportMember{}
-	nameRows, err := s.Pool.Query(r.Context(), `SELECT id::text, name FROM users WHERE id = ANY($1::uuid[])`, ids)
+	nameRows, err := s.Pool.Query(r.Context(), `SELECT id::text, name, driving_sensor_enabled FROM users WHERE id = ANY($1::uuid[])`, ids)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load members")
 		return
 	}
 	for nameRows.Next() {
 		m := &reportMember{}
-		if err := nameRows.Scan(&m.UserID, &m.Name); err == nil {
+		if err := nameRows.Scan(&m.UserID, &m.Name, &m.sensor); err == nil {
 			members[m.UserID] = m
 		}
 	}
@@ -217,7 +231,7 @@ func (s *Server) TripsReport(w http.ResponseWriter, r *http.Request) {
 
 	evRows, err := s.Pool.Query(r.Context(), `
 		SELECT user_id::text, kind, (started_at >= $3) AS cur, count(*)
-		FROM trip_events
+		FROM trip_events_effective
 		WHERE user_id = ANY($1::uuid[]) AND started_at >= $2 AND started_at < $4
 		GROUP BY 1, 2, 3`, ids, per.prevStart, per.start, per.end)
 	if err != nil {
@@ -254,8 +268,18 @@ func (s *Server) TripsReport(w http.ResponseWriter, r *http.Request) {
 		return list[a].UserID < list[b].UserID
 	})
 	var cur, prev reportTotals
+	sensorMembers := []string{}
+	curPhone, prevPhone, anySensor := 0, 0, false
 	out := make([]reportMember, 0, len(list))
 	for _, m := range list {
+		m.Events.finalizePhoneUse(m.sensor)
+		m.PreviousEvents.finalizePhoneUse(m.sensor)
+		if m.sensor {
+			anySensor = true
+			sensorMembers = append(sensorMembers, m.UserID)
+			curPhone += m.Events.phone
+			prevPhone += m.PreviousEvents.phone
+		}
 		cur.Drives += m.Drives
 		cur.DistanceM += m.DistanceM
 		if m.TopSpeedMps > cur.TopSpeedMps {
@@ -278,11 +302,14 @@ func (s *Server) TripsReport(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, *m)
 	}
+	if anySensor {
+		cur.Events.PhoneUse, prev.Events.PhoneUse = &curPhone, &prevPhone
+	}
 	ep := s.tripStore().EventParams
 	writeJSON(w, http.StatusOK, map[string]any{
 		"period": period, "start": per.startDay, "end": per.endDay,
 		"prev_start": per.prevStartDay, "prev_end": per.prevEndDay,
-		"totals": cur, "previous_totals": prev, "members": out,
+		"totals": cur, "previous_totals": prev, "members": out, "sensor_members": sensorMembers,
 		"thresholds": reportThresholds{SpeedingMps: ep.SpeedingMps, SpeedingSeconds: ep.SpeedingSeconds,
 			HardBrakeMps2: ep.HardBrakeMps2, RapidAccelMps2: ep.RapidAccelMps2},
 		"estimated": true,

@@ -258,6 +258,8 @@ func main() {
 		r.Get("/push/stream", srv.PushStream)
 		r.Post("/push/ack", srv.AckPush)
 		r.Post("/locations", srv.IngestLocation)
+		// Motion-sensor driving events (docs/driving.md).
+		r.Post("/trips/sensor-events", srv.IngestSensorEvents)
 		// Offline backfill: points queued while the device had no data,
 		// delivered newest-first once connectivity returns. Relaxed freshness
 		// rules, no geofence/broadcast side effects (see location_batch.go).
