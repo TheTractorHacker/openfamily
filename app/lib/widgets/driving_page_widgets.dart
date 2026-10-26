@@ -114,12 +114,12 @@ class _NowRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final int? mph = member.speedMph;
+    final double? mps = member.speedMps;
     final String speed =
-        mph == null ? 'Driving' : 'Driving ${units.formatSpeed(mph / kMpsToMph)}';
+        mps == null ? 'Driving' : 'Driving ${units.formatSpeed(mps)}';
     return Semantics(
       button: true,
-      label: '$name. $speed${mph == null ? '' : ', GPS speed'}. Opens trips.',
+      label: '$name. $speed${mps == null ? '' : ', GPS speed'}. Opens trips.',
       excludeSemantics: true,
       onTap: onTap,
       child: Material(
@@ -150,7 +150,7 @@ class _NowRow extends StatelessWidget {
                           color: BrandTheme.of(context).accentInk,
                         ),
                       ),
-                      if (mph != null)
+                      if (mps != null)
                         Text(
                           'GPS speed',
                           style: AppType.secondary.copyWith(

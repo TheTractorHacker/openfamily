@@ -2,8 +2,9 @@ import 'dart:async';
 
 
 import 'package:connectivity_plus/connectivity_plus.dart';
-import 'package:flutter/foundation.dart' show visibleForTesting;
+import 'package:flutter/foundation.dart' show ValueListenable, visibleForTesting;
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart' show Ticker;
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' hide Circle;
 
@@ -18,6 +19,11 @@ import '../services/circle_service.dart';
 import '../services/device_service.dart';
 import '../services/family_service.dart';
 import '../services/location_reporter.dart';
+import '../services/follow_camera.dart';
+import '../services/marker_motion.dart';
+import '../services/member_motion_hub.dart';
+import '../services/speed_units.dart';
+import '../services/watch_client.dart';
 import '../services/location_outbox.dart';
 import '../services/location_service.dart';
 import '../services/location_sharing_service.dart';
@@ -67,6 +73,8 @@ class MapScreen extends StatefulWidget {
     this.circleService,
     this.placesLoader,
     this.selectionStore,
+    this.motionHub,
+    this.watchClient,
   });
 
   /// When hosted in the app shell, the live roster is published here so the
@@ -83,6 +91,12 @@ class MapScreen extends StatefulWidget {
 
   /// Injected in tests; defaults to the shared-preferences store.
   final CircleSelectionStore? selectionStore;
+
+  /// Injected in tests; defaults to [MemberMotionHub.shared].
+  final MemberMotionHub? motionHub;
+
+  /// Injected in tests; defaults to a client that POSTs /locations/watch.
+  final WatchClient? watchClient;
 
   @override
   State<MapScreen> createState() => _MapScreenState();
@@ -153,10 +167,37 @@ class _MapScreenState extends State<MapScreen>
   // Camera animation controller for smooth recentering.
   AnimationController? _cameraAnim;
 
+  // --- live motion + follow ------------------------------------------------
+  // None of this uses setState on the screen: the ticker drives the motion
+  // hub, the hub notifies the marker layer, and the follow camera moves the
+  // map through the controller.
+  late final MemberMotionHub _hub = widget.motionHub ?? MemberMotionHub.shared;
+  late final WatchClient _watch = widget.watchClient ?? const WatchClient();
+  Ticker? _motionTicker;
+
+  /// The member the camera is locked to (null = free camera) plus what the
+  /// "Following" pill shows. [FollowUi.locked] is false after the user pans
+  /// away until they hit recenter.
+  late final FollowCamera _follow = FollowCamera(
+    moveTo: (LatLng c, double z) => _mapController.move(c, z),
+    camera: () {
+      final MapCamera cam = _mapController.camera;
+      return (center: cam.center, zoom: cam.zoom);
+    },
+  );
+  final ValueNotifier<FollowUi?> _followUi = ValueNotifier<FollowUi?>(null);
+
+  Timer? _watchTimer;
+  bool _appResumed = true;
+  bool _screenVisible = true;
+  ValueListenable<TickerModeData>? _tickerMode;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _motionTicker = createTicker(_onMotionTick);
+    unawaited(UnitPreferenceService.ensureLoaded());
     _familyService.onMembersChanged = _onMembersChanged;
     _familyService.onUserId = _onUserId;
     _familyService.onCircleGone = _onCircleGone;
@@ -182,6 +223,30 @@ class _MapScreenState extends State<MapScreen>
     });
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // TickerMode tells us when this screen is hidden (another tab, a pushed
+    // route). getValuesNotifier does not subscribe the element, so tab switches
+    // still rebuild nothing here.
+    final ValueListenable<TickerModeData> mode =
+        TickerMode.getValuesNotifier(context);
+    if (!identical(mode, _tickerMode)) {
+      _tickerMode?.removeListener(_onTickerMode);
+      _tickerMode = mode..addListener(_onTickerMode);
+      _onTickerMode();
+    }
+  }
+
+  void _onTickerMode() {
+    final bool visible = _tickerMode?.value.enabled ?? true;
+    if (visible == _screenVisible) return;
+    _screenVisible = visible;
+    _syncWatch();
+    // Coming back: catch the pins and the camera up to where the member is.
+    if (visible) _ensureTicker();
+  }
+
   void _onMembersChanged(List<Member> members) {
     if (!mounted) return;
     _members = members;
@@ -201,7 +266,110 @@ class _MapScreenState extends State<MapScreen>
 
   /// Pushes the current roster to the map layers and the People list.
   void _publishRoster() {
-    _roster.value = _liveMembers();
+    final List<Member> live = _liveMembers();
+    // The motion tracks see the new fix BEFORE the widgets do, so a pin and
+    // its caption never render the new roster against the old track.
+    if (_hub.update(live)) _ensureTicker();
+    _roster.value = live;
+    _checkFollowed(live);
+  }
+
+  void _ensureTicker() {
+    final Ticker? t = _motionTicker;
+    if (t != null && !t.isActive) t.start();
+  }
+
+  void _onMotionTick(Duration elapsed) {
+    final bool more = _hub.tick();
+    final String? fid = _follow.targetId;
+    final bool intro =
+        _follow.update(elapsed, fid == null ? null : _hub.sampleOf(fid));
+    if (!more && !intro) _motionTicker?.stop();
+  }
+
+  // --- follow mode ---------------------------------------------------------
+
+  /// Centers on [m] and locks the camera to their smoothed position.
+  void _followMember(Member m) {
+    if (!_mapReady) return;
+    if ((_hub.sampleOf(m.id)?.position ?? m.position) == null) return;
+    _cameraAnim?.dispose();
+    _cameraAnim = null;
+    _follow.start(m.id);
+    _followUi.value = FollowUi(id: m.id, name: m.name, locked: true);
+    _ensureTicker();
+    _syncWatch();
+  }
+
+  /// Re-locks onto the member already being followed (the recenter button).
+  void _refollow() {
+    final String? id = _follow.targetId;
+    if (id == null) return;
+    for (final Member m in _roster.value) {
+      if (m.id == id) {
+        _followMember(m);
+        return;
+      }
+    }
+    _stopFollow();
+  }
+
+  /// Ends following entirely (X on the pill, member offline, screen gone).
+  void _stopFollow() {
+    _follow.stop();
+    if (_followUi.value != null) _followUi.value = null;
+    _syncWatch();
+  }
+
+  /// The user took the camera: stop locking but keep the pill so they can
+  /// recenter.
+  void _breakFollowLock() {
+    final FollowUi? ui = _followUi.value;
+    if (ui == null || !ui.locked) return;
+    _follow.breakLock();
+    _followUi.value = FollowUi(id: ui.id, name: ui.name, locked: false);
+  }
+
+  /// Stops following when the member goes away or offline.
+  void _checkFollowed(List<Member> live) {
+    final String? id = _follow.targetId;
+    if (id == null) return;
+    Member? m;
+    for (final Member x in live) {
+      if (x.id == id) {
+        m = x;
+        break;
+      }
+    }
+    if (m == null || m.position == null || m.status == MemberStatus.stopped) {
+      _stopFollow();
+      return;
+    }
+    final FollowUi? ui = _followUi.value;
+    if (ui != null && ui.name != m.name) {
+      _followUi.value = FollowUi(id: ui.id, name: m.name, locked: ui.locked);
+    }
+  }
+
+  // --- watch pings -----------------------------------------------------------
+
+  void _syncWatch() {
+    final String? id = _follow.targetId;
+    final bool should =
+        id != null && id != _userId && _appResumed && _screenVisible;
+    if (should && _watchTimer == null) {
+      _pingWatch();
+      _watchTimer = Timer.periodic(WatchClient.renewEvery, (_) => _pingWatch());
+    } else if (!should) {
+      _watchTimer?.cancel();
+      _watchTimer = null;
+    }
+  }
+
+  void _pingWatch() {
+    final String? id = _follow.targetId;
+    if (id == null) return;
+    unawaited(_watch.watch(id, circleId: _selection.effectiveId));
   }
 
   /// Retries the initial family load automatically when the network returns
@@ -377,6 +545,11 @@ class _MapScreenState extends State<MapScreen>
     _reporter.stop();
     _familyService.dispose();
     _cameraAnim?.dispose();
+    _watchTimer?.cancel();
+    _tickerMode?.removeListener(_onTickerMode);
+    _motionTicker?.dispose();
+    _hub.reset();
+    _followUi.dispose();
     _roster.dispose();
     if (widget.membersSink == null) _membersListenable.dispose();
     super.dispose();
@@ -389,7 +562,11 @@ class _MapScreenState extends State<MapScreen>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.paused) {
       _reporter.stop();
+      _appResumed = false;
+      _syncWatch();
     } else if (state == AppLifecycleState.resumed) {
+      _appResumed = true;
+      _syncWatch();
       _onResumed();
     }
   }
@@ -498,6 +675,7 @@ class _MapScreenState extends State<MapScreen>
   /// (which always carries the freshest GPS fix); falls back to the live device
   /// position when the caller has no backend location yet.
   Future<void> _centerOnUser() async {
+    _stopFollow();
     final String? uid = _userId;
     if (uid != null) {
       for (final Member m in _members) {
@@ -514,6 +692,7 @@ class _MapScreenState extends State<MapScreen>
 
   /// Expands a tapped cluster so its members fan out and become tappable.
   void _expandCluster(String clusterId, LatLng centroid) {
+    _stopFollow();
     setState(() => _expandedClusters.add(clusterId));
     _animateTo(centroid, _expandZoom);
   }
@@ -528,6 +707,9 @@ class _MapScreenState extends State<MapScreen>
     final double? prev = _lastZoom;
     _lastZoom = camera.zoom;
     _camera = camera;
+    // Any user pan / pinch / fling takes the camera back. Programmatic moves
+    // (the follow lock itself) report hasGesture == false.
+    if (hasGesture && _follow.targetId != null) _breakFollowLock();
     if (hasGesture &&
         _expandedClusters.isNotEmpty &&
         prev != null &&
@@ -575,6 +757,17 @@ class _MapScreenState extends State<MapScreen>
         builder: (_) => MemberProfileScreen(member: member),
       ),
     );
+  }
+
+  void _openFollowedDetails() {
+    final String? id = _follow.targetId;
+    if (id == null) return;
+    for (final Member m in _roster.value) {
+      if (m.id == id) {
+        _openMemberDetails(m);
+        return;
+      }
+    }
   }
 
   void _openSos() {
@@ -673,11 +866,9 @@ class _MapScreenState extends State<MapScreen>
     );
   }
 
-  /// Centers the map on a member picked from the People list.
-  void _focusMember(Member m) {
-    final LatLng? p = m.position;
-    if (p != null && _mapReady) _animateTo(p, 16);
-  }
+  /// A member picked from the People list or tapped on the map: center on
+  /// them and follow.
+  void _focusMember(Member m) => _followMember(m);
 
   void _openPlaces() {
     Navigator.of(context)
@@ -755,6 +946,17 @@ class _MapScreenState extends State<MapScreen>
       onOpenCircle: _openCircle,
       onJoinCircle: _openJoinCircle,
       onOpenPlaces: _openPlaces,
+      topOverlay: ValueListenableBuilder<FollowUi?>(
+        valueListenable: _followUi,
+        builder: (BuildContext _, FollowUi? ui, __) => ui == null
+            ? const SizedBox.shrink()
+            : FollowPill(
+                ui: ui,
+                onStop: _stopFollow,
+                onRecenter: _refollow,
+                onOpen: _openFollowedDetails,
+              ),
+      ),
       map: FlutterMap(
         mapController: _mapController,
         options: MapOptions(
@@ -795,7 +997,7 @@ class _MapScreenState extends State<MapScreen>
                   for (final Member m in members)
                     if (_showRange(m))
                       CircleMarker(
-                        point: m.position!,
+                        point: _hub.sampleOf(m.id)?.position ?? m.position!,
                         radius: _rangeFor(m),
                         useRadiusInMeter: true,
                         color: AppColors.accuracyBlue.withValues(alpha: 0.12),
@@ -813,11 +1015,17 @@ class _MapScreenState extends State<MapScreen>
             valueListenable: _roster,
             builder: (BuildContext context, List<Member> members, _) {
               PerfMonitor.instance.countBuild('MapMarkers');
-              return MemberMarkerLayer(
-                members: members,
-                expandedClusters: _expandedClusters,
-                onMemberTap: _openMemberDetails,
-                onClusterTap: _expandCluster,
+              return ValueListenableBuilder<FollowUi?>(
+                valueListenable: _followUi,
+                builder: (BuildContext _, FollowUi? follow, __) =>
+                    MemberMarkerLayer(
+                  members: members,
+                  expandedClusters: _expandedClusters,
+                  onMemberTap: _focusMember,
+                  onClusterTap: _expandCluster,
+                  motion: _hub,
+                  followId: follow?.id,
+                ),
               );
             },
           ),
@@ -832,6 +1040,8 @@ class _MapScreenState extends State<MapScreen>
 /// GPS-accuracy state (which implies significant uncertainty).
 bool _showRange(Member m) =>
     m.position != null &&
+    // No accuracy ring around a pin that is driving (it would trail behind).
+    !(m.speedMps != null && m.speedMps! > 3) &&
     ((m.accuracyMeters != null && m.accuracyMeters! > 0) ||
         m.status == MemberStatus.gpsIssue);
 
@@ -841,6 +1051,92 @@ double _rangeFor(Member m) =>
     (m.accuracyMeters != null && m.accuracyMeters! > 0)
         ? m.accuracyMeters!
         : kApproxZoneRadiusMeters;
+
+/// What the "Following" pill shows.
+@immutable
+class FollowUi {
+  const FollowUi({required this.id, required this.name, required this.locked});
+  final String id;
+  final String name;
+
+  /// False once the user has panned away; the pill then offers recenter.
+  final bool locked;
+
+  @override
+  bool operator ==(Object other) =>
+      other is FollowUi &&
+      other.id == id &&
+      other.name == name &&
+      other.locked == locked;
+
+  @override
+  int get hashCode => Object.hash(id, name, locked);
+}
+
+/// "Following Ava" pill with a recenter button (when the lock was broken) and
+/// an X that ends following.
+class FollowPill extends StatelessWidget {
+  const FollowPill({
+    super.key,
+    required this.ui,
+    required this.onStop,
+    required this.onRecenter,
+    this.onOpen,
+  });
+
+  final FollowUi ui;
+  final VoidCallback onStop;
+  final VoidCallback onRecenter;
+  final VoidCallback? onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme cs = Theme.of(context).colorScheme;
+    return Material(
+      color: cs.surface,
+      elevation: 3,
+      shape: const StadiumBorder(),
+      child: Padding(
+        padding: const EdgeInsets.only(left: 14),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Icon(
+              ui.locked ? Icons.my_location : Icons.location_searching,
+              size: 18,
+              color: cs.primary,
+            ),
+            const SizedBox(width: 8),
+            Flexible(
+              child: InkWell(
+                onTap: onOpen,
+                child: Text(
+                  'Following ${ui.name}',
+                  key: const ValueKey<String>('follow-pill-label'),
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+              ),
+            ),
+            if (!ui.locked)
+              IconButton(
+                key: const ValueKey<String>('follow-recenter'),
+                tooltip: 'Recenter on ${ui.name}',
+                icon: const Icon(Icons.my_location),
+                onPressed: onRecenter,
+              ),
+            IconButton(
+              key: const ValueKey<String>('follow-stop'),
+              tooltip: 'Stop following ${ui.name}',
+              icon: const Icon(Icons.close),
+              onPressed: onStop,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
 /// Interpolates between two [LatLng]s for smooth camera animation.
 class _LatLngTween extends Tween<LatLng> {
@@ -859,11 +1155,16 @@ class _LatLngTween extends Tween<LatLng> {
 /// pans and zooms.
 ///
 /// Lives inside [FlutterMap]'s children so it can read the camera via
-/// [MapCamera.of], which also subscribes it to camera changes (it rebuilds on
-/// every pan/zoom). The bubble widgets themselves are cached per member
-/// instance: while panning, only marker POSITIONS are recomputed; an
-/// unchanged member's bubble subtree (shadows, ring, avatar) is not rebuilt
-/// because the very same widget instance is handed back to the framework.
+/// [MapCamera.of], which also subscribes it to camera changes. The bubble
+/// widgets themselves are cached per member instance: while panning or
+/// animating only marker POSITIONS are recomputed.
+///
+/// Live motion: with a [motion] hub the layer also listens to its per-frame
+/// notifier and re-places only the markers (setState on this State alone, the
+/// screen above is untouched). Clustering is recomputed only when the roster,
+/// the camera, the expanded set or the followed member change, or when a
+/// moving member has drifted far enough on screen to matter, never on every
+/// animation frame. The followed member is never clustered.
 @visibleForTesting
 class MemberMarkerLayer extends StatefulWidget {
   const MemberMarkerLayer({
@@ -871,20 +1172,70 @@ class MemberMarkerLayer extends StatefulWidget {
     required this.expandedClusters,
     required this.onMemberTap,
     required this.onClusterTap,
+    this.motion,
+    this.followId,
   });
 
   final List<Member> members;
   final Set<String> expandedClusters;
   final ValueChanged<Member> onMemberTap;
   final void Function(String clusterId, LatLng centroid) onClusterTap;
+  final MemberMotionHub? motion;
+  final String? followId;
+
+  /// How many times clustering ran (tests assert it is not per frame).
+  static int debugClusterRuns = 0;
 
   @override
   State<MemberMarkerLayer> createState() => _MemberMarkerLayerState();
 }
 
 class _MemberMarkerLayerState extends State<MemberMarkerLayer> {
+  /// A moving member that drifts this far (logical px) from where it was
+  /// clustered forces a re-cluster.
+  static const double _reclusterDriftPx = 24;
+
   /// Bubble widgets by cache key, valid for the roster they were built from.
   Map<Object, Widget> _bubbles = <Object, Widget>{};
+
+  // Cached clustering result and the inputs it was computed from.
+  List<BubblePlacement> _placements = const <BubblePlacement>[];
+  List<Member>? _placedMembers;
+  MapCamera? _placedCamera;
+  String _placedExpanded = '';
+  String? _placedFollow;
+  final Map<String, Offset> _placedScreen = <String, Offset>{};
+  final Map<String, LatLng> _placedPos = <String, LatLng>{};
+
+  @override
+  void initState() {
+    super.initState();
+    widget.motion?.frames.addListener(_onFrame);
+  }
+
+  @override
+  void didUpdateWidget(MemberMarkerLayer old) {
+    super.didUpdateWidget(old);
+    if (old.motion != widget.motion) {
+      old.motion?.frames.removeListener(_onFrame);
+      widget.motion?.frames.addListener(_onFrame);
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.motion?.frames.removeListener(_onFrame);
+    super.dispose();
+  }
+
+  void _onFrame() {
+    if (!mounted) return;
+    PerfMonitor.instance.countBuild('MarkerFrame');
+    setState(() {});
+  }
+
+  LatLng _posOf(Member m) =>
+      widget.motion?.sampleOf(m.id)?.position ?? m.position!;
 
   Widget _memberBubble(Member m, Map<Object, Widget> next) {
     // Keyed by the Member instance: a new instance (any field changed) gets
@@ -914,24 +1265,84 @@ class _MemberMarkerLayerState extends State<MemberMarkerLayer> {
     return bubble;
   }
 
+  bool _needsCluster(MapCamera camera, String expanded) {
+    if (!identical(_placedMembers, widget.members) ||
+        !identical(_placedCamera, camera) ||
+        _placedExpanded != expanded ||
+        _placedFollow != widget.followId) {
+      return true;
+    }
+    final MemberMotionHub? hub = widget.motion;
+    if (hub == null) return false;
+    for (final MapEntry<String, Offset> e in _placedScreen.entries) {
+      final MotionSample? s = hub.sampleOf(e.key);
+      if (s == null || !s.animating) continue;
+      final p = camera.latLngToScreenPoint(s.position);
+      if ((Offset(p.x, p.y) - e.value).distance > _reclusterDriftPx) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  void _cluster(MapCamera camera, String expanded) {
+    MemberMarkerLayer.debugClusterRuns++;
+    Offset toScreen(LatLng latLng) {
+      final p = camera.latLngToScreenPoint(latLng);
+      return Offset(p.x, p.y);
+    }
+
+    final String? follow = widget.followId;
+    final List<Member> clusterable = <Member>[];
+    Member? followed;
+    for (final Member m in widget.members) {
+      if (m.position == null) continue;
+      if (m.id == follow) {
+        followed = m;
+      } else {
+        clusterable.add(m);
+      }
+    }
+    final List<BubblePlacement> placed = placeBubbles(
+      clusterable,
+      toScreenOffset: toScreen,
+      toLatLng: camera.offsetToCrs,
+      expandedClusterIds: widget.expandedClusters,
+      positionOf: _posOf,
+    );
+    _placedScreen.clear();
+    _placedPos.clear();
+    for (final Member m in widget.members) {
+      if (m.position == null) continue;
+      final LatLng p = _posOf(m);
+      _placedPos[m.id] = p;
+      _placedScreen[m.id] = toScreen(p);
+    }
+    _placements = <BubblePlacement>[
+      ...placed,
+      if (followed != null)
+        BubblePlacement(position: _posOf(followed), member: followed),
+    ];
+    _placedMembers = widget.members;
+    _placedCamera = camera;
+    _placedExpanded = expanded;
+    _placedFollow = follow;
+  }
+
   @override
   Widget build(BuildContext context) {
     PerfMonitor.instance.countBuild('MapMarkerLayer');
     final MapCamera camera = MapCamera.of(context);
-    final List<BubblePlacement> placements = placeBubbles(
-      widget.members,
-      toScreenOffset: (latLng) {
-        final p = camera.latLngToScreenPoint(latLng);
-        return Offset(p.x, p.y);
-      },
-      toLatLng: camera.offsetToCrs,
-      expandedClusterIds: widget.expandedClusters,
-    );
+    final String expanded = widget.expandedClusters.isEmpty
+        ? ''
+        : (widget.expandedClusters.toList()..sort()).join('|');
+    if (_needsCluster(camera, expanded)) _cluster(camera, expanded);
 
     final Map<Object, Widget> next = <Object, Widget>{};
+    final MemberMotionHub? hub = widget.motion;
     final MarkerLayer layer = MarkerLayer(
       markers: [
-        for (final BubblePlacement p in placements)
+        for (final BubblePlacement p in _placements)
           if (p.isCluster)
             Marker(
               point: p.position,
@@ -942,7 +1353,7 @@ class _MemberMarkerLayerState extends State<MemberMarkerLayer> {
             )
           else
             Marker(
-              point: p.position,
+              point: _livePoint(hub, p),
               width: MemberAvatarBubble.markerWidth,
               height: MemberAvatarBubble.markerSizeFor(p.member!).height,
               alignment: MemberAvatarBubble.markerAlignmentFor(p.member!),
@@ -953,5 +1364,15 @@ class _MemberMarkerLayerState extends State<MemberMarkerLayer> {
     // Entries not used this pass belong to members that moved on.
     _bubbles = next;
     return layer;
+  }
+
+  /// A lone member follows its smoothed position; a fanned-out member keeps
+  /// its fan-out spot.
+  LatLng _livePoint(MemberMotionHub? hub, BubblePlacement p) {
+    final MotionSample? s = hub?.sampleOf(p.member!.id);
+    if (s == null) return p.position;
+    final LatLng? atCluster = _placedPos[p.member!.id];
+    if (atCluster != null && atCluster != p.position) return p.position;
+    return s.position;
   }
 }

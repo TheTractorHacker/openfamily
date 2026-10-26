@@ -88,13 +88,15 @@ List<MemberCluster> clusterMembers(
   List<Member> members, {
   required LatLngToScreenOffset toScreenOffset,
   double clusterRadiusPx = kClusterRadiusPx,
+  LatLng Function(Member member)? positionOf,
 }) {
+  LatLng pos(Member m) => positionOf != null ? positionOf(m) : m.position!;
   // Members without a reported location have no bubble and are skipped.
   final List<Member> positioned =
       members.where((m) => m.position != null).toList();
 
   final Map<String, Offset> points = <String, Offset>{
-    for (final Member m in positioned) m.id: toScreenOffset(m.position!),
+    for (final Member m in positioned) m.id: toScreenOffset(pos(m)),
   };
 
   final List<MemberCluster> clusters = <MemberCluster>[];
@@ -122,7 +124,7 @@ List<MemberCluster> clusterMembers(
     clusters.add(
       MemberCluster(
         id: _clusterId(group),
-        centroid: _centroid(group),
+        centroid: _centroid(group, pos),
         members: group,
       ),
     );
@@ -145,11 +147,14 @@ List<BubblePlacement> placeBubbles(
   double clusterRadiusPx = kClusterRadiusPx,
   double fanOutRadiusPx = kFanOutRadiusPx,
   Set<String> expandedClusterIds = const {},
+  LatLng Function(Member member)? positionOf,
 }) {
+  LatLng pos(Member m) => positionOf != null ? positionOf(m) : m.position!;
   final List<MemberCluster> clusters = clusterMembers(
     members,
     toScreenOffset: toScreenOffset,
     clusterRadiusPx: clusterRadiusPx,
+    positionOf: positionOf,
   );
   final List<BubblePlacement> placements = <BubblePlacement>[];
 
@@ -157,12 +162,12 @@ List<BubblePlacement> placeBubbles(
     if (cluster.members.length == 1) {
       placements.add(
         BubblePlacement(
-          position: cluster.members.first.position!,
+          position: pos(cluster.members.first),
           member: cluster.members.first,
         ),
       );
     } else if (expandedClusterIds.contains(cluster.id)) {
-      final Offset centroid = _screenCentroid(cluster.members, toScreenOffset);
+      final Offset centroid = _screenCentroid(cluster.members, toScreenOffset, pos);
       for (int i = 0; i < cluster.members.length; i++) {
         final double angle = (2 * math.pi * i) / cluster.members.length;
         final Offset offset =
@@ -194,12 +199,13 @@ String _clusterId(List<Member> members) {
   return ids.join('|');
 }
 
-LatLng _centroid(List<Member> members) {
+LatLng _centroid(List<Member> members, LatLng Function(Member) pos) {
   double lat = 0;
   double lng = 0;
   for (final Member m in members) {
-    lat += m.position!.latitude;
-    lng += m.position!.longitude;
+    final LatLng p = pos(m);
+    lat += p.latitude;
+    lng += p.longitude;
   }
   return LatLng(lat / members.length, lng / members.length);
 }
@@ -210,11 +216,12 @@ LatLng _centroid(List<Member> members) {
 Offset _screenCentroid(
   List<Member> members,
   LatLngToScreenOffset toScreenOffset,
+  LatLng Function(Member) pos,
 ) {
   double x = 0;
   double y = 0;
   for (final Member m in members) {
-    final Offset o = toScreenOffset(m.position!);
+    final Offset o = toScreenOffset(pos(m));
     x += o.dx;
     y += o.dy;
   }

@@ -57,7 +57,9 @@ Member memberFromJson(Map<String, dynamic> json) {
     avatarUpdatedAt: avatarUpdatedAt,
     avatarVersion: avatarVersion,
     movement: movement,
-    speedMph: speedMps != null ? (speedMps * 2.23694).round() : null,
+    speedMps: speedMps?.toDouble(),
+    headingDeg: _parseHeading(json['heading_deg']),
+    fixTime: timestamp,
     lastSeen: effectiveLastSeen,
     accuracyMeters: accuracy?.toDouble(),
   );
@@ -142,8 +144,12 @@ Member memberFromLocationUpdate(Member existing, Map<String, dynamic> json) {
       movement: movement,
     ),
     movement: movement,
-    speedMph:
-        speedMps != null ? (speedMps * 2.23694).round() : existing.speedMph,
+    // The speed belongs to THIS fix: a frame without one clears the old value
+    // rather than keeping a stale number on screen.
+    speedMps: speedMps?.toDouble(),
+    clearSpeed: speedMps == null,
+    headingDeg: _parseHeading(json['heading_deg']),
+    fixTime: fixTimestamp,
     lastSeen: timestamp,
     accuracyMeters: accuracy?.toDouble() ?? existing.accuracyMeters,
   );
@@ -317,6 +323,14 @@ MovementType? _movementFrom(String? motion) {
 MovementType? _movementFromSpeed(num? speedMps) {
   if (speedMps == null || speedMps < 5.0) return null;
   return MovementType.car;
+}
+
+/// Parses `heading_deg` (degrees clockwise from north); null when absent or
+/// not a finite number. Normalised to [0, 360).
+double? _parseHeading(dynamic v) {
+  if (v is! num || !v.isFinite) return null;
+  final double d = v.toDouble() % 360;
+  return d < 0 ? d + 360 : d;
 }
 
 /// Parses the backend `ts` field, which may be an ISO-8601 string or a Unix

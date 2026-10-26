@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:latlong2/latlong.dart';
 
+import '../services/speed_units.dart' show kMpsToMph;
 import '../theme/app_theme.dart';
 
 /// Speed (mph) at or above which a driving member is shown as a
@@ -57,6 +58,11 @@ enum MovementType {
   none,
 }
 
+/// Whether [mps] reads as speeding, using the displayed (rounded) mph so the
+/// flag and the number on screen can never disagree.
+bool isSpeedingMps(double? mps) =>
+    mps != null && (mps * kMpsToMph).round() >= kSpeedingMph;
+
 /// A single past location in a member's day, shown on the Day Detail
 /// location-history timeline.
 class LocationHistoryEntry {
@@ -94,13 +100,16 @@ class Member {
     this.avatarVersion = 0,
     this.avatarColor = AppColors.purple,
     this.movement = MovementType.none,
-    this.speedMph,
+    int? speedMph,
+    double? speedMps,
+    this.headingDeg,
+    this.fixTime,
     this.eta,
     this.waypoints,
     this.history = const [],
     this.lastSeen,
     this.accuracyMeters,
-  });
+  }) : speedMps = speedMps ?? (speedMph == null ? null : speedMph / kMpsToMph);
 
   final String id;
   final String name;
@@ -141,8 +150,22 @@ class Member {
 
   final MovementType movement;
 
-  /// Speed in mph, only meaningful when [movement] is [MovementType.car].
-  final int? speedMph;
+  /// GPS speed of the freshest fix in meters per second (0 is a real 0:
+  /// stopped; null means the fix carried no speed). Only meaningful for
+  /// display when [movement] is [MovementType.car].
+  final double? speedMps;
+
+  /// Speed in whole mph derived from [speedMps], kept for screens that only
+  /// need an integer. Prefer [speedMps] and the user's unit setting.
+  int? get speedMph =>
+      speedMps == null ? null : (speedMps! * kMpsToMph).round();
+
+  /// Direction of travel in degrees clockwise from north, when the backend
+  /// supplied one (`heading_deg`).
+  final double? headingDeg;
+
+  /// GPS fix time (backend `ts`); [lastSeen] may be newer (heartbeats).
+  final DateTime? fixTime;
 
   /// Estimated time of arrival, e.g. "12m" or "6:42 PM".
   final String? eta;
@@ -167,13 +190,11 @@ class Member {
 
   /// Whether this member is driving fast enough to show as "speeding".
   bool get isSpeeding =>
-      movement == MovementType.car &&
-      speedMph != null &&
-      speedMph! >= kSpeedingMph;
+      movement == MovementType.car && isSpeedingMps(speedMps);
 
   /// Whether the map pin should render a numeric speed caption.
   bool get hasDrivingSpeed =>
-      movement == MovementType.car && speedMph != null;
+      movement == MovementType.car && speedMps != null;
 
   /// Initials used while no avatar is available.
   String get initials {
@@ -197,7 +218,10 @@ class Member {
     String? address,
     String? name,
     MovementType? movement,
-    int? speedMph,
+    double? speedMps,
+    bool clearSpeed = false,
+    double? headingDeg,
+    DateTime? fixTime,
     String? eta,
     DateTime? lastSeen,
     double? accuracyMeters,
@@ -214,7 +238,9 @@ class Member {
       avatarVersion: avatarVersion,
       avatarColor: avatarColor,
       movement: movement ?? this.movement,
-      speedMph: speedMph ?? this.speedMph,
+      speedMps: clearSpeed ? null : (speedMps ?? this.speedMps),
+      headingDeg: headingDeg ?? this.headingDeg,
+      fixTime: fixTime ?? this.fixTime,
       eta: eta ?? this.eta,
       waypoints: waypoints,
       history: history,
@@ -244,7 +270,9 @@ class Member {
       avatarVersion: avatarVersion,
       avatarColor: avatarColor,
       movement: movement,
-      speedMph: speedMph,
+      speedMps: speedMps,
+      headingDeg: headingDeg,
+      fixTime: fixTime,
       eta: eta,
       waypoints: waypoints,
       history: history,

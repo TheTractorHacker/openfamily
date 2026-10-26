@@ -5,6 +5,7 @@ import 'package:openfamily/models/place.dart';
 import 'package:openfamily/services/member_mapper.dart';
 
 void main() {
+  liveMapSpeedTests();
   group('member avatar metadata', () {
     test('keeps a newer avatar when a stale WebSocket frame arrives', () {
       final member = memberFromJson(<String, dynamic>{
@@ -394,6 +395,72 @@ void main() {
       // Re-run: the cleared state is stable (no spurious onMembersChanged).
       final Member again = refreshStaleness(refreshed);
       expect(identical(again, refreshed), isTrue);
+    });
+  });
+}
+
+void liveMapSpeedTests() {
+  group('live speed and heading', () {
+    test('keeps the unrounded GPS speed; speedMph is derived', () {
+      final Member m = memberFromJson(<String, dynamic>{
+        'id': 'a',
+        'speed_mps': 13.4,
+        'heading_deg': 271.5,
+        'ts': '2026-01-01T12:00:00Z',
+      });
+      expect(m.speedMps, 13.4);
+      expect(m.speedMph, 30);
+      expect(m.headingDeg, 271.5);
+      expect(m.fixTime, DateTime.utc(2026, 1, 1, 12));
+    });
+
+    test('speed 0 is a real 0, absent speed is unknown', () {
+      expect(memberFromJson(<String, dynamic>{'id': 'a', 'speed_mps': 0}).speedMps, 0);
+      expect(memberFromJson(<String, dynamic>{'id': 'a'}).speedMps, isNull);
+      expect(memberFromJson(<String, dynamic>{'id': 'a'}).headingDeg, isNull);
+    });
+
+    test('a location frame replaces the speed and clears it when omitted', () {
+      final Member base = memberFromJson(<String, dynamic>{
+        'id': 'a',
+        'lat': 1.0,
+        'lon': 2.0,
+        'speed_mps': 20.0,
+        'motion_state': 'driving',
+      });
+      final Member fresh = memberFromLocationUpdate(base, <String, dynamic>{
+        'lat': 1.001,
+        'lon': 2.0,
+        'speed_mps': 21.3,
+        'heading_deg': 10,
+        'ts': '2026-01-01T12:00:01Z',
+      });
+      expect(fresh.speedMps, 21.3);
+      expect(fresh.headingDeg, 10);
+      final Member noSpeed = memberFromLocationUpdate(fresh, <String, dynamic>{
+        'lat': 1.002,
+        'lon': 2.0,
+        'ts': '2026-01-01T12:00:02Z',
+      });
+      expect(noSpeed.speedMps, isNull);
+      expect(noSpeed.headingDeg, 10, reason: 'last known heading is kept');
+    });
+
+    test('heading is normalised and garbage is ignored', () {
+      expect(
+        memberFromJson(<String, dynamic>{'id': 'a', 'heading_deg': -90}).headingDeg,
+        270,
+      );
+      expect(
+        memberFromJson(<String, dynamic>{'id': 'a', 'heading_deg': 725}).headingDeg,
+        5,
+      );
+    });
+
+    test('speeding uses the displayed (rounded) mph', () {
+      expect(isSpeedingMps(31.2), isTrue); // 69.8 mph rounds to 70
+      expect(isSpeedingMps(31.0), isFalse); // 69.35 mph rounds to 69
+      expect(isSpeedingMps(null), isFalse);
     });
   });
 }
