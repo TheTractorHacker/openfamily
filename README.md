@@ -586,6 +586,8 @@ For a fully private map, host your own tiles. The simplest option is
 | GET | `/trips?user_id&from&to&limit` | Trips (movement legs) that started in the range, newest first. `user_id` defaults to you; another member only if in your family. Default last 7 days, max 31 days, limit 100 (max 500) |
 | GET | `/trips/{id}?max_points` | One trip plus a downsampled `route` (default 300 points, max 1000). Another family's trip returns 404 |
 | GET | `/trips/summary?user_id&period&date&tz&speed_threshold_mps` | Driving report for a `day`, `week` (Mon-Sun) or `month`: trip count, distance, drive time, max/avg speed, speed events above the threshold (default 31.3 m/s), stops between trips |
+| GET | `/trips/report?period&start&utc_offset_minutes&circle_id` | Family driving report for a `week` (Mon-Sun, default) or `month`: drives, distance, top speed and speeding / hard-brake / rapid-acceleration event counts per member and in total, with the previous period for trends. Needs a shared circle and the member sharing location. See [docs/driving.md](docs/driving.md) |
+| GET | `/trips/{id}/events` | Driving events of one trip (404 for outsiders and when the member does not share location). `GET /trips/{id}` also returns `events` |
 | POST | `/trips/compute?from&to` | Recompute your own trips for a range of at most 7 days (replaces stored trips that started in it) |
 | POST | `/families` | Create a family (caller becomes admin) |
 | GET | `/family` | Get your family |
@@ -668,6 +670,9 @@ sustained change of mode splits a trip into legs. Thresholds live in
   summary lists them, the trip that is still in progress is not returned.
 - The speed threshold is a request parameter; it is not stored and no alerts
   are sent. There is no server-side units preference, so clients convert.
+- Driving events (speeding, hard braking, rapid acceleration) are detected
+  from the same fixes; they are estimates, configurable through
+  `DRIVING_*` variables. See [docs/driving.md](docs/driving.md).
 - Trips older than `LOCATION_RETENTION_DAYS` are hidden and pruned.
 - Locations that arrive after the job has passed them (long offline replays)
   are picked up by `POST /trips/compute`, not by the incremental job.
