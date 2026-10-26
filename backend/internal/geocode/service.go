@@ -63,6 +63,15 @@ type Settings struct {
 	Lang         string
 	AllowPrivate bool
 	Version      string // build version for the User-Agent
+
+	// FallbackURL is a Nominatim-compatible provider asked only for EXPLICIT
+	// searches that Photon could not answer at house level. Empty disables it.
+	FallbackURL string
+	// CensusEnabled adds the US Census geocoder as a further explicit-only
+	// fallback for US-looking addresses.
+	CensusEnabled bool
+	// CensusURL overrides the Census endpoint (tests only).
+	CensusURL string
 }
 
 // Service is a configured provider client with cache.
@@ -80,6 +89,9 @@ type Service struct {
 	gateMu     sync.Mutex
 	gateLast   time.Time
 	now        func() time.Time
+
+	fb          *fallbacks
+	fallbackErr error
 }
 
 // New validates settings and builds a Service. An empty URL yields (nil, nil):
@@ -111,9 +123,27 @@ func New(s Settings) (*Service, error) {
 	if v == "" {
 		v = "dev"
 	}
+	svc := &Service{
+		base:         base,
+		prov:         prov,
+		lang:         lang,
+		userAgent:    "OpenFamily/" + v + " (self-hosted)",
+		client:       newClient(s.AllowPrivate, base.Scheme == "http"),
+		cache:        newUserCache(maxCacheUsers, cacheSizePerUser, nil),
+		autocomplete: !public,
+		policyGate:   public,
+		now:          time.Now,
+	}
+	svc.fb, svc.fallbackErr = newFallbacks(s, base, isNom)
+	return svc, nil
+}
+
+// newClient builds an HTTP client that never uses a proxy, refuses private
+// addresses unless allowed, and never follows redirects.
+func newClient(allowPrivate, cleartext bool) *http.Client {
 	dialer := &net.Dialer{
 		Timeout: Timeout,
-		Control: dialControl(s.AllowPrivate, base.Scheme == "http"),
+		Control: dialControl(allowPrivate, cleartext),
 	}
 	tr := &http.Transport{
 		Proxy:                 nil, // never route through an environment proxy
@@ -124,22 +154,21 @@ func New(s Settings) (*Service, error) {
 		IdleConnTimeout:       30 * time.Second,
 		DisableCompression:    false,
 	}
-	return &Service{
-		base:      base,
-		prov:      prov,
-		lang:      lang,
-		userAgent: "OpenFamily/" + v + " (self-hosted)",
-		client: &http.Client{
-			Transport: tr,
-			Timeout:   Timeout,
-			// Never follow redirects: a provider must not bounce us to another host.
-			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-		},
-		cache:        newUserCache(maxCacheUsers, cacheSizePerUser, nil),
-		autocomplete: !public,
-		policyGate:   public,
-		now:          time.Now,
-	}, nil
+	return &http.Client{
+		Transport: tr,
+		Timeout:   Timeout,
+		// Never follow redirects: a provider must not bounce us to another host.
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
+}
+
+// FallbackError reports why the configured fallback provider was not enabled
+// (nil when enabled or not configured). The message holds no user data.
+func (s *Service) FallbackError() error {
+	if s == nil {
+		return nil
+	}
+	return s.fallbackErr
 }
 
 // Enabled reports whether the service can answer requests (nil-safe).
@@ -173,39 +202,11 @@ func round(v float64, places int) float64 {
 	return math.Round(v*p) / p
 }
 
-// Search runs a forward lookup. Results are cached per user (never shared
-// across users) and upstream calls are never coalesced between users. The bias point is rounded to ~1 km before it
-// is sent upstream. cached reports a cache hit.
+// Search runs a non-explicit forward lookup (autocomplete): the relaxation
+// ladder over the primary provider only. cached reports a full cache hit.
 func (s *Service) Search(ctx context.Context, user, q string, bias *Point, limit int) (res []Result, cached bool, err error) {
-	q = strings.Join(strings.Fields(q), " ")
-	if limit < 1 {
-		limit = 5
-	}
-	if limit > 8 {
-		limit = 8
-	}
-	var b *Point
-	key := "s:" + strconv.Itoa(limit) + ":" + NormalizeQuery(q)
-	if bias != nil {
-		b = &Point{round(bias.Lat, 2), round(bias.Lon, 2)}
-		key += ":" + strconv.FormatFloat(b.Lat, 'f', 2, 64) + "," + strconv.FormatFloat(b.Lon, 'f', 2, 64)
-	}
-	if v, ok := s.cache.get(user, key); ok {
-		return v.([]Result), true, nil
-	}
-	body, err := s.fetch(ctx, s.prov.searchURL(s.base, q, b, limit, s.lang))
-	if err != nil {
-		return nil, false, err
-	}
-	res, perr := s.prov.parseSearch(body)
-	if perr != nil {
-		return nil, false, &Error{Kind: KindParse}
-	}
-	if len(res) > limit {
-		res = res[:limit]
-	}
-	s.cache.put(user, key, res, searchTTL)
-	return res, false, nil
+	r, err := s.SearchWith(ctx, user, q, SearchOptions{Bias: bias, Limit: limit})
+	return r.Results, r.Cached, err
 }
 
 // Reverse looks up the address at p, rounded to 4 decimals (~11 m) both for the
@@ -257,15 +258,19 @@ func (s *Service) fetch(ctx context.Context, target string) ([]byte, error) {
 	if !s.take() {
 		return nil, ErrBusy
 	}
+	return doGet(ctx, s.client, s.userAgent, target)
+}
+
+func doGet(ctx context.Context, client *http.Client, userAgent, target string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, Timeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 	if err != nil {
 		return nil, &Error{Kind: KindUnavailable}
 	}
-	req.Header.Set("User-Agent", s.userAgent)
+	req.Header.Set("User-Agent", userAgent)
 	req.Header.Set("Accept", "application/json")
-	resp, err := s.client.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) || isTimeout(err) {
 			return nil, &Error{Kind: KindTimeout}

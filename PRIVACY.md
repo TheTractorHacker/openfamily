@@ -52,7 +52,12 @@ They set no cookies and ship no analytics or tracking code.
   phone) to the geocoder, by default the public Photon at photon.komoot.io,
   which sees them and your server's IP. No user identity is sent and your
   server does not log them. Set `GEOCODER_URL=` (empty) to turn it off, or
-  self-host Photon; see `docs/maps.md`.
+  self-host Photon; see `docs/maps.md`. When someone presses Search and Photon
+  finds no exact house, that same text (and the pin's position rounded to about
+  100 m) may also be sent from your server to the public Nominatim
+  (nominatim.openstreetmap.org) and, for US addresses, the US Census geocoder
+  (geocoding.geo.census.gov). Disable with `GEOCODER_FALLBACK_URL=` and
+  `GEOCODER_CENSUS_ENABLED=false`.
 - **Android push:** your ntfy server (or another UnifiedPush distributor).
   Payloads omit the tracked person's name unless `VERBOSE_PUSH=true`.
 - **iOS push:** APNs (platform requirement). Payloads do not include

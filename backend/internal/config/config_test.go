@@ -80,3 +80,18 @@ func TestGeocoderDefaultsAndDisable(t *testing.T) {
 		t.Fatalf("explicit empty must disable, got %q", got)
 	}
 }
+
+func TestGeocoderFallbackDefaults(t *testing.T) {
+	os.Unsetenv("GEOCODER_FALLBACK_URL")
+	os.Unsetenv("GEOCODER_CENSUS_ENABLED")
+	c := Load()
+	if c.GeocoderFallbackURL != DefaultGeocoderFallbackURL || !c.GeocoderCensusEnabled {
+		t.Fatalf("%q %v", c.GeocoderFallbackURL, c.GeocoderCensusEnabled)
+	}
+	t.Setenv("GEOCODER_FALLBACK_URL", "")
+	t.Setenv("GEOCODER_CENSUS_ENABLED", "false")
+	c = Load()
+	if c.GeocoderFallbackURL != "" || c.GeocoderCensusEnabled {
+		t.Fatalf("%q %v", c.GeocoderFallbackURL, c.GeocoderCensusEnabled)
+	}
+}

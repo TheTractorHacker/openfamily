@@ -149,16 +149,31 @@ class _PlacePickerScreenState extends State<PlacePickerScreen> {
     _reverseGen++; // drop any in-flight pin-drop lookup
     _suggester.clear();
     _addressFocus.unfocus();
+    // An approximate hit only knows the street or town: keep what the user
+    // typed (it has their house number) and ask them to place the pin.
     setState(() {
       _position = s.position;
-      _userEdited = false;
+      _userEdited = s.approximate;
       _detecting = false;
       _detectFailed = false;
       _offeredAddress = null;
-      _address.text = s.label;
-      _address.selection = TextSelection.collapsed(offset: s.label.length);
+      if (!s.approximate) {
+        _address.text = s.label;
+        _address.selection = TextSelection.collapsed(offset: s.label.length);
+      }
     });
-    _mapController.move(s.position, 17);
+    _mapController.move(s.position, s.approximate ? 16 : 17);
+    if (s.approximate) {
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        SnackBar(
+          content: Text(
+            s.matched == 'locality'
+                ? 'Pin placed on the town. Drag it to the exact spot.'
+                : 'Pin placed on the street. Drag it to the exact spot.',
+          ),
+        ),
+      );
+    }
   }
 
   void _onAddressEdited(String text) {

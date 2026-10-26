@@ -19,6 +19,8 @@ const (
 	// DefaultGeocoderURL is the public Photon instance used when GEOCODER_URL
 	// is entirely unset. An explicitly empty GEOCODER_URL disables geocoding.
 	DefaultGeocoderURL = "https://photon.komoot.io"
+	// DefaultGeocoderFallbackURL is the Nominatim used for explicit searches.
+	DefaultGeocoderFallbackURL = "https://nominatim.openstreetmap.org"
 
 	// DefaultTileURL is the public OSM raster template. Operators override
 	// TILE_URL when they want another provider or a self-hosted endpoint.
@@ -114,6 +116,13 @@ type Config struct {
 	// GeocoderAllowPrivate permits a loopback/private-network geocoder
 	// (GEOCODER_ALLOW_PRIVATE=true) for a self-hosted instance beside the API.
 	GeocoderAllowPrivate bool
+	// GeocoderFallbackURL (GEOCODER_FALLBACK_URL) is a Nominatim-compatible
+	// provider consulted only for explicit searches Photon cannot answer.
+	// Unset = public nominatim.openstreetmap.org; empty disables.
+	GeocoderFallbackURL string
+	// GeocoderCensusEnabled (GEOCODER_CENSUS_ENABLED, default true) adds the
+	// US Census geocoder as a further explicit-search fallback.
+	GeocoderCensusEnabled bool
 
 	// APNs push notification credentials (optional; empty KeyFile disables APNs).
 	APNsKeyFile    string
@@ -227,6 +236,8 @@ func Load() Config {
 		GeocoderType:          strings.ToLower(strings.TrimSpace(getenv("GEOCODER_TYPE", "photon"))),
 		GeocoderLang:          strings.TrimSpace(getenv("GEOCODER_LANG", "")),
 		GeocoderAllowPrivate:  getenvBool("GEOCODER_ALLOW_PRIVATE", false),
+		GeocoderFallbackURL:   strings.TrimSpace(getenvPresent("GEOCODER_FALLBACK_URL", DefaultGeocoderFallbackURL)),
+		GeocoderCensusEnabled: getenvBool("GEOCODER_CENSUS_ENABLED", true),
 		APNsKeyFile:           getenv("APNS_KEY_FILE", ""),
 		APNsKeyID:             getenv("APNS_KEY_ID", ""),
 		APNsTeamID:            getenv("APNS_TEAM_ID", ""),

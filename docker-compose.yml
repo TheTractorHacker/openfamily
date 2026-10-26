@@ -83,6 +83,8 @@ services:
       GEOCODER_TYPE: ${GEOCODER_TYPE:-photon}
       GEOCODER_LANG: ${GEOCODER_LANG:-}
       GEOCODER_ALLOW_PRIVATE: ${GEOCODER_ALLOW_PRIVATE:-false}
+      GEOCODER_FALLBACK_URL: ${GEOCODER_FALLBACK_URL-https://nominatim.openstreetmap.org}
+      GEOCODER_CENSUS_ENABLED: ${GEOCODER_CENSUS_ENABLED:-true}
       # APNs (iOS push). Empty disables APNs; Android still works via ntfy.
       # To enable iOS push, add a volume mount to this service:
       #   volumes:

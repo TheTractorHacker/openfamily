@@ -51,6 +51,19 @@ class AddressSuggestionList extends StatelessWidget {
                 child: Text(text, style: muted),
               ),
             );
+        Widget retryMessage(String text) => Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                message(text),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: AppSpace.sm),
+                  child: TextButton(
+                    onPressed: suggester.retry,
+                    child: const Text('Try again'),
+                  ),
+                ),
+              ],
+            );
         final List<Widget> rows = <Widget>[];
         switch (suggester.status) {
           case SuggestStatus.idle:
@@ -61,22 +74,30 @@ class AddressSuggestionList extends StatelessWidget {
             }
           case SuggestStatus.empty:
             rows.add(message(
-              'No matches. Keep typing, or drop the pin on the map.',
+              suggester.lastExplicit
+                  ? 'We could not find that address. Try the street and city, or drag the pin on the map.'
+                  : 'No matches yet. Keep typing, press search, or drag the pin on the map.',
             ));
           case SuggestStatus.offline:
-            rows.add(message(
+            rows.add(retryMessage(
               'Can\'t reach the server. You can still type an address.',
             ));
           case SuggestStatus.rateLimited:
             rows.add(message(
-              'Too many searches. Wait a moment, then try again.',
+              'Please wait a few seconds, then search again.',
             ));
           case SuggestStatus.error:
-            rows.add(message(
+            rows.add(retryMessage(
               'Address search is unavailable right now. You can still type an address.',
             ));
           case SuggestStatus.ready:
-            break;
+            if (suggester.approximate) {
+              rows.add(message(
+                suggester.suggestions.first.matched == 'locality'
+                    ? 'We found the town but not that street. The pin is on the town; drag it to the exact spot.'
+                    : 'We found the street but not that house number. The pin is on the street; drag it to the exact spot.',
+              ));
+            }
         }
         for (final GeocodeSuggestion s in suggester.suggestions) {
           rows.add(

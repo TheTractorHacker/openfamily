@@ -91,17 +91,21 @@ func (s *Server) GeocodeSearch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	start := time.Now()
-	res, _, err := s.Geocoder.Search(r.Context(), uid, q, bias, limit)
+	resp, err := s.Geocoder.SearchWith(r.Context(), uid, q, geocode.SearchOptions{
+		Bias: bias, Limit: limit, Explicit: qv.Get("explicit") == "1",
+	})
+	res := resp.Results
 	if err != nil {
 		s.geocodeFail(w, "search", start, err)
 		return
 	}
 	slog.Info("geocode", "op", "search", "status", http.StatusOK, "results", len(res),
+		"attempts", resp.Attempts, "approximate", resp.Approximate, "fallback", resp.Fallback,
 		"ms", time.Since(start).Milliseconds())
 	if res == nil {
 		res = []geocode.Result{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"results": res})
+	writeJSON(w, http.StatusOK, map[string]any{"results": res, "approximate": resp.Approximate})
 }
 
 // GeocodeReverse proxies reverse geocoding: GET /geocode/reverse?lat=&lon=.
