@@ -4,9 +4,11 @@ import 'package:latlong2/latlong.dart';
 
 import '../widgets/openfamily_map_layers.dart';
 import '../models/trip.dart';
+import '../models/trip_report.dart';
 import '../services/speed_units.dart';
 import '../services/trips_service.dart';
 import '../theme/app_theme.dart';
+import '../widgets/driving_event_chips.dart';
 import '../widgets/ds/ds.dart';
 import '../widgets/trip_widgets.dart';
 import 'trips_screen.dart' show UnitToggleButton;
@@ -129,6 +131,7 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
       trip: t,
       route: _detail!.route,
       stops: _stops,
+      events: _detail!.events,
       tileProvider: widget.tileProvider,
     );
   }
@@ -180,6 +183,8 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
               ),
             ],
           ),
+          if (_detail != null && _detail!.events.isNotEmpty)
+            ..._eventsSection(context, _detail!.events, units),
           if (_stops.isNotEmpty) ...<Widget>[
             const SizedBox(height: AppSpace.lg),
             Semantics(
@@ -216,6 +221,54 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
   }
 }
 
+extension on _TripDetailScreenState {
+  List<Widget> _eventsSection(
+    BuildContext context,
+    List<TripEvent> events,
+    UnitSystem units,
+  ) {
+    final ColorScheme cs = Theme.of(context).colorScheme;
+    return <Widget>[
+      const SizedBox(height: AppSpace.lg),
+      Semantics(
+        header: true,
+        child: const Text('Driving events', style: AppType.headline),
+      ),
+      for (final TripEvent e in events)
+        Padding(
+          padding: const EdgeInsets.only(top: AppSpace.sm),
+          child: Semantics(
+            container: true,
+            excludeSemantics: true,
+            label: '${e.kind.label} at ${tripClock(context, e.startedAt)}'
+                '${eventMagnitudeText(e, units) == null ? '' : ', ${eventMagnitudeText(e, units)}'}'
+                ', estimated from GPS',
+            child: Row(
+              children: <Widget>[
+                Icon(eventIcon(e.kind), size: 20, color: eventColor(e.kind)),
+                const SizedBox(width: AppSpace.sm),
+                Expanded(
+                  child: Text(
+                    '${e.kind.label}, ${tripClock(context, e.startedAt)}'
+                    '${eventMagnitudeText(e, units) == null ? '' : ' \u00b7 ${eventMagnitudeText(e, units)}'}',
+                    style: AppType.body.copyWith(fontWeight: FontWeight.w500),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      Padding(
+        padding: const EdgeInsets.only(top: AppSpace.xs),
+        child: Text(
+          'Estimated from GPS',
+          style: AppType.secondary.copyWith(color: cs.onSurfaceVariant),
+        ),
+      ),
+    ];
+  }
+}
+
 /// Route polyline with start / end / stop markers on the app's tile layer.
 class TripRouteMap extends StatelessWidget {
   const TripRouteMap({
@@ -224,12 +277,14 @@ class TripRouteMap extends StatelessWidget {
     required this.trip,
     required this.route,
     this.stops = const <TripStop>[],
+    this.events = const <TripEvent>[],
     this.height = 280,
   });
 
   final Trip trip;
   final List<TripRoutePoint> route;
   final List<TripStop> stops;
+  final List<TripEvent> events;
   final double height;
 
   /// Overridable so tests need no network.
@@ -307,6 +362,18 @@ class TripRouteMap extends StatelessWidget {
                         label: 'Stop',
                       ),
                     ),
+                  for (final TripEvent e in events)
+                    if (e.position != null)
+                      Marker(
+                        point: e.position!,
+                        width: 28,
+                        height: 28,
+                        child: _Pin(
+                          icon: eventIcon(e.kind),
+                          color: eventColor(e.kind),
+                          label: '${e.kind.label} (estimated)',
+                        ),
+                      ),
                   Marker(
                     point: start,
                     width: 36,

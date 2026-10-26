@@ -1,5 +1,7 @@
 import 'package:latlong2/latlong.dart';
 
+import 'trip_report.dart';
+
 /// How a trip leg was classified by the server.
 enum TripMode { driving, walking, other }
 
@@ -97,7 +99,11 @@ class TripRoutePoint {
 }
 
 class TripDetail {
-  const TripDetail({required this.trip, required this.route});
+  const TripDetail({
+    required this.trip,
+    required this.route,
+    this.events = const <TripEvent>[],
+  });
 
   factory TripDetail.fromJson(Map<String, dynamic> j) {
     final Object? t = j['trip'];
@@ -113,11 +119,15 @@ class TripDetail {
               .map(TripRoutePoint.fromJson)
               .toList()
           : const <TripRoutePoint>[],
+      events: parseTripEvents(j['events']),
     );
   }
 
   final Trip trip;
   final List<TripRoutePoint> route;
+
+  /// Detected driving events (empty on older servers).
+  final List<TripEvent> events;
 }
 
 /// A dwell between two consecutive trips.

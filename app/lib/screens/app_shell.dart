@@ -55,6 +55,9 @@ class _AppShellState extends State<AppShell> {
   );
   final ValueNotifier<String?> _userId = ValueNotifier<String?>(null);
 
+  /// The circle selected on the map pill, shared with the Driving tab.
+  final ValueNotifier<String?> _circleId = ValueNotifier<String?>(null);
+
   @override
   void initState() {
     super.initState();
@@ -67,6 +70,7 @@ class _AppShellState extends State<AppShell> {
     AppShell.requestedTab.removeListener(_onRequested);
     _members.dispose();
     _userId.dispose();
+    _circleId.dispose();
     super.dispose();
   }
 
@@ -92,9 +96,17 @@ class _AppShellState extends State<AppShell> {
     if (override != null) return Builder(builder: override);
     switch (t) {
       case AppTab.location:
-        return MapScreen(membersSink: _members, userIdSink: _userId);
+        return MapScreen(
+          membersSink: _members,
+          userIdSink: _userId,
+          circleIdSink: _circleId,
+        );
       case AppTab.driving:
-        return DrivingTabScreen(members: _members, userId: _userId);
+        return DrivingTabScreen(
+          members: _members,
+          userId: _userId,
+          circleId: _circleId,
+        );
       case AppTab.safety:
         return const SafetyHubScreen();
       case AppTab.circle:
