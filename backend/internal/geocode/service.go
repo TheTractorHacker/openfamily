@@ -28,10 +28,11 @@ const (
 	// MaxResponseBytes caps what is read from the provider.
 	MaxResponseBytes = 256 << 10
 
-	cacheSize       = 512
-	searchTTL       = time.Hour
-	reverseTTL      = 24 * time.Hour
-	publicNominatim = "nominatim.openstreetmap.org"
+	cacheSizePerUser = 64
+	maxCacheUsers    = 1000
+	searchTTL        = time.Hour
+	reverseTTL       = 24 * time.Hour
+	publicNominatim  = "nominatim.openstreetmap.org"
 )
 
 // Kind classifies a sanitized upstream failure.
@@ -71,7 +72,7 @@ type Service struct {
 	lang         string
 	userAgent    string
 	client       *http.Client
-	cache        *lru
+	cache        *userCache
 	autocomplete bool
 
 	// public Nominatim policy: at most one upstream request per second.
@@ -134,7 +135,7 @@ func New(s Settings) (*Service, error) {
 			// Never follow redirects: a provider must not bounce us to another host.
 			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 		},
-		cache:        newLRU(cacheSize, nil),
+		cache:        newUserCache(maxCacheUsers, cacheSizePerUser, nil),
 		autocomplete: !public,
 		policyGate:   public,
 		now:          time.Now,
@@ -172,9 +173,10 @@ func round(v float64, places int) float64 {
 	return math.Round(v*p) / p
 }
 
-// Search runs a forward lookup. The bias point is rounded to ~1 km before it
+// Search runs a forward lookup. Results are cached per user (never shared
+// across users) and upstream calls are never coalesced between users. The bias point is rounded to ~1 km before it
 // is sent upstream. cached reports a cache hit.
-func (s *Service) Search(ctx context.Context, q string, bias *Point, limit int) (res []Result, cached bool, err error) {
+func (s *Service) Search(ctx context.Context, user, q string, bias *Point, limit int) (res []Result, cached bool, err error) {
 	q = strings.Join(strings.Fields(q), " ")
 	if limit < 1 {
 		limit = 5
@@ -188,7 +190,7 @@ func (s *Service) Search(ctx context.Context, q string, bias *Point, limit int) 
 		b = &Point{round(bias.Lat, 2), round(bias.Lon, 2)}
 		key += ":" + strconv.FormatFloat(b.Lat, 'f', 2, 64) + "," + strconv.FormatFloat(b.Lon, 'f', 2, 64)
 	}
-	if v, ok := s.cache.get(key); ok {
+	if v, ok := s.cache.get(user, key); ok {
 		return v.([]Result), true, nil
 	}
 	body, err := s.fetch(ctx, s.prov.searchURL(s.base, q, b, limit, s.lang))
@@ -202,17 +204,17 @@ func (s *Service) Search(ctx context.Context, q string, bias *Point, limit int) 
 	if len(res) > limit {
 		res = res[:limit]
 	}
-	s.cache.put(key, res, searchTTL)
+	s.cache.put(user, key, res, searchTTL)
 	return res, false, nil
 }
 
 // Reverse looks up the address at p, rounded to 4 decimals (~11 m) both for the
 // cache key and for what is sent upstream. A nil Address with nil error means
 // "no address found" (also cached).
-func (s *Service) Reverse(ctx context.Context, p Point) (addr *Address, cached bool, err error) {
+func (s *Service) Reverse(ctx context.Context, user string, p Point) (addr *Address, cached bool, err error) {
 	rp := Point{round(p.Lat, 4), round(p.Lon, 4)}
 	key := "r:" + strconv.FormatFloat(rp.Lat, 'f', 4, 64) + "," + strconv.FormatFloat(rp.Lon, 'f', 4, 64)
-	if v, ok := s.cache.get(key); ok {
+	if v, ok := s.cache.get(user, key); ok {
 		a, _ := v.(*Address)
 		return a, true, nil
 	}
@@ -231,7 +233,7 @@ func (s *Service) Reverse(ctx context.Context, p Point) (addr *Address, cached b
 	if a == nil {
 		ttl = 10 * time.Minute
 	}
-	s.cache.put(key, a, ttl)
+	s.cache.put(user, key, a, ttl)
 	return a, false, nil
 }
 

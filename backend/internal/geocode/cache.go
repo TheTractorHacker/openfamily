@@ -70,3 +70,62 @@ func (c *lru) len() int {
 	defer c.mu.Unlock()
 	return c.ll.Len()
 }
+
+// userCache keeps one small LRU per authenticated user so cache state is never
+// observable across users (a shared cache would let one family probe, by
+// latency, whether another recently looked up the same address). Each user is
+// capped at perUser entries, so one user can never evict another's entries;
+// the number of users is bounded too, least recently active user first.
+type userCache struct {
+	mu       sync.Mutex
+	maxUsers int
+	perUser  int
+	now      func() time.Time
+	users    map[string]*list.Element // value: *userEntry
+	order    *list.List
+}
+
+type userEntry struct {
+	id    string
+	cache *lru
+}
+
+func newUserCache(maxUsers, perUser int, now func() time.Time) *userCache {
+	if now == nil {
+		now = time.Now
+	}
+	return &userCache{maxUsers: maxUsers, perUser: perUser, now: now,
+		users: make(map[string]*list.Element), order: list.New()}
+}
+
+func (c *userCache) forUser(id string, create bool) *lru {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if el, ok := c.users[id]; ok {
+		c.order.MoveToFront(el)
+		return el.Value.(*userEntry).cache
+	}
+	if !create {
+		return nil
+	}
+	e := &userEntry{id: id, cache: newLRU(c.perUser, c.now)}
+	c.users[id] = c.order.PushFront(e)
+	for c.order.Len() > c.maxUsers {
+		last := c.order.Back()
+		c.order.Remove(last)
+		delete(c.users, last.Value.(*userEntry).id)
+	}
+	return e.cache
+}
+
+func (c *userCache) get(user, key string) (any, bool) {
+	l := c.forUser(user, false)
+	if l == nil {
+		return nil, false
+	}
+	return l.get(key)
+}
+
+func (c *userCache) put(user, key string, val any, ttl time.Duration) {
+	c.forUser(user, true).put(key, val, ttl)
+}

@@ -234,3 +234,54 @@ func TestGeocodeAutocompleteRefusedOnPublicNominatimPolicy(t *testing.T) {
 		t.Fatalf("%d %s", rec.Code, rec.Body)
 	}
 }
+
+// The cache must never be observable across users.
+func TestGeocodeCacheIsPerUserAndInvisible(t *testing.T) {
+	var hits int32
+	s := geoServer(t, "photon", func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		if strings.HasPrefix(r.URL.Path, "/reverse") {
+			w.Write(geoFixture(t, "photon_house.json"))
+			return
+		}
+		w.Write(geoFixture(t, "photon_house.json"))
+	})
+	const other = "22222222-2222-2222-2222-222222222222"
+	for _, c := range []struct{ name, url string }{
+		{"search", "/geocode/search?q=123+main+st"},
+		{"reverse", "/geocode/reverse?lat=39.799&lon=-89.65"},
+	} {
+		atomic.StoreInt32(&hits, 0)
+		h := s.GeocodeSearch
+		if c.name == "reverse" {
+			h = s.GeocodeReverse
+		}
+		first := geoCall(h, c.url, geoUser)
+		if hits != 1 {
+			t.Fatalf("%s: first call hits=%d", c.name, hits)
+		}
+		again := geoCall(h, c.url, geoUser)
+		if hits != 1 {
+			t.Fatalf("%s: same user's repeat must be cached, hits=%d", c.name, hits)
+		}
+		second := geoCall(h, c.url, other)
+		if hits != 2 {
+			t.Fatalf("%s: other user must trigger its own upstream call, hits=%d", c.name, hits)
+		}
+		// Hit and miss responses are indistinguishable.
+		if first.Body.String() != again.Body.String() || first.Body.String() != second.Body.String() {
+			t.Fatalf("%s: bodies differ", c.name)
+		}
+		if len(first.Header()) != len(again.Header()) {
+			t.Fatalf("%s: headers differ: %v vs %v", c.name, first.Header(), again.Header())
+		}
+		for k := range again.Header() {
+			if strings.Contains(strings.ToLower(k), "cache") || strings.EqualFold(k, "Age") || strings.EqualFold(k, "X-Cache") {
+				t.Fatalf("%s: header %s reveals cache state", c.name, k)
+			}
+		}
+		if strings.Contains(strings.ToLower(again.Body.String()), "cache") {
+			t.Fatalf("%s: body reveals cache state", c.name)
+		}
+	}
+}

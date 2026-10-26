@@ -145,7 +145,7 @@ func TestDialTimeSSRFGuard(t *testing.T) {
 	u, _ := url.Parse(ts.URL)
 	svc.base = u
 	svc.client.Transport.(*http.Transport).DialContext = (&dialerFor{allowPrivate: false, cleartext: false}).dial
-	if _, _, err := svc.Reverse(context.Background(), Point{1, 2}); err == nil {
+	if _, _, err := svc.Reverse(context.Background(), "u1", Point{1, 2}); err == nil {
 		t.Fatal("loopback target reached")
 	}
 }
@@ -170,12 +170,12 @@ func TestSearchAndCache(t *testing.T) {
 		w.Write(fixture(t, "photon_house.json"))
 	})
 	bias := &Point{39.79901, -89.65014}
-	r1, cached, err := svc.Search(context.Background(), "123  Main St", bias, 5)
+	r1, cached, err := svc.Search(context.Background(), "u1", "123  Main St", bias, 5)
 	if err != nil || cached || len(r1) != 1 {
 		t.Fatalf("%v %v %v", r1, cached, err)
 	}
 	// Normalized repeat is served from cache.
-	_, cached, _ = svc.Search(context.Background(), " 123 main st ", bias, 5)
+	_, cached, _ = svc.Search(context.Background(), "u1", " 123 main st ", bias, 5)
 	if !cached || atomic.LoadInt32(&hits) != 1 {
 		t.Fatalf("cached=%v hits=%d", cached, hits)
 	}
@@ -207,7 +207,7 @@ func TestReverseCacheRoundingAndNotFound(t *testing.T) {
 		}
 		w.Write(fixture(t, "nominatim_reverse.json"))
 	})
-	a, _, err := svc.Reverse(context.Background(), Point{39.799012, -89.650148})
+	a, _, err := svc.Reverse(context.Background(), "u1", Point{39.799012, -89.650148})
 	if err != nil || a == nil {
 		t.Fatalf("%v %v", a, err)
 	}
@@ -215,20 +215,20 @@ func TestReverseCacheRoundingAndNotFound(t *testing.T) {
 		t.Fatalf("upstream lat %s", last.Get("lat"))
 	}
 	// ~5 m away: same rounded cell, no new upstream request.
-	_, cached, _ := svc.Reverse(context.Background(), Point{39.799014, -89.650140})
+	_, cached, _ := svc.Reverse(context.Background(), "u1", Point{39.799014, -89.650140})
 	if !cached || hits != 1 {
 		t.Fatalf("cached=%v hits=%d", cached, hits)
 	}
 	// ~30 m away: new request.
-	_, cached, _ = svc.Reverse(context.Background(), Point{39.79930, -89.65015})
+	_, cached, _ = svc.Reverse(context.Background(), "u1", Point{39.79930, -89.65015})
 	if cached || hits != 2 {
 		t.Fatalf("cached=%v hits=%d", cached, hits)
 	}
-	a, _, err = svc.Reverse(context.Background(), Point{10, 10})
+	a, _, err = svc.Reverse(context.Background(), "u1", Point{10, 10})
 	if a != nil || err != nil {
 		t.Fatalf("none: %v %v", a, err)
 	}
-	_, cached, _ = svc.Reverse(context.Background(), Point{10, 10})
+	_, cached, _ = svc.Reverse(context.Background(), "u1", Point{10, 10})
 	if !cached {
 		t.Fatal("not-found should be cached")
 	}
@@ -268,7 +268,7 @@ func TestUpstreamFailures(t *testing.T) {
 	}
 	for name, c := range cases {
 		svc, _ := fake(t, "photon", c.h)
-		_, _, err := svc.Search(context.Background(), "secret query text", nil, 5)
+		_, _, err := svc.Search(context.Background(), "u1", "secret query text", nil, 5)
 		ge, ok := err.(*Error)
 		if !ok || ge.Kind != c.want {
 			t.Errorf("%s: %v", name, err)
@@ -311,4 +311,48 @@ type dialerFor struct{ allowPrivate, cleartext bool }
 func (d *dialerFor) dial(ctx context.Context, network, addr string) (net.Conn, error) {
 	nd := &net.Dialer{Timeout: Timeout, Control: dialControl(d.allowPrivate, d.cleartext)}
 	return nd.DialContext(ctx, network, addr)
+}
+
+func TestUserCacheIsolationAndFairness(t *testing.T) {
+	c := newUserCache(2, 2, nil)
+	c.put("a", "k1", 1, time.Hour)
+	if _, ok := c.get("b", "k1"); ok {
+		t.Fatal("entry leaked across users")
+	}
+	// One user filling their quota cannot evict another user's entries.
+	c.put("b", "x1", 1, time.Hour)
+	c.put("b", "x2", 1, time.Hour)
+	c.put("b", "x3", 1, time.Hour)
+	if _, ok := c.get("a", "k1"); !ok {
+		t.Fatal("user b flushed user a")
+	}
+	if _, ok := c.get("b", "x1"); ok {
+		t.Fatal("per-user cap not enforced")
+	}
+	// The number of tracked users is bounded.
+	c.put("c", "k", 1, time.Hour)
+	c.put("d", "k", 1, time.Hour)
+	if len(c.users) > 2 {
+		t.Fatalf("users=%d", len(c.users))
+	}
+}
+
+func TestServiceCacheIsPerUser(t *testing.T) {
+	var hits int32
+	svc, _ := fake(t, "photon", func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		w.Write(fixture(t, "photon_house.json"))
+	})
+	for i := 0; i < 2; i++ {
+		svc.Search(context.Background(), "u1", "main st", nil, 5)
+		svc.Reverse(context.Background(), "u1", Point{1, 2})
+	}
+	if hits != 2 {
+		t.Fatalf("u1 repeats should be cached, hits=%d", hits)
+	}
+	svc.Search(context.Background(), "u2", "main st", nil, 5)
+	svc.Reverse(context.Background(), "u2", Point{1, 2})
+	if hits != 4 {
+		t.Fatalf("u2 must cause its own upstream calls, hits=%d", hits)
+	}
 }

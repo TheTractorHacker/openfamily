@@ -53,7 +53,8 @@ func parseCoord(raw string, limit float64) (float64, bool) {
 // PRIVACY: neither q nor lat/lon is ever logged; only status, count, cache
 // hit and latency are.
 func (s *Server) GeocodeSearch(w http.ResponseWriter, r *http.Request) {
-	if s.geocodeGate(w, r, "search", geocodeSearchPerMin) == "" {
+	uid := s.geocodeGate(w, r, "search", geocodeSearchPerMin)
+	if uid == "" {
 		return
 	}
 	qv := r.URL.Query()
@@ -90,13 +91,13 @@ func (s *Server) GeocodeSearch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	start := time.Now()
-	res, cached, err := s.Geocoder.Search(r.Context(), q, bias, limit)
+	res, _, err := s.Geocoder.Search(r.Context(), uid, q, bias, limit)
 	if err != nil {
 		s.geocodeFail(w, "search", start, err)
 		return
 	}
 	slog.Info("geocode", "op", "search", "status", http.StatusOK, "results", len(res),
-		"cached", cached, "ms", time.Since(start).Milliseconds())
+		"ms", time.Since(start).Milliseconds())
 	if res == nil {
 		res = []geocode.Result{}
 	}
@@ -105,7 +106,8 @@ func (s *Server) GeocodeSearch(w http.ResponseWriter, r *http.Request) {
 
 // GeocodeReverse proxies reverse geocoding: GET /geocode/reverse?lat=&lon=.
 func (s *Server) GeocodeReverse(w http.ResponseWriter, r *http.Request) {
-	if s.geocodeGate(w, r, "reverse", geocodeReversePerMin) == "" {
+	uid := s.geocodeGate(w, r, "reverse", geocodeReversePerMin)
+	if uid == "" {
 		return
 	}
 	qv := r.URL.Query()
@@ -116,18 +118,18 @@ func (s *Server) GeocodeReverse(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	start := time.Now()
-	addr, cached, err := s.Geocoder.Reverse(r.Context(), geocode.Point{Lat: lat, Lon: lon})
+	addr, _, err := s.Geocoder.Reverse(r.Context(), uid, geocode.Point{Lat: lat, Lon: lon})
 	if err != nil {
 		s.geocodeFail(w, "reverse", start, err)
 		return
 	}
 	if addr == nil {
-		slog.Info("geocode", "op", "reverse", "status", http.StatusNotFound, "cached", cached,
+		slog.Info("geocode", "op", "reverse", "status", http.StatusNotFound,
 			"ms", time.Since(start).Milliseconds())
 		writeError(w, http.StatusNotFound, "no address found")
 		return
 	}
-	slog.Info("geocode", "op", "reverse", "status", http.StatusOK, "cached", cached,
+	slog.Info("geocode", "op", "reverse", "status", http.StatusOK,
 		"ms", time.Since(start).Milliseconds())
 	writeJSON(w, http.StatusOK, addr)
 }
