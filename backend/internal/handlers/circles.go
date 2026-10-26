@@ -625,6 +625,11 @@ func (s *Server) SetCircleSharing(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.auditCircle(r.Context(), uid, m.CircleID, "circle.sharing", "sharing set to "+boolWord(*req.Enabled), clientIP(r))
+	if s.hub != nil {
+		if b, err := json.Marshal(map[string]any{"type": "sharing", "circle_id": m.CircleID, "user_id": uid, "enabled": *req.Enabled}); err == nil {
+			s.hub.notifyCircleAware(m.CircleID, b)
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"circle_id": m.CircleID, "sharing_enabled": *req.Enabled})
 }
 

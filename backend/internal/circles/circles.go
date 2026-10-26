@@ -166,6 +166,43 @@ func (a *Authz) LocationVisibility(ctx context.Context, viewerID string, circleI
 	return out, rows.Err()
 }
 
+// MemberCircle is one circle a co-member shares with the viewer.
+type MemberCircle struct {
+	CircleID string
+	// Sharing is true when the member shares their location in this circle
+	// (always true for the viewer themselves).
+	Sharing bool
+}
+
+// MemberCircles maps every co-member of viewer within circleIDs (only circles
+// the viewer belongs to count) to the circles of circleIDs they share with the
+// viewer. It lets a client filter one snapshot per circle.
+func (a *Authz) MemberCircles(ctx context.Context, viewerID string, circleIDs []string) (map[string][]MemberCircle, error) {
+	out := map[string][]MemberCircle{}
+	if !ValidID(viewerID) || len(circleIDs) == 0 {
+		return out, nil
+	}
+	rows, err := a.db.Query(ctx, `
+		SELECT s.user_id::text, s.circle_id::text, (s.sharing_enabled OR s.user_id = v.user_id)
+		FROM circle_members v
+		JOIN circle_members s ON s.circle_id = v.circle_id
+		WHERE v.user_id = $1 AND v.circle_id = ANY($2::uuid[])
+		ORDER BY s.circle_id`, viewerID, filterIDs(circleIDs))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var uid string
+		var mc MemberCircle
+		if err := rows.Scan(&uid, &mc.CircleID, &mc.Sharing); err != nil {
+			return nil, err
+		}
+		out[uid] = append(out[uid], mc)
+	}
+	return out, rows.Err()
+}
+
 func filterIDs(in []string) []string {
 	out := make([]string, 0, len(in))
 	for _, id := range in {
