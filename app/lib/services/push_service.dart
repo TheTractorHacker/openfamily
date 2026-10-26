@@ -8,16 +8,21 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'alert_router.dart';
 import 'api_client.dart';
 import 'device_service.dart';
+import 'direct_push_service.dart';
+import 'background_location_service.dart';
 import 'location_refresh_service.dart';
 import 'secure_url.dart';
 import 'unifiedpush_bridge.dart';
 
-/// Registers this device for push (UnifiedPush/ntfy on Android, APNs on iOS)
-/// and shows a local notification when a message arrives while the app is open.
+/// Registers this device for push and shows local notifications.
+///
+/// Android has two transports that can run side by side: the built-in "direct"
+/// channel (an authenticated stream to your own server, nothing to install; see
+/// [DirectPushService]) and, optionally, UnifiedPush/ntfy. iOS uses APNs.
 class PushService {
   PushService._();
 
-  static const String _prefKey = 'push_notifications_enabled';
+  static const String _prefKey = DirectPushService.enabledPrefKey;
   static const MethodChannel _apns = MethodChannel(
     'app.openfamily/apns',
   );
@@ -65,6 +70,8 @@ class PushService {
             requestSoundPermission: false,
           ),
         ),
+        onDidReceiveNotificationResponse: (NotificationResponse r) =>
+            onDirectNotificationTap(r.payload),
       );
     } catch (_) {
       // Tests and unsupported platforms have no native plugin.
@@ -123,11 +130,36 @@ class PushService {
     } catch (_) {}
   }
 
+  static DirectPushLifecycle? _directLifecycle;
+
+  /// Opts this device into the built-in direct channel when the server offers
+  /// it, then starts the connection (unless the background location service,
+  /// which owns it while running, is up). Failures are silent: UnifiedPush
+  /// below still works on its own.
+  static Future<void> _registerDirect(Map<String, dynamic> cfg) async {
+    if (cfg['direct_push'] != true) return;
+    try {
+      final String deviceId = await DeviceService.ensureRegistered();
+      await DeviceService.ensureIngestKey();
+      await ApiClient.updateDevicePush(
+        deviceId: deviceId,
+        pushTransport: 'direct',
+      );
+      _directLifecycle ??= DirectPushLifecycle(
+        backgroundServiceRunning: BackgroundLocationService.isRunning,
+      )..attach();
+      await DirectPushService.startForeground(
+        backgroundServiceRunning: BackgroundLocationService.isRunning,
+      );
+    } catch (_) {}
+  }
+
   static Future<void> _registerAndroid() async {
     String? ntfyBaseUrl;
     try {
       final Map<String, dynamic> cfg = await ApiClient.getPushConfig();
       ntfyBaseUrl = cfg['ntfy_base_url'] as String?;
+      await _registerDirect(cfg);
     } catch (_) {}
     try {
       await registerUnifiedPush(
@@ -213,6 +245,7 @@ class PushService {
   }
 
   static Future<void> _clearRegistration() async {
+    DirectPushService.instance.stop();
     try {
       await unregisterUnifiedPush();
     } catch (_) {}
@@ -224,6 +257,7 @@ class PushService {
         await ApiClient.updateDevicePush(
           deviceId: deviceId,
           unifiedpushEndpoint: '',
+          pushTransport: '',
         );
       }
     } catch (_) {}

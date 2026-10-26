@@ -38,7 +38,8 @@ class PrivacyPolicyScreen extends StatelessWidget {
       'By default, OpenStreetMap street tiles and Esri satellite tiles '
           'receive map requests, including the area you view and your IP '
           'address. Your operator can configure other providers or self-host '
-          'tiles; custom map tile URLs must use HTTPS. Android notifications use ntfy or another UnifiedPush '
+          'tiles; custom map tile URLs must use HTTPS. Android notifications are delivered by your own server over a '
+          'direct connection and, optionally, ntfy or another UnifiedPush '
           'distributor. Optional Twilio SMS processes destination phone numbers '
           'and alert share links. On iOS, push notifications use Apple APNs.'
     ),

@@ -34,8 +34,8 @@ const String kPreviewPlatformOverride = String.fromEnvironment(
 
 /// One-line push-notification guidance for the Settings screen.
 ///
-/// Platform-aware on purpose: Android's UnifiedPush guidance ("install the
-/// ntfy app") must not leak into iOS (whose delivery rides APNs, nothing to
+/// Platform-aware on purpose: Android's guidance (built-in direct channel,
+/// optional ntfy/UnifiedPush) must not leak into iOS (whose delivery rides APNs, nothing to
 /// install) or the browser preview (where no push transport exists at all).
 /// [isWeb] is passed explicitly because `kIsWeb` is a compile-time constant;
 /// [previewPlatform] defaults to the build-time override so tests can pass
@@ -48,8 +48,9 @@ String pushNotificationsSubtitle({
   // Device-preview override: present copy as the rehearsed platform even
   // though the rendering engine is the web.
   if (previewPlatform == 'android') {
-    return 'Android needs the ntfy app (UnifiedPush) so alerts arrive when '
-        'OpenFamily is closed. Off unregisters this device.';
+    return 'Alerts reach this phone through your own server; nothing to install. '
+        'The ntfy app (UnifiedPush) is optional and only adds delivery when '
+        'OpenFamily is fully stopped. Off unregisters this device.';
   }
   if (previewPlatform == 'ios') {
     return 'Delivered through your server via APNs. Off unregisters this '
@@ -61,8 +62,9 @@ String pushNotificationsSubtitle({
   }
   switch (platform ?? defaultTargetPlatform) {
     case TargetPlatform.android:
-      return 'Android needs the ntfy app (UnifiedPush) so alerts arrive when '
-          'OpenFamily is closed. Off unregisters this device.';
+      return 'Alerts reach this phone through your own server; nothing to install. '
+          'The ntfy app (UnifiedPush) is optional and only adds delivery when '
+          'OpenFamily is fully stopped. Off unregisters this device.';
     case TargetPlatform.iOS:
       return 'Delivered through your server via APNs. Off unregisters this '
           'device.';

@@ -11,6 +11,7 @@ import 'package:geolocator/geolocator.dart'
 import 'package:http/http.dart' as http;
 
 import 'background_credential_store.dart';
+import 'direct_push_service.dart';
 import 'location_outbox.dart';
 
 /// Background location reporting: keeps the device's GPS position flowing to
@@ -51,6 +52,8 @@ const Duration _httpTimeout = Duration(seconds: 15);
 @pragma('vm:entry-point')
 Future<void> onHeartbeatTick() async {
   try {
+    // Keep this isolate's direct-push connection (alerts without ntfy) alive.
+    DirectPushService.ensureRunningInBackground();
     final _BackgroundCredentials? credentials = await _readCredentials();
     if (credentials == null) return;
 
@@ -75,6 +78,7 @@ Future<void> onLocationUpdate(LocationDto location) async {
   try {
     // Skip spoofed locations (Android mock-location detection).
     if (location.isMocked) return;
+    DirectPushService.ensureRunningInBackground();
 
     final _BackgroundCredentials? credentials = await _readCredentials();
     if (credentials == null) return;
@@ -323,6 +327,7 @@ class BackgroundLocationService {
   /// Stops background location tracking.
   static Future<void> stop() async {
     _shouldRun = false;
+    DirectPushService.instance.stop();
     await BackgroundLocator.unRegisterLocationUpdate();
   }
 
