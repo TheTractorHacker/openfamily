@@ -6,7 +6,7 @@ import '../services/family_service.dart';
 import '../services/geofence_service.dart';
 import '../services/place_service.dart';
 import '../theme/app_theme.dart';
-import '../widgets/onboarding_step_indicator.dart';
+import '../widgets/ds/ds.dart';
 import 'app_shell.dart';
 import 'place_picker_screen.dart';
 
@@ -201,7 +201,7 @@ class _AddLocationsScreenState extends State<AddLocationsScreen> {
 
   Future<void> _finish() async {
     if (_finishing) return;
-    _finishing = true;
+    setState(() => _finishing = true);
     final List<Place> all = <Place>[
       ..._places.values,
       ..._customPlaces,
@@ -272,7 +272,7 @@ class _AddLocationsScreenState extends State<AddLocationsScreen> {
     }
     if (!mounted) return;
     if (failed) {
-      _finishing = false;
+      setState(() => _finishing = false);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
@@ -297,301 +297,123 @@ class _AddLocationsScreenState extends State<AddLocationsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Add locations'),
-        automaticallyImplyLeading: false,
-        bottom: widget.step == null
-            ? null
-            : OnboardingStepIndicator(currentStep: widget.step!, totalSteps: 6),
-      ),
-      body: SafeArea(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+    return DsPage(
+      title: 'Add locations',
+      showBack: false,
+      step: widget.step,
+      totalSteps: widget.step == null ? null : 6,
+      actions: [
+        DsBusyButton(label: 'Continue', busy: _finishing, onPressed: _finish),
+        DsPillButton(
+          label: 'Skip for now',
+          style: DsPillStyle.outlined,
+          onPressed: _finishing ? null : _finish,
+        ),
+      ],
+      children: [
+        const DsHeading(
+          'Add places to your map',
+          subtitle: 'Places are shared with all family members, so everyone '
+              'gets arrival and departure alerts.',
+        ),
+        DsRowGroup(
           children: [
-            Expanded(
-              child: ListView(
-                padding: const EdgeInsets.all(24),
-                children: [
-                  const Text(
-                    'Add places to your map',
-                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
-                  ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Places are shared with all family members, so everyone '
-                    'gets arrival and departure alerts.',
-                    style: TextStyle(fontSize: 14, color: AppColors.textMuted),
-                  ),
-                  const SizedBox(height: 20),
-                  for (final _PlacePreset preset in _presets) ...[
-                    _PlaceCard(
-                      preset: preset,
-                      place: _places[preset.id],
-                      onAdd: () => _addPlace(preset),
-                      onToggleAlerts: () => _toggleAlerts(preset),
-                    ),
-                    const SizedBox(height: 12),
-                  ],
-                  for (int i = 0; i < _customPlaces.length; i++) ...[
-                    _CustomPlaceCard(
-                      place: _customPlaces[i],
-                      onEdit: () => _editCustomPlace(i),
-                      onToggleAlerts: () => _toggleCustomAlerts(i),
-                    ),
-                    const SizedBox(height: 12),
-                  ],
-                  _AddCustomPlaceCard(onTap: _addCustomPlace),
-                ],
+            for (final _PlacePreset preset in _presets)
+              _PlaceRow(
+                icon: preset.icon,
+                name: preset.name,
+                emptyHint: preset.subtitle,
+                place: _places[preset.id],
+                onOpen: () => _addPlace(preset),
+                onToggleAlerts: () => _toggleAlerts(preset),
               ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  FilledButton(
-                    onPressed: _finish,
-                    child: const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 14),
-                      child: Text('Continue', style: TextStyle(fontSize: 16)),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  TextButton(
-                    onPressed: _finish,
-                    child: const Text('Skip for now'),
-                  ),
-                ],
+            for (int i = 0; i < _customPlaces.length; i++)
+              _PlaceRow(
+                icon: _customPlaces[i].icon,
+                name: _customPlaces[i].name,
+                emptyHint: '',
+                place: _customPlaces[i],
+                onOpen: () => _editCustomPlace(i),
+                onToggleAlerts: () => _toggleCustomAlerts(i),
               ),
+            DsListRow(
+              leading: DsListRow.iconTile(
+                context,
+                Icons.add_location_alt_outlined,
+              ),
+              title: 'Add a custom place',
+              subtitle: 'Any other place, e.g. Grandma\'s house',
+              chevron: true,
+              onTap: _addCustomPlace,
             ),
           ],
         ),
-      ),
+      ],
     );
   }
 }
 
-/// A preset place card. Before adding it shows an "Add" button; once added it
-/// shows the captured address + radius, a check, and a bell toggle for
-/// arrive/leave notifications. Tapping the card re-opens the picker to edit.
-class _PlaceCard extends StatelessWidget {
-  const _PlaceCard({
-    required this.preset,
+/// One place row. Before it is added it offers an "Add" button; once added it
+/// shows "Added" with the captured address and radius, and a bell toggle for
+/// arrive/leave alerts (state also spelled out in words). Tapping the row
+/// opens the picker to add or edit.
+class _PlaceRow extends StatelessWidget {
+  const _PlaceRow({
+    required this.icon,
+    required this.name,
+    required this.emptyHint,
     required this.place,
-    required this.onAdd,
+    required this.onOpen,
     required this.onToggleAlerts,
   });
 
-  final _PlacePreset preset;
+  final IconData icon;
+  final String name;
+  final String emptyHint;
   final Place? place;
-  final VoidCallback onAdd;
+  final VoidCallback onOpen;
   final VoidCallback onToggleAlerts;
 
   @override
   Widget build(BuildContext context) {
     final Place? p = place;
-    return Material(
-      color: AppColors.surfaceTint,
-      borderRadius: BorderRadius.circular(16),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(16),
-        onTap: onAdd,
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: AppColors.purple.withValues(alpha: 0.12),
-                ),
-                child: Icon(preset.icon, color: AppColors.purple, size: 24),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      preset.name,
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      p == null
-                          ? preset.subtitle
-                          : '${p.address} · ${p.radiusLabel}',
-                      style: const TextStyle(
-                        fontSize: 13,
-                        color: AppColors.textMuted,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              if (p != null) ...[
-                const Icon(Icons.check_circle, color: AppColors.statusGreen),
-                const SizedBox(width: 4),
-                // Bell toggle: arrive/leave notifications for this place.
-                IconButton(
-                  tooltip: p.alertsOn ? 'Alerts on' : 'Alerts off',
-                  icon: Icon(
-                    p.alertsOn
-                        ? Icons.notifications_active
-                        : Icons.notifications_off,
-                    color: p.alertsOn ? AppColors.purple : AppColors.textMuted,
-                  ),
-                  onPressed: onToggleAlerts,
-                ),
-              ] else
-                OutlinedButton(
-                  onPressed: onAdd,
-                  child: const Text('Add'),
-                ),
-            ],
-          ),
-        ),
+    return DsListRow(
+      leading: DsListRow.iconTile(
+        context,
+        p == null ? icon : Icons.check_circle,
+        color: p == null ? null : AppColors.statusGreen,
       ),
-    );
-  }
-}
-
-/// A captured custom (non-preset) place: name, address + radius, a check, and
-/// a bell toggle. Tapping the card re-opens the picker to edit.
-class _CustomPlaceCard extends StatelessWidget {
-  const _CustomPlaceCard({
-    required this.place,
-    required this.onEdit,
-    required this.onToggleAlerts,
-  });
-
-  final Place place;
-  final VoidCallback onEdit;
-  final VoidCallback onToggleAlerts;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: AppColors.surfaceTint,
-      borderRadius: BorderRadius.circular(16),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(16),
-        onTap: onEdit,
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: AppColors.purple.withValues(alpha: 0.12),
-                ),
-                child: Icon(place.icon, color: AppColors.purple, size: 24),
+      title: name,
+      subtitle: p == null
+          ? emptyHint
+          : 'Added · ${p.address} · ${p.radiusLabel}\n'
+              'Arrive and leave alerts ${p.alertsOn ? 'on' : 'off'}',
+      onTap: onOpen,
+      trailing: p == null
+          ? DsPillButton(
+              label: 'Add',
+              style: DsPillStyle.outlined,
+              onPressed: onOpen,
+              semanticLabel: 'Add $name',
+            )
+          : IconButton(
+              tooltip: p.alertsOn
+                  ? 'Turn off alerts for $name'
+                  : 'Turn on alerts for $name',
+              constraints: const BoxConstraints(
+                minWidth: kMinTarget,
+                minHeight: kMinTarget,
               ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      place.name,
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      '${place.address} · ${place.radiusLabel}',
-                      style: const TextStyle(
-                        fontSize: 13,
-                        color: AppColors.textMuted,
-                      ),
-                    ),
-                  ],
-                ),
+              icon: Icon(
+                p.alertsOn
+                    ? Icons.notifications_active
+                    : Icons.notifications_off_outlined,
+                color: p.alertsOn
+                    ? BrandTheme.of(context).accentInk
+                    : Theme.of(context).colorScheme.onSurfaceVariant,
               ),
-              const Icon(Icons.check_circle, color: AppColors.statusGreen),
-              const SizedBox(width: 4),
-              IconButton(
-                tooltip: place.alertsOn ? 'Alerts on' : 'Alerts off',
-                icon: Icon(
-                  place.alertsOn
-                      ? Icons.notifications_active
-                      : Icons.notifications_off,
-                  color: place.alertsOn ? AppColors.purple : AppColors.textMuted,
-                ),
-                onPressed: onToggleAlerts,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// A dashed "add a custom place" affordance at the bottom of the preset list.
-class _AddCustomPlaceCard extends StatelessWidget {
-  const _AddCustomPlaceCard({required this.onTap});
-
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      borderRadius: BorderRadius.circular(16),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(16),
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: AppColors.purple.withValues(alpha: 0.4)),
-          ),
-          child: const Row(
-            children: [
-              Icon(Icons.add_location_alt_outlined,
-                  color: AppColors.purple, size: 24),
-              SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Add a custom place',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.purple,
-                      ),
-                    ),
-                    SizedBox(height: 2),
-                    Text(
-                      'Any other place — e.g. Grandma\'s house',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: AppColors.textMuted,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Icon(Icons.chevron_right, color: AppColors.textMuted),
-            ],
-          ),
-        ),
-      ),
+              onPressed: onToggleAlerts,
+            ),
     );
   }
 }
