@@ -39,6 +39,11 @@ type wsMember struct {
 	// are arriving; clients use it to keep "last seen" fresh without moving
 	// the pin.
 	LastSeenAt *time.Time `json:"last_seen_at,omitempty"`
+	// CircleIDs are the caller's circles the member belongs to (within the
+	// snapshot's scope); SharingCircleIDs the subset where they share their
+	// location. Additive fields.
+	CircleIDs        []string `json:"circle_ids,omitempty"`
+	SharingCircleIDs []string `json:"sharing_circle_ids,omitempty"`
 }
 
 // wsLocation is a live location update broadcast to a family.
@@ -53,6 +58,9 @@ type wsLocation struct {
 	SpeedMPS       *float64  `json:"speed_mps"`
 	MotionState    *string   `json:"motion_state"`
 	AccuracyMeters *float64  `json:"accuracy_meters"`
+	// CircleID labels the frame for circle-aware clients (set per delivery by
+	// broadcastLocation); omitted for legacy clients.
+	CircleID string `json:"circle_id,omitempty"`
 }
 
 // wsPresence is a liveness announcement broadcast when a device reports but its
@@ -65,6 +73,7 @@ type wsPresence struct {
 	UserID     string    `json:"user_id"`
 	TS         time.Time `json:"ts"`
 	BatteryPct *float64  `json:"battery_pct,omitempty"`
+	CircleID   string    `json:"circle_id,omitempty"`
 }
 
 // wsAvatarUpdate tells already-connected clients to fetch or clear a changed
@@ -115,6 +124,26 @@ func (s *Server) Stream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Optional circle subscription: ?circle_id=<uuid> narrows the stream to one
+	// circle, "all" subscribes to every circle with labelled frames. Anything
+	// else, or a circle the caller is not in, is a 404 (no probing).
+	aware := false
+	filter := ""
+	if q := r.URL.Query().Get("circle_id"); q != "" {
+		aware = true
+		if q != "all" {
+			if _, err := circles.New(s.Pool).RequireMember(r.Context(), claims.UserID, q); err != nil {
+				if errors.Is(err, circles.ErrNotFound) {
+					http.Error(w, "circle not found", http.StatusNotFound)
+				} else {
+					http.Error(w, "failed to load circle", http.StatusInternalServerError)
+				}
+				return
+			}
+			filter = strings.ToLower(q)
+		}
+	}
+
 	opts := &websocket.AcceptOptions{
 		// Restrict cross-origin connections to the configured origin (or none,
 		// i.e. same-origin only) instead of allowing any origin.
@@ -139,6 +168,9 @@ func (s *Server) Stream(w http.ResponseWriter, r *http.Request) {
 		done: make(chan struct{}),
 	}
 	s.hub.registerCircles(circleIDs, claims.UserID, c)
+	if aware {
+		s.hub.setSubscription(c, filter)
+	}
 	go s.hub.watch(c, wsRevalidateInterval, func(ctx context.Context) (bool, error) {
 		return s.circleStreamAuthorized(ctx, c, claims.UserID, claims.TokenVersion)
 	})
@@ -158,12 +190,16 @@ func (s *Server) Stream(w http.ResponseWriter, r *http.Request) {
 
 	// Members snapshot: full family member list with each member's latest
 	// location. Sent once, after welcome, before any live updates.
-	members, err := s.circleMembersSnapshot(ctx, circleIDs, claims.UserID)
+	scope := circleIDs
+	if filter != "" {
+		scope = []string{filter}
+	}
+	members, err := s.circleMembersSnapshot(ctx, scope, claims.UserID)
 	if err != nil {
 		slog.Warn("members snapshot failed", "err", err, "user_id", claims.UserID)
 		return
 	}
-	snapshot, err := json.Marshal(map[string]any{"type": "members", "members": members})
+	snapshot, err := marshalSnapshot(members, aware, filter)
 	if err != nil {
 		slog.Warn("members snapshot marshal failed", "err", err)
 		return
@@ -201,9 +237,17 @@ func (s *Server) Stream(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		var frame struct {
-			Type string `json:"type"`
+			Type     string `json:"type"`
+			CircleID string `json:"circle_id"`
 		}
-		if err := json.Unmarshal(data, &frame); err != nil || frame.Type != "ping" {
+		if err := json.Unmarshal(data, &frame); err != nil {
+			continue
+		}
+		if frame.Type == "subscribe" {
+			s.handleSubscribe(ctx, c, claims.UserID, frame.CircleID)
+			continue
+		}
+		if frame.Type != "ping" {
 			continue
 		}
 		pong, err := json.Marshal(map[string]string{"type": "pong"})
@@ -272,6 +316,10 @@ func (s *Server) circleMembersSnapshot(ctx context.Context, circleIDs []string, 
 	for id := range visible {
 		memberIDs = append(memberIDs, id)
 	}
+	byMember, err := circles.New(s.Pool).MemberCircles(ctx, callerID, circleIDs)
+	if err != nil {
+		return nil, err
+	}
 
 	rows, err := s.Pool.Query(ctx, `
 		SELECT u.id, u.email, u.name, u.role,
@@ -326,6 +374,12 @@ func (s *Server) circleMembersSnapshot(ctx context.Context, circleIDs []string, 
 			AccuracyMeters:  accuracy,
 			LastSeenAt:      lastSeenAt,
 		}
+		for _, mc := range byMember[id] {
+			m.CircleIDs = append(m.CircleIDs, mc.CircleID)
+			if mc.Sharing {
+				m.SharingCircleIDs = append(m.SharingCircleIDs, mc.CircleID)
+			}
+		}
 		if !visible[id] {
 			m.redactLocation()
 		}
@@ -365,6 +419,12 @@ func (s *Server) broadcastLocation(ownerID string, loc wsLocation) {
 		slog.Warn("location broadcast: resolve circles failed", "err", err, "user_id", ownerID)
 		return
 	}
+	own, err := circles.New(s.Pool).CircleIDs(ctx, ownerID)
+	if err != nil {
+		slog.Warn("location broadcast: resolve own circles failed", "err", err, "user_id", ownerID)
+		return
+	}
+	loc.CircleID = ""
 	msg, err := json.Marshal(loc)
 	if err != nil {
 		slog.Warn("location broadcast: marshal failed", "err", err)
@@ -372,8 +432,17 @@ func (s *Server) broadcastLocation(ownerID string, loc wsLocation) {
 	}
 	// Only circles where the owner currently shares are fanned out to, plus
 	// the owner's own sockets. Membership and sharing are read per message, so
-	// a revocation takes effect on the very next update.
-	s.hub.broadcastCircles(shared, ownerID, msg)
+	// a revocation takes effect on the very next update. Circle-aware clients
+	// get one frame per circle labelled with its id; legacy clients one copy.
+	s.hub.broadcastLabelled(shared, own, ownerID, msg, func(circleID string) []byte {
+		l := loc
+		l.CircleID = circleID
+		b, err := json.Marshal(l)
+		if err != nil {
+			return msg
+		}
+		return b
+	})
 	// Platform admin clients see every live update regardless of family.
 	s.hub.broadcastAdmin(msg)
 }
@@ -396,17 +465,26 @@ func (s *Server) broadcastPresence(ownerID string, ts time.Time, batteryPct *flo
 		slog.Warn("presence broadcast: resolve circles failed", "err", err, "user_id", ownerID)
 		return
 	}
-	msg, err := json.Marshal(wsPresence{
-		Type:       "presence",
-		UserID:     ownerID,
-		TS:         ts,
-		BatteryPct: batteryPct,
-	})
+	own, err := circles.New(s.Pool).CircleIDs(ctx, ownerID)
+	if err != nil {
+		slog.Warn("presence broadcast: resolve own circles failed", "err", err, "user_id", ownerID)
+		return
+	}
+	p := wsPresence{Type: "presence", UserID: ownerID, TS: ts, BatteryPct: batteryPct}
+	msg, err := json.Marshal(p)
 	if err != nil {
 		slog.Warn("presence broadcast: marshal failed", "err", err)
 		return
 	}
-	s.hub.broadcastCircles(shared, ownerID, msg)
+	s.hub.broadcastLabelled(shared, own, ownerID, msg, func(circleID string) []byte {
+		l := p
+		l.CircleID = circleID
+		b, err := json.Marshal(l)
+		if err != nil {
+			return msg
+		}
+		return b
+	})
 	s.hub.broadcastAdmin(msg)
 }
 
@@ -468,4 +546,74 @@ func bearerToken(r *http.Request) string {
 		return h[7:]
 	}
 	return ""
+}
+
+// marshalSnapshot builds the members frame. Circle-aware clients get a
+// circle_id naming the scope ("all" or one circle id); legacy clients get the
+// historical shape.
+func marshalSnapshot(members []wsMember, aware bool, filter string) ([]byte, error) {
+	f := map[string]any{"type": "members", "members": members}
+	if aware {
+		if filter == "" {
+			f["circle_id"] = "all"
+		} else {
+			f["circle_id"] = filter
+		}
+	}
+	return json.Marshal(f)
+}
+
+// handleSubscribe switches a live socket to one circle ("all" or "" = every
+// circle). The id is checked against the database; an unknown, malformed or
+// foreign id yields an error frame and leaves the current subscription. On
+// success the client gets a "subscribed" ack and a fresh members snapshot
+// scoped to the circle.
+func (s *Server) handleSubscribe(ctx context.Context, c *wsClient, userID, circleID string) {
+	queue := func(v any) {
+		b, err := json.Marshal(v)
+		if err != nil {
+			return
+		}
+		select {
+		case c.send <- b:
+		default:
+		}
+	}
+	filter := ""
+	if circleID != "" && circleID != "all" {
+		if _, err := circles.New(s.Pool).RequireMember(ctx, userID, circleID); err != nil {
+			if errors.Is(err, circles.ErrNotFound) {
+				queue(map[string]string{"type": "error", "code": "circle_not_found"})
+			}
+			return
+		}
+		filter = strings.ToLower(circleID)
+	}
+	if !s.hub.setSubscription(c, filter) {
+		return
+	}
+	scope := []string{filter}
+	if filter == "" {
+		ids, err := circles.New(s.Pool).CircleIDs(ctx, userID)
+		if err != nil || len(ids) == 0 {
+			return
+		}
+		scope = ids
+	}
+	members, err := s.circleMembersSnapshot(ctx, scope, userID)
+	if err != nil {
+		slog.Warn("subscribe snapshot failed", "err", err, "user_id", userID)
+		return
+	}
+	ackID := filter
+	if ackID == "" {
+		ackID = "all"
+	}
+	queue(map[string]string{"type": "subscribed", "circle_id": ackID})
+	if b, err := marshalSnapshot(members, true, filter); err == nil {
+		select {
+		case c.send <- b:
+		default:
+		}
+	}
 }

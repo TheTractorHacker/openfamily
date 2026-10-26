@@ -266,14 +266,36 @@ func (s *Server) ListMembers(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "unauthenticated")
 		return
 	}
-	familyID, err := s.familyIDForUser(r.Context(), claims.UserID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load family")
-		return
-	}
-	if familyID == "" {
-		writeError(w, http.StatusNotFound, "no family")
-		return
+	// Scope: ?circle_id=<uuid> lists one circle (404 for a malformed id or a
+	// non-member, so ids cannot be probed), ?circle_id=all every circle of the
+	// caller, and no parameter the legacy primary circle.
+	az := circles.New(s.Pool)
+	scope := []string{}
+	switch q := r.URL.Query().Get("circle_id"); q {
+	case "":
+		familyID, err := s.familyIDForUser(r.Context(), claims.UserID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to load family")
+			return
+		}
+		if familyID == "" {
+			writeError(w, http.StatusNotFound, "no family")
+			return
+		}
+		scope = []string{familyID}
+	case "all":
+		ids, err := az.CircleIDs(r.Context(), claims.UserID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to load circles")
+			return
+		}
+		if len(ids) == 0 {
+			writeError(w, http.StatusNotFound, "no family")
+			return
+		}
+		scope = ids
+	default:
+		scope = []string{strings.ToLower(q)}
 	}
 
 	// Children may see member names/locations but not email addresses.
@@ -283,20 +305,30 @@ func (s *Server) ListMembers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The legacy family list is the caller's primary circle. Location fields
-	// are only filled for members who share with the caller (the caller always
-	// sees themselves); a member who turned sharing off stays listed.
-	az := circles.New(s.Pool)
-	callerMembership, err := az.RequireMember(r.Context(), claims.UserID, familyID)
-	if err != nil {
-		if errors.Is(err, circles.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "no family")
+	// Location fields are only filled for members who share with the caller in
+	// the scope (the caller always sees themselves); a member who turned
+	// sharing off stays listed. Phone numbers go to admins of a scoped circle.
+	adminOf := map[string]bool{}
+	for _, id := range scope {
+		m, err := az.RequireMember(r.Context(), claims.UserID, id)
+		if err != nil {
+			if errors.Is(err, circles.ErrNotFound) {
+				writeError(w, http.StatusNotFound, "no family")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "failed to load family")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "failed to load family")
+		if m.Role == circles.RoleAdmin {
+			adminOf[id] = true
+		}
+	}
+	visible, err := az.LocationVisibility(r.Context(), claims.UserID, scope)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list members")
 		return
 	}
-	visible, err := az.LocationVisibility(r.Context(), claims.UserID, []string{familyID})
+	byMember, err := az.MemberCircles(r.Context(), claims.UserID, scope)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list members")
 		return
@@ -340,13 +372,25 @@ func (s *Server) ListMembers(w http.ResponseWriter, r *http.Request) {
 			m.Lat, m.Lon, m.TS, m.BatteryPct, m.SpeedMPS, m.MotionState, m.AccuracyMeters, m.LastSeenAt =
 				nil, nil, nil, nil, nil, nil, nil, nil
 		}
+		for _, mc := range byMember[m.ID] {
+			m.CircleIDs = append(m.CircleIDs, mc.CircleID)
+			if mc.Sharing {
+				m.SharingCircleIDs = append(m.SharingCircleIDs, mc.CircleID)
+			}
+		}
 		if !canManage {
 			m.Email = "" // redact email for non-manager (child) viewers
 		}
-		// Phone numbers go only to admins of this family (who can edit them),
-		// never to plain members, and never for platform-admin accounts other
-		// than the caller's own.
-		if callerMembership.Role != circles.RoleAdmin || (memberIsPlatformAdmin && m.ID != claims.UserID) {
+		// Phone numbers go only to admins of a circle they share with this
+		// member (who can edit them), never to plain members, and never for
+		// platform-admin accounts other than the caller's own.
+		adminHere := false
+		for _, mc := range byMember[m.ID] {
+			if adminOf[mc.CircleID] {
+				adminHere = true
+			}
+		}
+		if !adminHere || (memberIsPlatformAdmin && m.ID != claims.UserID) {
 			m.Phone = nil
 		}
 		members = append(members, m)

@@ -80,6 +80,11 @@ type MemberWithLocation struct {
 	// are arriving; clients use it to keep "last seen" fresh without moving
 	// the pin.
 	LastSeenAt *time.Time `json:"last_seen_at,omitempty"`
+	// CircleIDs are the circles (within the requested scope) the member shares
+	// with the caller; SharingCircleIDs is the subset in which they share their
+	// location. Additive: legacy clients ignore both.
+	CircleIDs        []string `json:"circle_ids,omitempty"`
+	SharingCircleIDs []string `json:"sharing_circle_ids,omitempty"`
 }
 
 // InviteCode gates registration: a new user presents a valid, unexpired,

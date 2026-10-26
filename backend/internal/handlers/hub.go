@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"sync"
 	"time"
 
@@ -25,6 +26,13 @@ type wsClient struct {
 	// circles is the set of circle ids this socket is subscribed to. Guarded
 	// by hub.mu.
 	circles map[string]struct{}
+	// aware is set once the client opted in to circle-labelled frames (by
+	// connecting with ?circle_id= or sending a subscribe frame). Legacy
+	// clients stay unaware and receive one unlabelled copy per update.
+	aware bool
+	// filter is the one circle an aware client subscribed to; "" means all of
+	// its circles. Guarded by hub.mu.
+	filter string
 }
 
 // close signals the writer goroutine to stop and closes the connection. It is
@@ -140,6 +148,16 @@ func (h *hub) removeCircleLocked(circleID string, c *wsClient) {
 		}
 	}
 	delete(c.circles, circleID)
+	if c.aware {
+		if c.filter == circleID {
+			c.filter = "" // the subscribed circle is gone; fall back to all
+		}
+		notice, _ := json.Marshal(map[string]string{"type": "circle_removed", "circle_id": circleID})
+		select {
+		case c.send <- notice:
+		default:
+		}
+	}
 }
 
 // unregister removes a client from every circle it is subscribed to.
@@ -462,6 +480,119 @@ func (h *hub) broadcastCircles(circleIDs []string, alsoUser string, msg []byte) 
 		default:
 			h.unregister(c.familyID, c)
 			c.close()
+		}
+	}
+}
+
+// setSubscription opts c in to circle-labelled frames and narrows it to
+// circleID ("" = all its circles). The caller must already have verified
+// membership against the database; a circle the hub did not yet know is added.
+// It reports false when the client is no longer registered.
+func (h *hub) setSubscription(c *wsClient, circleID string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if c.userID != "" {
+		if _, live := h.familyUsers[c.userID][c]; !live {
+			return false
+		}
+	}
+	if circleID != "" {
+		if _, ok := c.circles[circleID]; !ok {
+			h.addCircleLocked(circleID, c)
+		}
+	}
+	c.aware = true
+	c.filter = circleID
+	return true
+}
+
+// broadcastLabelled delivers one subject update. shared are the circles the
+// subject currently shares in; own are all of the subject's circles (they
+// always see themselves). frame(circleID) returns the circle-labelled frame
+// and legacy the unlabelled one. A legacy client gets one copy; an aware client
+// gets one frame per matching circle, so it can filter per circle.
+func (h *hub) broadcastLabelled(shared, own []string, ownerID string, legacy []byte, frame func(circleID string) []byte) {
+	type delivery struct {
+		c    *wsClient
+		msgs [][]byte
+	}
+	cache := map[string][]byte{}
+	labelled := func(id string) []byte {
+		if b, ok := cache[id]; ok {
+			return b
+		}
+		b := frame(id)
+		cache[id] = b
+		return b
+	}
+	h.mu.Lock()
+	byClient := map[*wsClient]*delivery{}
+	add := func(c *wsClient, msg []byte) {
+		d := byClient[c]
+		if d == nil {
+			d = &delivery{c: c}
+			byClient[c] = d
+		}
+		d.msgs = append(d.msgs, msg)
+	}
+	for _, id := range shared {
+		for c := range h.families[id] {
+			if ownerID != "" && c.userID == ownerID {
+				continue // handled below
+			}
+			if !c.aware {
+				if byClient[c] == nil {
+					add(c, legacy)
+				}
+				continue
+			}
+			if c.filter == "" || c.filter == id {
+				add(c, labelled(id))
+			}
+		}
+	}
+	if ownerID != "" {
+		for c := range h.familyUsers[ownerID] {
+			if !c.aware {
+				add(c, legacy)
+				continue
+			}
+			for _, id := range own {
+				if _, in := c.circles[id]; in && (c.filter == "" || c.filter == id) {
+					add(c, labelled(id))
+				}
+			}
+		}
+	}
+	h.mu.Unlock()
+
+	for _, d := range byClient {
+		for _, msg := range d.msgs {
+			select {
+			case d.c.send <- msg:
+			default:
+				h.unregister(d.c.familyID, d.c)
+				d.c.close()
+			}
+		}
+	}
+}
+
+// notifyCircleAware sends msg to every aware client subscribed to circleID
+// (directly or via "all"). Legacy clients are not sent new frame types.
+func (h *hub) notifyCircleAware(circleID string, msg []byte) {
+	h.mu.Lock()
+	var clients []*wsClient
+	for c := range h.families[circleID] {
+		if c.aware && (c.filter == "" || c.filter == circleID) {
+			clients = append(clients, c)
+		}
+	}
+	h.mu.Unlock()
+	for _, c := range clients {
+		select {
+		case c.send <- msg:
+		default:
 		}
 	}
 }

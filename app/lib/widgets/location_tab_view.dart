@@ -26,6 +26,10 @@ class LocationTabView extends StatefulWidget {
     this.circles = const <Circle>[],
     this.selfId,
     this.sharingPaused = false,
+    this.selectedCircleId,
+    this.circleSharingPaused = false,
+    this.onSelectCircle,
+    this.onResumeCircleSharing,
     this.loading = false,
     this.error,
     this.hasFamily = true,
@@ -53,6 +57,19 @@ class LocationTabView extends StatefulWidget {
   final List<Member> members;
   final String? selfId;
   final bool sharingPaused;
+
+  /// The circle the map is scoped to: a circle id, `all`, or null when there
+  /// is only one circle (nothing to choose).
+  final String? selectedCircleId;
+
+  /// The user turned sharing off in the selected circle: show a clear
+  /// "sharing paused" state with a way to resume.
+  final bool circleSharingPaused;
+
+  /// A circle (or `all`) was picked in the pill sheet. When null the sheet
+  /// falls back to opening the circle's detail (legacy behaviour).
+  final ValueChanged<String>? onSelectCircle;
+  final VoidCallback? onResumeCircleSharing;
   final bool loading;
   final String? error;
   final bool hasFamily;
@@ -133,6 +150,19 @@ class _LocationTabViewState extends State<LocationTabView> {
                       trailing: Icon(Icons.check, color: brand.accentInk),
                       onTap: () => Navigator.of(ctx).pop(),
                     ),
+                  if (circles.length > 1 && widget.onSelectCircle != null)
+                    DsListRow(
+                      title: 'All circles',
+                      subtitle: 'Everyone from every circle',
+                      leading: DsListRow.iconTile(ctx, Icons.public),
+                      trailing: widget.selectedCircleId == 'all'
+                          ? Icon(Icons.check, color: brand.accentInk)
+                          : null,
+                      onTap: () {
+                        Navigator.of(ctx).pop();
+                        widget.onSelectCircle?.call('all');
+                      },
+                    ),
                   for (final Circle c in circles)
                     DsListRow(
                       title: c.name,
@@ -140,15 +170,20 @@ class _LocationTabViewState extends State<LocationTabView> {
                           '${c.memberCount} '
                           '${c.memberCount == 1 ? 'person' : 'people'}'
                           '${c.isAdmin ? ' - Admin' : ''}'
+                          '${c.sharingEnabled ? '' : ' - Sharing paused'}'
                           '${_isActive(c) ? ' - Shown on the map' : ''}',
                       leading: _circleLeading(ctx, c),
                       trailing: _isActive(c)
                           ? Icon(Icons.check, color: brand.accentInk)
                           : null,
-                      chevron: !_isActive(c),
+                      chevron: !_isActive(c) && widget.onSelectCircle == null,
                       onTap: () {
                         Navigator.of(ctx).pop();
-                        if (!_isActive(c)) widget.onOpenCircle?.call(c);
+                        if (widget.onSelectCircle != null) {
+                          widget.onSelectCircle!.call(c.id);
+                        } else if (!_isActive(c)) {
+                          widget.onOpenCircle?.call(c);
+                        }
                       },
                     ),
                   DsListRow(
@@ -170,9 +205,14 @@ class _LocationTabViewState extends State<LocationTabView> {
     );
   }
 
-  bool _isActive(Circle c) => widget.circles.any((Circle x) => x.isPrimary)
-      ? c.isPrimary
-      : c.name == widget.circleName;
+  bool _isActive(Circle c) {
+    if (widget.selectedCircleId != null) {
+      return widget.selectedCircleId == c.id;
+    }
+    return widget.circles.any((Circle x) => x.isPrimary)
+        ? c.isPrimary
+        : c.name == widget.circleName;
+  }
 
   Widget _circleLeading(BuildContext ctx, Circle c) {
     final String? icon = c.icon;
@@ -286,6 +326,14 @@ class _LocationTabViewState extends State<LocationTabView> {
                   ),
                 ],
               ),
+              if (widget.circleSharingPaused)
+                Padding(
+                  padding: const EdgeInsets.only(top: AppSpace.sm),
+                  child: _CircleSharingPausedBanner(
+                    circleName: widget.circleName,
+                    onResume: widget.onResumeCircleSharing,
+                  ),
+                ),
               if (widget.locationOff)
                 Padding(
                   padding: const EdgeInsets.only(top: AppSpace.sm),
@@ -593,6 +641,54 @@ class _CirclePill extends StatelessWidget {
                 ),
               ),
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Shown when the user turned sharing off in the selected circle: the circle's
+/// people are still listed, but they cannot see you there.
+class _CircleSharingPausedBanner extends StatelessWidget {
+  const _CircleSharingPausedBanner({
+    required this.circleName,
+    required this.onResume,
+  });
+
+  final String circleName;
+  final VoidCallback? onResume;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      container: true,
+      label: 'Sharing paused for $circleName',
+      child: Material(
+        color: BrandTheme.of(context).sheet,
+        elevation: 3,
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpace.lg,
+            vertical: AppSpace.sm,
+          ),
+          child: Row(
+            children: <Widget>[
+              const Icon(Icons.pause_circle_outline,
+                  color: AppColors.statusOrange),
+              const SizedBox(width: AppSpace.md),
+              Expanded(
+                child: Text(
+                  'Sharing paused. People in $circleName can\'t see where '
+                  'you are.',
+                  style: AppType.secondary.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+              TextButton(onPressed: onResume, child: const Text('Resume')),
+            ],
           ),
         ),
       ),

@@ -1,6 +1,6 @@
 # Multi-circle data model (GAP-001, GAP-002)
 
-Status: stage 1 implemented on `feat/circles`. Stage 2 is listed at the end.
+Status: stage 1 implemented on `feat/circles`. Stage 2 is partly done (circle-aware map and live stream, see below); the rest is listed at the end.
 
 Goal: a user can belong to several circles (family, friends, ...), is admin in
 some and member in others, and chooses per circle whether their location is
@@ -105,7 +105,21 @@ user with one circle and default sharing, output is identical to before.
 - Account deletion can leave a circle without an admin (promote the oldest member in stage 2).
 - The legacy registration flow cannot redeem codes of non-family circles.
 
-## Stage 2 (not done) - exact files
+## Circle-aware map and live stream (stage 2, done)
+
+Wire protocol (`GET /ws/stream`, additive; legacy clients unchanged):
+
+- Connect with `?circle_id=<uuid>` (one circle) or `?circle_id=all` to opt in to circle-labelled frames; an unknown, malformed or foreign id is a plain 404 before the upgrade. Without the parameter the socket is "legacy": every frame is as before (one unlabelled copy per update, snapshot of all co-members).
+- Client -> server `{"type":"subscribe","circle_id":"<uuid>|all"}` switches an open socket (also opts in). The membership is checked against the database. Success: `{"type":"subscribed","circle_id":...}` then a fresh `members` snapshot scoped to that circle. Failure: `{"type":"error","code":"circle_not_found"}` and the previous subscription stays.
+- Aware clients get `members` with `circle_id` (`all` or the id); `location` and `presence` frames carry `circle_id`. A subject who shares in several circles is delivered once per circle (viewer and subject both members, subject sharing on), so the client can filter; an aware socket narrowed to one circle only receives that circle's frames. A subject always receives their own updates, labelled per own circle.
+- New frames for aware sockets: `sharing` `{circle_id,user_id,enabled}` when a member changes their flag, and `circle_removed` `{circle_id}` when the hub drops that circle from the socket (removed, left, deleted). A narrowed socket then falls back to `all`; a socket left with no circle is closed, as before. The 30 s revalidation still re-syncs subscriptions and closes revoked sockets.
+- Each member in `members` (and in `GET /family/members`) carries `circle_ids` (circles shared with the caller in scope) and `sharing_circle_ids` (where that member shares).
+- `GET /family/members?circle_id=<uuid>|all`: membership-checked, 404 for outsiders and malformed ids; without it the legacy primary circle.
+- `admin_ws` is unchanged (platform admins keep the unlabelled global stream).
+
+App: the circle pill selects a circle (or "All circles" when in two or more), persisted in shared preferences; the roster, map markers, People list and socket are scoped to it, with a "Sharing paused" banner (and Resume) when the user turned sharing off in the selected circle. A deleted or left circle falls back to the primary one; stale frames from a previous selection are ignored. With one circle nothing is scoped or shown differently.
+
+## Stage 2 (remaining) - exact files
 
 Convert from `family_id` to a circle id taken from the request and checked with `internal/circles`:
 
@@ -114,4 +128,5 @@ Convert from `family_id` to a circle id taken from the request and checked with 
 - `handlers/alerts.go`, `handlers/contacts.go`, `handlers/audit.go` (family-scoped fan-out and audit view).
 - `handlers/admin.go`, `admin_users.go`, `admin_ws.go` (move/assign/delete family must call circle repair).
 - `handlers/auth.go` Register / `invites.go` `consumeInviteCode` (circle invite at registration), `profile.go` DeleteMe (last-admin handling).
-- Add circle id to WebSocket frames, tracking history retention per circle, chat (GAP-005), notification settings (GAP-006).
+- ~~Add circle id to WebSocket frames~~ (done above); `ws.go` `broadcastAvatarUpdate` is still family-scoped.
+- Places, geofences and history per circle (a later issue), tracking history retention per circle, chat (GAP-005), notification settings (GAP-006).
