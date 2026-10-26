@@ -1,23 +1,46 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// Local opt-in flags (default OFF). Stored in SharedPreferences so the
+/// Local driving-detection flags. Stored in SharedPreferences so the
 /// background isolate can read them (it calls [reload] first).
+///
+/// Motion-sensor detection (hard braking / rapid acceleration) is ON by
+/// default: a missing preference means on, for new installs and for installs
+/// that update. The phone-use estimate is a separate, more intrusive switch
+/// and stays OFF until the user turns it on.
 class DrivingSettings {
   DrivingSettings._();
 
   static const String sensorKey = 'driving_sensor_enabled';
   static const String phoneUseKey = 'driving_phone_use_enabled';
 
-  static Future<bool> sensorEnabled({bool reload = true}) =>
-      _get(sensorKey, reload);
+  /// True once the server has acknowledged the current effective value of
+  /// [sensorKey]. Cleared whenever the local value changes.
+  static const String syncedKey = 'driving_sensor_server_synced';
 
-  /// Phone-use estimate. Only effective when [sensorEnabled] is also true.
+  /// The one-time "Driving detection is on" card has been dismissed.
+  static const String disclosureSeenKey = 'driving_detection_disclosure_seen';
+
+  /// Effective state: missing preference = on. Unreadable storage = off (the
+  /// safe answer when we cannot tell).
+  static Future<bool> sensorEnabled({bool reload = true}) async {
+    try {
+      final SharedPreferences p = await SharedPreferences.getInstance();
+      if (reload) await p.reload();
+      return p.getBool(sensorKey) ?? true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Phone-use estimate (default off). Only effective when [sensorEnabled]
+  /// is also true.
   static Future<bool> phoneUseEnabled({bool reload = true}) =>
-      _get(phoneUseKey, reload);
+      _get(phoneUseKey, reload, false);
 
   static Future<void> setSensorEnabled(bool v) async {
     final SharedPreferences p = await SharedPreferences.getInstance();
     await p.setBool(sensorKey, v);
+    await p.setBool(syncedKey, false);
     if (!v) await p.setBool(phoneUseKey, false);
   }
 
@@ -26,13 +49,36 @@ class DrivingSettings {
     await p.setBool(phoneUseKey, v);
   }
 
-  static Future<bool> _get(String key, bool reload) async {
+  static Future<bool> serverSynced({bool reload = true}) =>
+      _get(syncedKey, reload, false);
+
+  /// Persists the effective value explicitly and records that the server has
+  /// been told [enabled]. Does nothing if the local value changed meanwhile,
+  /// so a later sync still delivers the newer choice.
+  static Future<void> markSynced(bool enabled) async {
+    final SharedPreferences p = await SharedPreferences.getInstance();
+    await p.reload();
+    if ((p.getBool(sensorKey) ?? true) != enabled) return;
+    await p.setBool(sensorKey, enabled);
+    await p.setBool(syncedKey, true);
+  }
+
+  static Future<bool> disclosureSeen() => _get(disclosureSeenKey, false, false);
+
+  static Future<void> markDisclosureSeen() async {
+    try {
+      final SharedPreferences p = await SharedPreferences.getInstance();
+      await p.setBool(disclosureSeenKey, true);
+    } catch (_) {}
+  }
+
+  static Future<bool> _get(String key, bool reload, bool fallback) async {
     try {
       final SharedPreferences p = await SharedPreferences.getInstance();
       if (reload) await p.reload();
-      return p.getBool(key) ?? false;
+      return p.getBool(key) ?? fallback;
     } catch (_) {
-      return false;
+      return fallback;
     }
   }
 }

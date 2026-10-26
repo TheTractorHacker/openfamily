@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
+
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'driving_event.dart';
@@ -73,6 +75,11 @@ class DrivingEventOutbox {
 
   static int _failures = 0;
   static Future<void> _lock = Future<void>.value();
+
+  /// Tests run each case in its own zone; a lock future left from an earlier
+  /// case would never complete.
+  @visibleForTesting
+  static void resetLockForTest() => _lock = Future<void>.value();
 
   static Future<T> _serial<T>(Future<T> Function() fn) {
     final Future<T> r = _lock.then((_) => fn());

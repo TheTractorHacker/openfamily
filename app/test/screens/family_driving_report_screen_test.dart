@@ -1,8 +1,13 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:openfamily/models/member.dart';
+import 'package:openfamily/models/trip.dart';
+import 'package:openfamily/screens/driving_detection_screen.dart';
 import 'package:openfamily/screens/family_driving_report_screen.dart';
+import 'package:openfamily/screens/trip_detail_screen.dart';
+import 'package:openfamily/services/driving/driving_settings.dart';
 import 'package:openfamily/screens/trips_screen.dart';
 import 'package:openfamily/services/api_client.dart' show ApiException;
 import 'package:openfamily/services/speed_units.dart';
@@ -30,6 +35,21 @@ const Member _brian = Member(
 );
 
 final DateTime _now = DateTime(2026, 10, 26, 9);
+
+final Trip _trip = Trip(
+  id: 't3',
+  userId: 'u1',
+  startedAt: DateTime(2026, 10, 25, 8),
+  endedAt: DateTime(2026, 10, 25, 8, 25),
+  durationS: 1500,
+  distanceM: 8000,
+  maxSpeedMps: 29,
+  avgSpeedMps: 5,
+  mode: TripMode.driving,
+  speedSource: 'device_gps',
+  start: const LatLng(40, -75),
+  end: const LatLng(40.1, -75),
+);
 
 Future<void> _pump(
   WidgetTester t,
@@ -74,14 +94,14 @@ void main() {
   testWidgets('shows loading skeleton, then the report', (WidgetTester t) async {
     final FakeTripReportApi api = FakeTripReportApi();
     await _pump(t, api);
-    expect(find.text('Weekly driving report'), findsOneWidget);
+    expect(find.text('Driving'), findsOneWidget);
     expect(find.text('Blake', skipOffstage: false), findsOneWidget);
     expect(find.text('You'), findsOneWidget, reason: 'self is labelled You');
     expect(find.text('84 mph'), findsOneWidget);
     expect(find.text('GPS speed'), findsOneWidget);
     expect(find.text('1 drive · 30 mi'), findsOneWidget);
     expect(find.text('1 risky event'), findsOneWidget);
-    expect(find.text('No drives yet'), findsNWidgets(2));
+    expect(find.text('No drives'), findsOneWidget, reason: 'idle member is collapsed');
     expect(find.text('Not tracked yet'), findsOneWidget);
     expect(find.textContaining('Phone use is not tracked yet'), findsOneWidget);
     expect(api.calls.single.$1, DateTime(2026, 10, 26));
@@ -128,7 +148,8 @@ void main() {
       t,
       FakeTripReportApi(result: reportJson(drives: 0, speeding: 0)),
     );
-    expect(find.text('No trips this week yet'), findsOneWidget);
+    expect(find.text('No drives yet this week'), findsOneWidget);
+    expect(find.textContaining('moving faster than walking'), findsOneWidget);
     expect(find.text('Drivers'), findsNothing);
   });
 
@@ -167,26 +188,50 @@ void main() {
     expect(find.textContaining('Showing the last report'), findsOneWidget);
   });
 
-  testWidgets('period chips reload with the right start', (WidgetTester t) async {
+  testWidgets('arrows, week/month toggle and picker reload the right period',
+      (WidgetTester t) async {
     final FakeTripReportApi api = FakeTripReportApi();
     await _pump(
       t,
       api,
       picker: (BuildContext c, DateTime n) async => DateTime(2026, 10, 14),
     );
-    await t.tap(find.text('Last week'));
+    expect(find.text('This week'), findsOneWidget);
+    expect(find.text('Oct 26 – Nov 1'), findsOneWidget);
+    // Next is disabled at the current week.
+    final IconButton next = t.widget(find.widgetWithIcon(IconButton, Icons.chevron_right_rounded));
+    expect(next.onPressed, isNull);
+    await t.tap(find.byTooltip('Previous week'));
     await t.pump();
     await t.pump();
     expect(api.calls.last.$1, DateTime(2026, 10, 19));
+    expect(find.text('Last week'), findsOneWidget);
     await t.tap(find.text('Pick a week'));
     await t.pump();
     await t.pump();
     expect(api.calls.last.$1, DateTime(2026, 10, 12));
     expect(find.text('Oct 12 – Oct 18'), findsWidgets);
-    await t.tap(find.text('This week'));
+    await t.tap(find.byTooltip('Next week'));
     await t.pump();
     await t.pump();
-    expect(api.calls.last.$1, DateTime(2026, 10, 26));
+    expect(api.calls.last.$1, DateTime(2026, 10, 19));
+    await t.tap(find.text('Month'));
+    await t.pump();
+    await t.pump();
+    expect(api.periods.last, 'month');
+    expect(api.calls.last.$1, DateTime(2026, 10));
+    expect(find.text('October 2026'), findsOneWidget);
+    expect(find.text('This month'), findsOneWidget);
+    await t.tap(find.byTooltip('Previous month'));
+    await t.pump();
+    await t.pump();
+    expect(api.calls.last.$1, DateTime(2026, 9));
+    expect(find.text('Last month'), findsOneWidget);
+    await t.tap(find.text('Week'));
+    await t.pump();
+    await t.pump();
+    expect(api.periods.last, 'week');
+    expect(api.calls.last.$1, DateTime(2026, 8, 31));
   });
 
   testWidgets('uses the selected circle and reloads when it changes', (WidgetTester t) async {
@@ -268,11 +313,249 @@ void main() {
 
   testWidgets('tap targets are at least 48dp', (WidgetTester t) async {
     await _pump(t, FakeTripReportApi());
-    for (final String label in <String>['This week', 'Last week']) {
+    for (final String label in <String>['Week', 'Month']) {
       final Size s = t.getSize(
         find.ancestor(of: find.text(label), matching: find.byType(InkWell)),
       );
       expect(s.height, greaterThanOrEqualTo(48));
     }
+  });
+
+  group('Driving page content', () {
+    Future<void> pumpRich(
+      WidgetTester t, {
+      bool sensor = false,
+      bool detectionOn = true,
+      bool sharing = true,
+      List<Member>? members,
+      double scale = 1,
+      FakeTrips? trips,
+    }) async {
+      t.view.physicalSize = const Size(780, 9000);
+      t.view.devicePixelRatio = 2;
+      addTearDown(t.view.reset);
+      await t.pumpWidget(
+        MaterialApp(
+          theme: buildLightTheme(),
+          builder: (BuildContext c, Widget? child) => MediaQuery(
+            data: MediaQuery.of(c).copyWith(textScaler: TextScaler.linear(scale)),
+            child: child!,
+          ),
+          home: FamilyDrivingReportScreen(
+            members: ValueNotifier<List<Member>>(members ?? <Member>[_blake, _brian]),
+            userId: ValueNotifier<String?>('u2'),
+            api: FakeTripReportApi(
+              result: reportJson(twoMembers: true, rich: true, sensor: sensor),
+            ),
+            tripsApi: trips ?? FakeTrips(),
+            clock: () => DateTime(2026, 10, 25, 12),
+            sharing: ValueNotifier<bool>(sharing),
+            detectionLoader: () async => detectionOn,
+          ),
+        ),
+      );
+      await t.pump();
+      await t.pump();
+      await t.pump();
+    }
+
+    testWidgets('recent drives are on the page with all the facts',
+        (WidgetTester t) async {
+      await pumpRich(t);
+      expect(find.text('Recent drives'), findsOneWidget);
+      expect(find.text('Blake · Today 8:00 am'), findsOneWidget);
+      expect(find.text('Blake · Fri Oct 23 5:00 pm'), findsOneWidget);
+      expect(find.text('You · Fri Oct 23 9:00 am'), findsOneWidget);
+      expect(find.text('7.5 mi · 25 min · top 65 mph'), findsWidgets);
+      expect(find.text('1 speeding'), findsWidgets);
+      expect(find.text('2 hard braking'), findsOneWidget);
+    });
+
+    testWidgets('daily chart has real axis labels and tapping a day filters',
+        (WidgetTester t) async {
+      await pumpRich(t);
+      expect(find.text('Distance per day (mi)'), findsOneWidget);
+      // 20 km = 12.4 mi -> axis 20 mi, half 10, zero.
+      expect(find.text('20 mi'), findsOneWidget);
+      expect(find.text('10'), findsOneWidget);
+      expect(find.text('Mon'), findsOneWidget);
+      await t.tap(find.bySemanticsLabel(RegExp('^Fri Oct 23')));
+      await t.pump();
+      expect(find.text('Drives on Fri Oct 23'), findsOneWidget);
+      expect(find.text('Blake · Fri Oct 23 5:00 pm'), findsOneWidget);
+      expect(find.text('Blake · Today 8:00 am'), findsNothing);
+      await t.tap(find.text('Show all drives'));
+      await t.pump();
+      expect(find.text('Recent drives'), findsOneWidget);
+      expect(find.text('Blake · Today 8:00 am'), findsOneWidget);
+    });
+
+    testWidgets('a day with no drives says so', (WidgetTester t) async {
+      await pumpRich(t);
+      await t.tap(find.bySemanticsLabel(RegExp('^Sat Oct 24')));
+      await t.pump();
+      expect(find.text('No drives on this day.'), findsOneWidget);
+    });
+
+    testWidgets('tapping a drive opens its detail', (WidgetTester t) async {
+      await pumpRich(t, trips: FakeTrips(trips: <Trip>[_trip]));
+      await t.tap(find.text('Blake · Today 8:00 am'));
+      await t.pumpAndSettle();
+      expect(find.byType(TripDetailScreen), findsOneWidget);
+    });
+
+    testWidgets('Driving now strip shows speed in the unit; hidden when nobody drives',
+        (WidgetTester t) async {
+      final Member driving = _blake.copyWith(
+        movement: MovementType.car,
+        speedMph: 42,
+      );
+      await pumpRich(t, members: <Member>[driving, _brian]);
+      expect(find.text('DRIVING NOW'), findsOneWidget);
+      expect(find.text('Driving 42 mph'), findsOneWidget);
+      UnitPreferenceService.units.value = UnitSystem.metric;
+      await t.pump();
+      expect(find.text('Driving 68 km/h'), findsOneWidget);
+      UnitPreferenceService.units.value = UnitSystem.imperial;
+    });
+
+    testWidgets('no Driving now strip when nobody is driving',
+        (WidgetTester t) async {
+      await pumpRich(t);
+      expect(find.text('DRIVING NOW'), findsNothing);
+    });
+
+    testWidgets('detection off shows the prompt with a button; on does not',
+        (WidgetTester t) async {
+      await pumpRich(t, detectionOn: false);
+      expect(
+        find.text('Hard braking and phone use need Driving detection'),
+        findsOneWidget,
+      );
+      await t.tap(find.text('Open Driving detection'));
+      await t.pumpAndSettle();
+      expect(find.byType(DrivingDetectionScreen), findsOneWidget);
+    });
+
+    testWidgets('detection on: no prompt', (WidgetTester t) async {
+      await pumpRich(t);
+      expect(find.textContaining('need Driving detection'), findsNothing);
+    });
+
+    testWidgets('sharing paused is explained', (WidgetTester t) async {
+      await pumpRich(t, sharing: false);
+      expect(find.text('Your location sharing is paused'), findsOneWidget);
+    });
+
+    testWidgets('GPS-only estimate note; absent when a sensor member exists',
+        (WidgetTester t) async {
+      await pumpRich(t);
+      expect(find.textContaining('estimated from GPS'), findsOneWidget);
+    });
+
+    testWidgets('sensor members: no GPS-only note, phone use is a number',
+        (WidgetTester t) async {
+      await pumpRich(t, sensor: true);
+      expect(find.textContaining('estimated from GPS'), findsNothing);
+      expect(find.text('Speeds, braking and acceleration are GPS estimates.'),
+          findsOneWidget);
+    });
+
+    testWidgets('one member with one drive looks complete',
+        (WidgetTester t) async {
+      t.view.physicalSize = const Size(780, 9000);
+      t.view.devicePixelRatio = 2;
+      addTearDown(t.view.reset);
+      final Map<String, dynamic> j = reportJson(rich: true);
+      (j['members'] as List).removeLast();
+      await t.pumpWidget(MaterialApp(
+        theme: buildLightTheme(),
+        home: FamilyDrivingReportScreen(
+          members: ValueNotifier<List<Member>>(<Member>[_blake]),
+          userId: ValueNotifier<String?>('u1'),
+          api: FakeTripReportApi(result: j),
+          clock: () => DateTime(2026, 10, 25, 12),
+          detectionLoader: () async => true,
+        ),
+      ));
+      await t.pump();
+      await t.pump();
+      expect(find.text('Driver'), findsOneWidget);
+      expect(find.text('Recent drives'), findsOneWidget);
+      expect(find.textContaining('Top speed 84 mph'), findsOneWidget);
+      expect(find.text('No drives'), findsNothing);
+    });
+
+    testWidgets('200% text does not overflow with the full page',
+        (WidgetTester t) async {
+      await pumpRich(t, scale: 2, detectionOn: false, sharing: false);
+      expect(t.takeException(), isNull);
+      await t.scrollUntilVisible(find.text('Drivers'), 400,
+          scrollable: find.byType(Scrollable).first);
+      expect(t.takeException(), isNull);
+    });
+
+    testWidgets('chart bars and drives are labelled for screen readers',
+        (WidgetTester t) async {
+      final SemanticsHandle h = t.ensureSemantics();
+      await pumpRich(t);
+      expect(find.bySemanticsLabel(RegExp(r'^Fri Oct 23: 12 mi, 2 drives')),
+          findsOneWidget);
+      expect(find.bySemanticsLabel(RegExp(r'^Sun Oct 25, today')),
+          findsOneWidget);
+      h.dispose();
+    });
+  });
+
+  group('disclosure card', () {
+    Future<void> pumpCard(WidgetTester t, {bool detectionOn = true}) async {
+      t.view.physicalSize = const Size(780, 3200);
+      t.view.devicePixelRatio = 2;
+      addTearDown(t.view.reset);
+      await t.pumpWidget(MaterialApp(
+        theme: buildLightTheme(),
+        home: FamilyDrivingReportScreen(
+          members: ValueNotifier<List<Member>>(<Member>[_blake]),
+          userId: ValueNotifier<String?>('u1'),
+          api: FakeTripReportApi(),
+          clock: () => _now,
+          detectionLoader: () async => detectionOn,
+        ),
+      ));
+      await t.pump();
+      await t.pump();
+      await t.pump();
+    }
+
+    testWidgets('shows once, says what is collected, and Okay dismisses it for good',
+        (WidgetTester t) async {
+      await pumpCard(t);
+      expect(find.text('Driving detection is on'), findsOneWidget);
+      expect(find.textContaining('only while you are driving'), findsOneWidget);
+      expect(find.textContaining('never the raw sensor data'), findsOneWidget);
+      await t.tap(find.text('Okay'));
+      await t.pump();
+      expect(find.text('Driving detection is on'), findsNothing);
+      expect(await DrivingSettings.disclosureSeen(), isTrue);
+      await t.pumpWidget(const SizedBox());
+      await pumpCard(t);
+      expect(find.text('Driving detection is on'), findsNothing,
+          reason: 'seen state survives a new screen');
+    });
+
+    testWidgets('Change in Settings marks it seen and opens Driving detection',
+        (WidgetTester t) async {
+      await pumpCard(t);
+      await t.tap(find.text('Change in Settings'));
+      await t.pumpAndSettle();
+      expect(find.byType(DrivingDetectionScreen), findsOneWidget);
+      expect(await DrivingSettings.disclosureSeen(), isTrue);
+    });
+
+    testWidgets('not shown when the user has turned detection off',
+        (WidgetTester t) async {
+      await pumpCard(t, detectionOn: false);
+      expect(find.text('Driving detection is on'), findsNothing);
+    });
   });
 }

@@ -1,21 +1,28 @@
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
+import 'package:latlong2/latlong.dart';
 
 import '../models/member.dart';
+import '../models/trip.dart';
 import '../models/trip_report.dart';
 import '../services/circle_selection.dart' show kAllCircles;
+import '../services/driving/driving_settings.dart';
 import '../services/speed_units.dart';
 import '../services/trip_report_service.dart';
 import '../services/trips_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/driving_event_chips.dart';
 import '../widgets/driving_event_sheet.dart';
+import '../widgets/driving_page_widgets.dart';
 import '../widgets/driving_report_cards.dart';
 import '../widgets/ds/ds.dart';
+import 'driving_detection_screen.dart';
+import 'trip_detail_screen.dart';
 import 'trips_screen.dart';
 
-/// The Driving tab: the family's weekly driving report. Event chips, summary
-/// cards and one card per member that opens that member's trips.
+/// The Driving tab: who is driving now, the period's totals, a per-day chart,
+/// the latest drives and one card per member. Everything comes from one
+/// `GET /trips/report` request plus the live member snapshot.
 class FamilyDrivingReportScreen extends StatefulWidget {
   const FamilyDrivingReportScreen({
     super.key,
@@ -26,6 +33,9 @@ class FamilyDrivingReportScreen extends StatefulWidget {
     this.tripsApi,
     this.clock,
     this.datePicker,
+    this.sharing,
+    this.detectionLoader,
+    this.optInSync,
   });
 
   final ValueListenable<List<Member>> members;
@@ -35,14 +45,25 @@ class FamilyDrivingReportScreen extends StatefulWidget {
   final ValueListenable<String?>? circleId;
   final TripReportApi? api;
 
-  /// Passed on to [TripsScreen].
+  /// Passed on to [TripsScreen] and [TripDetailScreen].
   final TripsApi? tripsApi;
 
   /// Overridable "now" (tests).
   final DateTime Function()? clock;
 
-  /// Overridable picker (tests); returns any day in the chosen week.
+  /// Overridable picker (tests); returns any day in the chosen period.
   final Future<DateTime?> Function(BuildContext, DateTime now)? datePicker;
+
+  /// This phone's location sharing (false = paused). Null means unknown/on.
+  final ValueListenable<bool>? sharing;
+
+  /// Whether Driving detection is on. Defaults to the stored preference
+  /// (missing = on).
+  final Future<bool> Function()? detectionLoader;
+
+  /// Tells the server the effective detection opt-in (the app passes
+  /// `DrivingEventsService.syncOptIn`). Null = do nothing (tests).
+  final Future<bool> Function()? optInSync;
 
   @override
   State<FamilyDrivingReportScreen> createState() => _State();
@@ -51,11 +72,14 @@ class FamilyDrivingReportScreen extends StatefulWidget {
 class _State extends State<FamilyDrivingReportScreen> {
   late final TripReportApi _api = widget.api ?? TripReportService.instance;
 
-  ReportPreset _preset = ReportPreset.thisWeek;
-  DateTime? _custom;
+  String _period = 'week';
+  late DateTime _anchor = periodStartOf(_period, _now);
+  DateTime? _day;
   TripReport? _report;
   TripsException? _error;
   bool _loading = true;
+  bool? _detectionOn;
+  bool _disclosureSeen = true;
   int _seq = 0;
 
   DateTime get _now => widget.clock?.call() ?? DateTime.now();
@@ -65,6 +89,8 @@ class _State extends State<FamilyDrivingReportScreen> {
     super.initState();
     UnitPreferenceService.ensureLoaded();
     widget.circleId?.addListener(_load);
+    widget.optInSync?.call();
+    _loadPrefs();
     _load();
   }
 
@@ -72,6 +98,17 @@ class _State extends State<FamilyDrivingReportScreen> {
   void dispose() {
     widget.circleId?.removeListener(_load);
     super.dispose();
+  }
+
+  Future<void> _loadPrefs() async {
+    final bool on = await (widget.detectionLoader?.call() ??
+        DrivingSettings.sensorEnabled(reload: false));
+    final bool seen = await DrivingSettings.disclosureSeen();
+    if (!mounted) return;
+    setState(() {
+      _detectionOn = on;
+      _disclosureSeen = seen;
+    });
   }
 
   String? get _scope {
@@ -87,7 +124,8 @@ class _State extends State<FamilyDrivingReportScreen> {
     });
     try {
       final TripReport r = await _api.report(
-        start: presetStart(_preset, _now, custom: _custom),
+        start: _anchor,
+        period: _period,
         circleId: _scope,
       );
       if (!mounted || seq != _seq) return;
@@ -104,32 +142,47 @@ class _State extends State<FamilyDrivingReportScreen> {
     }
   }
 
-  void _pick(ReportPreset p) {
-    if (p == _preset && _custom == null) return;
+  void _goTo(String period, DateTime anchor) {
+    final DateTime cur = periodStartOf(period, _now);
     setState(() {
-      _preset = p;
+      _period = period;
+      _anchor = anchor.isAfter(cur) ? cur : periodStartOf(period, anchor);
+      _day = null;
       _report = null;
     });
     _load();
   }
+
+  bool get _canNext =>
+      !shiftPeriod(_period, _anchor, 1).isAfter(periodStartOf(_period, _now));
 
   Future<void> _pickDate() async {
     final DateTime now = _now;
     final DateTime? d = await (widget.datePicker?.call(context, now) ??
         showDatePicker(
           context: context,
-          initialDate: _custom ?? now,
+          initialDate: _anchor,
           firstDate: DateTime(now.year - 2),
           lastDate: now,
-          helpText: 'Pick any day in the week',
+          helpText: _period == 'month'
+              ? 'Pick any day in the month'
+              : 'Pick any day in the week',
         ));
     if (d == null || !mounted) return;
-    setState(() {
-      _preset = ReportPreset.custom;
-      _custom = d;
-      _report = null;
-    });
-    _load();
+    _goTo(_period, d);
+  }
+
+  Future<void> _openDetection() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => const DrivingDetectionScreen()),
+    );
+    await _loadPrefs();
+  }
+
+  Future<void> _dismissDisclosure({bool openSettings = false}) async {
+    setState(() => _disclosureSeen = true);
+    await DrivingSettings.markDisclosureSeen();
+    if (openSettings && mounted) await _openDetection();
   }
 
   // ---- members ----
@@ -151,13 +204,32 @@ class _State extends State<FamilyDrivingReportScreen> {
   String _nameOf(MemberReport m) =>
       m.userId == widget.userId.value ? 'You' : (m.name.isEmpty ? 'Member' : m.name);
 
-  void _openMember(MemberReport m) {
+  void _openMember(Member m) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => TripsScreen(
-          member: _memberFor(m.userId, m.name),
-          api: widget.tripsApi,
-        ),
+        builder: (_) => TripsScreen(member: m, api: widget.tripsApi),
+      ),
+    );
+  }
+
+  void _openTrip(RecentTrip t) {
+    final Trip trip = Trip(
+      id: t.id,
+      userId: t.userId,
+      startedAt: t.startedAt,
+      endedAt: t.endedAt,
+      durationS: t.durationS,
+      distanceM: t.distanceM,
+      maxSpeedMps: t.maxSpeedMps,
+      avgSpeedMps: t.durationS > 0 ? t.distanceM / t.durationS : 0,
+      mode: TripMode.driving,
+      speedSource: 'device_gps',
+      start: const LatLng(0, 0),
+      end: const LatLng(0, 0),
+    );
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => TripDetailScreen(trip: trip, api: widget.tripsApi),
       ),
     );
   }
@@ -186,15 +258,31 @@ class _State extends State<FamilyDrivingReportScreen> {
                       AppSpace.xxxl,
                     ),
                     children: <Widget>[
-                      _periodChips(context),
-                      const SizedBox(height: AppSpace.lg),
+                      if (!_disclosureSeen && _detectionOn == true) ...<Widget>[
+                        DrivingNoticeCard(
+                          icon: Icons.shield_outlined,
+                          title: 'Driving detection is on',
+                          message:
+                              'Your phone reads its motion sensor only while '
+                              'you are driving, to notice hard braking and '
+                              'sudden acceleration. Only the detected events '
+                              'are uploaded, never the raw sensor data. You '
+                              'can turn it off at any time.',
+                          actionLabel: 'Okay',
+                          onAction: _dismissDisclosure,
+                          secondaryLabel: 'Change in Settings',
+                          onSecondary: () =>
+                              _dismissDisclosure(openSettings: true),
+                        ),
+                        const SizedBox(height: AppSpace.lg),
+                      ],
                       Row(
                         children: <Widget>[
                           Expanded(
                             child: Semantics(
                               header: true,
                               child: Text(
-                                'Weekly driving report',
+                                'Driving',
                                 style: AppType.title.copyWith(fontSize: 28),
                               ),
                             ),
@@ -202,20 +290,39 @@ class _State extends State<FamilyDrivingReportScreen> {
                           const UnitToggleButton(),
                         ],
                       ),
-                      if (_report != null) ...<Widget>[
-                        const SizedBox(height: AppSpace.xxs),
-                        Text(
-                          formatDateRange(
-                            _report!.start,
-                            _report!.end,
-                            now: _now,
-                          ),
-                          style: AppType.body.copyWith(
-                            color: Theme.of(context).colorScheme.onSurfaceVariant,
-                          ),
+                      const SizedBox(height: AppSpace.sm),
+                      DrivingPeriodBar(
+                        period: _period,
+                        title: periodTitle(_period, _anchor, now: _now),
+                        caption: _caption(),
+                        canNext: _canNext,
+                        onPeriod: (String p) {
+                          if (p != _period) _goTo(p, _anchor);
+                        },
+                        onPrev: () =>
+                            _goTo(_period, shiftPeriod(_period, _anchor, -1)),
+                        onNext: () =>
+                            _goTo(_period, shiftPeriod(_period, _anchor, 1)),
+                        onPick: _pickDate,
+                      ),
+                      const SizedBox(height: AppSpace.md),
+                      ValueListenableBuilder<List<Member>>(
+                        valueListenable: widget.members,
+                        builder: (BuildContext context, List<Member> all, _) =>
+                            DrivingNowStrip(
+                          driving: <Member>[
+                            ...all.where((Member m) =>
+                                m.movement == MovementType.car &&
+                                m.id == widget.userId.value),
+                            ...all.where((Member m) =>
+                                m.movement == MovementType.car &&
+                                m.id != widget.userId.value),
+                          ],
+                          selfId: widget.userId.value,
+                          units: units,
+                          onTap: _openMember,
                         ),
-                      ],
-                      const SizedBox(height: AppSpace.lg),
+                      ),
                       ..._content(context, units),
                     ],
                   ),
@@ -228,40 +335,12 @@ class _State extends State<FamilyDrivingReportScreen> {
     );
   }
 
-  Widget _periodChips(BuildContext context) {
-    final DateTime now = _now;
-    final String custom = _custom == null
-        ? 'Pick a week'
-        : formatDateRange(
-            weekStartOf(_custom!),
-            weekStartOf(_custom!).add(const Duration(days: 6)),
-            now: now,
-          );
-    return Wrap(
-      spacing: AppSpace.sm,
-      runSpacing: AppSpace.sm,
-      children: <Widget>[
-        _PeriodChip(
-          label: 'This week',
-          selected: _preset == ReportPreset.thisWeek,
-          onTap: () => _pick(ReportPreset.thisWeek),
-        ),
-        _PeriodChip(
-          label: 'Last week',
-          selected: _preset == ReportPreset.lastWeek,
-          onTap: () => _pick(ReportPreset.lastWeek),
-        ),
-        _PeriodChip(
-          label: custom,
-          icon: Icons.calendar_month_outlined,
-          selected: _preset == ReportPreset.custom,
-          semanticLabel: _custom == null
-              ? 'Pick a week from the calendar'
-              : 'Week of $custom. Tap to change.',
-          onTap: _pickDate,
-        ),
-      ],
-    );
+  String? _caption() {
+    final String unit = _period == 'month' ? 'month' : 'week';
+    final DateTime cur = periodStartOf(_period, _now);
+    if (_anchor == cur) return 'This $unit';
+    if (_anchor == shiftPeriod(_period, cur, -1)) return 'Last $unit';
+    return null;
   }
 
   List<Widget> _content(BuildContext context, UnitSystem units) {
@@ -288,17 +367,43 @@ class _State extends State<FamilyDrivingReportScreen> {
           ),
       ];
     }
-    final String phrase = periodPhrase(_preset);
-    final List<MemberReport> members = <MemberReport>[
-      ...r.members.where((MemberReport m) => m.userId == widget.userId.value),
-      ...r.members.where((MemberReport m) => m.userId != widget.userId.value),
+    final String phrase = periodPhraseFor(_period, _anchor, _now);
+    final String? me = widget.userId.value;
+    final List<MemberReport> sorted = <MemberReport>[
+      ...r.members.where((MemberReport m) => m.userId == me),
+      ...r.members.where((MemberReport m) => m.userId != me),
     ];
+    final List<MemberReport> active =
+        sorted.where((MemberReport m) => m.drives > 0).toList();
+    final List<MemberReport> idle =
+        sorted.where((MemberReport m) => m.drives == 0).toList();
     final String? topId = r.totals.topSpeedUserId;
     MemberReport? topM;
     for (final MemberReport m in r.members) {
       if (m.userId == topId) topM = m;
     }
     final bool noPhone = r.totals.events.phoneUse == null;
+    final bool sharingPaused = widget.sharing?.value == false;
+    Widget card(MemberReport m) => MemberDrivingCard(
+      report: m,
+      member: _memberFor(m.userId, m.name),
+      displayName: _nameOf(m),
+      units: units,
+      onTap: () => _openMember(_memberFor(m.userId, m.name)),
+    );
+
+    final List<RecentTrip> shown = _day == null
+        ? r.recentTrips
+        : r.recentTrips
+              .where((RecentTrip t) =>
+                  DateTime(t.startedAt.year, t.startedAt.month, t.startedAt.day) ==
+                  _day)
+              .toList();
+    ReportDay? dayInfo;
+    for (final ReportDay d in r.days) {
+      if (d.date == _day) dayInfo = d;
+    }
+
     return <Widget>[
       if (_error != null)
         Padding(
@@ -315,6 +420,30 @@ class _State extends State<FamilyDrivingReportScreen> {
           padding: EdgeInsets.only(bottom: AppSpace.sm),
           child: LinearProgressIndicator(minHeight: 3),
         ),
+      if (sharingPaused)
+        const Padding(
+          padding: EdgeInsets.only(bottom: AppSpace.md),
+          child: DrivingNoticeCard(
+            icon: Icons.pause_circle_outline,
+            title: 'Your location sharing is paused',
+            message:
+                'Drives are not recorded for you while sharing is paused. '
+                'Turn sharing back on from the Location tab.',
+          ),
+        ),
+      if (_detectionOn == false)
+        Padding(
+          padding: const EdgeInsets.only(bottom: AppSpace.md),
+          child: DrivingNoticeCard(
+            icon: Icons.sensors_off_outlined,
+            title: 'Hard braking and phone use need Driving detection',
+            message:
+                'Driving detection is turned off on this phone, so braking '
+                'and acceleration are only estimated from GPS.',
+            actionLabel: 'Open Driving detection',
+            onAction: _openDetection,
+          ),
+        ),
       DrivingEventChips(
         report: r,
         phrase: phrase,
@@ -328,14 +457,11 @@ class _State extends State<FamilyDrivingReportScreen> {
         ),
       ),
       if (noPhone)
-        Padding(
-          padding: const EdgeInsets.only(top: AppSpace.sm),
-          child: Text(
+        const Padding(
+          padding: EdgeInsets.only(top: AppSpace.sm),
+          child: DrivingHint(
             'Phone use is not tracked yet, so it shows no number rather '
             'than a zero.',
-            style: AppType.secondary.copyWith(
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
-            ),
           ),
         ),
       const SizedBox(height: AppSpace.lg),
@@ -343,13 +469,18 @@ class _State extends State<FamilyDrivingReportScreen> {
         const SizedBox(height: AppSpace.lg),
         DsEmptyState(
           icon: Icons.directions_car_outlined,
-          title: _preset == ReportPreset.thisWeek
-              ? 'No trips this week yet'
-              : 'No trips in this week',
+          title: 'No drives yet $phrase'.replaceAll('yet in this', 'in this'),
           message:
-              'Drives appear here once someone in your circle shares their '
-              'location while driving.',
+              'Drives appear automatically when someone is moving faster '
+              'than walking.',
         ),
+        if (idle.isNotEmpty) ...<Widget>[
+          const SizedBox(height: AppSpace.lg),
+          NoDrivesGroup(
+            names: idle.map(_nameOf).toList(),
+            children: idle.map(card).toList(),
+          ),
+        ],
       ] else ...<Widget>[
         DrivingSummaryCards(
           report: r,
@@ -357,97 +488,89 @@ class _State extends State<FamilyDrivingReportScreen> {
           topSpeedMember: topM == null ? null : _memberFor(topM.userId, topM.name),
         ),
         const SizedBox(height: AppSpace.lg),
-        Semantics(
-          header: true,
-          child: const Text('Drivers', style: AppType.headline),
-        ),
-        const SizedBox(height: AppSpace.sm),
-        for (final MemberReport m in members)
-          Padding(
-            padding: const EdgeInsets.only(bottom: AppSpace.md),
-            child: MemberDrivingCard(
-              report: m,
-              member: _memberFor(m.userId, m.name),
-              displayName: _nameOf(m),
-              units: units,
-              onTap: () => _openMember(m),
+        if (r.days.isNotEmpty) ...<Widget>[
+          DrivingDaysChart(
+            days: r.days,
+            units: units,
+            today: _now,
+            selected: _day,
+            onSelect: (DateTime? d) => setState(() => _day = d),
+          ),
+          const SizedBox(height: AppSpace.lg),
+        ],
+        if (r.recentTrips.isNotEmpty) ...<Widget>[
+          Semantics(
+            header: true,
+            child: Text(
+              _day == null ? 'Recent drives' : 'Drives on ${dayText(_day!)}',
+              style: AppType.headline,
             ),
           ),
-        if (r.estimated)
-          Padding(
-            padding: const EdgeInsets.only(top: AppSpace.xs),
-            child: Text(
-              'Speeds, braking and acceleration are GPS estimates.',
-              style: AppType.secondary.copyWith(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
+          if (_day != null)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton(
+                onPressed: () => setState(() => _day = null),
+                style: TextButton.styleFrom(
+                  minimumSize: const Size(kMinTarget, kMinTarget),
+                ),
+                child: const Text('Show all drives'),
               ),
             ),
+          const SizedBox(height: AppSpace.sm),
+          if (shown.isEmpty)
+            DrivingHint(
+              dayInfo != null && dayInfo.drives > 0
+                  ? 'This day is older than the latest ${r.recentTrips.length} '
+                      'drives listed here. Open a driver below for every trip.'
+                  : 'No drives on this day.',
+            ),
+          for (final RecentTrip t in shown)
+            Padding(
+              padding: const EdgeInsets.only(bottom: AppSpace.md),
+              child: RecentDriveTile(
+                trip: t,
+                member: _memberFor(t.userId, t.name),
+                name: t.userId == me ? 'You' : (t.name.isEmpty ? 'Member' : t.name),
+                units: units,
+                now: _now,
+                onTap: () => _openTrip(t),
+              ),
+            ),
+          const SizedBox(height: AppSpace.sm),
+        ],
+        Semantics(
+          header: true,
+          child: Text(
+            sorted.length == 1 ? 'Driver' : 'Drivers',
+            style: AppType.headline,
+          ),
+        ),
+        const SizedBox(height: AppSpace.sm),
+        for (final MemberReport m in active)
+          Padding(
+            padding: const EdgeInsets.only(bottom: AppSpace.md),
+            child: card(m),
+          ),
+        if (idle.isNotEmpty)
+          NoDrivesGroup(
+            names: idle.map(_nameOf).toList(),
+            children: idle.map(card).toList(),
+          ),
+        if (r.gpsOnly)
+          const Padding(
+            padding: EdgeInsets.only(top: AppSpace.md),
+            child: DrivingHint(
+              'Braking and acceleration here are estimated from GPS, which '
+              'can miss short events. Speeds are GPS speed.',
+            ),
+          )
+        else if (r.estimated)
+          const Padding(
+            padding: EdgeInsets.only(top: AppSpace.md),
+            child: DrivingHint('Speeds, braking and acceleration are GPS estimates.'),
           ),
       ],
     ];
-  }
-}
-
-class _PeriodChip extends StatelessWidget {
-  const _PeriodChip({
-    required this.label,
-    required this.selected,
-    required this.onTap,
-    this.icon,
-    this.semanticLabel,
-  });
-
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-  final IconData? icon;
-  final String? semanticLabel;
-
-  @override
-  Widget build(BuildContext context) {
-    final BrandTheme brand = BrandTheme.of(context);
-    final ColorScheme cs = Theme.of(context).colorScheme;
-    final Color fg = selected ? brand.onAccent : cs.onSurface;
-    return Semantics(
-      button: true,
-      selected: selected,
-      label: semanticLabel ?? label,
-      excludeSemantics: true,
-      onTap: onTap,
-      child: Material(
-        color: selected ? brand.accent : brand.sheet,
-        shape: StadiumBorder(
-          side: selected ? BorderSide.none : BorderSide(color: cs.outlineVariant),
-        ),
-        child: InkWell(
-          customBorder: const StadiumBorder(),
-          onTap: onTap,
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(minHeight: kMinTarget),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: AppSpace.lg),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: <Widget>[
-                  if (icon != null) ...<Widget>[
-                    Icon(icon, size: 18, color: fg),
-                    const SizedBox(width: AppSpace.sm),
-                  ],
-                  Flexible(
-                    child: Text(
-                      label,
-                      style: AppType.body.copyWith(
-                        fontWeight: FontWeight.w700,
-                        color: fg,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
   }
 }

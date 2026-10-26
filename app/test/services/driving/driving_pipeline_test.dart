@@ -237,5 +237,33 @@ void main() {
       await Future<void>.delayed(Duration.zero);
       expect(feed.withScreen, isFalse);
     });
+
+    test('syncs the opt-in from the background until acknowledged, throttled',
+        () async {
+      int calls = 0;
+      bool ok = false;
+      final DrivingRuntime r = DrivingRuntime(
+        feed: feed,
+        service: DrivingEventsService(api),
+        isEnabled: () async => true,
+        isPhoneUseEnabled: () async => false,
+        syncOptIn: () async {
+          calls++;
+          return ok;
+        },
+        clock: () => now,
+        tickEvery: const Duration(hours: 1),
+      );
+      await r.onBackgroundFix(speedMps: 0);
+      await r.onBackgroundFix(speedMps: 0);
+      expect(calls, 1, reason: 'throttled');
+      now += const Duration(minutes: 11).inMilliseconds;
+      ok = true;
+      await r.onBackgroundFix(speedMps: 0);
+      expect(calls, 2);
+      now += const Duration(minutes: 30).inMilliseconds;
+      await r.onBackgroundFix(speedMps: 0);
+      expect(calls, 2, reason: 'acknowledged: no more calls');
+    });
   });
 }

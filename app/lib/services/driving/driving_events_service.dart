@@ -2,6 +2,7 @@ import '../api_client.dart';
 import '../background_credential_store.dart';
 import 'driving_event.dart';
 import 'driving_event_outbox.dart';
+import 'driving_settings.dart';
 
 /// Server reply to `POST /trips/sensor-events`.
 class SensorEventsResult {
@@ -117,5 +118,25 @@ class DrivingEventsService {
   Future<void> setServerOptIn(bool enabled) async {
     if (!enabled) await DrivingEventOutbox.clear();
     await api.post(const <Map<String, dynamic>>[], sensorEnabled: enabled);
+  }
+
+  /// Makes sure the server knows the effective on-device setting. Detection is
+  /// on by default, so on first run (or after an update) the preference is
+  /// missing and the server has not been told: this sends
+  /// `sensor_enabled=true` once and then persists the effective value. It
+  /// also redelivers a switch-off whose first call failed. A failed call
+  /// leaves the state unsynced so the next call retries. Never throws.
+  /// Returns true when the server is known to be in sync.
+  Future<bool> syncOptIn() async {
+    try {
+      if (await DrivingSettings.serverSynced()) return true;
+      final bool enabled = await DrivingSettings.sensorEnabled();
+      if (!enabled) await DrivingEventOutbox.clear();
+      await api.post(const <Map<String, dynamic>>[], sensorEnabled: enabled);
+      await DrivingSettings.markSynced(enabled);
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 }

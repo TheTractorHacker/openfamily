@@ -7,7 +7,9 @@ import '../widgets/ds/ds.dart';
 
 /// Settings > Driving detection: opt-in for on-device hard-braking /
 /// rapid-acceleration detection with the phone's motion sensors, and for the
-/// "screen activity while moving" estimate. Default OFF.
+/// "screen activity while moving" estimate. Motion detection is ON by default
+/// (turn it off here at any time); the screen-activity estimate is OFF by
+/// default.
 class DrivingDetectionScreen extends StatefulWidget {
   const DrivingDetectionScreen({super.key, this.api});
 
@@ -55,10 +57,14 @@ class _DrivingDetectionScreenState extends State<DrivingDetectionScreen> {
         // Tell the server first so a failure leaves the feature off.
         await _service.setServerOptIn(true);
         await DrivingSettings.setSensorEnabled(true);
+        await DrivingSettings.markSynced(true);
       } else {
-        // Stop sampling immediately; the server note follows.
+        // Stop sampling immediately; the server note follows. If it fails the
+        // state stays unsynced and is retried by the app and the background
+        // service.
         await DrivingSettings.setSensorEnabled(false);
         await _service.setServerOptIn(false);
+        await DrivingSettings.markSynced(false);
       }
       if (!mounted) return;
       setState(() {
@@ -74,7 +80,8 @@ class _DrivingDetectionScreenState extends State<DrivingDetectionScreen> {
             ? "Couldn't reach the server, so driving detection stays off. "
                 'Try again when you are online.'
             : 'Detection is off on this phone. The server could not be '
-                'told right now; it will not receive any more events.';
+                'told right now; the app will tell it as soon as it can, '
+                'and no more events are sent meanwhile.';
       });
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -122,8 +129,9 @@ class _DrivingDetectionScreenState extends State<DrivingDetectionScreen> {
             padding: pad,
             child: Text(
               'Phone GPS alone misses some sudden stops and hard launches. '
-              'With this on, your phone also uses its motion sensor to '
-              'notice them and adds them to your driving report.',
+              'This is on by default: your phone also uses its motion sensor '
+              'to notice them and adds them to your driving report. Turn the '
+              'switch below off at any time to stop it.',
               style: AppType.body,
             ),
           ),

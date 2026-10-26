@@ -8,7 +8,10 @@ Map<String, dynamic> reportJson({
   int rapidAccel = 0,
   int drives = 1,
   bool twoMembers = false,
+  bool rich = false,
+  bool sensor = false,
 }) => <String, dynamic>{
+  if (rich) ...richParts(drives: drives, sensor: sensor),
   'period': 'week',
   'start': '2026-10-19',
   'end': '2026-10-25',
@@ -87,12 +90,58 @@ Map<String, dynamic> reportJson({
   'estimated': true,
 };
 
+/// `days` (week of 2026-10-19, today is Mon 2026-10-26 in the screen tests, so
+/// the last bar is the previous Sunday) and `recent_trips`.
+Map<String, dynamic> richParts({int drives = 1, bool sensor = false}) {
+  final List<double> km = <double>[0, 12000, 0, 8000, 20000, 0, 8000];
+  final List<Map<String, dynamic>> days = <Map<String, dynamic>>[
+    for (int i = 0; i < 7; i++)
+      <String, dynamic>{
+        'date': '2026-10-${19 + i}',
+        'drives': km[i] == 0 ? 0 : (i == 4 ? 2 : 1),
+        'distance_m': km[i],
+        'top_speed_mps': km[i] == 0 ? 0 : 25.0 + i,
+      },
+  ];
+  Map<String, dynamic> trip(String id, String user, String name, String at, double d,
+          int speeding, int brake) =>
+      <String, dynamic>{
+        'id': id,
+        'user_id': user,
+        'name': name,
+        'started_at': at,
+        'ended_at': at.replaceFirst(':00:00', ':25:00'),
+        'distance_m': d,
+        'duration_s': 1500,
+        'max_speed_mps': 29.0,
+        'mode': 'driving',
+        'event_counts': <String, dynamic>{
+          'speeding': speeding,
+          'hard_brake': brake,
+          'rapid_accel': 0,
+          'phone_use': sensor ? 0 : null,
+        },
+      };
+  return <String, dynamic>{
+    'days': days,
+    'sensor_members': sensor ? <String>['u1'] : <String>[],
+    'recent_trips': drives == 0
+        ? <Map<String, dynamic>>[]
+        : <Map<String, dynamic>>[
+            trip('t3', 'u1', 'Blake', '2026-10-25T08:00:00', 8000, 0, 0),
+            trip('t2', 'u1', 'Blake', '2026-10-23T17:00:00', 12000, 1, 2),
+            trip('t1', 'u2', 'Brian', '2026-10-23T09:00:00', 8000, 0, 0),
+          ],
+  };
+}
+
 class FakeTripReportApi implements TripReportApi {
   FakeTripReportApi({this.result, this.error});
 
   Map<String, dynamic>? result;
   Object? error;
   final List<(DateTime, String?)> calls = <(DateTime, String?)>[];
+  final List<String> periods = <String>[];
 
   @override
   Future<TripReport> report({
@@ -101,6 +150,7 @@ class FakeTripReportApi implements TripReportApi {
     String? circleId,
   }) async {
     calls.add((start, circleId));
+    periods.add(period);
     if (error != null) throw error!;
     return TripReport.fromJson(result ?? reportJson());
   }
