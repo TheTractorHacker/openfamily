@@ -72,6 +72,7 @@ type MemberWithLocation struct {
 	TS              *time.Time `json:"ts,omitempty"`
 	BatteryPct      *float64   `json:"battery_pct,omitempty"`
 	SpeedMPS        *float64   `json:"speed_mps,omitempty"`
+	HeadingDeg      *float64   `json:"heading_deg,omitempty"`
 	MotionState     *string    `json:"motion_state,omitempty"`
 	AccuracyMeters  *float64   `json:"accuracy_meters,omitempty"`
 	// LastSeenAt is the most recent device heartbeat/ingest time across all of

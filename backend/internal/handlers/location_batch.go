@@ -51,7 +51,7 @@ const (
 	// batchRateLimit / batchWindow bound backfill requests per user. A
 	// well-behaved client needs a handful of batches per sync; each batch may
 	// carry up to batchMaxPoints rows, far above the live ingest cap.
-	batchRateLimit = 10
+	batchRateLimit = 60
 	batchWindow    = time.Minute
 )
 
@@ -283,16 +283,16 @@ func (s *Server) storeBackfill(ctx context.Context, deviceID, ownerID string, po
 				nullIfEmpty(p.MotionState), nullIfEmpty(p.Source),
 			)
 			b.Queue(`
-				INSERT INTO member_positions (user_id, lat, lon, ts, battery_pct, speed_mps, motion_state, accuracy_meters, device_id, updated_at)
-				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
+				INSERT INTO member_positions (user_id, lat, lon, ts, battery_pct, speed_mps, motion_state, accuracy_meters, device_id, heading_deg, updated_at)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now())
 				ON CONFLICT (user_id) DO UPDATE SET
 					lat = EXCLUDED.lat, lon = EXCLUDED.lon, ts = EXCLUDED.ts,
 					battery_pct = EXCLUDED.battery_pct, speed_mps = EXCLUDED.speed_mps,
 					motion_state = EXCLUDED.motion_state, accuracy_meters = EXCLUDED.accuracy_meters,
-					device_id = EXCLUDED.device_id, updated_at = now()
+					device_id = EXCLUDED.device_id, heading_deg = EXCLUDED.heading_deg, updated_at = now()
 				WHERE member_positions.ts < EXCLUDED.ts`,
 				ownerID, p.Lat, p.Lon, *p.TS, p.BatteryPct, p.SpeedMPS,
-				nullIfEmpty(p.MotionState), p.AccuracyMeters, p.DeviceID,
+				nullIfEmpty(p.MotionState), p.AccuracyMeters, p.DeviceID, p.HeadingDeg,
 			)
 		}
 		br := tx.SendBatch(ctx, b)

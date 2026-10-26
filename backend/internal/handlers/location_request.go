@@ -277,6 +277,12 @@ func (s *Server) iosPushTokens(ctx context.Context, userID string) ([]string, er
 // executed in the background — never shown as an alert). Returns true when at
 // least one transport accepted the request.
 func (s *Server) dispatchLocationRequest(parent context.Context, body []byte, userID string) bool {
+	return s.dispatchSilentCommand(parent, "OpenFamily location refresh", body, userID)
+}
+
+// dispatchSilentCommand delivers a silent command body to a member's devices
+// over the transports described on dispatchLocationRequest.
+func (s *Server) dispatchSilentCommand(parent context.Context, title string, body []byte, userID string) bool {
 	// Built-in direct channel first: a live stream delivers immediately. A
 	// device that is not connected still gets the command queued (short TTL),
 	// and the other transports below are tried too.
@@ -284,7 +290,7 @@ func (s *Server) dispatchLocationRequest(parent context.Context, body []byte, us
 	for _, id := range s.directDeviceIDs(parent, userID) {
 		dispatchCtx, cancel := context.WithTimeout(parent, 12*time.Second)
 		err := s.Push.Dispatch(dispatchCtx, directNotification(push.Notification{
-			Title: "OpenFamily location refresh", Body: string(body), Silent: true, Platform: "android",
+			Title: title, Body: string(body), Silent: true, Platform: "android",
 		}, id, userID, "", ""))
 		cancel()
 		if err == nil {
@@ -301,7 +307,7 @@ func (s *Server) dispatchLocationRequest(parent context.Context, body []byte, us
 	for _, endpoint := range endpoints {
 		dispatchCtx, cancel := context.WithTimeout(parent, 12*time.Second)
 		err := s.Push.Dispatch(dispatchCtx, push.Notification{
-			Title:               "OpenFamily location refresh",
+			Title:               title,
 			Body:                string(body),
 			Platform:            "android",
 			UnifiedPushEndpoint: endpoint,
@@ -318,7 +324,7 @@ func (s *Server) dispatchLocationRequest(parent context.Context, body []byte, us
 	for _, token := range tokens {
 		dispatchCtx, cancel := context.WithTimeout(parent, 12*time.Second)
 		err := s.Push.Dispatch(dispatchCtx, push.Notification{
-			Title:     "OpenFamily location refresh",
+			Title:     title,
 			Body:      string(body),
 			Silent:    true,
 			Platform:  "ios",
