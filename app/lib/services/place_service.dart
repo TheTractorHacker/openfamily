@@ -49,6 +49,33 @@ class PlaceService {
     return place;
   }
 
+  /// Updates a place (PATCH) and returns the saved [Place]. Only the fields
+  /// passed are sent, so omitted fields are left unchanged on the server.
+  static Future<Place> updatePlace(
+    String id, {
+    String? name,
+    String? type,
+    double? lat,
+    double? lon,
+    double? radiusMeters,
+    String? address,
+  }) async {
+    final Map<String, dynamic> body = <String, dynamic>{
+      if (name != null) 'name': name,
+      if (type != null) 'type': type,
+      if (lat != null) 'lat': lat,
+      if (lon != null) 'lon': lon,
+      if (radiusMeters != null) 'radius_meters': radiusMeters,
+      if (address != null) 'address': address,
+    };
+    final dynamic data = await ApiClient.patch('/family/places/$id', body: body);
+    final Place? place = _fromBackend(data as Map<String, dynamic>);
+    if (place == null) {
+      throw const ApiException(0, 'Unexpected place response.');
+    }
+    return place;
+  }
+
   /// Deletes a place by id.
   static Future<void> deletePlace(String id) async {
     await ApiClient.delete('/family/places/$id');
