@@ -1012,4 +1012,67 @@ class ApiClient {
   static Future<dynamic> getTripEvents(String id) {
     return get('/trips/${Uri.encodeComponent(id)}/events');
   }
+
+  // --- driving sensor ---
+
+  /// Request body of `POST /trips/sensor-events`. Only detected events and the
+  /// opt-in flag are ever sent, never raw sensor data. At most 100 events per
+  /// request.
+  static Map<String, dynamic> sensorEventsBody(
+    List<Map<String, dynamic>> events, {
+    required bool sensorEnabled,
+  }) {
+    return <String, dynamic>{
+      'events': events,
+      'sensor_enabled': sensorEnabled,
+    };
+  }
+
+  /// `POST /trips/sensor-events` with the account session (foreground use,
+  /// e.g. the opt-in switch). Returns `{accepted, duplicate, rejected}`.
+  static Future<Map<String, dynamic>> postSensorEvents(
+    List<Map<String, dynamic>> events, {
+    required bool sensorEnabled,
+  }) async {
+    final dynamic r = await post(
+      '/trips/sensor-events',
+      body: sensorEventsBody(events, sensorEnabled: sensorEnabled),
+    );
+    return r is Map<String, dynamic> ? r : <String, dynamic>{};
+  }
+
+  /// `POST /trips/sensor-events` authenticated with the **device ingest key**
+  /// (`X-Device-Key`), for the background isolate. Never uses account tokens
+  /// and never refreshes a session. Throws [ApiException] on non-2xx.
+  static Future<Map<String, dynamic>> postSensorEventsWithIngestKey({
+    required String apiBaseUrl,
+    required String deviceId,
+    required String ingestKey,
+    required List<Map<String, dynamic>> events,
+    required bool sensorEnabled,
+    http.Client? client,
+    Duration timeout = const Duration(seconds: 15),
+  }) async {
+    final http.Client c = client ?? http.Client();
+    try {
+      final http.Response r = await c
+          .post(
+            Uri.parse('$apiBaseUrl/trips/sensor-events'),
+            headers: <String, String>{
+              'X-Device-Key': '$deviceId.$ingestKey',
+              'Content-Type': 'application/json',
+            },
+            body: jsonEncode(
+                sensorEventsBody(events, sensorEnabled: sensorEnabled)),
+          )
+          .timeout(timeout);
+      if (r.statusCode < 200 || r.statusCode >= 300) {
+        throw ApiException(r.statusCode, 'sensor events rejected');
+      }
+      final dynamic data = r.body.isEmpty ? null : jsonDecode(r.body);
+      return data is Map<String, dynamic> ? data : <String, dynamic>{};
+    } finally {
+      if (client == null) c.close();
+    }
+  }
 }

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:background_locator_2/background_locator.dart';
@@ -12,6 +13,7 @@ import 'package:http/http.dart' as http;
 
 import 'background_credential_store.dart';
 import 'direct_push_service.dart';
+import 'driving/driving_background.dart';
 import 'location_outbox.dart';
 
 /// Background location reporting: keeps the device's GPS position flowing to
@@ -79,6 +81,13 @@ Future<void> onLocationUpdate(LocationDto location) async {
     // Skip spoofed locations (Android mock-location detection).
     if (location.isMocked) return;
     DirectPushService.ensureRunningInBackground();
+
+    // Arms the on-device driving detection (opt-in, no-op unless enabled).
+    unawaited(DrivingBackground.onLocationFix(
+      speedMps: location.speed > 0 ? location.speed : 0,
+      lat: location.latitude,
+      lon: location.longitude,
+    ));
 
     final _BackgroundCredentials? credentials = await _readCredentials();
     if (credentials == null) return;
