@@ -167,7 +167,14 @@ func (s *Server) GetTrip(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to load route")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"units": tripUnits, "trip": trip, "route": route})
+	// Events are as sensitive as the trip and follow the circle sharing rule.
+	events := []trips.EventRow{}
+	if ok, err := s.canViewSubject(r, claims.UserID, trip.UserID); err == nil && ok {
+		if ev, err := st.Events(r.Context(), trip.ID); err == nil {
+			events = ev
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"units": tripUnits, "trip": trip, "route": route, "events": events})
 }
 
 // periodBounds returns [start, end) for a day/week(Mon)/month period that
