@@ -36,11 +36,20 @@ Widget _shell({AppTab initial = AppTab.location}) {
   );
 }
 
+/// The flutter_test default view (800x600) is landscape, which now gets the
+/// NavigationRail. These tests exercise the phone bottom bar.
+Future<void> _pumpShell(WidgetTester tester, Widget w) {
+  tester.view.physicalSize = const Size(412, 915);
+  tester.view.devicePixelRatio = 1;
+  addTearDown(tester.view.reset);
+  return tester.pumpWidget(w);
+}
+
 void main() {
   testWidgets('shows four labelled destinations, Location first', (
     tester,
   ) async {
-    await tester.pumpWidget(_shell());
+    await _pumpShell(tester, _shell());
     await tester.pump();
     for (final l in ['Location', 'Driving', 'Safety', 'Circle']) {
       expect(find.text(l), findsOneWidget);
@@ -50,7 +59,7 @@ void main() {
   });
 
   testWidgets('switching tabs preserves each tab state', (tester) async {
-    await tester.pumpWidget(_shell());
+    await _pumpShell(tester, _shell());
     await tester.tap(find.text('loc 0'));
     await tester.pump();
     expect(find.text('loc 1'), findsOneWidget);
@@ -80,7 +89,7 @@ void main() {
   testWidgets('back from another tab returns to Location, then exits', (
     tester,
   ) async {
-    await tester.pumpWidget(_shell());
+    await _pumpShell(tester, _shell());
     await tester.tap(find.text('Safety'));
     await tester.pump();
     expect(find.text('saf 0'), findsOneWidget);
@@ -103,7 +112,7 @@ void main() {
   });
 
   testWidgets('requestTab deep-links to a tab', (tester) async {
-    await tester.pumpWidget(_shell());
+    await _pumpShell(tester, _shell());
     AppShell.requestTab(AppTab.safety);
     await tester.pump();
     expect(find.text('saf 0'), findsOneWidget);
@@ -112,7 +121,7 @@ void main() {
 
   testWidgets('a request made before mount is honoured', (tester) async {
     AppShell.requestTab(AppTab.driving);
-    await tester.pumpWidget(_shell());
+    await _pumpShell(tester, _shell());
     await tester.pump();
     expect(find.text('drv 0'), findsOneWidget);
   });
@@ -120,7 +129,7 @@ void main() {
   testWidgets('pushed routes cover the bar and pop back to the same tab', (
     tester,
   ) async {
-    await tester.pumpWidget(_shell(initial: AppTab.circle));
+    await _pumpShell(tester, _shell(initial: AppTab.circle));
     final nav = tester.state<NavigatorState>(find.byType(Navigator));
     nav.push(
       MaterialPageRoute<void>(

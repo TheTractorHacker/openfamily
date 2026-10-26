@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -337,6 +338,9 @@ class _PlacePickerScreenState extends State<PlacePickerScreen> {
         ),
       );
     }
+    // The suggestion box already speaks (matches / no matches); do not stack
+    // the standing hint on top of it.
+    if (_suggester.visible) return const SizedBox.shrink();
     return Text(
       'Start typing an address for suggestions, or drag the map — the '
       'address fills in automatically.',
@@ -348,9 +352,6 @@ class _PlacePickerScreenState extends State<PlacePickerScreen> {
   Widget build(BuildContext context) {
     final BrandTheme brand = BrandTheme.of(context);
     final ColorScheme cs = Theme.of(context).colorScheme;
-    // The control panel never takes more than this share of the screen, so
-    // the map stays usable and the panel scrolls at large text sizes.
-    final double panelMax = MediaQuery.sizeOf(context).height * 0.55;
     return Scaffold(
       appBar: AppBar(
         title: Text(
@@ -366,117 +367,72 @@ class _PlacePickerScreenState extends State<PlacePickerScreen> {
           ),
         ],
       ),
-      body: Column(
-        children: <Widget>[
-          // Map-first: the map dominates the top of the screen.
-          Expanded(
-            child: Stack(
+      // Keep clear of a landscape cutout / side gesture area; the status bar
+      // is the app bar's and the gesture bar is the panel's.
+      body: SafeArea(
+        top: false,
+        bottom: false,
+        child: LayoutBuilder(
+          builder: (BuildContext context, BoxConstraints box) {
+            final bool wide = box.maxWidth >= 720 ||
+                (box.maxWidth > box.maxHeight * 1.2 && box.maxWidth >= 560);
+            final bool keyboard = MediaQuery.viewInsetsOf(context).bottom > 0;
+            final Widget mapPane = _mapPane(
+              brand,
+              cs,
+              // Full-height map in two-pane mode runs under the gesture bar.
+              wide ? MediaQuery.paddingOf(context).bottom : 0,
+            );
+            if (wide) {
+              // Map beside the form: both stay usable in landscape.
+              return Row(
+                children: <Widget>[
+                  Expanded(child: mapPane),
+                  SizedBox(
+                    width: (box.maxWidth * 0.4).clamp(360.0, 440.0),
+                    child: _panel(brand, cs),
+                  ),
+                ],
+              );
+            }
+            // The form takes at most this share of the screen (more with the
+            // keyboard up) so the map stays visible and the form scrolls.
+            final double panelMax = keyboard
+                ? math.max(box.maxHeight * 0.6, box.maxHeight - 130)
+                : box.maxHeight * 0.6;
+            return Column(
               children: <Widget>[
-                FlutterMap(
-                  mapController: _mapController,
-                  options: MapOptions(
-                    initialCenter: _position,
-                    initialZoom: widget.initial != null ? 15 : 2,
-                    minZoom: 3,
-                    maxZoom: 18,
-                    interactionOptions: const InteractionOptions(
-                      flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
-                    ),
-                    onPositionChanged: (MapCamera camera, bool hasGesture) {
-                      _onMapMoved(camera.center, hasGesture);
-                    },
-                  ),
-                  children: <Widget>[
-                    const OpenFamilyTileLayer(),
-                    // The geofence radius, drawn live around the pin.
-                    CircleLayer(
-                      circles: <CircleMarker>[
-                        CircleMarker(
-                          point: _position,
-                          radius: _radiusMeters,
-                          useRadiusInMeter: true,
-                          color: brand.accent.withValues(alpha: 0.2),
-                          borderColor: brand.accentInk,
-                          borderStrokeWidth: 2,
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-                // Drop-pin fixed at the map center; dragging the map moves the
-                // pin. Shifted up by half the glyph so the tip sits on center.
-                IgnorePointer(
-                  child: Center(
-                    child: Transform.translate(
-                      offset: const Offset(0, -24),
-                      child: Icon(
-                        Icons.location_pin,
-                        size: 48,
-                        color: brand.accentInk,
-                        shadows: const <Shadow>[
-                          Shadow(color: Color(0x66000000), blurRadius: 6),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-                // Live coordinates so pin-drop is usable without address search.
-                Positioned(
-                  left: AppSpace.md,
-                  right: AppSpace.md + kMinTarget,
-                  top: AppSpace.md,
-                  child: IgnorePointer(
-                    child: Center(
-                      child: Semantics(
-                        label: 'Pin position ${_formatCoordinates(_position)}',
-                        excludeSemantics: true,
-                        child: Material(
-                          color: brand.sheet,
-                          elevation: 3,
-                          borderRadius: BorderRadius.circular(AppRadius.pill),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: AppSpace.md,
-                              vertical: AppSpace.xs + AppSpace.xxs,
-                            ),
-                            child: Text(
-                              _formatCoordinates(_position),
-                              style: AppType.secondary.copyWith(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w700,
-                                color: cs.onSurface,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-                // "Use my location" affordance, shown while locating or as a
-                // way to re-center after the user has dragged away.
-                Positioned(
-                  right: AppSpace.md,
-                  bottom: AppSpace.md,
-                  child: DsMapButton(
-                    icon: Icons.my_location,
-                    tooltip: 'Use my location',
-                    onPressed: _locating ? null : _locateUser,
-                  ),
+                Expanded(child: mapPane),
+                ConstrainedBox(
+                  constraints: BoxConstraints(maxHeight: panelMax),
+                  child: _panel(brand, cs),
                 ),
               ],
-            ),
-          ),
-          // Address + radius controls.
-          ConstrainedBox(
-            constraints: BoxConstraints(maxHeight: panelMax),
-            child: SafeArea(
-              top: false,
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(AppSpace.lg),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: <Widget>[
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _panel(BrandTheme brand, ColorScheme cs) {
+    return SafeArea(
+      top: false,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Flexible(
+            child: SingleChildScrollView(
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+              padding: const EdgeInsets.fromLTRB(
+                AppSpace.lg,
+                AppSpace.lg,
+                AppSpace.lg,
+                AppSpace.sm,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
                     TextField(
                       controller: _name,
                       textCapitalization: TextCapitalization.words,
@@ -519,7 +475,10 @@ class _PlacePickerScreenState extends State<PlacePickerScreen> {
                         onSelected: _selectSuggestion,
                       ),
                     const SizedBox(height: AppSpace.xs),
-                    _addressStatus(cs),
+                    ListenableBuilder(
+                      listenable: _suggester,
+                      builder: (BuildContext context, _) => _addressStatus(cs),
+                    ),
                     const SizedBox(height: AppSpace.lg),
                     Row(
                       children: <Widget>[
@@ -543,28 +502,141 @@ class _PlacePickerScreenState extends State<PlacePickerScreen> {
                       onChanged: (double v) =>
                           setState(() => _radiusMeters = v),
                     ),
-                    Wrap(
-                      spacing: AppSpace.sm,
-                      runSpacing: AppSpace.xs,
-                      children: <Widget>[
-                        for (final double preset in _radiusPresets)
-                          ChoiceChip(
-                            label: Text(_formatRadius(preset)),
-                            selected: (_radiusMeters - preset).abs() < 1,
-                            onSelected: (_) =>
-                                setState(() => _radiusMeters = preset),
-                          ),
-                      ],
+                    SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        children: <Widget>[
+                          for (final double preset in _radiusPresets)
+                            Padding(
+                              padding: const EdgeInsets.only(
+                                right: AppSpace.sm,
+                              ),
+                              child: ChoiceChip(
+                                label: Text(_formatRadius(preset)),
+                                selected: (_radiusMeters - preset).abs() < 1,
+                                onSelected: (_) =>
+                                    setState(() => _radiusMeters = preset),
+                              ),
+                            ),
+                        ],
+                      ),
                     ),
-                    const SizedBox(height: AppSpace.lg),
-                    DsPillButton(label: 'Save place', onPressed: _save),
-                  ],
-                ),
+                ],
               ),
             ),
+          ),
+          // Pinned so the primary action is always reachable, above both the
+          // keyboard and the gesture bar.
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              AppSpace.lg,
+              AppSpace.sm,
+              AppSpace.lg,
+              AppSpace.lg,
+            ),
+            child: DsPillButton(label: 'Save place', onPressed: _save),
           ),
         ],
       ),
     );
+  }
+
+  Widget _mapPane(BrandTheme brand, ColorScheme cs, double bottomInset) {
+    return Stack(
+          children: <Widget>[
+            FlutterMap(
+              mapController: _mapController,
+              options: MapOptions(
+                initialCenter: _position,
+                initialZoom: widget.initial != null ? 15 : 2,
+                minZoom: 3,
+                maxZoom: 18,
+                interactionOptions: const InteractionOptions(
+                  flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
+                ),
+                onPositionChanged: (MapCamera camera, bool hasGesture) {
+                  _onMapMoved(camera.center, hasGesture);
+                },
+              ),
+              children: <Widget>[
+                const OpenFamilyTileLayer(),
+                // The geofence radius, drawn live around the pin.
+                CircleLayer(
+                  circles: <CircleMarker>[
+                    CircleMarker(
+                      point: _position,
+                      radius: _radiusMeters,
+                      useRadiusInMeter: true,
+                      color: brand.accent.withValues(alpha: 0.2),
+                      borderColor: brand.accentInk,
+                      borderStrokeWidth: 2,
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            // Drop-pin fixed at the map center; dragging the map moves the
+            // pin. Shifted up by half the glyph so the tip sits on center.
+            IgnorePointer(
+              child: Center(
+                child: Transform.translate(
+                  offset: const Offset(0, -24),
+                  child: Icon(
+                    Icons.location_pin,
+                    size: 48,
+                    color: brand.accentInk,
+                    shadows: const <Shadow>[
+                      Shadow(color: Color(0x66000000), blurRadius: 6),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            // Live coordinates so pin-drop is usable without address search.
+            Positioned(
+              left: AppSpace.md,
+              right: AppSpace.md + kMinTarget,
+              top: AppSpace.md,
+              child: IgnorePointer(
+                child: Center(
+                  child: Semantics(
+                    label: 'Pin position ${_formatCoordinates(_position)}',
+                    excludeSemantics: true,
+                    child: Material(
+                      color: brand.sheet,
+                      elevation: 3,
+                      borderRadius: BorderRadius.circular(AppRadius.pill),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: AppSpace.md,
+                          vertical: AppSpace.xs + AppSpace.xxs,
+                        ),
+                        child: Text(
+                          _formatCoordinates(_position),
+                          style: AppType.secondary.copyWith(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            color: cs.onSurface,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            // "Use my location" affordance, shown while locating or as a
+            // way to re-center after the user has dragged away.
+            Positioned(
+              right: AppSpace.md,
+              bottom: AppSpace.md + bottomInset,
+              child: DsMapButton(
+                icon: Icons.my_location,
+                tooltip: 'Use my location',
+                onPressed: _locating ? null : _locateUser,
+              ),
+            ),
+          ],
+        );
   }
 }

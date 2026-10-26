@@ -18,7 +18,7 @@ class DsPage extends StatelessWidget {
     this.totalSteps,
     this.showBack = true,
     this.appBarActions,
-    this.maxWidth = 520,
+    this.maxWidth = 560,
   });
 
   final String title;

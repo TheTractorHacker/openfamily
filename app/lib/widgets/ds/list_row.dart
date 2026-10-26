@@ -17,7 +17,11 @@ class DsListRow extends StatelessWidget {
     this.destructive = false,
     this.chevron = false,
     this.semanticLabel,
+    this.wash = true,
   });
+
+  /// Paint the selected tint; false when the parent paints a bigger one.
+  final bool wash;
 
   final String title;
   final String? subtitle;
@@ -57,8 +61,8 @@ class DsListRow extends StatelessWidget {
       label: semanticLabel,
       container: true,
       child: Material(
-        color: selected
-            ? brand.accent.withValues(alpha: 0.14)
+        color: selected && wash
+            ? brand.accent.withValues(alpha: 0.09)
             : Colors.transparent,
         child: InkWell(
           onTap: onTap,

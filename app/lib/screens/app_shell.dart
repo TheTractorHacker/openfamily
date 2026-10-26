@@ -41,6 +41,12 @@ class AppShell extends StatefulWidget {
 
   static void requestTab(AppTab tab) => requestedTab.value = tab;
 
+  /// Wide screens (tablet, foldable, any landscape) get a [NavigationRail]
+  /// on the leading edge instead of the bottom bar, which would eat scarce
+  /// landscape height.
+  static bool useRail(Size size) =>
+      size.width >= 840 || (size.width > size.height && size.width >= 560);
+
   @override
   State<AppShell> createState() => _AppShellState();
 }
@@ -114,40 +120,83 @@ class _AppShellState extends State<AppShell> {
     }
   }
 
+  static const List<(IconData, IconData, String)> _items =
+      <(IconData, IconData, String)>[
+    (Icons.place_outlined, Icons.place, 'Location'),
+    (Icons.directions_car_outlined, Icons.directions_car, 'Driving'),
+    (Icons.shield_outlined, Icons.shield, 'Safety'),
+    (Icons.groups_outlined, Icons.groups, 'Circle'),
+  ];
+
   @override
   Widget build(BuildContext context) {
+    final bool rail = AppShell.useRail(MediaQuery.sizeOf(context));
+    final Widget stack = IndexedStack(
+      index: _tab.index,
+      children: <Widget>[
+        for (final AppTab t in AppTab.values)
+          // Hidden tabs must not take focus or announce to screen readers.
+          ExcludeSemantics(
+            excluding: t != _tab,
+            child: TickerMode(enabled: t == _tab, child: _body(t)),
+          ),
+      ],
+    );
     return PopScope(
       canPop: _tab == AppTab.location,
       onPopInvokedWithResult: (bool didPop, Object? _) {
         if (!didPop) _select(AppTab.location);
       },
       child: Scaffold(
-        body: IndexedStack(
-          index: _tab.index,
-          children: <Widget>[
-            for (final AppTab t in AppTab.values)
-              // Hidden tabs must not take focus or announce to screen readers.
-              ExcludeSemantics(
-                excluding: t != _tab,
-                child: TickerMode(enabled: t == _tab, child: _body(t)),
+        body: rail
+            ? Row(
+                children: <Widget>[
+                  // The rail keeps clear of the cutout and system bars; the
+                  // body then no longer needs the leading inset.
+                  ColoredBox(
+                    color: BrandTheme.of(context).sheet,
+                    child: SafeArea(
+                    right: false,
+                    child: NavigationRail(
+                      selectedIndex: _tab.index,
+                      onDestinationSelected: (int i) =>
+                          _select(AppTab.values[i]),
+                      labelType: NavigationRailLabelType.all,
+                      destinations: <NavigationRailDestination>[
+                        for (final (IconData, IconData, String) it in _items)
+                          NavigationRailDestination(
+                            icon: Icon(it.$1),
+                            selectedIcon: Icon(
+                              it.$2,
+                              color: BrandTheme.of(context).accentInk,
+                            ),
+                            label: Text(it.$3),
+                          ),
+                      ],
+                    ),
+                  ),
+                  ),
+                  Expanded(
+                    child: MediaQuery.removePadding(
+                      context: context,
+                      removeLeft: true,
+                      child: stack,
+                    ),
+                  ),
+                ],
+              )
+            : stack,
+        bottomNavigationBar: rail
+            ? null
+            : NavigationBar(
+                selectedIndex: _tab.index,
+                onDestinationSelected: (int i) => _select(AppTab.values[i]),
+                labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+                destinations: <Widget>[
+                  for (final (IconData, IconData, String) it in _items)
+                    _dest(it.$1, it.$2, it.$3),
+                ],
               ),
-          ],
-        ),
-        bottomNavigationBar: NavigationBar(
-          selectedIndex: _tab.index,
-          onDestinationSelected: (int i) => _select(AppTab.values[i]),
-          labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
-          destinations: <Widget>[
-            _dest(Icons.place_outlined, Icons.place, 'Location'),
-            _dest(
-              Icons.directions_car_outlined,
-              Icons.directions_car,
-              'Driving',
-            ),
-            _dest(Icons.shield_outlined, Icons.shield, 'Safety'),
-            _dest(Icons.groups_outlined, Icons.groups, 'Circle'),
-          ],
-        ),
       ),
     );
   }

@@ -116,6 +116,7 @@ class _LocationTabViewState extends State<LocationTabView> {
   @override
   void dispose() {
     _sheet.dispose();
+    _panelScroll.dispose();
     _extent.dispose();
     super.dispose();
   }
@@ -296,6 +297,7 @@ class _LocationTabViewState extends State<LocationTabView> {
       resizeToAvoidBottomInset: false,
       body: LayoutBuilder(
         builder: (BuildContext context, BoxConstraints box) {
+          if (isTwoPane(box)) return _buildTwoPane(context, box);
           final double h = box.maxHeight;
           final double minSize = (_peekPx / h).clamp(0.12, 0.4);
           // Leave the top row (settings / circle pill) visible when fully open.
@@ -347,6 +349,58 @@ class _LocationTabViewState extends State<LocationTabView> {
           );
         },
       ),
+    );
+  }
+
+  /// Wide or landscape bodies show the map beside a fixed People / Places
+  /// panel instead of a bottom sheet that would cover most of the map.
+  static bool isTwoPane(BoxConstraints box) =>
+      box.maxWidth >= 720 ||
+      (box.maxWidth > box.maxHeight * 1.2 && box.maxWidth >= 560);
+
+  final ScrollController _panelScroll = ScrollController();
+
+  Widget _buildTwoPane(BuildContext context, BoxConstraints box) {
+    final BrandTheme brand = BrandTheme.of(context);
+    final double panelW = (box.maxWidth * 0.38).clamp(340.0, 440.0);
+    final EdgeInsets pad = MediaQuery.paddingOf(context);
+    return Row(
+      children: <Widget>[
+        Expanded(
+          child: Stack(
+            children: <Widget>[
+              Positioned.fill(child: widget.map),
+              _buildTop(context),
+              Positioned(
+                left: AppSpace.md,
+                right: AppSpace.md,
+                bottom: AppSpace.md + pad.bottom,
+                child: _floatingRow(context),
+              ),
+            ],
+          ),
+        ),
+        SizedBox(
+          width: panelW,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: brand.sheet,
+              border: Border(
+                left: BorderSide(
+                  color: Theme.of(context).colorScheme.outlineVariant,
+                ),
+              ),
+            ),
+            // The panel is full height, so it clears the status bar itself.
+            child: _buildSheetBody(
+              context,
+              _panelScroll,
+              handle: false,
+              topInset: pad.top + AppSpace.sm,
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -427,7 +481,16 @@ class _LocationTabViewState extends State<LocationTabView> {
             child: AnimatedOpacity(
               opacity: visible ? 1 : 0,
               duration: AppMotion.of(context, AppMotion.fast),
-              child: Row(
+              child: _floatingRow(context),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _floatingRow(BuildContext context) {
+    return Row(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: <Widget>[
                   Expanded(
@@ -472,22 +535,22 @@ class _LocationTabViewState extends State<LocationTabView> {
                     ],
                   ),
                 ],
-              ),
-            ),
-          ),
-        );
-      },
-    );
+              );
   }
 
-  Widget _buildSheetBody(BuildContext context, ScrollController sc) {
+  Widget _buildSheetBody(
+    BuildContext context,
+    ScrollController sc, {
+    bool handle = true,
+    double topInset = 0,
+  }) {
     return CustomScrollView(
       controller: sc,
       slivers: <Widget>[
         SliverToBoxAdapter(
           child: Column(
             children: <Widget>[
-              const DsDragHandle(),
+              if (handle) const DsDragHandle() else SizedBox(height: topInset),
               DsSegmentedTabs(
                 labels: const <String>['People', 'Places'],
                 selected: _tab,
@@ -503,7 +566,7 @@ class _LocationTabViewState extends State<LocationTabView> {
           ..._placesSlivers(context),
         SliverToBoxAdapter(
           child: SizedBox(
-            height: MediaQuery.paddingOf(context).bottom + AppSpace.xl,
+            height: MediaQuery.paddingOf(context).bottom + AppSpace.xxxl,
           ),
         ),
       ],
@@ -870,13 +933,19 @@ class _PersonRow extends StatelessWidget {
     final String? battery = memberBatteryAlert(member);
     final String? updated = memberUpdatedLabel(member);
     final ColorScheme cs = Theme.of(context).colorScheme;
-    return Column(
+    final Color wash = selected
+        ? BrandTheme.of(context).accent.withValues(alpha: 0.09)
+        : Colors.transparent;
+    return ColoredBox(
+      color: wash,
+      child: Column(
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
         DsListRow(
           title: member.name,
           subtitle: status,
           selected: selected,
+          wash: false,
           semanticLabel:
               '${member.name}. $status.${battery == null ? '' : ' $battery.'}',
           leading: StatusAvatar(member: member, size: 44),
@@ -907,11 +976,13 @@ class _PersonRow extends StatelessWidget {
         ),
         if (selected)
           Padding(
+            // Aligned under the name (xl gutter + 44 avatar + md gap), with
+            // air above and below so it never touches the row.
             padding: const EdgeInsets.fromLTRB(
+              AppSpace.xl + 44 + AppSpace.md,
+              AppSpace.xs,
               AppSpace.xl,
-              0,
-              AppSpace.xl,
-              AppSpace.md,
+              AppSpace.lg,
             ),
             child: Align(
               alignment: Alignment.centerLeft,
@@ -925,6 +996,7 @@ class _PersonRow extends StatelessWidget {
             ),
           ),
       ],
+    ),
     );
   }
 }

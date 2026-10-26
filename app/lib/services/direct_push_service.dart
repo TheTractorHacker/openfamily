@@ -333,7 +333,7 @@ class LocalDirectPushNotifier implements DirectPushNotifier {
     if (!_ready) {
       await _plugin.initialize(
         settings: const InitializationSettings(
-          android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+          android: AndroidInitializationSettings('@drawable/ic_stat_notification'),
         ),
         onDidReceiveNotificationResponse: (NotificationResponse r) =>
             onDirectNotificationTap(r.payload),

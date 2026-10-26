@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'screens/login_screen.dart';
 import 'screens/app_shell.dart';
@@ -26,6 +27,9 @@ final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Deliberately draw behind the status and gesture bars (enforced on
+  // Android 15+ anyway); every screen pads via MediaQuery insets.
+  await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
   // Plugin callbacks must be registered before the first frame so a
   // UnifiedPush/APNs token arriving at launch is not dropped.
   PushService.initialize();
@@ -88,9 +92,13 @@ class _OpenFamilyAppState extends State<OpenFamilyApp> {
           theme: buildLightTheme(),
           darkTheme: buildDarkTheme(),
           themeMode: preference.themeMode,
-          builder: (context, child) => BiometricAppLock(
-            onLogout: _handleBiometricLogout,
-            child: child ?? const SizedBox.shrink(),
+          builder: (context, child) => AnnotatedRegion<SystemUiOverlayStyle>(
+            // Bar icon colours follow the app theme, not the OS theme.
+            value: systemOverlayFor(Theme.of(context).brightness),
+            child: BiometricAppLock(
+              onLogout: _handleBiometricLogout,
+              child: child ?? const SizedBox.shrink(),
+            ),
           ),
           home: const _SessionGate(),
         );

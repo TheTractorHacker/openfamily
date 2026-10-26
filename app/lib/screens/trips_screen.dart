@@ -126,7 +126,7 @@ class _TripsScreenState extends State<TripsScreen> {
             ),
         ],
       ),
-      body: Column(
+      body: DsBody(child: Column(
         children: <Widget>[
           const SizedBox(height: AppSpace.sm),
           DsSegmentedTabs(
@@ -157,7 +157,7 @@ class _TripsScreenState extends State<TripsScreen> {
           ),
           Expanded(child: _body()),
         ],
-      ),
+      )),
     );
   }
 

@@ -156,7 +156,7 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
         title: const Text('Day Detail'),
         actions: <Widget>[TripsAppBarAction(member: widget.member)],
       ),
-      body: Column(
+      body: DsBody(maxWidth: 760, child: Column(
         children: [
           _Header(
             member: widget.member,
@@ -169,7 +169,7 @@ class _DayDetailScreenState extends State<DayDetailScreen> {
           const Divider(height: 1),
           Expanded(child: _body()),
         ],
-      ),
+      )),
     );
   }
 
