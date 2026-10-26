@@ -135,28 +135,14 @@ class _CircleDetailScreenState extends State<CircleDetailScreen> {
     }
   }
 
-  Future<bool> _confirm(String title, String body, String action) async {
-    final bool? ok = await showDialog<bool>(
-      context: context,
-      builder: (BuildContext ctx) => AlertDialog(
-        title: Text(title),
-        content: Text(body),
-        actions: <Widget>[
-          TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: const Text('Cancel')),
-          FilledButton(
-            style: FilledButton.styleFrom(
-                backgroundColor: AppColors.sosRed,
-                foregroundColor: Colors.white),
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: Text(action),
-          ),
-        ],
-      ),
-    );
-    return ok == true;
-  }
+  Future<bool> _confirm(String title, String body, String action) =>
+      showDsConfirm(
+        context,
+        title: title,
+        message: body,
+        confirmLabel: action,
+        destructive: true,
+      );
 
   Future<void> _remove(CircleMember m) async {
     if (!await _confirm(
@@ -334,110 +320,87 @@ class _CircleDetailScreenState extends State<CircleDetailScreen> {
     }
     return RefreshIndicator(
       onRefresh: _load,
-      child: ListView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-        children: <Widget>[
-          _sharingCard(),
-          const SizedBox(height: 20),
-          _sectionTitle('Members (${_members.length})'),
-          if (_members.isEmpty)
-            const Padding(
-              padding: EdgeInsets.all(12),
-              child: Text('No members to show.'),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 560),
+          child: ListView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.fromLTRB(
+              AppSpace.xxl,
+              AppSpace.lg,
+              AppSpace.xxl,
+              AppSpace.xxxl,
             ),
-          for (final CircleMember m in _members) _memberRow(m),
-          if (_circle.isAdmin) ...<Widget>[
-            const SizedBox(height: 20),
-            _sectionTitle('Invite codes'),
-            ..._inviteSection(),
-          ],
-          const SizedBox(height: 28),
-          OutlinedButton.icon(
-            style: OutlinedButton.styleFrom(minimumSize: const Size(48, 48)),
-            onPressed: _busy ? null : _leave,
-            icon: const Icon(Icons.logout),
-            label: const Text('Leave circle'),
-          ),
-          if (_circle.isAdmin) ...<Widget>[
-            const SizedBox(height: 12),
-            OutlinedButton.icon(
-              style: OutlinedButton.styleFrom(
-                minimumSize: const Size(48, 48),
-                foregroundColor: AppColors.sosRed,
-                side: const BorderSide(color: AppColors.sosRed),
+            children: <Widget>[
+              _sharingCard(),
+              _sectionTitle('Members (${_members.length})'),
+              if (_members.isEmpty)
+                const DsEmptyState(
+                  icon: Icons.group_outlined,
+                  title: 'No members to show',
+                )
+              else
+                DsRowGroup(
+                  children: <Widget>[
+                    for (final CircleMember m in _members) _memberRow(m),
+                  ],
+                ),
+              if (_circle.isAdmin) ...<Widget>[
+                _sectionTitle('Invite codes'),
+                ..._inviteSection(),
+              ],
+              const SizedBox(height: AppSpace.xxl),
+              DsPillButton(
+                style: DsPillStyle.outlined,
+                onPressed: _busy ? null : _leave,
+                icon: Icons.logout,
+                label: 'Leave circle',
               ),
-              onPressed: _busy ? null : _delete,
-              icon: const Icon(Icons.delete_outline),
-              label: const Text('Delete circle'),
-            ),
-          ],
-        ],
+              if (_circle.isAdmin) ...<Widget>[
+                const SizedBox(height: AppSpace.md),
+                DsPillButton(
+                  style: DsPillStyle.danger,
+                  onPressed: _busy ? null : _delete,
+                  icon: Icons.delete_outline,
+                  label: 'Delete circle',
+                ),
+              ],
+            ],
+          ),
+        ),
       ),
     );
   }
 
-  Widget _sectionTitle(String text) => Padding(
-        padding: const EdgeInsets.only(bottom: 6),
-        child: Semantics(
-          header: true,
-          child: Text(text,
-              style:
-                  const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+  Widget _sectionTitle(String text) => DsSectionHeader(
+        text,
+        padding: const EdgeInsets.only(
+          top: AppSpace.xl,
+          bottom: AppSpace.sm,
         ),
       );
 
   Widget _sharingCard() {
     final bool on = _circle.sharingEnabled;
-    final BrandTheme brand = BrandTheme.of(context);
-    final Color statusColor = on ? AppColors.statusGreen : AppColors.statusGrey;
-    return Card(
-      color: brand.sheet,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-        side: BorderSide(color: statusColor, width: 2),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          children: <Widget>[
-            Icon(on ? Icons.location_on : Icons.location_off_outlined,
-                size: 32, color: statusColor),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  const Text('Share my location',
-                      style:
-                          TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
-                  const SizedBox(height: 2),
-                  Text(
-                    on
-                        ? 'Sharing: members of this circle can see where you are.'
-                        : 'Paused: nobody in this circle can see where you are.',
-                    style: const TextStyle(fontSize: 14),
-                  ),
-                ],
-              ),
-            ),
-            Semantics(
-              label: 'Share my location with ${_circle.name}',
-              toggled: on,
-              child: Switch(
-                value: on,
-                onChanged: _sharingBusy ? null : _toggleSharing,
-              ),
-            ),
-          ],
+    return DsRowGroup(
+      children: <Widget>[
+        DsToggleRow(
+          icon: on ? Icons.location_on : Icons.location_off_outlined,
+          title: 'Share my location',
+          subtitle: on
+              ? 'Sharing: members of this circle can see where you are.'
+              : 'Paused: nobody in this circle can see where you are.',
+          value: on,
+          onChanged: _sharingBusy ? null : _toggleSharing,
         ),
-      ),
+      ],
     );
   }
 
   Widget _memberRow(CircleMember m) {
     final bool isMe = m.userId == _myId;
     final bool canManage = _circle.isAdmin && !isMe;
+    final ColorScheme cs = Theme.of(context).colorScheme;
     return Semantics(
       container: true,
       label: '${m.name}${isMe ? ', you' : ''}, ${m.isAdmin ? 'admin' : 'member'}, '
@@ -448,16 +411,21 @@ class _CircleDetailScreenState extends State<CircleDetailScreen> {
           children: <Widget>[
             Expanded(
               child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8),
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpace.xl,
+                  AppSpace.md,
+                  0,
+                  AppSpace.md,
+                ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
                     Text(isMe ? '${m.name} (you)' : m.name,
-                        style: const TextStyle(
-                            fontSize: 15, fontWeight: FontWeight.w600)),
-                    const SizedBox(height: 4),
+                        style: AppType.body),
+                    const SizedBox(height: AppSpace.xs),
                     Wrap(
-                      spacing: 8,
+                      spacing: AppSpace.sm,
+                      runSpacing: AppSpace.xs,
                       crossAxisAlignment: WrapCrossAlignment.center,
                       children: <Widget>[
                         RoleBadge(role: m.role),
@@ -468,10 +436,11 @@ class _CircleDetailScreenState extends State<CircleDetailScreen> {
                           size: 15,
                           color: m.sharingEnabled
                               ? AppColors.statusGreen
-                              : AppColors.statusGrey,
+                              : cs.onSurfaceVariant,
                         ),
                         Text(m.sharingEnabled ? 'Sharing' : 'Paused',
-                            style: const TextStyle(fontSize: 13)),
+                            style: AppType.secondary
+                                .copyWith(color: cs.onSurfaceVariant)),
                       ],
                     ),
                   ],
@@ -500,7 +469,9 @@ class _CircleDetailScreenState extends State<CircleDetailScreen> {
                   const PopupMenuItem<String>(
                       value: 'remove', child: Text('Remove from circle')),
                 ],
-              ),
+              )
+            else
+              const SizedBox(width: AppSpace.xl),
           ],
         ),
       ),
@@ -508,12 +479,22 @@ class _CircleDetailScreenState extends State<CircleDetailScreen> {
   }
 
   List<Widget> _inviteSection() {
+    final ColorScheme cs = Theme.of(context).colorScheme;
     return <Widget>[
       for (final CircleInvite inv in _invites)
-        Card(
-          margin: const EdgeInsets.symmetric(vertical: 4),
-          child: Padding(
-            padding: const EdgeInsets.all(12),
+        Padding(
+          padding: const EdgeInsets.only(bottom: AppSpace.sm),
+          child: Container(
+            padding: const EdgeInsets.fromLTRB(
+              AppSpace.lg,
+              AppSpace.md,
+              AppSpace.xs,
+              AppSpace.md,
+            ),
+            decoration: BoxDecoration(
+              color: BrandTheme.of(context).sheet,
+              borderRadius: BorderRadius.circular(AppRadius.lg),
+            ),
             child: Row(
               children: <Widget>[
                 Expanded(
@@ -523,15 +504,12 @@ class _CircleDetailScreenState extends State<CircleDetailScreen> {
                       Semantics(
                         label: 'Invite code ${inv.code.split('').join(' ')}',
                         child: Text(inv.code,
-                            style: const TextStyle(
-                                fontSize: 22,
-                                fontWeight: FontWeight.w800,
-                                letterSpacing: 4)),
+                            style: AppType.title.copyWith(letterSpacing: 4)),
                       ),
                       Text(
                         'Used ${inv.uses} of ${inv.maxUses}',
-                        style: const TextStyle(
-                            fontSize: 12, color: AppColors.textMuted),
+                        style: AppType.secondary
+                            .copyWith(color: cs.onSurfaceVariant),
                       ),
                     ],
                   ),
@@ -562,16 +540,17 @@ class _CircleDetailScreenState extends State<CircleDetailScreen> {
           ),
         ),
       if (_invites.isEmpty)
-        const Padding(
-          padding: EdgeInsets.symmetric(vertical: 8),
-          child: Text('No active invite codes.'),
+        Padding(
+          padding: const EdgeInsets.only(bottom: AppSpace.md),
+          child: Text(
+            'No active invite codes.',
+            style: AppType.secondary.copyWith(color: cs.onSurfaceVariant),
+          ),
         ),
-      const SizedBox(height: 4),
-      FilledButton.icon(
-        style: FilledButton.styleFrom(minimumSize: const Size(48, 48)),
+      DsPillButton(
         onPressed: _busy ? null : _newInvite,
-        icon: const Icon(Icons.person_add_alt_1),
-        label: const Text('New invite code'),
+        icon: Icons.person_add_alt_1,
+        label: 'New invite code',
       ),
     ];
   }

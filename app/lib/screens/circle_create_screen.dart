@@ -81,7 +81,10 @@ class _CircleCreateScreenState extends State<CircleCreateScreen> {
           onSubmitted: (_) => _create(),
         ),
         const SizedBox(height: AppSpace.lg),
-        const DsSectionHeader('Icon'),
+        const DsSectionHeader(
+          'Icon',
+          padding: EdgeInsets.only(bottom: AppSpace.sm),
+        ),
         Wrap(
           spacing: AppSpace.sm,
           runSpacing: AppSpace.sm,
