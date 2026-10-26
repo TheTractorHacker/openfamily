@@ -360,4 +360,105 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('All circles'), findsNothing);
   });
+
+  group('circle details are reachable from the pill', () {
+    testWidgets('pill shows location sharing on / paused as words', (
+      tester,
+    ) async {
+      _phone(tester);
+      await tester.pumpWidget(_app(selectable: true, selectedCircleId: 'c1'));
+      await tester.pump();
+      expect(find.text('Location sharing: on'), findsOneWidget);
+
+      await tester.pumpWidget(
+        _app(
+          selectable: true,
+          circleName: 'Soccer team',
+          selectedCircleId: 'c2',
+          circleSharingPaused: true,
+        ),
+      );
+      await tester.pump();
+      expect(find.text('Location sharing: paused'), findsOneWidget);
+    });
+
+    testWidgets('sheet header opens details of the selected circle without '
+        'changing selection', (tester) async {
+      _phone(tester);
+      final calls = _Calls();
+      await tester.pumpWidget(
+        _app(calls: calls, selectable: true, selectedCircleId: 'c1'),
+      );
+      await tester.pump();
+      await tester.tap(find.text('Frank Family'));
+      await tester.pumpAndSettle();
+      expect(find.text('Open circle details'), findsOneWidget);
+      await tester.tap(find.text('Open circle details'));
+      await tester.pumpAndSettle();
+      expect(calls.log, <String>['circle:c1']);
+      expect(find.text('Your circles'), findsNothing);
+    });
+
+    testWidgets('each row has an info action; the row itself still selects', (
+      tester,
+    ) async {
+      _phone(tester);
+      final calls = _Calls();
+      await tester.pumpWidget(
+        _app(calls: calls, selectable: true, selectedCircleId: 'c1'),
+      );
+      await tester.pump();
+      await tester.tap(find.text('Frank Family'));
+      await tester.pumpAndSettle();
+      final Finder info = find.byTooltip('Open details for Soccer team');
+      expect(info, findsOneWidget);
+      expect(tester.getSize(info).shortestSide, greaterThanOrEqualTo(48));
+      await tester.tap(info);
+      await tester.pumpAndSettle();
+      expect(calls.log, <String>['circle:c2']);
+    });
+
+    testWidgets('header shows paused sharing for a paused circle', (
+      tester,
+    ) async {
+      _phone(tester);
+      await tester.pumpWidget(
+        _app(
+          selectable: true,
+          circleName: 'Soccer team',
+          selectedCircleId: 'c2',
+          circleSharingPaused: true,
+        ),
+      );
+      await tester.pump();
+      await tester.tap(find.text('Soccer team'));
+      await tester.pumpAndSettle();
+      // Pill line and sheet chip.
+      expect(find.text('Location sharing: paused'), findsNWidgets(2));
+    });
+
+    testWidgets('"All circles" scope has no single-circle header', (
+      tester,
+    ) async {
+      _phone(tester);
+      await tester.pumpWidget(_app(selectable: true, selectedCircleId: 'all'));
+      await tester.pump();
+      await tester.tap(find.text('Frank Family'));
+      await tester.pumpAndSettle();
+      expect(find.text('Open circle details'), findsNothing);
+      expect(find.byTooltip('Open details for Soccer team'), findsOneWidget);
+    });
+
+    testWidgets('works at 200% text without overflow', (tester) async {
+      _phone(tester);
+      await tester.pumpWidget(
+        _app(selectable: true, selectedCircleId: 'c1', textScale: 2),
+      );
+      await tester.pump();
+      await tester.tap(find.text('Frank Family'));
+      await tester.pumpAndSettle();
+      expect(find.text('Open circle details'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+  });
 }

@@ -138,6 +138,7 @@ class _LocationTabViewState extends State<LocationTabView> {
         return SafeArea(
           child: DsSheetScaffold(
             title: 'Your circles',
+            header: _circleSheetHeader(ctx),
             child: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -173,10 +174,30 @@ class _LocationTabViewState extends State<LocationTabView> {
                           '${c.sharingEnabled ? '' : ' - Sharing paused'}'
                           '${_isActive(c) ? ' - Shown on the map' : ''}',
                       leading: _circleLeading(ctx, c),
-                      trailing: _isActive(c)
-                          ? Icon(Icons.check, color: brand.accentInk)
-                          : null,
-                      chevron: !_isActive(c) && widget.onSelectCircle == null,
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: <Widget>[
+                          if (_isActive(c))
+                            Icon(Icons.check, color: brand.accentInk),
+                          if (widget.onOpenCircle != null)
+                            IconButton(
+                              key: ValueKey<String>('circle-info-${c.id}'),
+                              tooltip: 'Open details for ${c.name}',
+                              constraints: const BoxConstraints(
+                                minWidth: kMinTarget,
+                                minHeight: kMinTarget,
+                              ),
+                              icon: const Icon(Icons.info_outline),
+                              onPressed: () {
+                                Navigator.of(ctx).pop();
+                                widget.onOpenCircle!.call(c);
+                              },
+                            ),
+                        ],
+                      ),
+                      chevron: !_isActive(c) &&
+                          widget.onSelectCircle == null &&
+                          widget.onOpenCircle == null,
                       onTap: () {
                         Navigator.of(ctx).pop();
                         if (widget.onSelectCircle != null) {
@@ -205,6 +226,16 @@ class _LocationTabViewState extends State<LocationTabView> {
     );
   }
 
+  /// The single circle the map is scoped to, or null for "All circles" or
+  /// when the circle list is not known.
+  Circle? get _activeCircle {
+    if (widget.selectedCircleId == 'all') return null;
+    for (final Circle c in widget.circles) {
+      if (_isActive(c)) return c;
+    }
+    return null;
+  }
+
   bool _isActive(Circle c) {
     if (widget.selectedCircleId != null) {
       return widget.selectedCircleId == c.id;
@@ -212,6 +243,40 @@ class _LocationTabViewState extends State<LocationTabView> {
     return widget.circles.any((Circle x) => x.isPrimary)
         ? c.isPrimary
         : c.name == widget.circleName;
+  }
+
+  /// Pinned header of the circle sheet: for the selected circle, whether
+  /// location sharing is on or paused (icon plus words) and a clear way to
+  /// open its details (members, roles, sharing, invites).
+  Widget? _circleSheetHeader(BuildContext ctx) {
+    final Circle? c = _activeCircle;
+    if (c == null || widget.onOpenCircle == null) return null;
+    final bool paused = !c.sharingEnabled;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        AppSpace.xl,
+        0,
+        AppSpace.xl,
+        AppSpace.sm,
+      ),
+      child: Wrap(
+        spacing: AppSpace.sm,
+        runSpacing: AppSpace.sm,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: <Widget>[
+          _SharingChip(paused: paused),
+          DsPillButton(
+            label: 'Open circle details',
+            icon: Icons.info_outline,
+            style: DsPillStyle.tonal,
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              widget.onOpenCircle!.call(c);
+            },
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _circleLeading(BuildContext ctx, Circle c) {
@@ -313,6 +378,7 @@ class _LocationTabViewState extends State<LocationTabView> {
                     child: Center(
                       child: _CirclePill(
                         name: widget.circleName,
+                        sharingPaused: widget.circleSharingPaused,
                         onTap: _showCircles,
                       ),
                     ),
@@ -593,9 +659,14 @@ class _LocationTabViewState extends State<LocationTabView> {
 /// still shows the name (and still opens the list so Create/Join is
 /// reachable).
 class _CirclePill extends StatelessWidget {
-  const _CirclePill({required this.name, required this.onTap});
+  const _CirclePill({
+    required this.name,
+    required this.onTap,
+    this.sharingPaused = false,
+  });
 
   final String name;
+  final bool sharingPaused;
   final VoidCallback onTap;
 
   @override
@@ -603,7 +674,8 @@ class _CirclePill extends StatelessWidget {
     final BrandTheme brand = BrandTheme.of(context);
     return Semantics(
       button: true,
-      label: 'Circle: $name. Switch circle',
+      label: 'Circle: $name. Location sharing: '
+          '${sharingPaused ? 'paused' : 'on'}. Switch circle or open details',
       excludeSemantics: true,
       onTap: onTap,
       child: DecoratedBox(
@@ -628,11 +700,37 @@ class _CirclePill extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: <Widget>[
                     Flexible(
-                      child: Text(
-                        name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: AppType.headline,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          vertical: AppSpace.xs,
+                        ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: <Widget>[
+                            Text(
+                              name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: AppType.headline,
+                            ),
+                            Text(
+                              sharingPaused
+                                  ? 'Location sharing: paused'
+                                  : 'Location sharing: on',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: AppType.secondary.copyWith(
+                                fontSize: 12,
+                                color: sharingPaused
+                                    ? AppColors.statusOrange
+                                    : Theme.of(context)
+                                        .colorScheme
+                                        .onSurfaceVariant,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                     const SizedBox(width: AppSpace.xs),
@@ -646,6 +744,24 @@ class _CirclePill extends StatelessWidget {
       ),
     );
   }
+}
+
+/// "Location sharing: on / paused" with an icon, so colour is never the only
+/// signal.
+class _SharingChip extends StatelessWidget {
+  const _SharingChip({required this.paused});
+
+  final bool paused;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+        container: true,
+        child: DsStatusChip(
+          label: paused ? 'Location sharing: paused' : 'Location sharing: on',
+          icon: paused ? Icons.pause_circle_outline : Icons.location_on,
+          color: paused ? AppColors.statusOrange : AppColors.statusGreen,
+        ),
+      );
 }
 
 /// Shown when the user turned sharing off in the selected circle: the circle's
