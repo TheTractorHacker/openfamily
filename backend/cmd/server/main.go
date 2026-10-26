@@ -68,6 +68,11 @@ func main() {
 		Production: cfg.APNsProduction,
 	})
 	srv := handlers.New(pool, tm, dispatcher)
+	if cfg.DirectPush {
+		srv.Direct = push.NewDirectBroker(pool)
+		dispatcher.SetDirect(srv.Direct)
+		go srv.RunPushJanitor(ctx)
+	}
 	srv.VerbosePush = cfg.VerbosePush
 	srv.NtfyBaseURL = cfg.NtfyBaseURL
 	srv.TileURL = cfg.TileURL
@@ -247,6 +252,9 @@ func main() {
 		r.Use(mid.RequireAuthOrDeviceIngestKey(tm, pool))
 
 		r.Post("/devices/heartbeat", srv.HeartbeatDevice)
+		// Built-in direct push channel: SSE stream + delivery ack.
+		r.Get("/push/stream", srv.PushStream)
+		r.Post("/push/ack", srv.AckPush)
 		r.Post("/locations", srv.IngestLocation)
 		// Offline backfill: points queued while the device had no data,
 		// delivered newest-first once connectivity returns. Relaxed freshness

@@ -653,7 +653,7 @@ func (s *Server) redispatchFailedPushes(ctx context.Context) {
 	}
 	rows, err := s.Pool.Query(ctx, `
 		SELECT d.event_id, d.device_id, dev.platform, dev.push_token, dev.unifiedpush_endpoint,
-		       e.user_id, e.event_type, COALESCE(p.name, '')
+		       e.user_id, e.event_type, COALESCE(p.name, ''), dev.user_id, dev.push_transport
 		FROM geofence_event_devices d
 		JOIN geofence_events e ON e.id = d.event_id
 		JOIN geofences g ON g.id = e.geofence_id
@@ -675,9 +675,9 @@ func (s *Server) redispatchFailedPushes(ctx context.Context) {
 	defer rows.Close()
 
 	for rows.Next() {
-		var eventID, deviceID, platform, userID, eventType, placeName string
+		var eventID, deviceID, platform, userID, eventType, placeName, recipientID, transport string
 		var pushToken, unifiedPushEndpoint *string
-		if err := rows.Scan(&eventID, &deviceID, &platform, &pushToken, &unifiedPushEndpoint, &userID, &eventType, &placeName); err != nil {
+		if err := rows.Scan(&eventID, &deviceID, &platform, &pushToken, &unifiedPushEndpoint, &userID, &eventType, &placeName, &recipientID, &transport); err != nil {
 			slog.Error("geofence: scan failed push", "err", err)
 			continue
 		}
@@ -690,6 +690,7 @@ func (s *Server) redispatchFailedPushes(ctx context.Context) {
 			continue
 		}
 		n, ok := s.buildNotification(ctx, userID, placeName, eventType, platform, pushToken, unifiedPushEndpoint)
+		n, ok = s.withDirectTransport(n, ok, transport, deviceID, recipientID, eventID)
 		if !ok {
 			continue
 		}
@@ -722,7 +723,7 @@ func (s *Server) dispatchGeofencePush(eventID, trackedUserID, placeName, eventTy
 		ctx := context.Background()
 
 		rows, err := s.Pool.Query(ctx, `
-			SELECT d.device_id, dev.platform, dev.push_token, dev.unifiedpush_endpoint
+			SELECT d.device_id, dev.platform, dev.push_token, dev.unifiedpush_endpoint, dev.user_id, dev.push_transport
 			FROM geofence_event_devices d
 			JOIN devices dev ON dev.id = d.device_id
 			WHERE d.event_id = $1 AND d.push_sent = FALSE`,
@@ -734,14 +735,15 @@ func (s *Server) dispatchGeofencePush(eventID, trackedUserID, placeName, eventTy
 		defer rows.Close()
 
 		for rows.Next() {
-			var deviceID, platform string
+			var deviceID, platform, recipientID, transport string
 			var pushToken, unifiedPushEndpoint *string
-			if err := rows.Scan(&deviceID, &platform, &pushToken, &unifiedPushEndpoint); err != nil {
+			if err := rows.Scan(&deviceID, &platform, &pushToken, &unifiedPushEndpoint, &recipientID, &transport); err != nil {
 				slog.Error("geofence: scan device", "err", err)
 				continue
 			}
 
 			n, ok := s.buildNotification(ctx, trackedUserID, placeName, eventType, platform, pushToken, unifiedPushEndpoint)
+			n, ok = s.withDirectTransport(n, ok, transport, deviceID, recipientID, eventID)
 			if !ok {
 				continue
 			}
@@ -772,7 +774,8 @@ func (s *Server) createEventDeviceRows(ctx context.Context, tx pgx.Tx, eventID, 
 		JOIN users u ON u.id = d.user_id
 		WHERE u.family_id = $1 AND u.id <> $2
 		  AND ((d.platform = 'ios' AND d.push_token IS NOT NULL AND d.push_token <> '')
-		       OR (d.platform = 'android' AND d.unifiedpush_endpoint IS NOT NULL AND d.unifiedpush_endpoint <> ''))`,
+		       OR (d.platform = 'android' AND d.unifiedpush_endpoint IS NOT NULL AND d.unifiedpush_endpoint <> '')
+		       OR (d.platform = 'android' AND d.push_transport = 'direct'))`,
 		familyID, trackedUserID)
 	if err != nil {
 		return err
@@ -844,7 +847,7 @@ func (s *Server) buildNotification(ctx context.Context, trackedUserID, placeName
 // per-device delivery row as sent on success. A permanent failure dead-letters
 // the row so it is not re-dispatched.
 func (s *Server) dispatchToDevice(ctx context.Context, eventID, deviceID string, n push.Notification) {
-	if err := s.dispatchWithRetry(ctx, n); err != nil {
+	if err := s.dispatchBest(ctx, n); err != nil {
 		slog.Error("geofence: push dispatch failed after retries", "platform", n.Platform, "err", err)
 		if push.IsPermanent(err) {
 			s.deadLetterDevice(eventID, deviceID)

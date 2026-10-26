@@ -25,6 +25,10 @@ type Server struct {
 	// the user's name ("Mom arrived at School").
 	VerbosePush bool
 
+	// Direct is the built-in direct push channel (nil = disabled, see
+	// docs/push.md).
+	Direct *push.DirectBroker
+
 	// NtfyBaseURL is the public ntfy origin advertised by GET /config.
 	NtfyBaseURL string
 

@@ -20,8 +20,18 @@
 
 {$SITE_ADDRESS:localhost} {
 	import security_headers
-	encode gzip
-	reverse_proxy api:8080
+	# Direct push stream (SSE): never compressed or buffered, so heartbeats and
+	# alerts reach the phone immediately. See docs/push.md.
+	@pushstream path /push/stream
+	handle @pushstream {
+		reverse_proxy api:8080 {
+			flush_interval -1
+		}
+	}
+	handle {
+		encode gzip
+		reverse_proxy api:8080
+	}
 }
 
 {$PUSH_ADDRESS} {

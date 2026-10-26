@@ -21,6 +21,7 @@ func (s *Server) GetConfig(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ntfy_base_url":      s.NtfyBaseURL,
 		"apns_configured":    s.APNsConfigured,
+		"direct_push":        s.Direct != nil,
 		"sms_configured":     s.SMSEnabled(),
 		"tile_url":           tileURL,
 		"satellite_tile_url": satelliteURL,
