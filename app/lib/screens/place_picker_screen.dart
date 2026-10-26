@@ -6,9 +6,11 @@ import 'package:latlong2/latlong.dart';
 
 import '../widgets/openfamily_map_layers.dart';
 import '../models/place.dart';
+import '../services/address_suggester.dart';
 import '../services/geocoding_service.dart';
 import '../services/location_service.dart';
 import '../theme/app_theme.dart';
+import '../widgets/address_suggestions.dart';
 import '../widgets/ds/ds.dart';
 
 /// A map-first place picker: a full-bleed map with a drop-pin fixed at the
@@ -17,11 +19,12 @@ import '../widgets/ds/ds.dart';
 ///
 /// The map defaults to the user's CURRENT location (via [LocationService]),
 /// falling back to a neutral world view when location is unavailable. Address
-/// search is optional: when a self-hosted Nominatim instance is configured
-/// ([GeocodingService.isEnabled]), typing an address moves the pin and
-/// dropping the pin reverse-geocodes into the address field. Without that
-/// add-on, the pin itself is the source of truth — save works with just a
-/// name and the dropped coordinate.
+/// search is optional: when the server advertises a geocoder
+/// ([GeocodingService.isEnabled]), typing shows autocomplete suggestions (pick
+/// one to move the pin and fill the address) and dropping the pin detects the
+/// address. A manually typed address is never overwritten without asking.
+/// Without a geocoder the pin itself is the source of truth — save works with
+/// just a name and the dropped coordinate.
 ///
 /// Pops with the resulting [Place] (lat/lon + radius + address), or `null`
 /// when cancelled.
@@ -60,8 +63,20 @@ class _PlacePickerScreenState extends State<PlacePickerScreen> {
   static const LatLng _fallbackPosition = LatLng(0, 0);
 
   bool _locating = false;
-  bool _searching = false;
   Timer? _reverseTimer;
+  late final AddressSuggester _suggester;
+  final FocusNode _addressFocus = FocusNode();
+
+  /// True once the user typed in the address field (so pin moves must ask
+  /// before replacing it).
+  bool _userEdited = false;
+  bool _detecting = false;
+  bool _detectFailed = false;
+  int _reverseGen = 0;
+
+  /// A detected address for a moved pin, offered when the field holds a
+  /// manually typed address.
+  String? _offeredAddress;
 
   /// Radius presets in meters (250 ft, 500 ft, 1000 ft, 1 mi, 2 mi).
   static const List<double> _radiusPresets = <double>[
@@ -77,7 +92,15 @@ class _PlacePickerScreenState extends State<PlacePickerScreen> {
     super.initState();
     _position = widget.initial?.position ?? _fallbackPosition;
     _name = TextEditingController(text: widget.placeName);
-    _address = TextEditingController(text: widget.initial?.address ?? '');
+    final String initialAddress = widget.initial?.address ?? '';
+    _address = TextEditingController(
+      text: initialAddress == 'Pinned location' ? '' : initialAddress,
+    );
+    // An address already stored on an existing place counts as manual.
+    _userEdited = _address.text.trim().isNotEmpty;
+    _suggester = AddressSuggester(
+      nearProvider: () => _position == _fallbackPosition ? null : _position,
+    );
     _radiusMeters = widget.initial?.radiusMeters ?? 152.4; // ~500 ft
     // Only auto-locate for a brand-new place; editing keeps the saved pin.
     if (widget.initial == null) {
@@ -88,6 +111,9 @@ class _PlacePickerScreenState extends State<PlacePickerScreen> {
   @override
   void dispose() {
     _reverseTimer?.cancel();
+    _reverseGen++;
+    _suggester.dispose();
+    _addressFocus.dispose();
     _name.dispose();
     _address.dispose();
     super.dispose();
@@ -111,30 +137,36 @@ class _PlacePickerScreenState extends State<PlacePickerScreen> {
     });
   }
 
-  /// Forward geocodes the typed address and moves the pin/map to the result.
-  Future<void> _searchAddress(String query) async {
-    final String q = query.trim();
-    if (q.isEmpty || _searching) return;
-    setState(() => _searching = true);
-    final LatLng? result = await GeocodingService.search(q);
-    if (!mounted) return;
-    setState(() => _searching = false);
-    if (result == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Couldn\'t find that address. Try a nearby landmark.'),
-        ),
-      );
-      return;
-    }
-    setState(() => _position = result);
-    _mapController.move(result, 15);
-    // Fill the field with the canonical address for the matched coordinate.
-    final String? canonical = await GeocodingService.reverse(result);
-    if (canonical != null && mounted) {
-      _address.text = canonical;
-      _address.selection = TextSelection.collapsed(offset: _address.text.length);
-    }
+  /// Explicit search (keyboard "search" key or the search button).
+  void _submitAddress(String query) {
+    if (!GeocodingService.isEnabled) return;
+    _suggester.submit(query);
+  }
+
+  /// The user picked a suggestion: move the pin, fill the address.
+  void _selectSuggestion(GeocodeSuggestion s) {
+    _reverseTimer?.cancel();
+    _reverseGen++; // drop any in-flight pin-drop lookup
+    _suggester.clear();
+    _addressFocus.unfocus();
+    setState(() {
+      _position = s.position;
+      _userEdited = false;
+      _detecting = false;
+      _detectFailed = false;
+      _offeredAddress = null;
+      _address.text = s.label;
+      _address.selection = TextSelection.collapsed(offset: s.label.length);
+    });
+    _mapController.move(s.position, 17);
+  }
+
+  void _onAddressEdited(String text) {
+    _userEdited = text.trim().isNotEmpty;
+    _offeredAddress = null;
+    _detectFailed = false;
+    _suggester.onTextChanged(text);
+    setState(() {});
   }
 
   /// Called as the map moves; debounces reverse geocoding so we only hit the
@@ -152,10 +184,39 @@ class _PlacePickerScreenState extends State<PlacePickerScreen> {
   }
 
   Future<void> _reverseGeocode(LatLng center) async {
+    final int gen = ++_reverseGen;
+    final bool manual = _userEdited && _address.text.trim().isNotEmpty;
+    if (!manual) setState(() => _detecting = true);
     final String? address = await GeocodingService.reverse(center);
-    if (!mounted || address == null) return;
-    _address.text = address;
-    _address.selection = TextSelection.collapsed(offset: _address.text.length);
+    if (!mounted || gen != _reverseGen) return; // stale: pin moved again
+    setState(() {
+      _detecting = false;
+      if (manual) {
+        // Never overwrite a typed address silently: offer it instead.
+        _offeredAddress = address;
+        return;
+      }
+      if (address == null) {
+        // The old auto-filled text no longer describes this pin.
+        _address.clear();
+        _detectFailed = true;
+        return;
+      }
+      _detectFailed = false;
+      _address.text = address;
+      _address.selection = TextSelection.collapsed(offset: address.length);
+    });
+  }
+
+  void _useOfferedAddress() {
+    final String? a = _offeredAddress;
+    if (a == null) return;
+    setState(() {
+      _address.text = a;
+      _address.selection = TextSelection.collapsed(offset: a.length);
+      _userEdited = false;
+      _offeredAddress = null;
+    });
   }
 
   String _formatCoordinates(LatLng position) {
@@ -198,6 +259,74 @@ class _PlacePickerScreenState extends State<PlacePickerScreen> {
       alertsOn: widget.initial?.alertsOn ?? false,
     );
     Navigator.of(context).pop(place);
+  }
+
+  /// One status line under the address field: detecting, failure, an offer to
+  /// use a detected address, or the standing hint.
+  Widget _addressStatus(ColorScheme cs) {
+    final TextStyle style = AppType.secondary.copyWith(
+      color: cs.onSurfaceVariant,
+    );
+    if (!GeocodingService.isEnabled) {
+      return Text(
+        'Drag the map to drop a pin, then save. Address search is off on this '
+        'server — you can still save the pin, and type a label here if you '
+        'want.',
+        style: style,
+      );
+    }
+    if (_detecting) {
+      return Semantics(
+        liveRegion: true,
+        child: Row(
+          children: <Widget>[
+            const SizedBox(
+              width: 14,
+              height: 14,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+            const SizedBox(width: AppSpace.sm),
+            Expanded(child: Text('Detecting address…', style: style)),
+          ],
+        ),
+      );
+    }
+    if (_offeredAddress != null) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Semantics(
+            liveRegion: true,
+            child: Text(
+              'You moved the pin. Use "$_offeredAddress" as the address?',
+              style: style,
+            ),
+          ),
+          TextButton(
+            style: TextButton.styleFrom(
+              minimumSize: const Size(kMinTarget, kMinTarget),
+            ),
+            onPressed: _useOfferedAddress,
+            child: const Text('Use detected address'),
+          ),
+        ],
+      );
+    }
+    if (_detectFailed) {
+      return Semantics(
+        liveRegion: true,
+        child: Text(
+          'Couldn\'t detect an address here. It will be saved as "Pinned '
+          'location" unless you type one.',
+          style: style,
+        ),
+      );
+    }
+    return Text(
+      'Start typing an address for suggestions, or drag the map — the '
+      'address fills in automatically.',
+      style: style,
+    );
   }
 
   @override
@@ -346,12 +475,14 @@ class _PlacePickerScreenState extends State<PlacePickerScreen> {
                     const SizedBox(height: AppSpace.sm),
                     TextField(
                       controller: _address,
+                      focusNode: _addressFocus,
                       textCapitalization: TextCapitalization.words,
                       textInputAction: GeocodingService.isEnabled
                           ? TextInputAction.search
                           : TextInputAction.done,
+                      onChanged: _onAddressEdited,
                       onSubmitted:
-                          GeocodingService.isEnabled ? _searchAddress : null,
+                          GeocodingService.isEnabled ? _submitAddress : null,
                       decoration: InputDecoration(
                         labelText: GeocodingService.isEnabled
                             ? 'Address'
@@ -360,37 +491,20 @@ class _PlacePickerScreenState extends State<PlacePickerScreen> {
                         prefixIcon: const Icon(Icons.place_outlined),
                         suffixIcon: !GeocodingService.isEnabled
                             ? null
-                            : _searching
-                                ? const Padding(
-                                    padding: EdgeInsets.all(AppSpace.md),
-                                    child: SizedBox(
-                                      width: 18,
-                                      height: 18,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                      ),
-                                    ),
-                                  )
-                                : IconButton(
-                                    icon: const Icon(Icons.search),
-                                    tooltip: 'Search address',
-                                    onPressed: () =>
-                                        _searchAddress(_address.text),
-                                  ),
+                            : IconButton(
+                                icon: const Icon(Icons.search),
+                                tooltip: 'Search address',
+                                onPressed: () => _submitAddress(_address.text),
+                              ),
                       ),
                     ),
+                    if (GeocodingService.isEnabled)
+                      AddressSuggestionList(
+                        suggester: _suggester,
+                        onSelected: _selectSuggestion,
+                      ),
                     const SizedBox(height: AppSpace.xs),
-                    Text(
-                      GeocodingService.isEnabled
-                          ? 'Type an address to move the pin, or drag the map — '
-                              'the address fills in automatically.'
-                          : 'Drag the map to drop a pin, then save. Address '
-                              'search needs a geocoding add-on — you can still '
-                              'save the pin, and type a label here if you want.',
-                      style: AppType.secondary.copyWith(
-                        color: cs.onSurfaceVariant,
-                      ),
-                    ),
+                    _addressStatus(cs),
                     const SizedBox(height: AppSpace.lg),
                     Row(
                       children: <Widget>[
