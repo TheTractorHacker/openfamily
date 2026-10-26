@@ -59,6 +59,7 @@ class MapScreen extends StatefulWidget {
     super.key,
     this.membersSink,
     this.userIdSink,
+    this.circleIdSink,
     this.circleService,
     this.placesLoader,
     this.selectionStore,
@@ -68,6 +69,9 @@ class MapScreen extends StatefulWidget {
   /// other tabs (Driving, Circle) share the map's single subscription.
   final ValueNotifier<List<Member>>? membersSink;
   final ValueNotifier<String?>? userIdSink;
+
+  /// Receives the effective circle id (null = unscoped) for the Driving tab.
+  final ValueNotifier<String?>? circleIdSink;
 
   /// Injected in tests; defaults to [CircleService.instance].
   final CircleService? circleService;
@@ -583,6 +587,7 @@ class _MapScreenState extends State<MapScreen>
   }
 
   void _onSelectionChanged() {
+    widget.circleIdSink?.value = _selection.effectiveId;
     if (mounted) setState(() {});
   }
 
