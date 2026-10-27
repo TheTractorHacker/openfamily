@@ -9,6 +9,30 @@ class _FakeSharing implements SharingService {
   LiveShares shares = const LiveShares();
   final List<String> calls = <String>[];
   Object? failCheckIn;
+  List<ShareLink> links = <ShareLink>[];
+  Object? failCreate;
+  int nextLink = 1;
+
+  @override
+  Future<ShareLink> createShareLink({required int minutes, String label = ''}) async {
+    if (failCreate != null) throw failCreate!;
+    calls.add('link $minutes');
+    final ShareLink l = ShareLink(
+        id: 'l$nextLink',
+        expiresAt: DateTime(2030, 1, 1, 9).add(Duration(minutes: minutes)),
+        url: 'https://of.example/s/tok${nextLink++}');
+    links = <ShareLink>[...links, ShareLink(id: l.id, expiresAt: l.expiresAt)];
+    return l;
+  }
+
+  @override
+  Future<List<ShareLink>> shareLinks() async => links;
+
+  @override
+  Future<void> stopShareLink(String id) async {
+    calls.add('stop $id');
+    links = links.where((ShareLink l) => l.id != id).toList();
+  }
 
   @override
   Future<SharingPause> pauseStatus() async => pauseState;
@@ -67,12 +91,14 @@ const List<Member> _members = <Member>[
   Member(id: 'ella', name: 'Ella', position: null, status: MemberStatus.normal, batteryPercent: 90, address: ''),
 ];
 
-Widget _host(_FakeSharing svc) => MaterialApp(
+Widget _host(_FakeSharing svc, {List<String>? shared}) => MaterialApp(
       home: Scaffold(
         body: SharingSheet(
           members: _members,
           selfId: 'me',
           service: svc,
+          showPreviewMap: false,
+          shareUrl: (String url) async => shared?.add(url),
           locate: () async => (lat: 1.5, lon: 2.5),
           clock: () => DateTime(2030, 1, 1, 9),
         ),
@@ -86,12 +112,118 @@ void main() {
     addTearDown(tester.view.reset);
   }
 
+  Future<void> open(WidgetTester tester, String title) async {
+    await tester.ensureVisible(find.text(title));
+    await tester.tap(find.text(title));
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('shows the link flow first with the required copy',
+      (WidgetTester tester) async {
+    bigScreen(tester);
+    await tester.pumpWidget(_host(_FakeSharing()));
+    await tester.pump();
+    expect(find.text('Share your live location with anyone, no app needed'),
+        findsOneWidget);
+    expect(
+        find.text('Anyone with the link can see your live location, name, '
+            'photo, and battery status. You can stop sharing at any time.'),
+        findsOneWidget);
+    expect(find.byKey(const ValueKey<String>('link-duration')), findsOneWidget);
+    expect(find.text('1 hour'), findsOneWidget); // default duration
+    expect(find.widgetWithText(FilledButton, 'Start sharing'), findsOneWidget);
+  });
+
+  testWidgets('start sharing creates a link with the chosen duration and shares its URL',
+      (WidgetTester tester) async {
+    bigScreen(tester);
+    final _FakeSharing svc = _FakeSharing();
+    final List<String> shared = <String>[];
+    await tester.pumpWidget(_host(svc, shared: shared));
+    await tester.pump();
+
+    await tester.tap(find.byKey(const ValueKey<String>('link-duration')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('4 hours').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey<String>('start-link')));
+    await tester.pumpAndSettle();
+
+    expect(svc.calls, <String>['link 240']);
+    expect(shared, <String>['https://of.example/s/tok1']);
+    expect(find.text('Active links'), findsOneWidget);
+    expect(find.text('4 h left'), findsOneWidget);
+    expect(find.byKey(const ValueKey<String>('link-share-again')), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(TextButton, 'Stop sharing'));
+    await tester.pumpAndSettle();
+    expect(svc.calls.last, 'stop l1');
+    expect(find.text('Active links'), findsNothing);
+  });
+
+  testWidgets('custom duration is capped at 72 hours', (WidgetTester tester) async {
+    bigScreen(tester);
+    final _FakeSharing svc = _FakeSharing();
+    await tester.pumpWidget(_host(svc));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey<String>('link-duration')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Custom (up to 72 h)').last);
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const ValueKey<String>('custom-hours')), '99');
+    await tester.tap(find.widgetWithText(FilledButton, 'Set'));
+    await tester.pumpAndSettle();
+    // Out of range: dialog stays open.
+    expect(find.text('Custom duration'), findsOneWidget);
+    await tester.enterText(find.byKey(const ValueKey<String>('custom-hours')), '72');
+    await tester.tap(find.widgetWithText(FilledButton, 'Set'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey<String>('start-link')));
+    await tester.pumpAndSettle();
+    expect(svc.calls, <String>['link 4320']);
+  });
+
+  testWidgets('a failed link creation is reported and nothing is shared',
+      (WidgetTester tester) async {
+    bigScreen(tester);
+    final _FakeSharing svc = _FakeSharing()..failCreate = const ApiExceptionStub();
+    final List<String> shared = <String>[];
+    await tester.pumpWidget(_host(svc, shared: shared));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey<String>('start-link')));
+    await tester.pumpAndSettle();
+    expect(shared, isEmpty);
+    expect(find.textContaining('Could not create the link'), findsOneWidget);
+  });
+
+  testWidgets('fits a small phone at 2x text scale without overflow',
+      (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(320, 568);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final _FakeSharing svc = _FakeSharing();
+    svc.links = <ShareLink>[
+      ShareLink(id: 'a', expiresAt: DateTime(2030, 1, 1, 18), label: 'Dinner with the whole family'),
+    ];
+    await tester.pumpWidget(MediaQuery(
+      data: const MediaQueryData(size: Size(320, 568), textScaler: TextScaler.linear(2)),
+      child: _host(svc),
+    ));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    for (final String t in <String>["I'm here", 'Pause sharing', 'Share live with one person']) {
+      await open(tester, t);
+      expect(tester.takeException(), isNull);
+    }
+  });
+
   testWidgets('check-in needs a recipient, excludes self, sends location and note',
       (WidgetTester tester) async {
     bigScreen(tester);
     final _FakeSharing svc = _FakeSharing();
     await tester.pumpWidget(_host(svc));
     await tester.pump();
+    await open(tester, "I'm here");
 
     expect(find.byKey(const ValueKey<String>('checkin-me')), findsNothing);
     final Finder send = find.widgetWithText(FilledButton, 'Send check-in');
@@ -115,6 +247,7 @@ void main() {
       ..failCheckIn = const ApiExceptionStub();
     await tester.pumpWidget(_host(svc));
     await tester.pump();
+    await open(tester, "I'm here");
     await tester.tap(find.byKey(const ValueKey<String>('checkin-ella')));
     await tester.pump();
     await tester.tap(find.widgetWithText(FilledButton, 'Send check-in'));
@@ -128,6 +261,7 @@ void main() {
     final _FakeSharing svc = _FakeSharing();
     await tester.pumpWidget(_host(svc));
     await tester.pump();
+    await open(tester, 'Pause sharing');
 
     await tester.tap(find.widgetWithText(ActionChip, '1 hour'));
     await tester.pumpAndSettle();
@@ -147,6 +281,7 @@ void main() {
     final _FakeSharing svc = _FakeSharing();
     await tester.pumpWidget(_host(svc));
     await tester.pump();
+    await open(tester, 'Pause sharing');
     await tester.tap(find.widgetWithText(ActionChip, 'Until tomorrow'));
     await tester.pumpAndSettle();
     expect(svc.calls.last, 'pause minutes=null until=true');
@@ -158,8 +293,9 @@ void main() {
     final _FakeSharing svc = _FakeSharing();
     await tester.pumpWidget(_host(svc));
     await tester.pump();
+    await open(tester, 'Share live with one person');
 
-    final Finder start = find.widgetWithText(FilledButton, 'Start sharing');
+    final Finder start = find.byKey(const ValueKey<String>('start-person-share'));
     expect(tester.widget<FilledButton>(start).onPressed, isNull);
 
     await tester.tap(find.byKey(const ValueKey<String>('share-person')));
