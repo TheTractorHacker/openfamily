@@ -308,6 +308,11 @@ func main() {
 		r.Post("/live-shares", srv.CreateLiveShare)
 		r.Get("/live-shares", srv.ListLiveShares)
 		r.Delete("/live-shares/{id}", srv.DeleteLiveShare)
+
+		// Bubbles: temporary per-person geofences (docs/bubbles.md).
+		r.Post("/bubbles", srv.CreateBubble)
+		r.Get("/bubbles", srv.ListBubbles)
+		r.Delete("/bubbles/{id}", srv.DeleteBubble)
 	})
 
 	// Location ingest: accepts either a Bearer access token or the per-device
