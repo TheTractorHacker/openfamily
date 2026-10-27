@@ -169,11 +169,38 @@ func (s *Service) needFallback(q string, res []Result) bool {
 		return false
 	}
 	for _, r := range res {
-		if !r.Approximate && r.Type == "house" {
+		if isExactHouse(q, r) {
 			return false
 		}
 	}
 	return true
+}
+
+// isExactHouse reports whether r is a house-level hit for the house number the
+// user typed. A house result for some other number ("88 Old Hall Road" when
+// the query was "14322 Old 88 Rd") is not a match: it must not stop the
+// fallback providers or count as an exact hit.
+func isExactHouse(q string, r Result) bool {
+	if r.Approximate || r.Type != "house" {
+		return false
+	}
+	p := parse(q)
+	if len(p.parts) == 0 {
+		return true
+	}
+	toks := strings.Fields(p.parts[0])
+	if len(toks) == 0 || !numberRe.MatchString(toks[0]) {
+		return true
+	}
+	want := strings.ToLower(toks[0])
+	for _, t := range strings.FieldsFunc(strings.ToLower(r.Label+" "+r.Name), func(c rune) bool {
+		return !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9')
+	}) {
+		if t == want {
+			return true
+		}
+	}
+	return false
 }
 
 // ---------- fallback providers ----------
@@ -337,7 +364,7 @@ func (s *Service) fallbackSearch(ctx context.Context, user, q string, b *Point, 
 			return r
 		})
 		for _, r := range res {
-			if !r.Approximate && r.Type == "house" {
+			if isExactHouse(q, r) {
 				haveHouse = true
 			}
 		}

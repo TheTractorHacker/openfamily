@@ -195,7 +195,7 @@ func wantGoogle(q string, res []Result, explicit bool) bool {
 	number := hasHouseNumber(q)
 	exact := false
 	for _, r := range res {
-		if !r.Approximate && r.Type == "house" {
+		if isExactHouse(q, r) {
 			exact = true
 		}
 	}

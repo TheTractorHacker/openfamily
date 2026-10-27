@@ -252,7 +252,7 @@ func TestFallbackNotUsedWhenPhotonHasExactHouseOrNoNumber(t *testing.T) {
 
 func TestFallbackCensusSkippedWhenNominatimHasHouseAndWhenNotUS(t *testing.T) {
 	e := setupFallback(t, func(*http.Request) (int, []byte) { return 200, fixture(t, "nominatim_search.json") }, censusOwner(t))
-	resp, _ := e.svc.SearchWith(context.Background(), "u1", owner, SearchOptions{Explicit: true})
+	resp, _ := e.svc.SearchWith(context.Background(), "u1", "123 Main Street, Springfield, Illinois", SearchOptions{Explicit: true})
 	if e.cen.count() != 0 || resp.Results[0].Source != "nominatim" {
 		t.Fatalf("cen=%d %+v", e.cen.count(), resp.Results)
 	}
@@ -428,5 +428,24 @@ func TestCensusParsing(t *testing.T) {
 	}
 	if _, err = (census{}).parse(fixture(t, "malformed.json")); err == nil {
 		t.Fatal("malformed")
+	}
+}
+
+func TestIsExactHouseRequiresTheTypedNumber(t *testing.T) {
+	wrong := Result{Label: "88 Old Hall Road, Northwich, England", Type: "house"}
+	right := Result{Label: "14322 OLD 88 RD, CHESTER, AR, 72934", Type: "house", Source: "census"}
+	q := "14322 Old 88 Rd, Chester, AR 72934"
+	if isExactHouse(q, wrong) {
+		t.Fatal("a house with another number matched")
+	}
+	if !isExactHouse(q, right) {
+		t.Fatal("the matching house did not match")
+	}
+	if isExactHouse(q, Result{Label: "14322 Old 88 Rd", Type: "street"}) || isExactHouse(q, Result{Label: right.Label, Type: "house", Approximate: true}) {
+		t.Fatal("street or approximate hit counted as exact")
+	}
+	s := &Service{}
+	if !s.needFallback(q, []Result{wrong}) || s.needFallback(q, []Result{wrong, right}) {
+		t.Fatal("needFallback ignored the house number")
 	}
 }
