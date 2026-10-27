@@ -4,6 +4,7 @@ import React from 'react'
 import { ROUTES, type RouteKey } from '../lib/routes'
 import { useMe } from '../lib/me'
 import { CommandMenu } from './CommandMenu'
+import { ThemeCycleButton } from './ThemeCycleButton'
 import './nav.css'
 
 interface TopBarProps {
@@ -55,6 +56,8 @@ export function TopBar({ active, actions, onLogout, email, onNavigate }: TopBarP
 
       <div className="wb-topbar-right">
         {actions}
+
+        <ThemeCycleButton />
 
         <div className="wb-account" ref={menuRef}>
           <button

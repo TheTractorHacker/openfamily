@@ -1,6 +1,7 @@
 // Login screen — split layout with a branded gradient panel and a clean form.
 // Shown when the user is not authenticated.
 
+import { ThemeCycleButton } from '../components/ThemeCycleButton'
 import React from 'react'
 import { login } from '../lib/api'
 import { setTokens, setEmail as setSessionEmail } from '../lib/auth'
@@ -37,6 +38,7 @@ export function LoginPage({ onLoggedIn }: LoginPageProps) {
 
   return (
     <div className="wb-login">
+      <ThemeCycleButton className="wb-theme-cycle-login" />
       <aside className="wb-login-aside">
         <div className="wb-login-brand">
           <span className="wb-login-mark" aria-hidden="true">

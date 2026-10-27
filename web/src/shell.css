@@ -32,3 +32,19 @@
 @media (max-width: 860px) {
   .wb-shell { grid-template-columns: 64px 1fr; }
 }
+/* One-tap theme switch (top bar + sign-in page). */
+.wb-theme-cycle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  border: 1px solid var(--line, rgba(128, 128, 128, 0.3));
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.wb-theme-cycle:hover { background: color-mix(in srgb, currentColor 10%, transparent); }
+.wb-theme-cycle:focus-visible { outline: 2px solid var(--accent, currentColor); outline-offset: 2px; }
+.wb-theme-cycle-login { position: fixed; top: 16px; right: 16px; z-index: 5; background: var(--surface, transparent); }
