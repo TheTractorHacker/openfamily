@@ -122,9 +122,9 @@ func (s *Server) loadNotifPrefs(ctx context.Context, user, subject string) (noti
 	return p, nil
 }
 
-// GetNotificationPrefs returns the caller's preferences about one member
+// GetMemberNotificationPrefs returns the caller's preferences about one member
 // (defaults when never saved).
-func (s *Server) GetNotificationPrefs(w http.ResponseWriter, r *http.Request) {
+func (s *Server) GetMemberNotificationPrefs(w http.ResponseWriter, r *http.Request) {
 	caller, subject, ok := s.notifPrefsTarget(w, r)
 	if !ok {
 		return
@@ -137,9 +137,9 @@ func (s *Server) GetNotificationPrefs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, p)
 }
 
-// PutNotificationPrefs replaces the caller's preferences about one member.
+// PutMemberNotificationPrefs replaces the caller's preferences about one member.
 // The user is always the caller; the body cannot name another user.
-func (s *Server) PutNotificationPrefs(w http.ResponseWriter, r *http.Request) {
+func (s *Server) PutMemberNotificationPrefs(w http.ResponseWriter, r *http.Request) {
 	caller, subject, ok := s.notifPrefsTarget(w, r)
 	if !ok {
 		return
@@ -196,8 +196,8 @@ func (s *Server) PutNotificationPrefs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, p)
 }
 
-// DeleteNotificationPrefs resets the caller's preferences about one member.
-func (s *Server) DeleteNotificationPrefs(w http.ResponseWriter, r *http.Request) {
+// DeleteMemberNotificationPrefs resets the caller's preferences about one member.
+func (s *Server) DeleteMemberNotificationPrefs(w http.ResponseWriter, r *http.Request) {
 	caller, subject, ok := s.notifPrefsTarget(w, r)
 	if !ok {
 		return

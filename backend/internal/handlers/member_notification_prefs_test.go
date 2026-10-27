@@ -42,9 +42,9 @@ func TestInQuietHours(t *testing.T) {
 
 func (fx *alertFixture) prefsRouter() http.Handler {
 	r := chi.NewRouter()
-	r.Get("/members/{id}/notification-prefs", fx.srv.GetNotificationPrefs)
-	r.Put("/members/{id}/notification-prefs", fx.srv.PutNotificationPrefs)
-	r.Delete("/members/{id}/notification-prefs", fx.srv.DeleteNotificationPrefs)
+	r.Get("/members/{id}/notification-prefs", fx.srv.GetMemberNotificationPrefs)
+	r.Put("/members/{id}/notification-prefs", fx.srv.PutMemberNotificationPrefs)
+	r.Delete("/members/{id}/notification-prefs", fx.srv.DeleteMemberNotificationPrefs)
 	return r
 }
 

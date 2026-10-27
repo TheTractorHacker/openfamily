@@ -26,6 +26,9 @@ func (s *Server) EnsureThemeSchema(ctx context.Context) error {
 // defaultAccent returns the operator's accent as "#RRGGBB", or "" for the
 // built-in green. Errors read as "not set": the theme must never break /config.
 func (s *Server) defaultAccent(ctx context.Context) string {
+	if s.Pool == nil {
+		return ""
+	}
 	var a string
 	if err := s.Pool.QueryRow(ctx,
 		`SELECT default_accent FROM app_theme_settings WHERE id = 1`).Scan(&a); err != nil {
