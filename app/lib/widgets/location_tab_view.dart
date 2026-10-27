@@ -48,6 +48,7 @@ class LocationTabView extends StatefulWidget {
     this.onOpenSettings,
     this.onInvite,
     this.onCheckIn,
+    this.onOpenSharing,
     this.onSos,
     this.onSelectMember,
     this.onOpenMember,
@@ -97,6 +98,9 @@ class LocationTabView extends StatefulWidget {
   final VoidCallback? onOpenSettings;
   final VoidCallback? onInvite;
   final VoidCallback? onCheckIn;
+
+  /// Opens the check-in / pause / live-share sheet.
+  final VoidCallback? onOpenSharing;
   final VoidCallback? onSos;
 
   /// A person row was tapped: the map should center on them.
@@ -531,6 +535,15 @@ class _LocationTabViewState extends State<LocationTabView> {
                           floating: true,
                           onPressed: widget.onCheckIn,
                         ),
+                        if (widget.onOpenSharing != null)
+                          DsPillButton(
+                            label: 'Share',
+                            icon: Icons.share_location,
+                            floating: true,
+                            onPressed: widget.onOpenSharing,
+                            semanticLabel:
+                                'Check in, pause sharing or share live location',
+                          ),
                         DsPillButton(
                           label: 'SOS',
                           icon: Icons.warning_amber_rounded,

@@ -52,6 +52,15 @@ type Authz struct{ db DB }
 // New returns an Authz over db (a pool or a transaction).
 func New(db DB) *Authz { return &Authz{db: db} }
 
+// notPausedSQL is a SQL predicate that is true when the user whose id is the
+// given column expression has no unexpired sharing pause (sharing_pauses, see
+// handlers/sharing_pause.go). Expiry is enforced here, on read, so a pause
+// ends on time with no job needing to run. It is part of every "does this
+// member share their location" decision below; SOS does not use these helpers.
+func notPausedSQL(userCol string) string {
+	return "NOT EXISTS (SELECT 1 FROM sharing_pauses sp WHERE sp.user_id = " + userCol + " AND sp.paused_until > now())"
+}
+
 var uuidRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 // ValidID reports whether s is a well-formed UUID. Handlers use it to turn a
@@ -121,7 +130,7 @@ func (a *Authz) SharedWith(ctx context.Context, viewerID, subjectID string) ([]s
 		SELECT s.circle_id::text
 		FROM circle_members v
 		JOIN circle_members s ON s.circle_id = v.circle_id
-		WHERE v.user_id = $1 AND s.user_id = $2 AND s.sharing_enabled
+		WHERE v.user_id = $1 AND s.user_id = $2 AND s.sharing_enabled AND `+notPausedSQL("s.user_id")+`
 		ORDER BY s.circle_id`, viewerID, subjectID)
 }
 
@@ -133,7 +142,7 @@ func (a *Authz) SharingCircles(ctx context.Context, subjectID string) ([]string,
 	}
 	return a.strings(ctx, `
 		SELECT circle_id::text FROM circle_members
-		WHERE user_id = $1 AND sharing_enabled ORDER BY circle_id`, subjectID)
+		WHERE user_id = $1 AND sharing_enabled AND `+notPausedSQL("circle_members.user_id")+` ORDER BY circle_id`, subjectID)
 }
 
 // OwnAndSharingCircles returns, in ONE round trip, all of subject's circles
@@ -144,7 +153,7 @@ func (a *Authz) OwnAndSharingCircles(ctx context.Context, subjectID string) (own
 		return nil, nil, nil
 	}
 	rows, err := a.db.Query(ctx, `
-		SELECT circle_id::text, sharing_enabled FROM circle_members
+		SELECT circle_id::text, (sharing_enabled AND `+notPausedSQL("circle_members.user_id")+`) FROM circle_members
 		WHERE user_id = $1 ORDER BY joined_at, circle_id`, subjectID)
 	if err != nil {
 		return nil, nil, err
@@ -174,7 +183,7 @@ func (a *Authz) LocationVisibility(ctx context.Context, viewerID string, circleI
 		return out, nil
 	}
 	rows, err := a.db.Query(ctx, `
-		SELECT s.user_id::text, bool_or(s.sharing_enabled OR s.user_id = v.user_id)
+		SELECT s.user_id::text, bool_or((s.sharing_enabled AND `+notPausedSQL("s.user_id")+`) OR s.user_id = v.user_id)
 		FROM circle_members v
 		JOIN circle_members s ON s.circle_id = v.circle_id
 		WHERE v.user_id = $1 AND v.circle_id = ANY($2::uuid[])
@@ -211,7 +220,7 @@ func (a *Authz) MemberCircles(ctx context.Context, viewerID string, circleIDs []
 		return out, nil
 	}
 	rows, err := a.db.Query(ctx, `
-		SELECT s.user_id::text, s.circle_id::text, (s.sharing_enabled OR s.user_id = v.user_id)
+		SELECT s.user_id::text, s.circle_id::text, ((s.sharing_enabled AND `+notPausedSQL("s.user_id")+`) OR s.user_id = v.user_id)
 		FROM circle_members v
 		JOIN circle_members s ON s.circle_id = v.circle_id
 		WHERE v.user_id = $1 AND v.circle_id = ANY($2::uuid[])
@@ -254,6 +263,39 @@ func (a *Authz) strings(ctx context.Context, sql string, args ...any) ([]string,
 			return nil, err
 		}
 		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+// CoMembers returns the subset of ids (other users, never userID itself) that
+// share at least one circle with userID. Unlike SharedWith it ignores location
+// sharing: it answers "may userID address this person", which is what an
+// explicit check-in or live share needs.
+func (a *Authz) CoMembers(ctx context.Context, userID string, ids []string) (map[string]bool, error) {
+	out := map[string]bool{}
+	if !ValidID(userID) {
+		return out, nil
+	}
+	valid := filterIDs(ids)
+	if len(valid) == 0 {
+		return out, nil
+	}
+	rows, err := a.db.Query(ctx, `
+		SELECT DISTINCT o.user_id::text
+		FROM circle_members me
+		JOIN circle_members o ON o.circle_id = me.circle_id
+		WHERE me.user_id = $1 AND o.user_id = ANY($2::uuid[]) AND o.user_id <> $1`,
+		userID, valid)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out[id] = true
 	}
 	return out, rows.Err()
 }

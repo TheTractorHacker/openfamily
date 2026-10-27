@@ -35,6 +35,7 @@ import '../services/tile_config.dart';
 import '../theme/app_theme.dart';
 import '../utils/member_clustering.dart';
 import '../widgets/location_tab_view.dart';
+import '../widgets/sharing_sheet.dart';
 import '../widgets/member_avatar_bubble.dart';
 import '../widgets/visible_value_builder.dart';
 import 'check_in_screen.dart';
@@ -905,6 +906,14 @@ class _MapScreenState extends State<MapScreen>
         .push(MaterialPageRoute<void>(builder: (_) => const CheckInScreen()));
   }
 
+  void _openSharing() {
+    showSharingSheet(
+      context,
+      members: _roster.value,
+      selfId: _userId,
+    );
+  }
+
   void _toggleSatellite() {
     setState(() => _satellite = !_satellite);
   }
@@ -939,6 +948,7 @@ class _MapScreenState extends State<MapScreen>
       onOpenSettings: _openSettings,
       onInvite: _openAddPerson,
       onCheckIn: _openCheckIn,
+      onOpenSharing: _openSharing,
       onSos: _openSos,
       onSelectMember: _focusMember,
       onOpenMember: _openMemberDetails,
