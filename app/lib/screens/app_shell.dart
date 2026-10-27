@@ -1,3 +1,4 @@
+import '../services/chat_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -133,7 +134,11 @@ class _AppShellState extends State<AppShell> {
       case AppTab.safety:
         return const SafetyHubScreen();
       case AppTab.circle:
-        return CircleTabScreen(members: _members, userId: _userId);
+        return CircleTabScreen(
+          members: _members,
+          userId: _userId,
+          circleId: _circleId,
+        );
     }
   }
 
@@ -182,10 +187,13 @@ class _AppShellState extends State<AppShell> {
                       destinations: <NavigationRailDestination>[
                         for (final (IconData, IconData, String) it in _items)
                           NavigationRailDestination(
-                            icon: Icon(it.$1),
-                            selectedIcon: Icon(
-                              it.$2,
-                              color: BrandTheme.of(context).accentInk,
+                            icon: _badged(it.$3, Icon(it.$1)),
+                            selectedIcon: _badged(
+                              it.$3,
+                              Icon(
+                                it.$2,
+                                color: BrandTheme.of(context).accentInk,
+                              ),
                             ),
                             label: Text(it.$3),
                           ),
@@ -220,9 +228,26 @@ class _AppShellState extends State<AppShell> {
 
   NavigationDestination _dest(IconData icon, IconData selected, String label) {
     return NavigationDestination(
-      icon: Icon(icon),
-      selectedIcon: Icon(selected, color: BrandTheme.of(context).accentInk),
+      icon: _badged(label, Icon(icon)),
+      selectedIcon: _badged(
+        label,
+        Icon(selected, color: BrandTheme.of(context).accentInk),
+      ),
       label: label,
+    );
+  }
+
+  /// The Circle tab carries the unread family-chat count.
+  Widget _badged(String label, Widget icon) {
+    if (label != 'Circle') return icon;
+    return ValueListenableBuilder<int>(
+      valueListenable: ChatEvents.unreadTotal,
+      builder: (BuildContext context, int n, Widget? child) => Badge(
+        isLabelVisible: n > 0,
+        label: Text(n > 99 ? '99+' : '$n'),
+        child: child,
+      ),
+      child: icon,
     );
   }
 }
