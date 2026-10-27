@@ -141,7 +141,8 @@ func (s *Server) announceCrash(ctx context.Context, userID, crashID string) {
 		SELECT DISTINCT v.user_id::text
 		FROM circle_members s
 		JOIN circle_members v ON v.circle_id = s.circle_id AND v.user_id <> s.user_id
-		WHERE s.user_id = $1 AND s.sharing_enabled`, userID)
+		WHERE s.user_id = $1 AND s.sharing_enabled
+		  AND NOT `+pausedExprSQL("s.user_id"), userID)
 	if err != nil {
 		return
 	}
@@ -198,7 +199,8 @@ func (s *Server) ListCrashes(w http.ResponseWriter, r *http.Request) {
 		       OR EXISTS (
 		           SELECT 1 FROM circle_members v
 		           JOIN circle_members s ON s.circle_id = v.circle_id
-		           WHERE v.user_id = $1 AND s.user_id = c.user_id AND s.sharing_enabled))
+		           WHERE v.user_id = $1 AND s.user_id = c.user_id AND s.sharing_enabled
+		             AND NOT `+pausedExprSQL("s.user_id")+`))
 		ORDER BY c.occurred_at DESC LIMIT $2`, claims.UserID, crashListLimit)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load crash reports")
