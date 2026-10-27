@@ -33,6 +33,22 @@ enum SessionGateResult {
   none,
 }
 
+/// Result of the silent re-login with saved credentials.
+enum SilentLoginOutcome {
+  /// New tokens were obtained and saved.
+  success,
+
+  /// No saved credentials (or the feature is off).
+  unavailable,
+
+  /// The server definitively refused (bad credentials, or a TOTP code is
+  /// needed). The saved credentials have been dropped.
+  failed,
+
+  /// Network/5xx/429: nothing learned, keep everything.
+  unreachable,
+}
+
 /// The stored token pair as read from token storage.
 typedef SessionTokens = ({String? access, String? refresh});
 
@@ -74,8 +90,14 @@ class SessionGate {
       required String access,
       required String refresh,
     }) saveTokens,
+    Future<List<String>> Function()? loadRefreshCandidates,
+    void Function(String refreshToken)? markRejected,
+    Future<SilentLoginOutcome> Function()? silentLogin,
     DateTime Function()? now,
-  })  : _loadTokens = loadTokens,
+  })  : _loadRefreshCandidates = loadRefreshCandidates,
+        _markRejected = markRejected,
+        _silentLogin = silentLogin,
+        _loadTokens = loadTokens,
         _postRefresh = postRefresh,
         _saveTokens = saveTokens,
         _now = now ?? (() => DateTime.now().toUtc());
@@ -88,6 +110,9 @@ class SessionGate {
     required String refresh,
   }) _saveTokens;
   final DateTime Function() _now;
+  final Future<List<String>> Function()? _loadRefreshCandidates;
+  final void Function(String refreshToken)? _markRejected;
+  final Future<SilentLoginOutcome> Function()? _silentLogin;
 
   Future<SessionGateResult> evaluate() async {
     final SessionTokens tokens = await _loadTokens();
@@ -96,6 +121,21 @@ class SessionGate {
 
     if ((access == null || access.isEmpty) &&
         (refresh == null || refresh.isEmpty)) {
+      // Nothing stored at all (e.g. a Keystore reset wiped every store): saved
+      // credentials can still bring the session back.
+      final Future<SilentLoginOutcome> Function()? relogin = _silentLogin;
+      if (relogin != null) {
+        SilentLoginOutcome outcome;
+        try {
+          outcome = await relogin();
+        } catch (_) {
+          outcome = SilentLoginOutcome.unreachable;
+        }
+        if (outcome == SilentLoginOutcome.success) return SessionGateResult.valid;
+        if (outcome == SilentLoginOutcome.unreachable) {
+          return SessionGateResult.unreachable;
+        }
+      }
       return SessionGateResult.none;
     }
 
@@ -107,36 +147,75 @@ class SessionGate {
       }
     }
 
-    // Access is expired or missing. Without a refresh token the session is
-    // unrecoverable locally.
-    if (refresh == null || refresh.isEmpty) return SessionGateResult.expired;
+    // Access is expired or missing. Every refresh candidate (the redundant
+    // stores may disagree, newest first) is tried before giving up: a stale
+    // token being rejected must not end a session a newer one can continue.
+    final List<String> candidates = <String>[];
+    final Future<List<String>> Function()? loader = _loadRefreshCandidates;
+    if (loader != null) {
+      try {
+        candidates.addAll(await loader());
+      } catch (_) {}
+    }
+    if (loader == null && refresh != null && refresh.isNotEmpty) {
+      candidates.add(refresh);
+    }
 
-    SessionGateRefreshOutcome outcome;
-    try {
-      outcome = await _postRefresh(refresh);
-    } catch (_) {
-      // The IO layer is expected to classify failures itself, but a throwing
-      // transport must never destroy the session.
-      outcome = const SessionGateRefreshOutcome.unreachable();
+    for (final String candidate in candidates) {
+      SessionGateRefreshOutcome outcome;
+      try {
+        outcome = await _postRefresh(candidate);
+      } catch (_) {
+        // The IO layer is expected to classify failures itself, but a
+        // throwing transport must never destroy the session.
+        outcome = const SessionGateRefreshOutcome.unreachable();
+      }
+      switch (outcome.status) {
+        case SessionGateRefreshStatus.ok:
+          await _saveTokens(
+            access: outcome.access!,
+            refresh: outcome.refresh!,
+          );
+          return SessionGateResult.valid;
+        case SessionGateRefreshStatus.rejected:
+          _markRejected?.call(candidate);
+        case SessionGateRefreshStatus.unreachable:
+          return SessionGateResult.unreachable;
+      }
     }
-    switch (outcome.status) {
-      case SessionGateRefreshStatus.ok:
-        await _saveTokens(
-          access: outcome.access!,
-          refresh: outcome.refresh!,
-        );
-        return SessionGateResult.valid;
-      case SessionGateRefreshStatus.rejected:
-        return SessionGateResult.expired;
-      case SessionGateRefreshStatus.unreachable:
-        return SessionGateResult.unreachable;
+
+    // Every candidate is definitively dead (or none exists). Try the saved
+    // credentials before showing the login screen.
+    final Future<SilentLoginOutcome> Function()? relogin = _silentLogin;
+    if (relogin != null) {
+      SilentLoginOutcome outcome;
+      try {
+        outcome = await relogin();
+      } catch (_) {
+        outcome = SilentLoginOutcome.unreachable;
+      }
+      switch (outcome) {
+        case SilentLoginOutcome.success:
+          return SessionGateResult.valid;
+        case SilentLoginOutcome.unreachable:
+          return SessionGateResult.unreachable;
+        case SilentLoginOutcome.unavailable:
+        case SilentLoginOutcome.failed:
+          break;
+      }
     }
+    return SessionGateResult.expired;
   }
 }
 
 /// Decodes a JWT's `exp` claim (seconds since epoch) into a UTC [DateTime], or
 /// null when the token is malformed or has no usable `exp`.
-DateTime? jwtExpiryOf(String token) {
+DateTime? jwtExpiryOf(String token) => _jwtTimeClaim(token, 'exp');
+
+/// Decodes a JWT's `iat` (issued-at) claim, or null when absent/malformed.
+DateTime? jwtIssuedAtOf(String token) => _jwtTimeClaim(token, 'iat');
+
+DateTime? _jwtTimeClaim(String token, String claim) {
   final List<String> parts = token.split('.');
   if (parts.length != 3) return null;
   try {
@@ -149,10 +228,10 @@ DateTime? jwtExpiryOf(String token) {
     final List<int> bytes = base64Decode(padded);
     final dynamic decoded = jsonDecode(utf8.decode(bytes));
     if (decoded is! Map) return null;
-    final dynamic exp = decoded['exp'];
-    if (exp is! num) return null;
+    final dynamic value = decoded[claim];
+    if (value is! num) return null;
     return DateTime.fromMillisecondsSinceEpoch(
-      (exp * 1000).round(),
+      (value * 1000).round(),
       isUtc: true,
     );
   } catch (_) {

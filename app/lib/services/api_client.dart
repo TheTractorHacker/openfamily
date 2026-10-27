@@ -8,6 +8,7 @@ import 'package:http/http.dart' as http;
 import '../models/user_profile.dart';
 import 'perf/perf_monitor.dart';
 import 'server_config.dart';
+import 'session_diary.dart';
 import 'session_gate.dart';
 import 'token_storage.dart';
 
@@ -328,6 +329,11 @@ class ApiClient {
         refresh: data['refresh_token'] as String,
       );
     }
+    // The saved password is now wrong; a silent re-login with it would fail.
+    // The next password login saves the new one.
+    try {
+      await TokenStorage.clearSavedCredentials();
+    } catch (_) {}
   }
 
   /// DELETE /me with step-up `{password, totp_code?}`. 409 means last admin
@@ -690,18 +696,92 @@ class ApiClient {
   }
 
   static Future<_RefreshResult> _performRefresh() async {
+    final SessionDiary diary = SessionDiary.instance;
     try {
-      final String? refreshToken = await TokenStorage.readRefreshToken();
-      if (refreshToken == null) {
-        await _recoverOrClear();
-        return _RefreshResult.rejected;
+      // Every candidate (both redundant stores, newest first) is tried before
+      // the session is declared dead: a stale token being rejected must not
+      // sign the user out while a newer valid one exists.
+      final List<String> candidates = await TokenStorage.refreshCandidates();
+      for (final String refreshToken in candidates) {
+        final String tag = SessionDiary.shortHash(refreshToken);
+        final http.Response response = await _rawSend(
+          'POST',
+          _uri('/auth/refresh'),
+          body: <String, dynamic>{'refresh_token': refreshToken},
+          auth: false,
+        );
+        diary.record('refresh', 'token=$tag status=${response.statusCode}');
+        if (response.statusCode == 200) {
+          final Map<String, dynamic> data =
+              jsonDecode(response.body) as Map<String, dynamic>;
+          await TokenStorage.saveTokens(
+            access: data['access_token'] as String,
+            refresh: data['refresh_token'] as String,
+          );
+          return _RefreshResult.ok;
+        }
+        // Only a definitive rejection counts against a token. A deploy
+        // restarts the server (502/503 from the proxy), and 429/5xx are
+        // equally temporary.
+        if (response.statusCode == 400 ||
+            response.statusCode == 401 ||
+            response.statusCode == 403) {
+          TokenStorage.markRejected(refreshToken);
+          continue;
+        }
+        return _RefreshResult.transient;
       }
+      // Every candidate is dead (or none stored): saved credentials next.
+      switch (await silentRelogin()) {
+        case SilentLoginOutcome.success:
+          return _RefreshResult.ok;
+        case SilentLoginOutcome.unreachable:
+          return _RefreshResult.transient;
+        case SilentLoginOutcome.unavailable:
+        case SilentLoginOutcome.failed:
+          await TokenStorage.clear(reason: 'refresh rejected, no re-login');
+          return _RefreshResult.rejected;
+      }
+    } catch (e) {
+      // Offline, timeout or a storage hiccup: nothing says the session died.
+      diary.record('refresh', 'error=${e.runtimeType}');
+      return _RefreshResult.transient;
+    }
+  }
+
+  static Future<SilentLoginOutcome>? _silentInFlight;
+
+  /// "Keep me signed in on this device": logs in again with the credentials
+  /// saved at the last password login, replacing the token pair. Single
+  /// flight. A definitive refusal (bad credentials, or a TOTP code is
+  /// required) drops the saved password; network trouble changes nothing.
+  static Future<SilentLoginOutcome> silentRelogin() {
+    final Future<SilentLoginOutcome>? inFlight = _silentInFlight;
+    if (inFlight != null) return inFlight;
+    final Future<SilentLoginOutcome> future = _performSilentRelogin();
+    _silentInFlight = future;
+    future.whenComplete(() {
+      if (identical(_silentInFlight, future)) _silentInFlight = null;
+    });
+    return future;
+  }
+
+  static Future<SilentLoginOutcome> _performSilentRelogin() async {
+    final SessionDiary diary = SessionDiary.instance;
+    try {
+      final ({String email, String password})? creds =
+          await TokenStorage.readCredentials();
+      if (creds == null) return SilentLoginOutcome.unavailable;
       final http.Response response = await _rawSend(
         'POST',
-        _uri('/auth/refresh'),
-        body: <String, dynamic>{'refresh_token': refreshToken},
+        _uri('/auth/login'),
+        body: <String, dynamic>{
+          'email': creds.email,
+          'password': creds.password,
+        },
         auth: false,
       );
+      diary.record('silent_login', 'status=${response.statusCode}');
       if (response.statusCode == 200) {
         final Map<String, dynamic> data =
             jsonDecode(response.body) as Map<String, dynamic>;
@@ -709,29 +789,19 @@ class ApiClient {
           access: data['access_token'] as String,
           refresh: data['refresh_token'] as String,
         );
-        return _RefreshResult.ok;
+        markSessionActive();
+        return SilentLoginOutcome.success;
       }
-      // Only a definitive rejection ends the session. A deploy restarts the
-      // server (502/503 from the proxy), and 429/5xx are equally temporary.
-      if (response.statusCode == 400 ||
-          response.statusCode == 401 ||
-          response.statusCode == 403) {
-        await _recoverOrClear();
-        return _RefreshResult.rejected;
+      if (response.statusCode == 401 || response.statusCode == 403) {
+        // Wrong password, or a TOTP code is needed: a human must sign in.
+        await TokenStorage.clearSavedCredentials();
+        return SilentLoginOutcome.failed;
       }
-      return _RefreshResult.transient;
-    } catch (_) {
-      // Offline, timeout or a storage hiccup: nothing says the session died.
-      return _RefreshResult.transient;
+      return SilentLoginOutcome.unreachable;
+    } catch (e) {
+      diary.record('silent_login', 'error=${e.runtimeType}');
+      return SilentLoginOutcome.unreachable;
     }
-  }
-
-  /// Handles a failed foreground refresh: the background isolate no longer
-  /// holds or rotates account tokens (MOB-002), so a definitive failure tears
-  /// the session down.
-  static Future<bool> _recoverOrClear() async {
-    await TokenStorage.clear();
-    return false;
   }
 
   /// Notifies the app root that the session expired so it can redirect to
@@ -767,10 +837,16 @@ class ApiClient {
         refresh: await TokenStorage.readRefreshToken(),
       ),
       postRefresh: _refreshForGate,
+      loadRefreshCandidates: TokenStorage.refreshCandidates,
+      markRejected: TokenStorage.markRejected,
+      silentLogin: silentRelogin,
       saveTokens: ({required String access, required String refresh}) =>
           TokenStorage.saveTokens(access: access, refresh: refresh),
     );
-    return gate.evaluate();
+    return gate.evaluate().then((SessionGateResult r) {
+      SessionDiary.instance.record('gate', r.name);
+      return r;
+    });
   }
 
   /// The gate's refresh call: distinguishes a definitive rejection (401/403)
@@ -785,6 +861,9 @@ class ApiClient {
         body: <String, dynamic>{'refresh_token': refreshToken},
         auth: false,
       );
+      SessionDiary.instance.record('gate_refresh',
+          'token=${SessionDiary.shortHash(refreshToken)} '
+          'status=${response.statusCode}');
       if (response.statusCode == 200) {
         final Map<String, dynamic> data =
             jsonDecode(response.body) as Map<String, dynamic>;
