@@ -4,6 +4,7 @@ import 'package:local_auth/local_auth.dart' show BiometricType;
 
 import '../services/accent_preference.dart';
 import '../services/auth_service.dart';
+import '../services/token_storage.dart';
 import '../services/battery_optimization_service.dart';
 import '../services/biometric_service.dart';
 import '../services/location_sharing_service.dart';
@@ -123,6 +124,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _biometricLoading = true;
   bool _biometricUpdating = false;
   bool _biometricEnabled = false;
+  bool _keepSignedIn = true;
   BiometricAvailability? _biometricAvailability;
   String? _biometricError;
   Duration _lockGrace = Duration.zero;
@@ -141,6 +143,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void initState() {
     super.initState();
     _loadBiometricSettings();
+    _loadKeepSignedIn();
     _loadLocationSharing();
     _loadPushNotifications();
   }
@@ -171,6 +174,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _setLocationSharing(bool enabled) async {
     setState(() => _locationSharing = enabled);
     await LocationSharingService.setEnabled(enabled);
+  }
+
+  Future<void> _loadKeepSignedIn() async {
+    final bool on = await TokenStorage.keepSignedInEnabled();
+    if (mounted) setState(() => _keepSignedIn = on);
+  }
+
+  Future<void> _setKeepSignedIn(bool on) async {
+    setState(() => _keepSignedIn = on);
+    try {
+      await TokenStorage.setKeepSignedIn(on);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _keepSignedIn = !on);
+    }
   }
 
   Future<void> _loadBiometricSettings() async {
@@ -442,6 +460,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           _biometricEnabled)
                   ? _setBiometricEnabled
                   : null,
+            ),
+            DsToggleRow(
+              icon: Icons.lock_clock_outlined,
+              title: 'Keep me signed in on this device',
+              subtitle: 'If the server ends your session, sign in again '
+                  'automatically. Your password is kept in the Android '
+                  'Keystore on this device only. Turn off to delete it.',
+              value: _keepSignedIn,
+              onChanged: _setKeepSignedIn,
             ),
             if (_biometricEnabled)
               _LockDelayRow(

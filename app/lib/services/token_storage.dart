@@ -1,14 +1,41 @@
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'background_credential_store.dart';
 import 'biometric_service.dart';
 import 'location_outbox.dart';
 import 'server_config.dart';
-import 'session_gate.dart' show jwtExpiryOf;
+import 'session_diary.dart';
+import 'session_gate.dart';
 
-/// Stores auth tokens in the platform secure store:
-/// - iOS: Keychain
-/// - Android: Keystore-backed EncryptedSharedPreferences
+/// One stored token pair as read from a single backing store.
+class StoredSession {
+  const StoredSession({
+    required this.source,
+    required this.access,
+    required this.refresh,
+  });
+
+  /// 'A' (EncryptedSharedPreferences) or 'B' (independent Keystore store).
+  final String source;
+  final String? access;
+  final String? refresh;
+
+  DateTime? get refreshIssuedAt =>
+      refresh == null ? null : jwtIssuedAtOf(refresh!);
+}
+
+/// Stores auth tokens in the platform secure store, redundantly.
+///
+/// Production incident: after a fresh login the app later sent an OLD (already
+/// revoked) refresh token, so a storage read returned a stale value even though
+/// newer writes had happened. The pair is therefore kept in two independent
+/// Keystore-backed stores and, on every read, the one whose refresh JWT was
+/// issued last (`iat`) wins:
+/// - store A: EncryptedSharedPreferences (the original location);
+/// - store B: a separate preferences file using the plugin's own Keystore
+///   cipher (a different code path than A);
+/// - store C: opt-in saved login credentials for the silent re-login fallback.
 class TokenStorage {
   TokenStorage._();
 
@@ -16,25 +43,34 @@ class TokenStorage {
     aOptions: AndroidOptions(encryptedSharedPreferences: true),
   );
 
-  // A second, independent Keystore-backed file. Some phones end up with a
-  // primary store that keeps returning an old value and ignores new writes
-  // (the server then sees a spent refresh token replayed after every login),
-  // so the session lives in two places and the newest copy always wins.
-  static const FlutterSecureStorage _backup = FlutterSecureStorage(
+  static const FlutterSecureStorage _storageB = FlutterSecureStorage(
     aOptions: AndroidOptions(
-      encryptedSharedPreferences: true,
-      sharedPreferencesName: 'of_session_backup',
-      preferencesKeyPrefix: 'of_b_',
+      sharedPreferencesName: 'openfamily_session_b',
+      preferencesKeyPrefix: 'sb_',
     ),
   );
 
-  // v2 keys: a stuck v1 entry can never shadow a fresh login.
+  static const FlutterSecureStorage _storageC = FlutterSecureStorage(
+    aOptions: AndroidOptions(
+      sharedPreferencesName: 'openfamily_saved_login',
+      preferencesKeyPrefix: 'sl_',
+    ),
+  );
+
+  // v2 keys: on some phones the original 'access_token'/'refresh_token'
+  // entries are stuck (reads return an old value, writes are ignored), so a
+  // fresh pair can never be stored under them. They stay a read-only
+  // fallback for sessions saved before v2 and are deleted on save/clear.
   static const String _accessKey = 'access_token_v2';
   static const String _refreshKey = 'refresh_token_v2';
-  static const String _backupAccessKey = 'b_access_token';
-  static const String _backupRefreshKey = 'b_refresh_token';
   static const String _legacyAccessKey = 'access_token';
   static const String _legacyRefreshKey = 'refresh_token';
+  // Store B and C use distinct key names too, so they never alias store A.
+  static const String _accessKeyB = 'session_b_access';
+  static const String _refreshKeyB = 'session_b_refresh';
+  static const String _credEmailKey = 'saved_login_email';
+  static const String _credPasswordKey = 'saved_login_password';
+  static const String _keepSignedInPref = 'keep_signed_in_on_device';
   static const String _deviceIdKey = 'device_id';
   // Earlier app builds kept a profile-photo *path* locally. Avatars are now
   // private server data fetched as authenticated bytes, so remove that stale
@@ -42,33 +78,70 @@ class TokenStorage {
   // file at the old path: it may be a user-owned gallery photo.
   static const String _legacyProfilePhotoPathKey = 'profile_photo_path';
 
-  /// Persists an access + refresh token pair.
-  ///
-  /// Written to both stores. A store that cannot hold the new value is retried
-  /// once; the save fails only when neither store ends up holding it, so one
-  /// broken store can no longer block signing in.
+  /// Short hashes of refresh tokens the server definitively rejected during
+  /// this process. A rejected token is never retried.
+  static final Set<String> _rejected = <String>{};
+
+  /// The pair this process last saved: authoritative for the access token on
+  /// the hot path (saves four secure-storage reads per request) and one more
+  /// refresh candidate. Dropped on clear.
+  static StoredSession? _mem;
+
+  static final SessionDiary _diary = SessionDiary.instance;
+
+  static Future<String?> _safeRead(FlutterSecureStorage s, String key) async {
+    try {
+      return await s.read(key: key);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static Future<bool> _writeVerified(
+    FlutterSecureStorage s,
+    String accessKey,
+    String refreshKey,
+    String access,
+    String refresh,
+  ) async {
+    for (int attempt = 0; attempt < 2; attempt++) {
+      try {
+        if (attempt > 0) await s.delete(key: refreshKey);
+        await s.write(key: accessKey, value: access);
+        await s.write(key: refreshKey, value: refresh);
+        final String? gotRefresh = await s.read(key: refreshKey);
+        final String? gotAccess = await s.read(key: accessKey);
+        if (gotRefresh == refresh && gotAccess == access) return true;
+        // The store handed back something other than what was just written:
+        // exactly the stale-read fault under investigation.
+        _diary.record('readback_mismatch',
+            'key=$refreshKey attempt=$attempt wrote=${SessionDiary.shortHash(refresh)} '
+            'got=${SessionDiary.shortHash(gotRefresh)}');
+      } catch (e) {
+        _diary.record('write_error', 'key=$refreshKey ${e.runtimeType}');
+      }
+    }
+    return false;
+  }
+
+  /// Persists an access + refresh token pair to both stores.
   static Future<void> saveTokens({
     required String access,
     required String refresh,
   }) async {
-    final bool primary = await _writeVerified(
-      _storage,
-      _accessKey,
-      _refreshKey,
-      access,
-      refresh,
-    );
-    final bool secondary = await _writeVerified(
-      _backup,
-      _backupAccessKey,
-      _backupRefreshKey,
-      access,
-      refresh,
-    );
-    if (!primary && !secondary) {
+    // A refresh token is single-use: if the new one is not what we can read
+    // back, the next refresh replays a spent token. Write and verify both
+    // stores; one verified copy keeps the session, none is a loud failure.
+    final bool okA =
+        await _writeVerified(_storage, _accessKey, _refreshKey, access, refresh);
+    final bool okB = await _writeVerified(
+        _storageB, _accessKeyB, _refreshKeyB, access, refresh);
+    _mem = StoredSession(source: 'M', access: access, refresh: refresh);
+    _diary.record('save', 'refresh=${SessionDiary.shortHash(refresh)} '
+        'A=${okA ? 'ok' : 'FAIL'} B=${okB ? 'ok' : 'FAIL'}');
+    if (!okA && !okB) {
       throw StateError('Could not save the session on this device.');
     }
-    // The old unversioned entries are never read once a v2 pair exists.
     try {
       await _storage.delete(key: _legacyAccessKey);
       await _storage.delete(key: _legacyRefreshKey);
@@ -82,72 +155,126 @@ class TokenStorage {
     );
   }
 
-  static Future<bool> _writeVerified(
-    FlutterSecureStorage store,
-    String accessKey,
-    String refreshKey,
-    String access,
-    String refresh,
-  ) async {
-    Future<bool> attempt() async {
-      try {
-        await store.write(key: accessKey, value: access);
-        await store.write(key: refreshKey, value: refresh);
-        return await store.read(key: refreshKey) == refresh &&
-            await store.read(key: accessKey) == access;
-      } catch (_) {
-        return false;
+  /// Reads both stores. Entries with no tokens are omitted.
+  static Future<List<StoredSession>> readAllStores() async {
+    final List<StoredSession> out = <StoredSession>[];
+    final StoredSession a = StoredSession(
+      source: 'A',
+      access: await _safeRead(_storage, _accessKey),
+      refresh: await _safeRead(_storage, _refreshKey),
+    );
+    final StoredSession b = StoredSession(
+      source: 'B',
+      access: await _safeRead(_storageB, _accessKeyB),
+      refresh: await _safeRead(_storageB, _refreshKeyB),
+    );
+    // Pre-v2 session: used only when nothing else holds a token.
+    final bool haveV2 = (a.refresh ?? '').isNotEmpty ||
+        (a.access ?? '').isNotEmpty ||
+        (b.refresh ?? '').isNotEmpty ||
+        (b.access ?? '').isNotEmpty;
+    final StoredSession? legacy = haveV2
+        ? null
+        : StoredSession(
+            source: 'L',
+            access: await _safeRead(_storage, _legacyAccessKey),
+            refresh: await _safeRead(_storage, _legacyRefreshKey),
+          );
+    for (final StoredSession s in <StoredSession>[
+      a,
+      b,
+      if (legacy != null) legacy,
+      if (_mem != null) _mem!,
+    ]) {
+      if ((s.access ?? '').isNotEmpty || (s.refresh ?? '').isNotEmpty) {
+        out.add(s);
       }
     }
-
-    if (await attempt()) return true;
-    try {
-      await store.delete(key: accessKey);
-      await store.delete(key: refreshKey);
-    } catch (_) {}
-    return attempt();
+    return out;
   }
 
-  static Future<String?> _safeRead(FlutterSecureStorage store, String key) async {
-    try {
-      return await store.read(key: key);
-    } catch (_) {
-      return null;
+  static int _issuedMs(StoredSession s) =>
+      s.refreshIssuedAt?.millisecondsSinceEpoch ?? 0;
+
+  static String _describe(StoredSession s) {
+    final DateTime? iat = s.refreshIssuedAt;
+    final String age = iat == null
+        ? 'iat?'
+        : '${DateTime.now().toUtc().difference(iat).inMinutes}m';
+    return '${s.source}:${SessionDiary.shortHash(s.refresh)}/$age'
+        '${s.refresh != null && isRejected(s.refresh!) ? '/rejected' : ''}';
+  }
+
+  /// All stored sessions ordered best-first: not-known-rejected before
+  /// rejected, then newest refresh `iat`, then store A before B.
+  static Future<List<StoredSession>> _ranked() async {
+    final List<StoredSession> all = await readAllStores();
+    final List<StoredSession> ranked = List<StoredSession>.of(all);
+    ranked.sort((StoredSession x, StoredSession y) {
+      final int rx = (x.refresh != null && isRejected(x.refresh!)) ? 1 : 0;
+      final int ry = (y.refresh != null && isRejected(y.refresh!)) ? 1 : 0;
+      if (rx != ry) return rx - ry;
+      final int t = _issuedMs(y) - _issuedMs(x);
+      if (t != 0) return t;
+      return x.source.compareTo(y.source);
+    });
+    return ranked;
+  }
+
+  /// Refresh tokens worth trying, newest first, without duplicates and
+  /// without any token the server already rejected.
+  static Future<List<String>> refreshCandidates() async {
+    final List<StoredSession> ranked = await _ranked();
+    _diary.record('read', ranked.map(_describe).join(' '));
+    final List<String> out = <String>[];
+    for (final StoredSession s in ranked) {
+      final String? r = s.refresh;
+      if (r == null || r.isEmpty || isRejected(r) || out.contains(r)) continue;
+      out.add(r);
     }
+    return out;
   }
 
-  /// The copy that expires last was issued last, so it is the newest.
-  static String? _newest(List<String?> candidates) {
-    String? best;
-    DateTime? bestExp;
-    for (final String? c in candidates) {
-      if (c == null || c.isEmpty) continue;
-      final DateTime? exp = jwtExpiryOf(c);
-      if (best == null ||
-          (exp != null && (bestExp == null || exp.isAfter(bestExp)))) {
-        best = c;
-        bestExp = exp;
-      }
-    }
-    return best;
+  /// Remembers that the server rejected [refresh] so it is never retried.
+  static void markRejected(String refresh) {
+    _rejected.add(SessionDiary.shortHash(refresh));
+    _diary.record('rejected', 'refresh=${SessionDiary.shortHash(refresh)}');
   }
 
-  /// Returns the stored access token, or null if none.
+  static bool isRejected(String refresh) =>
+      _rejected.contains(SessionDiary.shortHash(refresh));
+
+  /// Test hook: forget in-memory state.
+  static void resetForTest() {
+    _rejected.clear();
+    _mem = null;
+  }
+
+  /// Returns the best stored access token, or null if none. It comes from the
+  /// same store as the best refresh token so the pair stays consistent.
   static Future<String?> readAccessToken() async {
-    final String? v2 = _newest(<String?>[
-      await _safeRead(_storage, _accessKey),
-      await _safeRead(_backup, _backupAccessKey),
-    ]);
-    return v2 ?? await _safeRead(_storage, _legacyAccessKey);
+    final StoredSession? mem = _mem;
+    if (mem != null && (mem.access ?? '').isNotEmpty) return mem.access;
+    final List<StoredSession> ranked = await _ranked();
+    for (final StoredSession s in ranked) {
+      if ((s.access ?? '').isNotEmpty) return s.access;
+    }
+    return null;
   }
 
-  /// Returns the stored refresh token, or null if none.
+  /// Returns the best stored refresh token (newest `iat`), or null if none.
   static Future<String?> readRefreshToken() async {
-    final String? v2 = _newest(<String?>[
-      await _safeRead(_storage, _refreshKey),
-      await _safeRead(_backup, _backupRefreshKey),
-    ]);
-    return v2 ?? await _safeRead(_storage, _legacyRefreshKey);
+    final StoredSession? mem = _mem;
+    if (mem != null &&
+        (mem.refresh ?? '').isNotEmpty &&
+        !isRejected(mem.refresh!)) {
+      return mem.refresh;
+    }
+    final List<StoredSession> ranked = await _ranked();
+    for (final StoredSession s in ranked) {
+      if ((s.refresh ?? '').isNotEmpty) return s.refresh;
+    }
+    return null;
   }
 
   /// Whether any access or refresh credential remains in the token store.
@@ -170,7 +297,9 @@ class TokenStorage {
   /// The device id is tied to the authenticated user, so it must be cleared
   /// whenever tokens are cleared — otherwise a later login by a different user
   /// would reuse the previous user's device id.
-  static Future<bool> clear() async {
+  static Future<bool> clear({String reason = 'unspecified'}) async {
+    _diary.record('clear', 'reason=$reason');
+    _mem = null;
     // Keep the lock enabled until every credential has been deleted and its
     // absence verified. If deletion fails or the process stops midway, any
     // surviving session therefore remains protected.
@@ -186,8 +315,9 @@ class TokenStorage {
     await attempt(() => _storage.delete(key: _refreshKey));
     await attempt(() => _storage.delete(key: _legacyAccessKey));
     await attempt(() => _storage.delete(key: _legacyRefreshKey));
-    await attempt(() => _backup.delete(key: _backupAccessKey));
-    await attempt(() => _backup.delete(key: _backupRefreshKey));
+    await attempt(() => _storageB.delete(key: _accessKeyB));
+    await attempt(() => _storageB.delete(key: _refreshKeyB));
+    await attempt(clearSavedCredentials);
     await attempt(() => _storage.delete(key: _deviceIdKey));
     await attempt(removeLegacyProfilePhotoPath);
     await attempt(BackgroundCredentialStore.clear);
@@ -201,6 +331,7 @@ class TokenStorage {
       final List<String?> remaining = <String?>[
         await readAccessToken(),
         await readRefreshToken(),
+        await _safeRead(_storageC, _credPasswordKey),
         await readDeviceId(),
         await BackgroundCredentialStore.readApiBaseUrl(),
         await BackgroundCredentialStore.readDeviceId(),
@@ -217,6 +348,51 @@ class TokenStorage {
     // use it diagnostically. Fresh login refuses to persist a new session
     // until this flag can be reset, preventing cross-account carryover.
     return BiometricService.instance.setEnabled(false);
+  }
+
+  // ---- Saved login ("Keep me signed in on this device") --------------------
+
+  /// Whether the user allows keeping the password in the Android Keystore for
+  /// the silent re-login fallback. Defaults to ON.
+  static Future<bool> keepSignedInEnabled() async {
+    try {
+      final SharedPreferences prefs = await SharedPreferences.getInstance();
+      return prefs.getBool(_keepSignedInPref) ?? true;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  /// Turning it off also deletes any saved password.
+  static Future<void> setKeepSignedIn(bool enabled) async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keepSignedInPref, enabled);
+    if (!enabled) await clearSavedCredentials();
+    _diary.record('keep_signed_in', enabled ? 'on' : 'off');
+  }
+
+  static Future<void> saveCredentials({
+    required String email,
+    required String password,
+  }) async {
+    if (!await keepSignedInEnabled()) return;
+    await _storageC.write(key: _credEmailKey, value: email);
+    await _storageC.write(key: _credPasswordKey, value: password);
+  }
+
+  static Future<({String email, String password})?> readCredentials() async {
+    if (!await keepSignedInEnabled()) return null;
+    final String? email = await _safeRead(_storageC, _credEmailKey);
+    final String? password = await _safeRead(_storageC, _credPasswordKey);
+    if (email == null || email.isEmpty || password == null || password.isEmpty) {
+      return null;
+    }
+    return (email: email, password: password);
+  }
+
+  static Future<void> clearSavedCredentials() async {
+    await _storageC.delete(key: _credEmailKey);
+    await _storageC.delete(key: _credPasswordKey);
   }
 
   /// Deletes the path-only profile-photo value written by pre-avatar builds.

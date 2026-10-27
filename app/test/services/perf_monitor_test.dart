@@ -232,8 +232,12 @@ void main() {
       expect(find.text('Performance'), findsOneWidget);
       expect(find.textContaining('Janky'), findsOneWidget);
       await tester.tap(find.text('Copy report'));
+      // The report also awaits the persisted session diary (real async IO).
+      await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 100)));
       await tester.pump();
       expect(clip, contains('OpenFamily performance report'));
+      expect(clip, contains('session diary'));
       expect(find.text('Performance report copied'), findsOneWidget);
       await tester.tap(find.text('Reset'));
       await tester.pump();

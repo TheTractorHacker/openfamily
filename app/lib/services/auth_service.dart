@@ -112,7 +112,7 @@ class AuthService {
     // Stop background reporting before clearing credentials, so the background
     // isolate never reports with a dead session.
     await BackgroundLocationService.stop();
-    await TokenStorage.clear();
+    await TokenStorage.clear(reason: 'logout');
     // Family-scoped caches must never outlive the account.
     PlaceService.invalidateCache();
   }
@@ -139,6 +139,18 @@ class AuthService {
       access: tokens['access_token'] as String,
       refresh: tokens['refresh_token'] as String,
     );
+    // "Keep me signed in on this device": remember the password in the
+    // Keystore for the silent re-login fallback. Never with a TOTP code (the
+    // saved login could not complete it) and never at the cost of the login.
+    if (totpCode == null || totpCode.isEmpty) {
+      try {
+        await TokenStorage.saveCredentials(email: email, password: password);
+      } catch (_) {}
+    } else {
+      try {
+        await TokenStorage.clearSavedCredentials();
+      } catch (_) {}
+    }
     // A fresh session is now active: re-arm the session-expired redirect so a
     // later expiry fires it again.
     ApiClient.markSessionActive();

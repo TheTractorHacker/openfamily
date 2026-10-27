@@ -40,9 +40,10 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   setUp(() async {
+    TokenStorage.resetForTest();
     FlutterSecureStorage.setMockInitialValues(<String, String>{
-      'access_token': 'old.access.token',
-      'refresh_token': 'old.refresh.token',
+      'access_token_v2': 'old.access.token',
+      'refresh_token_v2': 'old.refresh.token',
     });
     SharedPreferences.setMockInitialValues(
         <String, Object>{'wb_api_base_url': 'https://example.test'});

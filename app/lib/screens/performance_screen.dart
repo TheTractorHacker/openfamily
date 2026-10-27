@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../services/perf/perf_monitor.dart';
+import '../services/session_diary.dart';
 import '../theme/app_theme.dart';
 
 /// Hidden developer screen (Settings > tap the version row 7 times).
@@ -42,7 +43,8 @@ class _PerformanceScreenState extends State<PerformanceScreen> {
   }
 
   Future<void> _copy() async {
-    final String text = _m.buildReport();
+    final String text =
+        '${_m.buildReport()}\n${await SessionDiary.instance.render()}';
     await Clipboard.setData(ClipboardData(text: text));
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(

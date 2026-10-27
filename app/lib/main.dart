@@ -224,7 +224,7 @@ class _SessionGateState extends State<_SessionGate> {
         // The server rejected the refresh token: the session is truly dead.
         // Clearing also resets the biometric opt-in so it can never carry
         // over to a future account on the same device.
-        await TokenStorage.clear();
+        await TokenStorage.clear(reason: 'gate: refresh rejected');
         return _GateResult.noSession;
       case SessionGateResult.none:
         return _GateResult.noSession;

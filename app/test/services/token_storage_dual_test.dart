@@ -63,12 +63,12 @@ void main() {
     final String fresh = _jwt(2100000000);
     FlutterSecureStorage.setMockInitialValues(<String, String>{
       'refresh_token_v2': stale,
-      'b_refresh_token': fresh,
+      'session_b_refresh': fresh,
     });
     expect(await TokenStorage.readRefreshToken(), fresh);
     FlutterSecureStorage.setMockInitialValues(<String, String>{
       'refresh_token_v2': fresh,
-      'b_refresh_token': stale,
+      'session_b_refresh': stale,
     });
     expect(await TokenStorage.readRefreshToken(), fresh);
   });
@@ -79,8 +79,8 @@ void main() {
       'refresh_token': 'r',
       'access_token_v2': 'a2',
       'refresh_token_v2': 'r2',
-      'b_access_token': 'ba',
-      'b_refresh_token': 'br',
+      'session_b_access': 'ba',
+      'session_b_refresh': 'br',
     });
     await TokenStorage.clear();
     expect(await TokenStorage.readAccessToken(), isNull);
