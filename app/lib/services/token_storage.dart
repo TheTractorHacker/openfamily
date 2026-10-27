@@ -31,6 +31,17 @@ class TokenStorage {
   }) async {
     await _storage.write(key: _accessKey, value: access);
     await _storage.write(key: _refreshKey, value: refresh);
+    // A refresh token is single-use: if the new one is not what we can read
+    // back, the next refresh replays a spent token and the server ends the
+    // session. Verify, retry once, and fail loudly rather than carry on.
+    if (await readRefreshToken() != refresh) {
+      await _storage.delete(key: _refreshKey);
+      await _storage.write(key: _refreshKey, value: refresh);
+      await _storage.write(key: _accessKey, value: access);
+      if (await readRefreshToken() != refresh) {
+        throw StateError('Could not save the session on this device.');
+      }
+    }
     // The background isolate gets only the base URL and device id (plus its
     // ingest key, stored separately); it never sees these tokens (MOB-002).
     final String? deviceId = await readDeviceId();

@@ -253,8 +253,19 @@ func (s *Server) Refresh(w http.ResponseWriter, r *http.Request) {
 	switch status {
 	case refreshRotated:
 	case refreshReuse:
+		// Say which client replayed which token, so a repeated logout can be
+		// traced: the token's age, its jti prefix and the caller's user agent.
+		age := "unknown"
+		if claims.IssuedAt != nil {
+			age = time.Since(claims.IssuedAt.Time).Round(time.Second).String()
+		}
+		jti := claims.ID
+		if len(jti) > 8 {
+			jti = jti[:8]
+		}
 		s.logAudit(r.Context(), user.ID, "", "auth.refresh_reuse",
-			"refresh token reuse detected; session family revoked", clientIP(r))
+			fmt.Sprintf("refresh token reuse detected; session family revoked (token age %s, jti %s, ua %q)",
+				age, jti, truncateUA(r.UserAgent())), clientIP(r))
 		writeError(w, http.StatusUnauthorized, "invalid refresh token")
 		return
 	case refreshRejected:
@@ -371,4 +382,12 @@ func decoyRegistration(email, name string, familyID *string, role models.Role) m
 	id := fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
 	now := time.Now()
 	return models.User{ID: id, FamilyID: familyID, Email: email, Name: name, Role: role, CreatedAt: now, UpdatedAt: now}
+}
+
+// truncateUA bounds a client-supplied user agent before it is logged.
+func truncateUA(ua string) string {
+	if len(ua) > 80 {
+		return ua[:80]
+	}
+	return ua
 }
