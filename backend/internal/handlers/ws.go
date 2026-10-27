@@ -40,6 +40,9 @@ type wsMember struct {
 	// are arriving; clients use it to keep "last seen" fresh without moving
 	// the pin.
 	LastSeenAt *time.Time `json:"last_seen_at,omitempty"`
+	// PlacePresence is the member's current/most recent place (see
+	// models.PlacePresence); omitted when unknown or location-redacted.
+	PlacePresence *models.PlacePresence `json:"place_presence,omitempty"`
 	// CircleIDs are the caller's circles the member belongs to (within the
 	// snapshot's scope); SharingCircleIDs the subset where they share their
 	// location. Additive fields.
@@ -341,6 +344,11 @@ func (s *Server) circleMembersSnapshot(ctx context.Context, circleIDs []string, 
 	}
 	defer rows.Close()
 
+	presence, err := s.placePresence(ctx, memberIDs)
+	if err != nil {
+		return nil, err
+	}
+
 	members := []wsMember{}
 	for rows.Next() {
 		var (
@@ -377,6 +385,7 @@ func (s *Server) circleMembersSnapshot(ctx context.Context, circleIDs []string, 
 			MotionState:     motion,
 			AccuracyMeters:  accuracy,
 			LastSeenAt:      lastSeenAt,
+			PlacePresence:   presence[id],
 		}
 		for _, mc := range byMember[id] {
 			m.CircleIDs = append(m.CircleIDs, mc.CircleID)
@@ -403,6 +412,7 @@ func (s *Server) circleMembersSnapshot(ctx context.Context, circleIDs []string, 
 func (m *wsMember) redactLocation() {
 	m.Lat, m.Lon, m.TS, m.BatteryPct, m.SpeedMPS, m.HeadingDeg, m.MotionState, m.AccuracyMeters, m.LastSeenAt =
 		nil, nil, nil, nil, nil, nil, nil, nil, nil
+	m.PlacePresence = nil
 }
 
 // broadcastLocation fans out a live location update to the owner's family AND

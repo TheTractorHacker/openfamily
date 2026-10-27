@@ -13,6 +13,7 @@ import '../widgets/member_avatar_bubble.dart';
 import '../widgets/live_speed.dart';
 import '../widgets/movement_icon.dart';
 import '../services/speed_units.dart';
+import '../utils/member_status.dart';
 import 'day_detail_screen.dart';
 import '../widgets/trips_entry_button.dart';
 
@@ -119,6 +120,12 @@ class MemberProfileScreen extends StatelessWidget {
                       label: 'Accuracy',
                       value: _accuracyLabel,
                     ),
+                    if (member.placePresence != null)
+                      _DetailRow(
+                        icon: DsListRow.iconTile(context, Icons.home_outlined),
+                        label: 'Place',
+                        value: placePresenceLabel(member.placePresence!),
+                      ),
                     _DetailRow(
                       icon: DsListRow.iconTile(context, Icons.place_outlined),
                       label: 'Address',

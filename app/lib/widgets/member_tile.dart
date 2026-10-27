@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/member.dart';
 import '../services/speed_units.dart';
 import '../theme/app_theme.dart';
+import '../utils/member_status.dart';
 import 'ds/status_chip.dart';
 import 'member_avatar_bubble.dart';
 import 'live_speed.dart';
@@ -67,7 +68,7 @@ class MemberTile extends StatelessWidget {
                         child: Text(
                           member.position == null
                               ? 'No location yet'
-                              : member.address,
+                              : _placeOrAddress(),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: AppType.secondary.copyWith(
@@ -91,6 +92,18 @@ class MemberTile extends StatelessWidget {
       ),
       ),
     );
+  }
+
+  /// The arrival/departure line ("At Home since 3:42 PM") when the member is
+  /// parked with place history, otherwise the plain address ("Driving", ...).
+  String _placeOrAddress() {
+    final PlacePresence? p = member.placePresence;
+    final bool moving = member.movement == MovementType.car ||
+        member.movement == MovementType.bike;
+    if (p == null || moving || member.status == MemberStatus.stopped) {
+      return member.address;
+    }
+    return placePresenceLabel(p);
   }
 
   /// Builds the distinct status chips: battery %, ETA, and driving speed.

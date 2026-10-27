@@ -357,6 +357,12 @@ func (s *Server) ListMembers(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
+	presence, err := s.placePresence(r.Context(), memberIDs)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list members")
+		return
+	}
+
 	members := []models.MemberWithLocation{}
 	for rows.Next() {
 		var m models.MemberWithLocation
@@ -371,6 +377,8 @@ func (s *Server) ListMembers(w http.ResponseWriter, r *http.Request) {
 		if !visible[m.ID] {
 			m.Lat, m.Lon, m.TS, m.BatteryPct, m.SpeedMPS, m.HeadingDeg, m.MotionState, m.AccuracyMeters, m.LastSeenAt =
 				nil, nil, nil, nil, nil, nil, nil, nil, nil
+		} else {
+			m.PlacePresence = presence[m.ID]
 		}
 		for _, mc := range byMember[m.ID] {
 			m.CircleIDs = append(m.CircleIDs, mc.CircleID)
