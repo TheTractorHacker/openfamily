@@ -125,12 +125,42 @@ func (s *Server) announceCrash(ctx context.Context, userID, crashID string) {
 	if err != nil || familyID == "" || s.Push == nil {
 		return
 	}
+	// One announcement per person per 10 minutes, however many candidates fire.
+	var recent int
+	_ = s.Pool.QueryRow(ctx, `
+		SELECT count(*) FROM crash_events
+		WHERE user_id = $1 AND id <> $2 AND occurred_at > now() - interval '10 minutes'`,
+		userID, crashID).Scan(&recent)
+	if recent > 0 {
+		return
+	}
+	// Only people who share a circle with this person AND in which they share
+	// their location may be told where and when they stopped.
+	only := map[string]bool{}
+	rows, err := s.Pool.Query(ctx, `
+		SELECT DISTINCT v.user_id::text
+		FROM circle_members s
+		JOIN circle_members v ON v.circle_id = s.circle_id AND v.user_id <> s.user_id
+		WHERE s.user_id = $1 AND s.sharing_enabled`, userID)
+	if err != nil {
+		return
+	}
+	for rows.Next() {
+		var id string
+		if rows.Scan(&id) == nil {
+			only[id] = true
+		}
+	}
+	rows.Close()
+	if len(only) == 0 {
+		return
+	}
 	var name string
 	_ = s.Pool.QueryRow(ctx, `SELECT name FROM users WHERE id = $1`, userID).Scan(&name)
 	who := s.pushName(name)
 	title := "Possible crash: " + who
 	body := who + "'s phone detected a sudden stop at driving speed. Check that they are okay."
-	sent, failed := s.pushFamilyAlert(ctx, familyID, userID, "", title, body)
+	sent, failed := s.pushFamilyAlertOnly(ctx, familyID, userID, "", title, body, "safety_incidents", only)
 	s.logAudit(ctx, userID, familyID, "crash.detected",
 		fmt.Sprintf("crash_id=%s push_sent=%d push_failed=%d", crashID, sent, failed), "")
 }
@@ -165,7 +195,10 @@ func (s *Server) ListCrashes(w http.ResponseWriter, r *http.Request) {
 		JOIN users u ON u.id = c.user_id
 		WHERE c.occurred_at > now() - interval '90 days'
 		  AND (c.user_id = $1
-		       OR (u.family_id IS NOT NULL AND u.family_id = (SELECT family_id FROM users WHERE id = $1)))
+		       OR EXISTS (
+		           SELECT 1 FROM circle_members v
+		           JOIN circle_members s ON s.circle_id = v.circle_id
+		           WHERE v.user_id = $1 AND s.user_id = c.user_id AND s.sharing_enabled))
 		ORDER BY c.occurred_at DESC LIMIT $2`, claims.UserID, crashListLimit)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load crash reports")

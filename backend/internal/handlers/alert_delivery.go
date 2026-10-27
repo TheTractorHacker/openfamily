@@ -160,6 +160,13 @@ func (s *Server) pushFamilyAlert(ctx context.Context, familyID, senderID, alertI
 // pushFamilyAlertFor is pushFamilyAlert for a mutable category (see
 // notification_prefs.go); "" means the push always gets through.
 func (s *Server) pushFamilyAlertFor(ctx context.Context, familyID, senderID, alertID, title, body, category string) (sent, failed int) {
+	return s.pushFamilyAlertOnly(ctx, familyID, senderID, alertID, title, body, category, nil)
+}
+
+// pushFamilyAlertOnly is pushFamilyAlertFor limited to the user ids in only
+// (nil means the whole family), for alerts that carry one person's data and
+// so may reach only the people that person shares with.
+func (s *Server) pushFamilyAlertOnly(ctx context.Context, familyID, senderID, alertID, title, body, category string, only map[string]bool) (sent, failed int) {
 	// category is "" for alerts that always get through (SOS, help); otherwise
 	// people who muted it are skipped.
 	muted := s.usersMuted(ctx, category)
@@ -193,7 +200,7 @@ func (s *Server) pushFamilyAlertFor(ctx context.Context, familyID, senderID, ale
 		if err := rows.Scan(&uid, &name, &platform, &token, &endpoint, &devID, &transport); err != nil {
 			continue
 		}
-		if muted[uid] {
+		if muted[uid] || (only != nil && !only[uid]) {
 			continue
 		}
 		t := targets[uid]
