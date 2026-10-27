@@ -8,11 +8,19 @@ class HistoryTrailPoint {
     required this.position,
     required this.ts,
     this.motionState = '',
+    this.speedMps,
+    this.batteryPct,
   });
 
   final LatLng position;
   final DateTime ts;
   final String motionState;
+
+  /// Device-reported speed in m/s, null when the device didn't report one.
+  final double? speedMps;
+
+  /// Device battery 0-100, null when unknown.
+  final double? batteryPct;
 }
 
 /// A named place stay, unnamed dwell, or in-transit segment.
@@ -97,6 +105,8 @@ class HistoryService {
             position: LatLng(lat.toDouble(), lon.toDouble()),
             ts: ts,
             motionState: item['motion_state'] as String? ?? '',
+            speedMps: (item['speed_mps'] as num?)?.toDouble(),
+            batteryPct: (item['battery_pct'] as num?)?.toDouble(),
           ),
         );
       }

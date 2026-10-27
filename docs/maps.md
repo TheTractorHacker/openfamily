@@ -162,3 +162,18 @@ Public Photon is a shared fair-use service with no uptime guarantee.
 Visual quality and rendering performance of vector mode on real devices have
 not been checked; adjust `layerMode` / `concurrency` in the shared layer if
 older phones struggle.
+
+## Daily History scrubber
+
+`GET /family/members/{id}/history?from=&to=` (same family only, unchanged
+authorization, retention and 25 h range limit) now also returns optional
+`speed_mps` and `battery_pct` on each `trail` point (last reported value in the
+30 s bucket; omitted when unknown). The app's Daily History screen
+(`DailyHistoryScreen`, opened from a member's profile or the People list) sends
+the local-day window as `from`/`to`, so days follow the viewer's timezone.
+
+The scrubber works on the full (30 s bucket) trail; only drawing is
+downsampled. Stops are clustered client side (75 m, 5 min) and named from the
+server's `place` visits. Playback runs 60 s of day-time per real second at 1x
+(4x, 16x). The avatar holds position across reporting gaps over 10 minutes.
+Logic: `app/lib/services/history_scrubber.dart`.

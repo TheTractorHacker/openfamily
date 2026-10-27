@@ -5,6 +5,7 @@ import '../models/member.dart';
 import '../theme/app_theme.dart';
 import '../widgets/ds/ds.dart';
 import '../widgets/member_tile.dart';
+import 'daily_history_screen.dart';
 import 'invite_screen.dart';
 import 'member_profile_screen.dart';
 
@@ -91,9 +92,25 @@ class PeopleScreen extends StatelessWidget {
                   );
                 }
                 final Member member = roster[index - 1];
-                return MemberTile(
-                  member: member,
-                  onTap: () => _openMember(context, member),
+                return Row(
+                  children: [
+                    Expanded(
+                      child: MemberTile(
+                        member: member,
+                        onTap: () => _openMember(context, member),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Daily history for ${member.name}',
+                      onPressed: () => openDailyHistory(context, member),
+                      constraints: const BoxConstraints(
+                        minWidth: kMinTarget,
+                        minHeight: kMinTarget,
+                      ),
+                      icon: const Icon(Icons.history),
+                    ),
+                    const SizedBox(width: AppSpace.sm),
+                  ],
                 );
               },
             );
