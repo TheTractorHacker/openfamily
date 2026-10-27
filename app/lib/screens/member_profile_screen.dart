@@ -14,6 +14,7 @@ import '../widgets/live_speed.dart';
 import '../widgets/movement_icon.dart';
 import '../services/speed_units.dart';
 import '../utils/member_status.dart';
+import 'bubble_create_screen.dart';
 import 'day_detail_screen.dart';
 import 'notification_prefs_screen.dart';
 import '../widgets/trips_entry_button.dart';
@@ -146,6 +147,8 @@ class MemberProfileScreen extends StatelessWidget {
                     // Day Detail (location history) entry point.
                     _DayDetailButton(member: member),
                     TripsEntryButton(member: member),
+                    if (member.position != null)
+                      BubbleEntryButton(member: member),
                     NotificationPrefsEntryButton(
                       memberId: member.id,
                       memberName: member.name,
@@ -392,6 +395,32 @@ class _DayDetailButton extends StatelessWidget {
         Navigator.of(context).push(
           MaterialPageRoute<void>(
             builder: (_) => DayDetailScreen(member: member),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// "Create Bubble": a one-tap temporary geofence around this person's current
+/// location (docs/bubbles.md). Hidden until the person has a location.
+class BubbleEntryButton extends StatelessWidget {
+  const BubbleEntryButton({super.key, required this.member});
+
+  final Member member;
+
+  @override
+  Widget build(BuildContext context) {
+    return DsListRow(
+      leading: DsListRow.iconTile(context, Icons.bubble_chart_outlined),
+      title: 'Create Bubble',
+      subtitle: 'Get an alert when ${member.name} leaves this spot',
+      chevron: true,
+      semanticLabel: 'Create a Bubble around ${member.name}',
+      onTap: () {
+        Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => BubbleCreateScreen(member: member),
           ),
         );
       },

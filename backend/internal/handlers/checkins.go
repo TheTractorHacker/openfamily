@@ -275,6 +275,7 @@ func (s *Server) purgeExpiredSharing() {
 		`DELETE FROM checkins WHERE expires_at <= now()`,
 		`DELETE FROM live_shares WHERE expires_at <= now()`,
 		`DELETE FROM sharing_pauses WHERE paused_until <= now()`,
+		`DELETE FROM bubbles WHERE expires_at <= now()`,
 	} {
 		if _, err := s.Pool.Exec(ctx, q); err != nil {
 			slog.Debug("purge expired sharing", "err", err)

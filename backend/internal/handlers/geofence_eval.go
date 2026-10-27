@@ -76,6 +76,9 @@ type geofenceCandidate struct {
 // pass. A crash between the location INSERT and evaluation is likewise healed
 // by the worker.
 func (s *Server) evaluateGeofences(ctx context.Context, userID string, lon, lat float64, ts time.Time) {
+	// Bubbles (temporary per-person geofences, bubbles.go) ride the same path.
+	s.evaluateBubbles(ctx, userID, lon, lat, ts)
+
 	familyID, err := s.familyIDForUser(ctx, userID)
 	if err != nil {
 		slog.Error("geofence: resolve family", "user_id", userID, "err", err)
@@ -423,6 +426,7 @@ func (s *Server) ReconcileGeofences(ctx context.Context) {
 
 // reconcileGeofencesOnce performs one reconciliation pass.
 func (s *Server) reconcileGeofencesOnce(ctx context.Context) {
+	s.purgeExpiredBubbles(ctx)
 	s.reconcileLatestPoints(ctx)
 	s.firePendingNotifications(ctx)
 	s.redispatchFailedPushes(ctx)

@@ -5,6 +5,7 @@ import '../models/member.dart';
 import '../theme/app_theme.dart';
 import '../widgets/ds/ds.dart';
 import '../widgets/member_tile.dart';
+import 'bubbles_screen.dart';
 import 'invite_screen.dart';
 import 'member_profile_screen.dart';
 
@@ -43,6 +44,20 @@ class PeopleScreen extends StatelessWidget {
       appBar: AppBar(
         title: const Text('People'),
         actions: [
+          IconButton(
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(builder: (_) => const BubblesScreen()),
+            ),
+            tooltip: 'Bubbles',
+            constraints: const BoxConstraints(
+              minWidth: kMinTarget,
+              minHeight: kMinTarget,
+            ),
+            icon: Icon(
+              Icons.bubble_chart_outlined,
+              color: BrandTheme.of(context).accentInk,
+            ),
+          ),
           IconButton(
             onPressed: _invite(context),
             tooltip: 'Invite someone',

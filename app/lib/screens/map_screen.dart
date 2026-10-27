@@ -9,11 +9,13 @@ import 'package:flutter/scheduler.dart' show Ticker;
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' hide Circle;
 
+import '../models/bubble.dart';
 import '../models/circle.dart';
 import '../widgets/openfamily_map_layers.dart';
 import '../models/member.dart';
 import '../services/api_client.dart';
 import '../services/background_location_service.dart';
+import '../services/bubble_service.dart';
 import '../services/battery_optimization_service.dart';
 import '../services/circle_selection.dart';
 import '../services/circle_service.dart';
@@ -235,6 +237,7 @@ class _MapScreenState extends State<MapScreen>
     _connectivitySub =
         Connectivity().onConnectivityChanged.listen(_onConnectivityChanged);
     _load();
+    unawaited(BubbleStore.instance.refresh());
     _checkLocation();
     _initLocationSharing();
     // Push registration and the operator-config refresh are not needed to
@@ -1057,6 +1060,28 @@ class _MapScreenState extends State<MapScreen>
                         color: AppColors.accuracyBlue.withValues(alpha: 0.12),
                         borderColor:
                             AppColors.accuracyBlue.withValues(alpha: 0.5),
+                        borderStrokeWidth: 2,
+                      ),
+                ],
+              );
+            },
+          ),
+          // The caller's own active Bubbles (temporary geofences). The server
+          // only ever sends these to their creator.
+          ValueListenableBuilder<List<Bubble>>(
+            valueListenable: BubbleStore.instance.mine,
+            builder: (BuildContext _, List<Bubble> bubbles, __) {
+              final DateTime now = DateTime.now();
+              return CircleLayer(
+                circles: <CircleMarker>[
+                  for (final Bubble b in bubbles)
+                    if (!b.expiredAt(now))
+                      CircleMarker(
+                        point: b.center,
+                        radius: b.radiusM.toDouble(),
+                        useRadiusInMeter: true,
+                        color: AppColors.purple.withValues(alpha: 0.18),
+                        borderColor: AppColors.purple,
                         borderStrokeWidth: 2,
                       ),
                 ],
