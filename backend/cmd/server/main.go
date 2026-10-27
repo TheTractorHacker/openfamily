@@ -293,6 +293,17 @@ func main() {
 		r.Post("/alerts/{id}/resolve", srv.ResolveAlert)
 		r.Post("/alerts/{id}/ack", srv.AckAlert)
 		r.Post("/alerts/{id}/share/revoke", srv.RevokeAlertShare)
+
+		// Check-ins to chosen people, sharing pause, live shares
+		// (docs/checkin-sharing.md).
+		r.Post("/checkins", srv.PostCheckinTo)
+		r.Get("/checkins", srv.ListCheckins)
+		r.Get("/sharing/pause", srv.GetSharingPause)
+		r.Put("/sharing/pause", srv.SetSharingPause)
+		r.Delete("/sharing/pause", srv.ClearSharingPause)
+		r.Post("/live-shares", srv.CreateLiveShare)
+		r.Get("/live-shares", srv.ListLiveShares)
+		r.Delete("/live-shares/{id}", srv.DeleteLiveShare)
 	})
 
 	// Location ingest: accepts either a Bearer access token or the per-device
