@@ -5,13 +5,18 @@ import 'package:flutter/services.dart';
 
 import 'screens/login_screen.dart';
 import 'screens/app_shell.dart';
+import 'screens/join_circle_screen.dart';
 import 'screens/server_config_screen.dart';
+import 'screens/sign_up_screen.dart';
 import 'screens/welcome_screen.dart';
 import 'services/accent_preference.dart';
 import 'services/api_client.dart';
 import 'services/auth_service.dart';
 import 'services/background_credential_store.dart';
 import 'services/background_location_service.dart';
+import 'services/deep_link_service.dart';
+import 'services/invite_link.dart';
+import 'services/pending_invite.dart';
 import 'services/perf/perf_monitor.dart';
 import 'services/push_service.dart';
 import 'services/server_config.dart';
@@ -70,6 +75,34 @@ class _OpenFamilyAppState extends State<OpenFamilyApp> {
     super.initState();
     // When a session expires mid-use (refresh fails), redirect to login.
     ApiClient.onSessionExpired = _handleSessionExpired;
+    DeepLinkService.listen(_handleInviteLink);
+  }
+
+  /// An invite link opened while the app is running.
+  Future<void> _handleInviteLink(InviteLink link) async {
+    final bool accepted = await PendingInvite.accept(link);
+    final NavigatorState? navigator = navigatorKey.currentState;
+    if (navigator == null) return;
+    if (!accepted) {
+      // ignore: use_build_context_synchronously
+      ScaffoldMessenger.maybeOf(navigator.context)?.showSnackBar(
+        const SnackBar(
+          content: Text(
+            'This invite is for a different server than the one this app '
+            'uses. Change the server in Settings first.',
+          ),
+        ),
+      );
+      return;
+    }
+    final SessionGateResult session = await ApiClient.checkSession();
+    final bool signedIn = session == SessionGateResult.valid ||
+        session == SessionGateResult.unreachable;
+    navigator.push(MaterialPageRoute<void>(
+      builder: (_) => signedIn
+          ? JoinCircleScreen(initialCode: link.code)
+          : const SignUpScreen(),
+    ));
   }
 
   void _handleSessionExpired() {
@@ -150,6 +183,11 @@ class _SessionGateState extends State<_SessionGate> {
     // Load the runtime server URL (shared_preferences → ServerConfig). Already
     // done in main(); this returns immediately then.
     await ServerConfig.instance.load();
+
+    // Launched from an invite link: adopt its server (when none is set yet)
+    // and keep the code for the join/sign-up form.
+    final InviteLink? launchLink = await DeepLinkService.initialLink();
+    if (launchLink != null) await PendingInvite.accept(launchLink);
 
     if (!ServerConfig.instance.isConfigured) {
       // Housekeeping only; nothing else to wait for.
@@ -235,13 +273,44 @@ class _SessionGateState extends State<_SessionGate> {
           case _GateResult.needsServerConfig:
             return const ServerConfigScreen();
           case _GateResult.hasSession:
-            return const AppShell();
+            final String? code = PendingInvite.code;
+            if (code == null) return const AppShell();
+            return _OpenJoinAfterBuild(code: code, child: const AppShell());
           default:
+            if (PendingInvite.code != null) return const SignUpScreen();
             return const WelcomeScreen();
         }
       },
     );
   }
+}
+
+/// Shows [child] and then pushes the join screen pre-filled with [code], for a
+/// signed-in user who launched the app from an invite link.
+class _OpenJoinAfterBuild extends StatefulWidget {
+  const _OpenJoinAfterBuild({required this.code, required this.child});
+
+  final String code;
+  final Widget child;
+
+  @override
+  State<_OpenJoinAfterBuild> createState() => _OpenJoinAfterBuildState();
+}
+
+class _OpenJoinAfterBuildState extends State<_OpenJoinAfterBuild> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      Navigator.of(context).push(MaterialPageRoute<void>(
+        builder: (_) => JoinCircleScreen(initialCode: widget.code),
+      ));
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }
 
 enum _GateResult { needsServerConfig, hasSession, noSession }

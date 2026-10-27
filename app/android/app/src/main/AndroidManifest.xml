@@ -61,6 +61,23 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+            <!-- Invite links: https://<your server>/join/<code>. The server is
+                 self-hosted so the host is unknown at build time and the
+                 filter cannot be auto-verified; the app validates the link
+                 itself and never trusts it beyond pre-filling the join form. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="https" android:pathPrefix="/join/"/>
+            </intent-filter>
+            <!-- Landing-page button: openfamily://join?server=...&code=... -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="openfamily" android:host="join"/>
+            </intent-filter>
         </activity>
         <meta-data
             android:name="flutterEmbedding"

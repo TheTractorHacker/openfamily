@@ -1,4 +1,5 @@
 import 'api_client.dart';
+import 'invite_link.dart';
 import 'server_config.dart';
 
 /// Creates and shares alphanumeric family invite codes.
@@ -26,15 +27,22 @@ class InviteService {
   /// The share-sheet subject line.
   static const String shareSubject = 'Join my OpenFamily family';
 
-  /// The share-sheet body: the code and the operator's server URL.
-  ///
-  /// There is no `/join/{code}` web route; the recipient installs the Android
-  /// app, enters this server, and types the code.
-  static String shareMessage(String code) =>
-      'Join my OpenFamily family!\n\n'
-      '1. Install the OpenFamily Android app\n'
-      '2. Enter this server: ${ServerConfig.instance.apiBaseUrl}\n'
-      '3. Use invite code $code';
+  /// The shareable invite link (`https://<server>/join/<code>`), which is
+  /// also the QR payload. Null when no valid server URL is configured.
+  static String? inviteLink(String code) =>
+      InviteLink.build(ServerConfig.instance.apiBaseUrl, code);
+
+  /// The share-sheet body: the tap-to-join link plus the manual fallback
+  /// (server URL and code) for people who cannot open the link.
+  static String shareMessage(String code) {
+    final String? link = inviteLink(code);
+    return 'Join my OpenFamily family!\n\n'
+        '${link == null ? '' : 'Tap to join: $link\n\n'}'
+        'Or do it by hand:\n'
+        '1. Install the OpenFamily Android app\n'
+        '2. Enter this server: ${ServerConfig.instance.apiBaseUrl}\n'
+        '3. Use invite code $code';
+  }
 }
 
 /// A user-facing sentence for a failed invite creation. Shows the server's own

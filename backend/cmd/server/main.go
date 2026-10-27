@@ -170,6 +170,8 @@ func main() {
 	})
 	r.Get("/config", srv.GetConfig)
 	r.Get("/alerts/share/{token}", srv.ShareAlert)
+	// Public invite landing page: static, no database access, no secrets.
+	r.Get("/join/{code}", srv.JoinLanding)
 
 	// Auth (unauthenticated).
 	r.Post("/auth/register", srv.Register)
