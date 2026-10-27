@@ -203,6 +203,12 @@ void main() {
     await open(tester);
     await tester.enterText(addressField(), 'main street');
     await tester.pump(const Duration(milliseconds: 400));
+    // A rate limit is retried quietly first (two attempts, 2 s apart); the
+    // message only shows once those are used up.
+    expect(find.textContaining('Please wait a few seconds'), findsNothing);
+    await tester.pump(const Duration(milliseconds: 2100));
+    await tester.pump(const Duration(milliseconds: 2100));
+    await tester.pump();
     expect(find.textContaining('Please wait a few seconds'), findsOneWidget);
     fake.failure = GeocodeFailure.offline;
     await tester.enterText(addressField(), 'main street 2');

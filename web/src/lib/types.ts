@@ -147,6 +147,34 @@ export interface SmsSettings {
   source: 'settings' | 'environment'
 }
 
+/** Dawarich sync state from GET /api/admin/settings/dawarich. */
+export interface DawarichSettings {
+  enabled: boolean
+  base_url: string
+  local_url: string
+  api_key_set: boolean
+  send_unmapped: boolean
+  since: string
+  last_sync_at: string | null
+  last_error: string
+  total_sent: number
+  pending: number
+}
+
+/** One OpenFamily account and its Dawarich mapping. */
+export interface DawarichUser {
+  user_id: string
+  name: string
+  email: string
+  mapped: boolean
+  label: string
+  enabled: boolean
+  api_key_set: boolean
+  since: string | null
+  last_error: string
+  total_sent: number
+}
+
 /** One live DNS or HTTPS check for the admin domain status card. */
 export interface DomainCheck {
   status: 'ok' | 'fail' | 'skipped'

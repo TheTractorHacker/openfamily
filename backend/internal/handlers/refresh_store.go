@@ -71,8 +71,8 @@ func (p pgRefreshStore) Rotate(ctx context.Context, userID, oldJTI, newJTI strin
 		RETURNING family_id`, oldJTI, userID).Scan(&family)
 	if err == nil {
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO refresh_sessions (jti, family_id, user_id, expires_at)
-			VALUES ($1, $2, $3, $4)`, newJTI, family, userID, expires); err != nil {
+			INSERT INTO refresh_sessions (jti, family_id, user_id, expires_at, parent_jti)
+			VALUES ($1, $2, $3, $4, $5)`, newJTI, family, userID, expires, oldJTI); err != nil {
 			return rotateUnknown, err
 		}
 		return rotateOK, tx.Commit(ctx)
@@ -99,17 +99,30 @@ func (p pgRefreshStore) Rotate(ctx context.Context, userID, oldJTI, newJTI strin
 	// A refresh response can be lost after the server rotated: the app is
 	// killed by an update, the phone drops off the network, or the proxy
 	// resets the connection. The client then legitimately retries the token
-	// it still holds. Within a short window that retry is not theft, so
-	// mint a sibling in the same family rather than revoking the session.
-	// A token spent longer ago, or a revoked family, is still reuse.
-	if revoked == nil && used != nil && expiresAt.After(time.Now()) &&
-		time.Since(*used) <= refreshReuseGrace {
+	// it still holds. That retry is accepted at most once per spent token, only
+	// within refreshReuseGrace of the rotation (database clock), and only if
+	// the token that rotation produced was never used: a used successor means
+	// the client did receive it, so this is a replay. Everything else is reuse.
+	var graceFamily string
+	err = tx.QueryRow(ctx, `
+		UPDATE refresh_sessions SET grace_used_at = now()
+		WHERE jti = $1 AND user_id = $2
+		  AND used_at IS NOT NULL AND revoked_at IS NULL AND grace_used_at IS NULL
+		  AND expires_at > now()
+		  AND used_at > now() - make_interval(secs => $3)
+		  AND NOT EXISTS (SELECT 1 FROM refresh_sessions c
+		                  WHERE c.parent_jti = $1 AND c.used_at IS NOT NULL)
+		RETURNING family_id`, oldJTI, userID, refreshReuseGrace.Seconds()).Scan(&graceFamily)
+	if err == nil {
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO refresh_sessions (jti, family_id, user_id, expires_at)
-			VALUES ($1, $2, $3, $4)`, newJTI, family, userID, expires); err != nil {
+			INSERT INTO refresh_sessions (jti, family_id, user_id, expires_at, parent_jti)
+			VALUES ($1, $2, $3, $4, $5)`, newJTI, graceFamily, userID, expires, oldJTI); err != nil {
 			return rotateUnknown, err
 		}
 		return rotateOK, tx.Commit(ctx)
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return rotateUnknown, err
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE refresh_sessions SET revoked_at = now()

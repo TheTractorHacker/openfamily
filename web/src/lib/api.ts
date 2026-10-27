@@ -19,6 +19,8 @@ import type {
   Profile,
   Role,
   SmsSettings,
+  DawarichSettings,
+  DawarichUser,
   DomainStatus,
 } from './types'
 
@@ -455,6 +457,55 @@ export function updateSmsSettings(input: {
 
 export function clearSmsSettings(): Promise<SmsSettings> {
   return request<SmsSettings>('/api/admin/settings/sms', { method: 'DELETE' })
+}
+
+// ---- Dawarich sync (platform admin) ----
+
+export function getDawarich(): Promise<DawarichSettings> {
+  return request<DawarichSettings>('/api/admin/settings/dawarich')
+}
+
+export function updateDawarich(input: {
+  base_url: string
+  local_url: string
+  api_key: string
+  enabled: boolean
+  send_unmapped: boolean
+  backfill_days: number
+}): Promise<DawarichSettings> {
+  return request<DawarichSettings>('/api/admin/settings/dawarich', { method: 'PUT', body: input })
+}
+
+export function clearDawarich(): Promise<DawarichSettings> {
+  return request<DawarichSettings>('/api/admin/settings/dawarich', { method: 'DELETE' })
+}
+
+export function testDawarich(): Promise<{ status: string; reached: string }> {
+  return request('/api/admin/settings/dawarich/test', { method: 'POST' })
+}
+
+export function syncDawarichNow(): Promise<DawarichSettings> {
+  return request<DawarichSettings>('/api/admin/settings/dawarich/sync', { method: 'POST' })
+}
+
+export function listDawarichUsers(): Promise<DawarichUser[]> {
+  return request<DawarichUser[]>('/api/admin/settings/dawarich/users')
+}
+
+export function saveDawarichUser(
+  userId: string,
+  input: { api_key: string; label: string; enabled: boolean; backfill_days: number }
+): Promise<DawarichUser[]> {
+  return request<DawarichUser[]>(`/api/admin/settings/dawarich/users/${encodeURIComponent(userId)}`, {
+    method: 'PUT',
+    body: input,
+  })
+}
+
+export function removeDawarichUser(userId: string): Promise<DawarichUser[]> {
+  return request<DawarichUser[]>(`/api/admin/settings/dawarich/users/${encodeURIComponent(userId)}`, {
+    method: 'DELETE',
+  })
 }
 
 // ---- Domain status (platform admin) ----

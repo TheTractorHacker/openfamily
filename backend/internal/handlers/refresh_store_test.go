@@ -174,20 +174,60 @@ func TestPGRefreshStore(t *testing.T) {
 	if out, err := st.Rotate(ctx, uid, "pg-a", "pg-b", exp); err != nil || out != rotateOK {
 		t.Fatalf("rotate: %v %v", out, err)
 	}
-	// A retry right after the rotation (lost response) is tolerated and gets
-	// a sibling token in the same family.
+	// A retry right after the rotation (lost response) is tolerated once and
+	// gets a sibling token in the same family.
 	if out, err := st.Rotate(ctx, uid, "pg-a", "pg-c", exp); err != nil || out != rotateOK {
 		t.Fatalf("lost-response retry within grace: %v %v", out, err)
 	}
-	// The same spent token replayed after the grace window is theft.
-	if _, err := pool.Exec(ctx, `UPDATE refresh_sessions SET used_at = now() - interval '5 minutes' WHERE jti = 'pg-a'`); err != nil {
+	// ...but only once: a second replay of the same spent token is theft and
+	// revokes the family, including the sibling just issued.
+	if out, err := st.Rotate(ctx, uid, "pg-a", "pg-c2", exp); err != nil || out != rotateReused {
+		t.Fatalf("second replay within grace: %v %v", out, err)
+	}
+	if out, err := st.Rotate(ctx, uid, "pg-c", "pg-c3", exp); err != nil || out != rotateReused {
+		t.Fatalf("sibling after revoke: %v %v", out, err)
+	}
+
+	// A fresh family: replay after the grace window is theft.
+	if err := st.Create(ctx, uid, "old-a", exp); err != nil {
 		t.Fatal(err)
 	}
-	if out, err := st.Rotate(ctx, uid, "pg-a", "pg-c2", exp); err != nil || out != rotateReused {
+	if out, err := st.Rotate(ctx, uid, "old-a", "old-b", exp); err != nil || out != rotateOK {
+		t.Fatalf("rotate: %v %v", out, err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE refresh_sessions SET used_at = now() - interval '5 minutes' WHERE jti = 'old-a'`); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := st.Rotate(ctx, uid, "old-a", "old-c", exp); err != nil || out != rotateReused {
 		t.Fatalf("replay after grace: %v %v", out, err)
+	}
+
+	// A replay is theft when the client already used the successor.
+	if err := st.Create(ctx, uid, "ok-a", exp); err != nil {
+		t.Fatal(err)
+	}
+	if out, _ := st.Rotate(ctx, uid, "ok-a", "ok-b", exp); out != rotateOK {
+		t.Fatal("rotate ok-a")
+	}
+	if out, _ := st.Rotate(ctx, uid, "ok-b", "ok-c", exp); out != rotateOK {
+		t.Fatal("rotate ok-b")
+	}
+	if out, err := st.Rotate(ctx, uid, "ok-a", "ok-d", exp); err != nil || out != rotateReused {
+		t.Fatalf("replay after successor used: %v %v", out, err)
+	}
+
+	// Reset the family used by the remaining checks below.
+	if err := st.Create(ctx, uid, "pg-x", exp); err != nil {
+		t.Fatal(err)
+	}
+	if out, _ := st.Rotate(ctx, uid, "pg-x", "pg-y", exp); out != rotateOK {
+		t.Fatal("rotate pg-x")
 	}
 	if out, err := st.Rotate(ctx, uid, "pg-b", "pg-d", exp); err != nil || out != rotateReused {
 		t.Fatalf("family revoked: %v %v", out, err)
+	}
+	if out, err := st.Rotate(ctx, uid, "pg-y", "pg-z", exp); err != nil || out != rotateOK {
+		t.Fatalf("unrelated family unaffected: %v %v", out, err)
 	}
 	if out, _ := st.Rotate(ctx, uid, "missing", "pg-e", exp); out != rotateUnknown {
 		t.Fatalf("unknown: %v", out)

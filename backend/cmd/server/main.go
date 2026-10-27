@@ -130,6 +130,11 @@ func main() {
 	// Background reconciliation self-heals any geofence evaluation that failed
 	// or was interrupted during ingest.
 	go srv.ReconcileGeofences(ctx)
+	if err := srv.EnsureDawarichSchema(ctx); err != nil {
+		slog.Error("dawarich schema", "err", err)
+		os.Exit(1)
+	}
+	go srv.RunDawarichSync(ctx)
 
 	// Segment new locations into trips (bounded, cancelled with ctx).
 	go (&trips.Worker{Store: trips.NewStore(pool)}).Run(ctx)
@@ -326,6 +331,14 @@ func main() {
 		r.Get("/api/admin/settings/sms", srv.AdminGetSMSSettings)
 		r.Put("/api/admin/settings/sms", srv.AdminPutSMSSettings)
 		r.Delete("/api/admin/settings/sms", srv.AdminDeleteSMSSettings)
+		r.Get("/api/admin/settings/dawarich", srv.AdminGetDawarich)
+		r.Put("/api/admin/settings/dawarich", srv.AdminPutDawarich)
+		r.Delete("/api/admin/settings/dawarich", srv.AdminDeleteDawarich)
+		r.Post("/api/admin/settings/dawarich/test", srv.AdminTestDawarich)
+		r.Post("/api/admin/settings/dawarich/sync", srv.AdminDawarichSyncNow)
+		r.Get("/api/admin/settings/dawarich/users", srv.AdminListDawarichUsers)
+		r.Put("/api/admin/settings/dawarich/users/{id}", srv.AdminPutDawarichUser)
+		r.Delete("/api/admin/settings/dawarich/users/{id}", srv.AdminDeleteDawarichUser)
 
 		// Domain status: read-only mirror of SITE_ADDRESS plus live DNS and
 		// HTTPS health checks for the admin panel card.
