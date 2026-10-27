@@ -54,6 +54,7 @@ class AddressSuggester extends ChangeNotifier {
   /// Call on every user edit of the address field.
   void onTextChanged(String text) {
     _timer?.cancel();
+    _autoRetries = 0;
     final String q = text.trim();
     if (q.length < minChars || !GeocodingService.isAutocompleteEnabled) {
       clear();
@@ -65,6 +66,7 @@ class AddressSuggester extends ChangeNotifier {
   /// Immediate search for an explicit submit (works without autocomplete).
   void submit(String text) {
     _timer?.cancel();
+    _autoRetries = 0;
     final String q = text.trim();
     if (q.length < minChars) {
       clear();
@@ -72,6 +74,8 @@ class AddressSuggester extends ChangeNotifier {
     }
     unawaited(_run(q, explicit: true));
   }
+
+  int _autoRetries = 0;
 
   Future<void> _run(String q, {required bool explicit}) async {
     final int gen = ++_generation;
@@ -89,6 +93,18 @@ class AddressSuggester extends ChangeNotifier {
       _set(r.isEmpty ? SuggestStatus.empty : SuggestStatus.ready, r);
     } on GeocodeException catch (e) {
       if (gen != _generation) return;
+      if (e.failure == GeocodeFailure.rateLimited && _autoRetries < 2) {
+        // Busy provider or a burst of keystrokes: look again shortly rather
+        // than leaving the user to press search. A new keystroke or search
+        // cancels this through the generation check.
+        _autoRetries++;
+        _timer?.cancel();
+        _timer = Timer(const Duration(seconds: 2), () {
+          if (gen == _generation) unawaited(_run(q, explicit: explicit));
+        });
+        _set(SuggestStatus.loading, suggestions);
+        return;
+      }
       _set(
         switch (e.failure) {
           GeocodeFailure.offline => SuggestStatus.offline,

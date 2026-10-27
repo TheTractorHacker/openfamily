@@ -25,6 +25,9 @@ class ApiException implements Exception {
   String toString() => 'ApiException($status): $message';
 }
 
+/// Outcome of a mid-session token refresh.
+enum _RefreshResult { ok, rejected, transient }
+
 /// Thrown when the session has expired and cannot be recovered by a token
 /// refresh (e.g. the refresh token is missing or expired).
 ///
@@ -78,7 +81,7 @@ class ApiClient {
 
   /// Single-flight guard for token refresh: concurrent 401s share one refresh
   /// call instead of each issuing their own.
-  static Future<bool>? _refreshInFlight;
+  static Future<_RefreshResult>? _refreshInFlight;
 
   // ---------------------------------------------------------------------------
   // Typed helpers
@@ -539,8 +542,17 @@ class ApiClient {
     );
 
     if (response.statusCode == 401 && auth) {
-      final bool refreshed = await _tryRefresh();
-      if (refreshed) {
+      final _RefreshResult refreshResult = await _tryRefresh();
+      if (refreshResult == _RefreshResult.transient) {
+        // The server was unreachable, restarting (5xx from the proxy) or
+        // rate limiting. That says nothing about the session, so keep the
+        // tokens and let the caller retry later.
+        throw const ApiException(
+          0,
+          'Could not reach the server. Check your connection.',
+        );
+      }
+      if (refreshResult == _RefreshResult.ok) {
         final http.Response retry = await _rawSend(
           method,
           uri,
@@ -656,11 +668,11 @@ class ApiClient {
   /// Attempts a single token refresh, single-flighted so concurrent 401s share
   /// one refresh call. Returns true and persists the new pair on success;
   /// otherwise clears tokens (and the device id) and returns false.
-  static Future<bool> _tryRefresh() {
-    final Future<bool>? inFlight = _refreshInFlight;
+  static Future<_RefreshResult> _tryRefresh() {
+    final Future<_RefreshResult>? inFlight = _refreshInFlight;
     if (inFlight != null) return inFlight;
 
-    final Future<bool> future = _performRefresh();
+    final Future<_RefreshResult> future = _performRefresh();
     _refreshInFlight = future;
     future.whenComplete(() {
       if (identical(_refreshInFlight, future)) {
@@ -670,11 +682,12 @@ class ApiClient {
     return future;
   }
 
-  static Future<bool> _performRefresh() async {
+  static Future<_RefreshResult> _performRefresh() async {
     try {
       final String? refreshToken = await TokenStorage.readRefreshToken();
       if (refreshToken == null) {
-        return await _recoverOrClear();
+        await _recoverOrClear();
+        return _RefreshResult.rejected;
       }
       final http.Response response = await _rawSend(
         'POST',
@@ -689,12 +702,21 @@ class ApiClient {
           access: data['access_token'] as String,
           refresh: data['refresh_token'] as String,
         );
-        return true;
+        return _RefreshResult.ok;
       }
+      // Only a definitive rejection ends the session. A deploy restarts the
+      // server (502/503 from the proxy), and 429/5xx are equally temporary.
+      if (response.statusCode == 400 ||
+          response.statusCode == 401 ||
+          response.statusCode == 403) {
+        await _recoverOrClear();
+        return _RefreshResult.rejected;
+      }
+      return _RefreshResult.transient;
     } catch (_) {
-      // Fall through to recovery below.
+      // Offline, timeout or a storage hiccup: nothing says the session died.
+      return _RefreshResult.transient;
     }
-    return _recoverOrClear();
   }
 
   /// Handles a failed foreground refresh: the background isolate no longer

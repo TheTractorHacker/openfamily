@@ -179,7 +179,6 @@ void main() {
       for (final MapEntry<GeocodeFailure, SuggestStatus> e
           in <GeocodeFailure, SuggestStatus>{
         GeocodeFailure.offline: SuggestStatus.offline,
-        GeocodeFailure.rateLimited: SuggestStatus.rateLimited,
         GeocodeFailure.unavailable: SuggestStatus.error,
       }.entries) {
         fake.failure = e.key;
@@ -187,6 +186,12 @@ void main() {
         await Future<void>.delayed(const Duration(milliseconds: 30));
         expect(s.status, e.value);
       }
+      // A rate limit is retried quietly (still "loading"), and only surfaces
+      // once the automatic retries are used up.
+      fake.failure = GeocodeFailure.rateLimited;
+      s.onTextChanged('main st');
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+      expect(s.status, SuggestStatus.loading);
       fake.failure = null;
       fake.results = const <GeocodeSuggestion>[];
       s.onTextChanged('nowhere at all');

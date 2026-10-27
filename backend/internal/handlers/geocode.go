@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	geocodeSearchPerMin  = 30
+	geocodeSearchPerMin  = 120
 	geocodeReversePerMin = 20
 	geocodeWindow        = time.Minute
 )

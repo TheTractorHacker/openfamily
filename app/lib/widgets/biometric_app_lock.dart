@@ -153,20 +153,23 @@ class _BiometricAppLockState extends State<BiometricAppLock>
       case AppLifecycleState.hidden:
       case AppLifecycleState.paused:
       case AppLifecycleState.detached:
-        // With a zero grace period (the default, and the historical
-        // behavior) the app locks on ANY non-resumed transition — including
-        // `inactive` from the notification shade — synchronously, exactly as
-        // before grace periods existed. With a non-zero grace, `inactive`
-        // alone never locks, and the cover/lock land only if the app is
-        // still backgrounded when the grace expires. Note the deliberate
+        // With a zero grace period (the default) the app locks as soon as it
+        // is really backgrounded (`hidden`/`paused`). With a non-zero grace,
+        // the cover/lock land only if the app is still backgrounded when the
+        // grace expires. Note the deliberate
         // privacy trade-off of a non-zero grace: the OS app-switcher
         // snapshot may show the uncovered UI.
         _graceTimer?.cancel();
+        // `inactive` alone is also what Android reports when the window just
+        // loses focus: the Samsung screenshot toolbar, the notification shade,
+        // a permission dialog. Covering the app for those made screenshots
+        // capture the lock spinner instead of the screen. Real backgrounding
+        // always continues to `hidden`/`paused`, which still lock at once.
+        if (state == AppLifecycleState.inactive) break;
         if (_grace <= Duration.zero) {
           _coverForPrivacy();
           return;
         }
-        if (state == AppLifecycleState.inactive) break;
         _graceTimer = Timer(_grace, () {
           if (!mounted) return;
           // A resume during the grace period cancels the timer; if lifecycle

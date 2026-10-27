@@ -173,6 +173,29 @@ void main() {
     expect(find.text('OpenFamily is locked'), findsNothing);
   });
 
+  testWidgets('losing window focus alone (screenshot toolbar) does not lock',
+      (WidgetTester tester) async {
+    final _FakeAuthenticator authenticator = _FakeAuthenticator();
+
+    await _pumpLock(
+      tester,
+      service: BiometricService(
+        authenticator: authenticator,
+        preferenceStore: _MemoryPreferenceStore(true),
+      ),
+    );
+    expect(authenticator.authenticationCalls, 1);
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    await tester.pump();
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+    expect(find.text('OpenFamily is locked'), findsNothing);
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pumpAndSettle();
+    expect(authenticator.authenticationCalls, 1);
+  });
+
   testWidgets('a foreground session check cannot uncover a backgrounded app',
       (WidgetTester tester) async {
     final Completer<bool> firstSessionCheck = Completer<bool>();

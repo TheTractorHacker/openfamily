@@ -174,8 +174,17 @@ func TestPGRefreshStore(t *testing.T) {
 	if out, err := st.Rotate(ctx, uid, "pg-a", "pg-b", exp); err != nil || out != rotateOK {
 		t.Fatalf("rotate: %v %v", out, err)
 	}
-	if out, err := st.Rotate(ctx, uid, "pg-a", "pg-c", exp); err != nil || out != rotateReused {
-		t.Fatalf("replay: %v %v", out, err)
+	// A retry right after the rotation (lost response) is tolerated and gets
+	// a sibling token in the same family.
+	if out, err := st.Rotate(ctx, uid, "pg-a", "pg-c", exp); err != nil || out != rotateOK {
+		t.Fatalf("lost-response retry within grace: %v %v", out, err)
+	}
+	// The same spent token replayed after the grace window is theft.
+	if _, err := pool.Exec(ctx, `UPDATE refresh_sessions SET used_at = now() - interval '5 minutes' WHERE jti = 'pg-a'`); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := st.Rotate(ctx, uid, "pg-a", "pg-c2", exp); err != nil || out != rotateReused {
+		t.Fatalf("replay after grace: %v %v", out, err)
 	}
 	if out, err := st.Rotate(ctx, uid, "pg-b", "pg-d", exp); err != nil || out != rotateReused {
 		t.Fatalf("family revoked: %v %v", out, err)

@@ -44,6 +44,10 @@ func newTokenID() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
+// refreshReuseGrace is how long after a refresh token is spent that presenting
+// it again is treated as a lost-response retry instead of token theft.
+const refreshReuseGrace = 60 * time.Second
+
 type pgRefreshStore struct{ pool *pgxpool.Pool }
 
 func (p pgRefreshStore) Create(ctx context.Context, userID, jti string, expires time.Time) error {
@@ -91,6 +95,21 @@ func (p pgRefreshStore) Rotate(ctx context.Context, userID, oldJTI, newJTI strin
 	}
 	if used == nil && revoked == nil {
 		return rotateUnknown, nil // simply expired
+	}
+	// A refresh response can be lost after the server rotated: the app is
+	// killed by an update, the phone drops off the network, or the proxy
+	// resets the connection. The client then legitimately retries the token
+	// it still holds. Within a short window that retry is not theft, so
+	// mint a sibling in the same family rather than revoking the session.
+	// A token spent longer ago, or a revoked family, is still reuse.
+	if revoked == nil && used != nil && expiresAt.After(time.Now()) &&
+		time.Since(*used) <= refreshReuseGrace {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO refresh_sessions (jti, family_id, user_id, expires_at)
+			VALUES ($1, $2, $3, $4)`, newJTI, family, userID, expires); err != nil {
+			return rotateUnknown, err
+		}
+		return rotateOK, tx.Commit(ctx)
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE refresh_sessions SET revoked_at = now()
