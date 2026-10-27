@@ -13,8 +13,8 @@ import { DawarichUserMap } from './DawarichUserMap'
 
 type FormMessage = { tone: 'success' | 'error'; text: string } | null
 
-const DEFAULT_URL = 'https://maps.foleyit.com'
-const DEFAULT_LOCAL_URL = 'http://10.1.1.1:30161'
+const URL_PLACEHOLDER = 'https://dawarich.example.com'
+const LOCAL_PLACEHOLDER = 'http://192.168.1.50:3000'
 
 function messageFromError(error: unknown, fallback: string): string {
   if (error instanceof ApiError || error instanceof Error) return error.message || fallback
@@ -33,8 +33,8 @@ function ago(iso: string | null): string {
 export function DawarichSettingsCard() {
   const [settings, setSettings] = React.useState<DawarichSettings | null>(null)
   const [loading, setLoading] = React.useState(true)
-  const [baseUrl, setBaseUrl] = React.useState(DEFAULT_URL)
-  const [localUrl, setLocalUrl] = React.useState(DEFAULT_LOCAL_URL)
+  const [baseUrl, setBaseUrl] = React.useState('')
+  const [localUrl, setLocalUrl] = React.useState('')
   const [apiKey, setApiKey] = React.useState('')
   const [enabled, setEnabled] = React.useState(true)
   const [sendUnmapped, setSendUnmapped] = React.useState(false)
@@ -44,7 +44,7 @@ export function DawarichSettingsCard() {
   const hydrate = React.useCallback((next: DawarichSettings) => {
     setSettings(next)
     if (next.base_url) setBaseUrl(next.base_url)
-    setLocalUrl(next.local_url || DEFAULT_LOCAL_URL)
+    setLocalUrl(next.local_url)
     setEnabled(next.base_url ? next.enabled : true)
     setSendUnmapped(next.send_unmapped)
     setApiKey('')
@@ -115,13 +115,13 @@ export function DawarichSettingsCard() {
         <label className="wb-field" htmlFor="wb-dw-url">
           <span className="wb-label">Dawarich address</span>
           <input id="wb-dw-url" className="wb-input" type="url" value={baseUrl}
-            onChange={(e) => setBaseUrl(e.target.value)} placeholder={DEFAULT_URL}
+            onChange={(e) => setBaseUrl(e.target.value)} placeholder={URL_PLACEHOLDER}
             autoComplete="off" spellCheck={false} disabled={Boolean(busy)} required />
         </label>
         <label className="wb-field" htmlFor="wb-dw-local">
           <span className="wb-label">Local address (optional)</span>
           <input id="wb-dw-local" className="wb-input" type="url" value={localUrl}
-            onChange={(e) => setLocalUrl(e.target.value)} placeholder={DEFAULT_LOCAL_URL}
+            onChange={(e) => setLocalUrl(e.target.value)} placeholder={LOCAL_PLACEHOLDER}
             autoComplete="off" spellCheck={false} disabled={Boolean(busy)} />
           <span className="wb-help">Tried when the public address can’t be reached.</span>
         </label>

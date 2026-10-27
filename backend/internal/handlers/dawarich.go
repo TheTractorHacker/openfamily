@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/TheTractorHacker/openfamily/backend/internal/auth"
 	"github.com/TheTractorHacker/openfamily/backend/internal/middleware"
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -75,12 +76,12 @@ func (r dawarichRow) endpoints() []string {
 func (r dawarichRow) postPoints(ctx context.Context, key string, body []byte) error {
 	var netErr error
 	for _, base := range r.endpoints() {
-		req, _ := http.NewRequestWithContext(ctx, http.MethodPost,
-			base+"/api/v1/points?api_key="+url.QueryEscape(key), bytes.NewReader(body))
+		req, _ := http.NewRequestWithContext(ctx, http.MethodPost, base+"/api/v1/points", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+key)
 		resp, err := dawarichClient.Do(req)
 		if err != nil {
-			netErr = fmt.Errorf("could not reach Dawarich at %s: %w", base, err)
+			netErr = fmt.Errorf("could not reach Dawarich at %s: %w", base, scrubDawarichErr(err))
 			continue
 		}
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
@@ -93,6 +94,28 @@ func (r dawarichRow) postPoints(ctx context.Context, key string, body []byte) er
 	return netErr
 }
 
+// scrubDawarichErr drops the request URL that *url.Error carries, so an
+// error can be logged or stored without the address details leaking.
+func scrubDawarichErr(err error) error {
+	var ue *url.Error
+	if errors.As(err, &ue) {
+		return ue.Err
+	}
+	return err
+}
+
+const keyPurposeDawarich = "dawarich-api-key"
+
+func (s *Server) dawarichKey() []byte { return s.TM.DeriveKey(keyPurposeDawarich) }
+
+// sealDawarichKey encrypts an API key for storage; empty stays empty.
+func (s *Server) sealDawarichKey(plain string) (string, error) {
+	if plain == "" {
+		return "", nil
+	}
+	return auth.SealSecret(s.dawarichKey(), plain)
+}
+
 func (s *Server) readDawarich(ctx context.Context) (dawarichRow, bool, error) {
 	var row dawarichRow
 	err := s.Pool.QueryRow(ctx, `
@@ -102,7 +125,13 @@ func (s *Server) readDawarich(ctx context.Context) (dawarichRow, bool, error) {
 	if errors.Is(err, pgx.ErrNoRows) {
 		return dawarichRow{}, false, nil
 	}
-	return row, err == nil, err
+	if err != nil {
+		return dawarichRow{}, false, err
+	}
+	if row.APIKey, err = auth.OpenSecret(s.dawarichKey(), row.APIKey); err != nil {
+		return dawarichRow{}, false, err
+	}
+	return row, true, nil
 }
 
 func normalizeDawarichURL(raw string) (string, error) {
@@ -204,6 +233,11 @@ func (s *Server) AdminPutDawarich(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "history to include must be 0–90 days")
 		return
 	}
+	sealedKey, err := s.sealDawarichKey(key)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to protect API key")
+		return
+	}
 	// Sync is add-only and starts from now unless the admin asks for history
 	// (backfill_days, applied only when the settings row is first created).
 	_, err = s.Pool.Exec(r.Context(), `
@@ -212,7 +246,7 @@ func (s *Server) AdminPutDawarich(w http.ResponseWriter, r *http.Request) {
 		ON CONFLICT (id) DO UPDATE SET
 			base_url = EXCLUDED.base_url, local_url = EXCLUDED.local_url, api_key = EXCLUDED.api_key,
 			enabled = EXCLUDED.enabled, send_unmapped = EXCLUDED.send_unmapped, last_error = '', updated_at = now()`,
-		base, key, req.Enabled, local, req.SendUnmapped, days)
+		base, sealedKey, req.Enabled, local, req.SendUnmapped, days)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to save Dawarich settings")
 		return
@@ -251,13 +285,24 @@ func (s *Server) AdminTestDawarich(w http.ResponseWriter, r *http.Request) {
 		req, _ := http.NewRequestWithContext(r.Context(), http.MethodGet, base+"/api/v1/health", nil)
 		resp, err := dawarichClient.Do(req)
 		if err != nil {
-			lastErr = fmt.Errorf("could not reach %s: %w", base, err)
+			lastErr = fmt.Errorf("could not reach %s: %w", base, scrubDawarichErr(err))
 			continue
 		}
 		resp.Body.Close()
 		if resp.StatusCode >= 400 {
 			lastErr = fmt.Errorf("%s answered %d", base, resp.StatusCode)
 			continue
+		}
+		if row.APIKey != "" {
+			areq, _ := http.NewRequestWithContext(r.Context(), http.MethodGet, base+"/api/v1/points?per_page=1", nil)
+			areq.Header.Set("Authorization", "Bearer "+row.APIKey)
+			if aresp, aerr := dawarichClient.Do(areq); aerr == nil {
+				aresp.Body.Close()
+				if aresp.StatusCode == http.StatusUnauthorized || aresp.StatusCode == http.StatusForbidden {
+					writeError(w, http.StatusBadGateway, "Dawarich is reachable but rejected the main API key")
+					return
+				}
+			}
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "reached": base})
 		return
@@ -319,6 +364,10 @@ func (s *Server) dawarichTargets(ctx context.Context, row dawarichRow) ([]dawari
 		var t dawarichTarget
 		if err := rows.Scan(&t.UserID, &t.Key, &t.Since); err != nil {
 			return nil, err
+		}
+		if t.Key, err = auth.OpenSecret(s.dawarichKey(), t.Key); err != nil {
+			slog.Warn("dawarich: cannot decrypt a user key; skipping", "user", t.UserID)
+			continue
 		}
 		out = append(out, t)
 	}
@@ -540,6 +589,11 @@ func (s *Server) AdminPutDawarichUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "user not found")
 		return
 	}
+	sealedKey, err := s.sealDawarichKey(key)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to protect API key")
+		return
+	}
 	if !mapped && key == "" {
 		writeError(w, http.StatusBadRequest, "API key is required")
 		return
@@ -549,7 +603,7 @@ func (s *Server) AdminPutDawarichUser(w http.ResponseWriter, r *http.Request) {
 			UPDATE dawarich_user_map
 			SET api_key = CASE WHEN $2 = '' THEN api_key ELSE $2 END,
 			    label = $3, enabled = $4, last_error = ''
-			WHERE user_id = $1`, userID, key, label, req.Enabled)
+			WHERE user_id = $1`, userID, sealedKey, label, req.Enabled)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to save mapping")
 			return
@@ -558,7 +612,7 @@ func (s *Server) AdminPutDawarichUser(w http.ResponseWriter, r *http.Request) {
 		if _, err := s.Pool.Exec(r.Context(), `
 			INSERT INTO dawarich_user_map (user_id, api_key, label, enabled, since)
 			VALUES ($1, $2, $3, $4, now() - make_interval(days => $5))`,
-			userID, key, label, req.Enabled, req.BackfillDays); err != nil {
+			userID, sealedKey, label, req.Enabled, req.BackfillDays); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to save mapping")
 			return
 		}
@@ -603,6 +657,9 @@ func (s *Server) EnsureDawarichSchema(ctx context.Context) error {
 			last_error TEXT NOT NULL DEFAULT '',
 			total_sent BIGINT NOT NULL DEFAULT 0,
 			created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-		)`)
+		);
+		-- Earlier builds could store the request URL (and so the key) in an error.
+		UPDATE dawarich_settings SET last_error = '' WHERE last_error LIKE '%api_key=%';
+		UPDATE dawarich_user_map SET last_error = '' WHERE last_error LIKE '%api_key=%'`)
 	return err
 }
