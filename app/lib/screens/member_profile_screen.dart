@@ -14,6 +14,7 @@ import '../widgets/live_speed.dart';
 import '../widgets/movement_icon.dart';
 import '../services/speed_units.dart';
 import '../utils/member_status.dart';
+import 'daily_history_screen.dart';
 import 'day_detail_screen.dart';
 import 'notification_prefs_screen.dart';
 import '../widgets/trips_entry_button.dart';
@@ -145,6 +146,7 @@ class MemberProfileScreen extends StatelessWidget {
                   children: [
                     // Day Detail (location history) entry point.
                     _DayDetailButton(member: member),
+                    _DailyHistoryButton(member: member),
                     TripsEntryButton(member: member),
                     NotificationPrefsEntryButton(
                       memberId: member.id,
@@ -395,6 +397,24 @@ class _DayDetailButton extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+/// Opens the map-based Daily History scrubber.
+class _DailyHistoryButton extends StatelessWidget {
+  const _DailyHistoryButton({required this.member});
+
+  final Member member;
+
+  @override
+  Widget build(BuildContext context) {
+    return DsListRow(
+      leading: DsListRow.iconTile(context, Icons.history),
+      title: 'Daily history',
+      subtitle: 'Replay the day on the map',
+      chevron: true,
+      onTap: () => openDailyHistory(context, member),
     );
   }
 }

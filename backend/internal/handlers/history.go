@@ -47,6 +47,10 @@ type trailPoint struct {
 	Lon         float64   `json:"lon"`
 	TS          time.Time `json:"ts"`
 	MotionState string    `json:"motion_state,omitempty"`
+	// SpeedMPS and BatteryPct are the device-reported values of the last fix
+	// in the bucket that carried them; omitted when unknown.
+	SpeedMPS   *float64 `json:"speed_mps,omitempty"`
+	BatteryPct *float64 `json:"battery_pct,omitempty"`
 }
 
 // historyVisit is a place stay, unnamed dwell, or in-transit segment.
@@ -77,6 +81,9 @@ type historyPoint struct {
 	// Accuracy is the device-reported 68%-confidence radius in meters;
 	// 0 means unknown.
 	Accuracy float64
+	// SpeedMPS and BatteryPct are nil when the device did not report them.
+	SpeedMPS   *float64
+	BatteryPct *float64
 }
 
 type historyPlace struct {
@@ -277,7 +284,7 @@ func filterUsablePoints(points []historyPoint) []historyPoint {
 
 func (s *Server) loadHistoryPoints(ctx context.Context, userID string, from, to time.Time) ([]historyPoint, error) {
 	rows, err := s.Pool.Query(ctx, `
-		SELECT ST_Y(l.geom), ST_X(l.geom), l.ts, COALESCE(l.motion_state, ''), COALESCE(l.accuracy_meters, 0)
+		SELECT ST_Y(l.geom), ST_X(l.geom), l.ts, COALESCE(l.motion_state, ''), COALESCE(l.accuracy_meters, 0), l.speed_mps, l.battery_pct
 		FROM locations l
 		JOIN devices d ON d.id = l.device_id
 		WHERE d.user_id = $1 AND l.ts >= $2 AND l.ts < $3
@@ -290,7 +297,7 @@ func (s *Server) loadHistoryPoints(ctx context.Context, userID string, from, to 
 	points := []historyPoint{}
 	for rows.Next() {
 		var p historyPoint
-		if err := rows.Scan(&p.Lat, &p.Lon, &p.TS, &p.MotionState, &p.Accuracy); err != nil {
+		if err := rows.Scan(&p.Lat, &p.Lon, &p.TS, &p.MotionState, &p.Accuracy, &p.SpeedMPS, &p.BatteryPct); err != nil {
 			return nil, err
 		}
 		points = append(points, p)
@@ -332,6 +339,7 @@ func downsampleTrail(points []historyPoint, bucket time.Duration, capN int) []tr
 	var count int
 	var motion string
 	var ts time.Time
+	var speed, battery *float64
 
 	flush := func() {
 		if count == 0 {
@@ -342,6 +350,8 @@ func downsampleTrail(points []historyPoint, bucket time.Duration, capN int) []tr
 			Lon:         lonSum / float64(count),
 			TS:          ts,
 			MotionState: motion,
+			SpeedMPS:    speed,
+			BatteryPct:  battery,
 		})
 	}
 
@@ -354,11 +364,18 @@ func downsampleTrail(points []historyPoint, bucket time.Duration, capN int) []tr
 			flush()
 			bucketStart = start
 			latSum, lonSum, count, motion = 0, 0, 0, ""
+			speed, battery = nil, nil
 		}
 		latSum += p.Lat
 		lonSum += p.Lon
 		count++
 		ts = p.TS
+		if p.SpeedMPS != nil {
+			speed = p.SpeedMPS
+		}
+		if p.BatteryPct != nil {
+			battery = p.BatteryPct
+		}
 		if motion == "" {
 			motion = p.MotionState
 		}

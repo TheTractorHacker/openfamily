@@ -392,3 +392,26 @@ func TestParseHistoryRangeHonorsConfiguredRetention(t *testing.T) {
 		t.Error("200 days should be within a 365-day window")
 	}
 }
+
+func TestDownsampleTrailCarriesSpeedAndBattery(t *testing.T) {
+	start := time.Date(2026, 8, 22, 0, 0, 0, 0, time.UTC)
+	sp, b1, b2 := 12.5, 80.0, 79.0
+	points := []historyPoint{
+		{Lat: 1, Lon: 2, TS: start, SpeedMPS: &sp, BatteryPct: &b1},
+		{Lat: 1, Lon: 2, TS: start.Add(5 * time.Second), BatteryPct: &b2},
+		{Lat: 1, Lon: 2, TS: start.Add(2 * time.Minute)},
+	}
+	trail := downsampleTrail(points, 30*time.Second, 100)
+	if len(trail) != 2 {
+		t.Fatalf("got %d points", len(trail))
+	}
+	if trail[0].SpeedMPS == nil || *trail[0].SpeedMPS != 12.5 {
+		t.Fatalf("speed not carried: %#v", trail[0].SpeedMPS)
+	}
+	if trail[0].BatteryPct == nil || *trail[0].BatteryPct != 79 {
+		t.Fatalf("battery should be last reported in bucket: %#v", trail[0].BatteryPct)
+	}
+	if trail[1].SpeedMPS != nil || trail[1].BatteryPct != nil {
+		t.Fatalf("unknown values must stay nil (bucket reset): %#v", trail[1])
+	}
+}
