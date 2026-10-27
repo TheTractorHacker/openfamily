@@ -18,6 +18,7 @@ import { SettingsPage } from './pages/SettingsPage'
 import { ROUTES, DEFAULT_ROUTE, routeFromHash, type RouteKey } from './lib/routes'
 import { clearTokens, getEmail, isAuthenticated, subscribeAuth } from './lib/auth'
 import { useMe } from './lib/me'
+import { useServerVersion } from './lib/serverVersion'
 import { AccessDenied, Spinner } from './components/primitives'
 import './shell.css'
 
@@ -37,6 +38,7 @@ export default function App() {
 
   // Identity + capability flags for the signed-in account.
   const { loading: meLoading, isPlatformAdmin } = useMe()
+  const serverVersion = useServerVersion()
 
   // Hash-based routing.
   const [route, setRoute] = React.useState<RouteKey>(() =>
@@ -69,7 +71,7 @@ export default function App() {
   return (
     <div className="wb-shell">
       <div className="wb-shell-sidebar">
-        <Sidebar active={route} onNavigate={navigate} footer={<span>v0.1</span>} />
+        <Sidebar active={route} onNavigate={navigate} footer={<span>{serverVersion ?? ''}</span>} />
       </div>
       <div className="wb-shell-topbar">
         <TopBar active={route} onLogout={logout} email={email} onNavigate={navigate} />

@@ -14,6 +14,7 @@ import {
   uploadProfileAvatar,
 } from '../lib/api'
 import { useMe } from '../lib/me'
+import { useServerVersion } from '../lib/serverVersion'
 import type { Profile } from '../lib/types'
 import { ThemeToggle } from '../components/ThemeToggle'
 import { Button, Card, CopyButton, Mono, Spinner } from '../components/primitives'
@@ -28,7 +29,6 @@ const MAX_AVATAR_BYTES = 5 * 1024 * 1024
 const ACCEPTED_AVATAR_TYPES = new Set(['image/jpeg', 'image/png'])
 const MAX_NAME_LENGTH = 120
 const MIN_PASSWORD_LENGTH = 8
-const APP_VERSION = '0.1.0'
 
 type AvatarMutation = 'uploading' | 'removing' | null
 type ProfileMessage = { tone: 'success' | 'error'; text: string } | null
@@ -124,6 +124,7 @@ function passwordFormIssue(
 
 export function SettingsPage({ email, onLogout }: SettingsPageProps) {
   const { isPlatformAdmin } = useMe()
+  const serverVersion = useServerVersion()
   const fileInputRef = React.useRef<HTMLInputElement>(null)
   const avatarObjectUrlRef = React.useRef<string | null>(null)
   const requestVersionRef = React.useRef(0)
@@ -543,7 +544,7 @@ export function SettingsPage({ email, onLogout }: SettingsPageProps) {
             </div>
             <div>
               <dt>Version</dt>
-              <dd>{APP_VERSION}</dd>
+              <dd>{serverVersion ?? '…'}</dd>
             </div>
             <div>
               <dt>Server</dt>

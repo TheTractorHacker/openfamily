@@ -56,7 +56,7 @@ export function LoginPage({ onLoggedIn }: LoginPageProps) {
             administrators also get user, build, and server-wide tools.
           </p>
         </div>
-        <div className="wb-login-aside-foot">OpenFamily · v0.1</div>
+        <div className="wb-login-aside-foot">OpenFamily</div>
       </aside>
 
       <main className="wb-login-main">

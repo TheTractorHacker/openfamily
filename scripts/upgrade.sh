@@ -49,7 +49,7 @@ rollback() {
   else
     git checkout --quiet "$prev_ref"
   fi
-  GIT_COMMIT="$(git rev-parse --short HEAD)" docker compose up -d --build || true
+  GIT_COMMIT="$(git describe --tags --always)" docker compose up -d --build || true
   echo >&2
   echo "Code is back at $prev_ref. If the new version already migrated the database," >&2
   echo "the old code may not work against it. Restore the pre-upgrade backup with:" >&2
@@ -77,7 +77,7 @@ if [ "$new_ref" = "$prev_ref" ]; then
 fi
 
 echo "==> Rebuilding and restarting"
-GIT_COMMIT="$(git rev-parse --short HEAD)" docker compose up -d --build --remove-orphans || rollback
+GIT_COMMIT="$(git describe --tags --always)" docker compose up -d --build --remove-orphans || rollback
 
 echo "==> Waiting for /healthz (up to ${HEALTH_TIMEOUT}s)"
 wait_healthy || rollback

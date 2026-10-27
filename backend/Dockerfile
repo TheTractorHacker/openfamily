@@ -26,7 +26,10 @@ RUN resolved_ref="${GIT_COMMIT}"; \
         *) resolved_ref="${head_value}" ;; \
       esac; \
     fi; \
-    short_ref="$(printf '%s' "${resolved_ref}" | cut -c1-7)"; \
+    case "${resolved_ref}" in \
+      *[!0-9a-f]*) short_ref="${resolved_ref}" ;; \
+      *) short_ref="$(printf '%s' "${resolved_ref}" | cut -c1-7)" ;; \
+    esac; \
     test -n "${short_ref}"; \
     CGO_ENABLED=0 GOOS=linux go build -trimpath \
       -ldflags="-s -w -X github.com/TheTractorHacker/openfamily/backend/internal/config.buildVersion=${short_ref}" \
