@@ -48,6 +48,9 @@ type wsMember struct {
 	// location. Additive fields.
 	CircleIDs        []string `json:"circle_ids,omitempty"`
 	SharingCircleIDs []string `json:"sharing_circle_ids,omitempty"`
+	// CircleExpiries maps a temporary circle id (within CircleIDs) to its
+	// expiry; permanent circles are absent.
+	CircleExpiries map[string]time.Time `json:"circle_expires,omitempty"`
 }
 
 // wsLocation is a live location update broadcast to a family.
@@ -389,6 +392,12 @@ func (s *Server) circleMembersSnapshot(ctx context.Context, circleIDs []string, 
 		}
 		for _, mc := range byMember[id] {
 			m.CircleIDs = append(m.CircleIDs, mc.CircleID)
+			if mc.ExpiresAt != nil {
+				if m.CircleExpiries == nil {
+					m.CircleExpiries = map[string]time.Time{}
+				}
+				m.CircleExpiries[mc.CircleID] = *mc.ExpiresAt
+			}
 			if mc.Sharing {
 				m.SharingCircleIDs = append(m.SharingCircleIDs, mc.CircleID)
 			}

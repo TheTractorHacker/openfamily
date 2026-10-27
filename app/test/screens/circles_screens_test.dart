@@ -43,8 +43,9 @@ class FakeCircleService implements CircleService {
   }
 
   @override
-  Future<Circle> createCircle(String name, String? icon) async {
-    calls.add('create:$name:$icon');
+  Future<Circle> createCircle(String name, String? icon,
+      {int? durationHours}) async {
+    calls.add('create:$name:$icon:${durationHours ?? '-'}');
     return Circle(
         id: 'new',
         name: name,
@@ -52,6 +53,23 @@ class FakeCircleService implements CircleService {
         role: 'admin',
         sharingEnabled: true,
         memberCount: 1);
+  }
+
+  @override
+  Future<Circle> extendCircle(String id, int hours) async {
+    calls.add('extend:$id:$hours');
+    return Circle(
+        id: id,
+        name: 'Trip',
+        role: 'admin',
+        sharingEnabled: true,
+        memberCount: 2,
+        expiresAt: DateTime.now().toUtc().add(Duration(hours: hours + 24)));
+  }
+
+  @override
+  Future<void> endCircle(String id) async {
+    calls.add('end:$id');
   }
 
   @override

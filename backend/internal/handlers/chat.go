@@ -209,7 +209,7 @@ func (s *Server) ChatUnread(w http.ResponseWriter, r *http.Request) {
 		       (SELECT COUNT(*) FROM chat_messages x
 		        WHERE x.circle_id = cm.circle_id AND x.sender_id <> $1
 		          AND x.seq > COALESCE(r.last_seq, 0))
-		FROM circle_members cm
+		FROM live_circle_members cm
 		LEFT JOIN chat_reads r ON r.circle_id = cm.circle_id AND r.user_id = cm.user_id
 		WHERE cm.user_id = $1`, uid)
 	if err != nil {
@@ -255,7 +255,7 @@ func (s *Server) pushChatMessage(ctx context.Context, msg chatMessageOut) {
 	rows, err := s.Pool.Query(ctx, `
 		SELECT d.user_id, d.platform, d.push_token, d.unifiedpush_endpoint, d.id, d.push_transport
 		FROM devices d
-		JOIN circle_members cm ON cm.user_id = d.user_id AND cm.circle_id = $1
+		JOIN live_circle_members cm ON cm.user_id = d.user_id AND cm.circle_id = $1
 		WHERE d.user_id <> $2
 		  AND ((d.platform = 'ios' AND d.push_token IS NOT NULL AND d.push_token <> '')
 		       OR (d.platform = 'android' AND d.unifiedpush_endpoint IS NOT NULL AND d.unifiedpush_endpoint <> '')

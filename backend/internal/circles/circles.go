@@ -83,7 +83,7 @@ func (a *Authz) RequireMember(ctx context.Context, userID, circleID string) (Mem
 		return m, ErrNotFound
 	}
 	err := a.db.QueryRow(ctx, `
-		SELECT role, sharing_enabled, joined_at FROM circle_members
+		SELECT role, sharing_enabled, joined_at FROM live_circle_members
 		WHERE circle_id = $1 AND user_id = $2`, circleID, userID,
 	).Scan(&m.Role, &m.SharingEnabled, &m.JoinedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -105,13 +105,39 @@ func (a *Authz) RequireAdmin(ctx context.Context, userID, circleID string) (Memb
 	return m, nil
 }
 
+// RequireGraceAdmin is RequireAdmin for the one operation that may act on a
+// temporary circle that expired naturally but has not been purged yet:
+// extending it. A circle an admin ended early (ended_at set) stays ended.
+// Non-members and non-admins get the same errors as RequireAdmin.
+func (a *Authz) RequireGraceAdmin(ctx context.Context, userID, circleID string) (Membership, error) {
+	m := Membership{CircleID: circleID, UserID: userID}
+	if !ValidID(circleID) || !ValidID(userID) {
+		return m, ErrNotFound
+	}
+	err := a.db.QueryRow(ctx, `
+		SELECT cm.role, cm.sharing_enabled, cm.joined_at
+		FROM circle_members cm JOIN circles c ON c.id = cm.circle_id
+		WHERE cm.circle_id = $1 AND cm.user_id = $2 AND c.ended_at IS NULL`, circleID, userID,
+	).Scan(&m.Role, &m.SharingEnabled, &m.JoinedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return m, ErrNotFound
+	}
+	if err != nil {
+		return m, err
+	}
+	if m.Role != RoleAdmin {
+		return m, ErrForbidden
+	}
+	return m, nil
+}
+
 // CircleIDs lists every circle the user belongs to (oldest membership first).
 func (a *Authz) CircleIDs(ctx context.Context, userID string) ([]string, error) {
 	if !ValidID(userID) {
 		return nil, nil
 	}
 	return a.strings(ctx, `
-		SELECT circle_id::text FROM circle_members WHERE user_id = $1
+		SELECT circle_id::text FROM live_circle_members WHERE user_id = $1
 		ORDER BY joined_at, circle_id`, userID)
 }
 
@@ -128,8 +154,8 @@ func (a *Authz) SharedWith(ctx context.Context, viewerID, subjectID string) ([]s
 	}
 	return a.strings(ctx, `
 		SELECT s.circle_id::text
-		FROM circle_members v
-		JOIN circle_members s ON s.circle_id = v.circle_id
+		FROM live_circle_members v
+		JOIN live_circle_members s ON s.circle_id = v.circle_id
 		WHERE v.user_id = $1 AND s.user_id = $2 AND s.sharing_enabled AND `+notPausedSQL("s.user_id")+`
 		ORDER BY s.circle_id`, viewerID, subjectID)
 }
@@ -141,8 +167,8 @@ func (a *Authz) SharingCircles(ctx context.Context, subjectID string) ([]string,
 		return nil, nil
 	}
 	return a.strings(ctx, `
-		SELECT circle_id::text FROM circle_members
-		WHERE user_id = $1 AND sharing_enabled AND `+notPausedSQL("circle_members.user_id")+` ORDER BY circle_id`, subjectID)
+		SELECT circle_id::text FROM live_circle_members
+		WHERE user_id = $1 AND sharing_enabled AND `+notPausedSQL("live_circle_members.user_id")+` ORDER BY circle_id`, subjectID)
 }
 
 // OwnAndSharingCircles returns, in ONE round trip, all of subject's circles
@@ -153,7 +179,7 @@ func (a *Authz) OwnAndSharingCircles(ctx context.Context, subjectID string) (own
 		return nil, nil, nil
 	}
 	rows, err := a.db.Query(ctx, `
-		SELECT circle_id::text, (sharing_enabled AND `+notPausedSQL("circle_members.user_id")+`) FROM circle_members
+		SELECT circle_id::text, (sharing_enabled AND `+notPausedSQL("live_circle_members.user_id")+`) FROM live_circle_members
 		WHERE user_id = $1 ORDER BY joined_at, circle_id`, subjectID)
 	if err != nil {
 		return nil, nil, err
@@ -184,8 +210,8 @@ func (a *Authz) LocationVisibility(ctx context.Context, viewerID string, circleI
 	}
 	rows, err := a.db.Query(ctx, `
 		SELECT s.user_id::text, bool_or((s.sharing_enabled AND `+notPausedSQL("s.user_id")+`) OR s.user_id = v.user_id)
-		FROM circle_members v
-		JOIN circle_members s ON s.circle_id = v.circle_id
+		FROM live_circle_members v
+		JOIN live_circle_members s ON s.circle_id = v.circle_id
 		WHERE v.user_id = $1 AND v.circle_id = ANY($2::uuid[])
 		GROUP BY s.user_id`, viewerID, filterIDs(circleIDs))
 	if err != nil {
@@ -209,6 +235,8 @@ type MemberCircle struct {
 	// Sharing is true when the member shares their location in this circle
 	// (always true for the viewer themselves).
 	Sharing bool
+	// ExpiresAt is the circle's expiry when it is temporary, else nil.
+	ExpiresAt *time.Time
 }
 
 // MemberCircles maps every co-member of viewer within circleIDs (only circles
@@ -220,9 +248,10 @@ func (a *Authz) MemberCircles(ctx context.Context, viewerID string, circleIDs []
 		return out, nil
 	}
 	rows, err := a.db.Query(ctx, `
-		SELECT s.user_id::text, s.circle_id::text, ((s.sharing_enabled AND `+notPausedSQL("s.user_id")+`) OR s.user_id = v.user_id)
-		FROM circle_members v
-		JOIN circle_members s ON s.circle_id = v.circle_id
+		SELECT s.user_id::text, s.circle_id::text, ((s.sharing_enabled AND `+notPausedSQL("s.user_id")+`) OR s.user_id = v.user_id), c.expires_at
+		FROM live_circle_members v
+		JOIN live_circle_members s ON s.circle_id = v.circle_id
+		JOIN circles c ON c.id = s.circle_id
 		WHERE v.user_id = $1 AND v.circle_id = ANY($2::uuid[])
 		ORDER BY s.circle_id`, viewerID, filterIDs(circleIDs))
 	if err != nil {
@@ -232,7 +261,7 @@ func (a *Authz) MemberCircles(ctx context.Context, viewerID string, circleIDs []
 	for rows.Next() {
 		var uid string
 		var mc MemberCircle
-		if err := rows.Scan(&uid, &mc.CircleID, &mc.Sharing); err != nil {
+		if err := rows.Scan(&uid, &mc.CircleID, &mc.Sharing, &mc.ExpiresAt); err != nil {
 			return nil, err
 		}
 		out[uid] = append(out[uid], mc)
@@ -282,8 +311,8 @@ func (a *Authz) CoMembers(ctx context.Context, userID string, ids []string) (map
 	}
 	rows, err := a.db.Query(ctx, `
 		SELECT DISTINCT o.user_id::text
-		FROM circle_members me
-		JOIN circle_members o ON o.circle_id = me.circle_id
+		FROM live_circle_members me
+		JOIN live_circle_members o ON o.circle_id = me.circle_id
 		WHERE me.user_id = $1 AND o.user_id = ANY($2::uuid[]) AND o.user_id <> $1`,
 		userID, valid)
 	if err != nil {

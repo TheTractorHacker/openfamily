@@ -130,3 +130,33 @@ Convert from `family_id` to a circle id taken from the request and checked with 
 - `handlers/auth.go` Register / `invites.go` `consumeInviteCode` (circle invite at registration), `profile.go` DeleteMe (last-admin handling).
 - ~~Add circle id to WebSocket frames~~ (done above); `ws.go` `broadcastAvatarUpdate` is still family-scoped.
 - Places, geofences and history per circle (a later issue), tracking history retention per circle, chat (GAP-005), notification settings (GAP-006).
+
+## Temporary circles (migration 000114)
+
+`circles.expires_at` (nullable; NULL = permanent) and `circles.ended_at` (set
+when an admin ends the circle early). A circle is **live** while
+`ended_at IS NULL AND (expires_at IS NULL OR expires_at > now())`. Expiry is
+enforced in SQL on every read, so correctness needs no job:
+
+- Every `internal/circles` helper reads the view `live_circle_members`
+  (circle_members joined to live circles), so `RequireMember`/`RequireAdmin`,
+  `CircleIDs`, `SharedWith`, `SharingCircles`, `OwnAndSharingCircles`,
+  `LocationVisibility`, `MemberCircles` and `CoMembers` treat an expired circle
+  as non-existent (404 to members and outsiders alike). That covers chat,
+  check-ins, trips, watch/live boost, sharing pauses and WS subscriptions.
+  Chat unread/push, crash alerts, live shares and member edit use the view too.
+- Joining by invite code and the legacy code redeem path refuse codes of a
+  non-live circle; creating invites needs a live circle (admin check).
+- `GET /circles` omits non-live circles and returns `expires_at`; WS member
+  snapshots carry `circle_expires` (circle id -> expiry, temporary only).
+
+API: `POST /circles` accepts `duration_hours` (1-720) or `expires_at` (1 hour to
+30 days from now). `PATCH /circles/{id}` (admin) accepts `extend_hours`,
+`expires_at`, or `end: true`; only temporary circles can be extended or ended.
+A circle that lapsed naturally can be extended by its admin during the grace
+period (`RequireGraceAdmin`); one ended early cannot be revived.
+
+Cleanup: `RunCirclePurge` (every 10 min) drops hub subscriptions of lapsed
+circles and deletes circles 7 days after they ended/expired (members, invites,
+chat and check-in rows cascade). No expiry reminder push is sent: there is no
+existing scheduled-notification hook to attach one to.

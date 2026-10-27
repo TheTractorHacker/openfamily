@@ -219,6 +219,7 @@ class _MapScreenState extends State<MapScreen>
   final ValueNotifier<FollowUi?> _followUi = ValueNotifier<FollowUi?>(null);
 
   Timer? _watchTimer;
+  Timer? _circleExpiryTimer;
   bool _appResumed = true;
   bool _screenVisible = true;
   ValueListenable<TickerModeData>? _tickerMode;
@@ -394,6 +395,7 @@ class _MapScreenState extends State<MapScreen>
       _watchTimer = Timer.periodic(WatchClient.renewEvery, (_) => _pingWatch());
     } else if (!should) {
       _watchTimer?.cancel();
+    _circleExpiryTimer?.cancel();
       _watchTimer = null;
     }
   }
@@ -833,9 +835,32 @@ class _MapScreenState extends State<MapScreen>
       if (!mounted) return;
       final bool fellBack = _selection.update(circles);
       if (fellBack) _applySelection();
+      _scheduleCircleExpiry();
     } catch (_) {
       // Keep the previous list.
     }
+  }
+
+  /// A temporary circle disappears server-side the moment it expires. Drop it
+  /// locally at that instant too, so the selection falls back to the primary
+  /// circle instead of showing an empty one until the next refresh.
+  void _scheduleCircleExpiry() {
+    _circleExpiryTimer?.cancel();
+    _circleExpiryTimer = null;
+    final DateTime now = DateTime.now().toUtc();
+    final DateTime? next = _selection.nextExpiry(now);
+    if (next == null) return;
+    // Timer durations are capped so a 30-day wait cannot overflow; the timer
+    // simply re-arms when it fires early.
+    Duration wait = next.difference(now) + const Duration(seconds: 1);
+    if (wait > const Duration(hours: 12)) wait = const Duration(hours: 12);
+    _circleExpiryTimer = Timer(wait, () {
+      if (!mounted) return;
+      final bool wasSelected = _selection.pruneExpired(DateTime.now().toUtc());
+      if (wasSelected) _applySelection();
+      _scheduleCircleExpiry();
+      unawaited(_loadCircles());
+    });
   }
 
   /// The user picked a circle in the pill. Only the latest pick's data lands

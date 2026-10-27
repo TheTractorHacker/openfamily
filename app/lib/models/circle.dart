@@ -8,6 +8,7 @@ class Circle {
     required this.memberCount,
     this.icon,
     this.isPrimary = false,
+    this.expiresAt,
   });
 
   final String id;
@@ -26,7 +27,15 @@ class Circle {
   /// True for the circle the legacy single-family endpoints operate on.
   final bool isPrimary;
 
+  /// When a temporary circle stops sharing (UTC); null for a permanent one.
+  final DateTime? expiresAt;
+
   bool get isAdmin => role == 'admin';
+  bool get isTemporary => expiresAt != null;
+
+  /// True once a temporary circle's expiry has passed at [now].
+  bool isExpiredAt(DateTime now) =>
+      expiresAt != null && !expiresAt!.isAfter(now);
 
   factory Circle.fromJson(Map<String, dynamic> json) {
     final dynamic icon = json['icon'];
@@ -38,6 +47,9 @@ class Circle {
       sharingEnabled: json['sharing_enabled'] != false,
       memberCount: (json['member_count'] as num?)?.toInt() ?? 0,
       isPrimary: json['is_primary'] == true,
+      expiresAt: json['expires_at'] is String
+          ? DateTime.tryParse(json['expires_at'] as String)?.toUtc()
+          : null,
     );
   }
 
@@ -47,6 +59,7 @@ class Circle {
     String? role,
     bool? sharingEnabled,
     int? memberCount,
+    DateTime? expiresAt,
   }) {
     return Circle(
       id: id,
@@ -56,6 +69,7 @@ class Circle {
       sharingEnabled: sharingEnabled ?? this.sharingEnabled,
       memberCount: memberCount ?? this.memberCount,
       isPrimary: isPrimary,
+      expiresAt: expiresAt ?? this.expiresAt,
     );
   }
 }

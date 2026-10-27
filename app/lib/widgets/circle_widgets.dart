@@ -103,3 +103,41 @@ class CircleStateMessage extends StatelessWidget {
     );
   }
 }
+
+/// "Ends in 2 days" style label for a temporary circle expiring at
+/// [expiresAt], relative to [now]. Rounds down to the largest whole unit.
+String circleTimeLeftLabel(DateTime expiresAt, DateTime now) {
+  final Duration left = expiresAt.difference(now);
+  if (left <= Duration.zero) return 'Ended';
+  if (left.inDays >= 1) {
+    final int d = left.inDays;
+    return 'Ends in $d ${d == 1 ? 'day' : 'days'}';
+  }
+  if (left.inHours >= 1) {
+    final int h = left.inHours;
+    return 'Ends in $h ${h == 1 ? 'hour' : 'hours'}';
+  }
+  final int m = left.inMinutes < 1 ? 1 : left.inMinutes;
+  return 'Ends in $m min';
+}
+
+/// Countdown chip on a temporary circle ("Ends in 2 days"). Turns amber in the
+/// last day. The label is text, so colour is never the only signal. [now] is
+/// injectable for tests.
+class CircleCountdownChip extends StatelessWidget {
+  const CircleCountdownChip({super.key, required this.expiresAt, this.now});
+
+  final DateTime expiresAt;
+  final DateTime? now;
+
+  @override
+  Widget build(BuildContext context) {
+    final DateTime t = (now ?? DateTime.now()).toUtc();
+    final bool soon = expiresAt.difference(t) < const Duration(days: 1);
+    return DsStatusChip(
+      label: circleTimeLeftLabel(expiresAt, t),
+      icon: Icons.timer_outlined,
+      color: soon ? AppColors.statusOrange : AppColors.statusGrey,
+    );
+  }
+}
