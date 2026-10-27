@@ -201,8 +201,9 @@ func TestFallbackOnlyForExplicitSearches(t *testing.T) {
 	e := setupFallback(t, emptyNom(t), censusOwner(t))
 	ctx := context.Background()
 	resp, err := e.svc.SearchWith(ctx, "u1", owner, SearchOptions{Bias: &Point{35.31, -94.39}})
-	if err != nil || e.nom.count() != 0 || e.cen.count() != 0 || resp.Fallback {
-		t.Fatalf("typing path reached a fallback: nom=%d cen=%d %v", e.nom.count(), e.cen.count(), err)
+	// Typing may reach Census (a free US geocoder) but never Nominatim.
+	if err != nil || e.nom.count() != 0 || e.cen.count() != 1 || resp.Results[0].Source != "census" {
+		t.Fatalf("typing path: nom=%d cen=%d %v", e.nom.count(), e.cen.count(), err)
 	}
 	resp, err = e.svc.SearchWith(ctx, "u1", owner, SearchOptions{Bias: &Point{35.31, -94.39}, Explicit: true})
 	if err != nil || e.nom.count() != 1 || e.cen.count() != 1 || !resp.Fallback {

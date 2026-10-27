@@ -73,8 +73,10 @@ func (s *Service) SearchWith(ctx context.Context, user, q string, o SearchOption
 		}
 	}
 
-	if o.Explicit && s.fb != nil && s.needFallback(q, res) {
-		fr, cached, ran, ferr := s.fallbackSearch(ctx, user, q, b, limit)
+	// Nominatim's policy forbids autocomplete, so typing may reach only the
+	// Census geocoder, and only for a house-number address with a locality.
+	if s.fb != nil && s.needFallback(q, res) && (o.Explicit || len(parse(q).parts) >= 2) {
+		fr, cached, ran, ferr := s.fallbackSearch(ctx, user, q, b, limit, !o.Explicit)
 		out.Fallback = ran
 		if ran && !cached {
 			allCached = false
@@ -259,7 +261,7 @@ func newFallbacks(s Settings, primary *url.URL, primaryIsNominatim bool) (*fallb
 // fallbackSearch asks Nominatim and then the US Census geocoder. ran reports
 // whether any fallback was actually consulted. Fallback failures never fail
 // the request on their own; a busy gate is reported only when nothing was found.
-func (s *Service) fallbackSearch(ctx context.Context, user, q string, b *Point, limit int) (res []Result, cached, ran bool, err error) {
+func (s *Service) fallbackSearch(ctx context.Context, user, q string, b *Point, limit int, censusOnly bool) (res []Result, cached, ran bool, err error) {
 	f := s.fb
 	p := parse(q)
 	number := hasHouseNumber(q)
@@ -299,7 +301,7 @@ func (s *Service) fallbackSearch(ctx context.Context, user, q string, b *Point, 
 		res = append(res, r...)
 	}
 
-	if f.nomBase != nil {
+	if f.nomBase != nil && !censusOnly {
 		nom := nominatim{}
 		target := ""
 		if len(p.parts) >= 3 && number {

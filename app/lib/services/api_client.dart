@@ -563,11 +563,14 @@ class ApiClient {
           auth: auth,
         );
         if (retry.statusCode == 401) {
-          // Refresh succeeded but the retry still 401s: the session is truly
-          // dead. Clear the (fresh) tokens and surface the auth failure.
-          await TokenStorage.clear();
-          _notifySessionExpired();
-          throw const SessionExpiredException();
+          // The refresh just succeeded, so the session is alive: a 401 right
+          // after it is a server hiccup (or a request that is refused for
+          // another reason), never proof the login is gone. Keep the tokens;
+          // a genuinely dead session is rejected by the refresh itself.
+          throw const ApiException(
+            0,
+            'Could not reach the server. Check your connection.',
+          );
         }
         return retry;
       }

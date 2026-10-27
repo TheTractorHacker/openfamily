@@ -68,6 +68,30 @@ void main() {
     });
   }
 
+  test('a 401 right after a successful refresh keeps the session', () async {
+    bool expired = false;
+    ApiClient.onSessionExpired = () => expired = true;
+    final http.Client always401 = MockClient((http.Request r) async {
+      if (r.url.path == '/auth/refresh') {
+        return http.Response(
+          jsonEncode(<String, String>{
+            'access_token': 'new.access.token',
+            'refresh_token': 'new.refresh.token',
+          }),
+          200,
+          headers: <String, String>{'content-type': 'application/json'},
+        );
+      }
+      return http.Response('{"error":"x"}', 401,
+          headers: <String, String>{'content-type': 'application/json'});
+    });
+    await http.runWithClient(() async {
+      await expectLater(ApiClient.get('/family'), throwsA(isA<ApiException>()));
+    }, () => always401);
+    expect(expired, isFalse);
+    expect(await TokenStorage.readRefreshToken(), 'new.refresh.token');
+  });
+
   test('refresh that cannot connect keeps the session', () async {
     bool expired = false;
     ApiClient.onSessionExpired = () => expired = true;

@@ -3,11 +3,13 @@ package middleware
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/TheTractorHacker/openfamily/backend/internal/auth"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type contextKey string
@@ -61,8 +63,15 @@ func RequireTokenVersion(pool *pgxpool.Pool) func(http.Handler) http.Handler {
 			err := pool.QueryRow(r.Context(),
 				`SELECT token_version FROM users WHERE id = $1`, claims.UserID,
 			).Scan(&version)
-			if err != nil || version != claims.TokenVersion {
+			// Only a definite mismatch (or a deleted user) is an auth failure. A
+			// database hiccup (restart, pool exhaustion) must not read as 401:
+			// clients treat 401 as "session dead" and sign the user out.
+			if errors.Is(err, pgx.ErrNoRows) || (err == nil && version != claims.TokenVersion) {
 				http.Error(w, `{"error":"invalid or expired token"}`, http.StatusUnauthorized)
+				return
+			}
+			if err != nil {
+				http.Error(w, `{"error":"temporarily unavailable"}`, http.StatusServiceUnavailable)
 				return
 			}
 			next.ServeHTTP(w, r)
