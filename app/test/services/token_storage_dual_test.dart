@@ -12,13 +12,14 @@ String _jwt(int expSeconds) {
   String enc(Map<String, Object?> m) =>
       base64Url.encode(utf8.encode(jsonEncode(m))).replaceAll('=', '');
   return '${enc(<String, Object?>{'alg': 'none'})}.'
-      '${enc(<String, Object?>{'exp': expSeconds})}.sig';
+      '${enc(<String, Object?>{'exp': expSeconds, 'iat': expSeconds - 1000})}.sig';
 }
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   setUp(() async {
+    TokenStorage.resetForTest();
     SharedPreferences.setMockInitialValues(
         <String, Object>{'wb_api_base_url': 'https://example.test'});
     await ServerConfig.instance.load();
