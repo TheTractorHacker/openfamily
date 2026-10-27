@@ -10,6 +10,7 @@ import '../models/member.dart';
 import '../models/place.dart';
 import 'alert_service.dart';
 import 'api_client.dart';
+import 'chat_service.dart';
 import 'member_avatar_cache.dart';
 import 'member_mapper.dart';
 import 'perf/perf_monitor.dart';
@@ -492,6 +493,9 @@ class FamilyService {
         if (id != null) {
           _userId = id;
           AlertEvents.selfUserId = id;
+          ChatEvents.selfUserId = id;
+          // Catch up the chat badge after every (re)connect.
+          unawaited(ChatEvents.refreshUnread());
           onUserId?.call(id);
         }
         return true;
@@ -511,6 +515,8 @@ class FamilyService {
         return _applyPresence(map);
       case 'avatar':
         return _applyAvatar(map);
+      case 'chat':
+        return ChatEvents.handleFrame(map);
       case 'alert':
       case 'alert_ack':
         AlertEvents.handleFrame(map);

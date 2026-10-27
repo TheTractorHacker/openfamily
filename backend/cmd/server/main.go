@@ -219,6 +219,10 @@ func main() {
 		r.Post("/circles/{id}/invites", srv.CreateCircleInvite)
 		r.Get("/circles/{id}/invites", srv.ListCircleInvites)
 		r.Delete("/circles/{id}/invites/{invite_id}", srv.RevokeCircleInvite)
+		r.Get("/circles/{id}/chat", srv.ListChatMessages)
+		r.Post("/circles/{id}/chat", srv.SendChatMessage)
+		r.Post("/circles/{id}/chat/read", srv.MarkChatRead)
+		r.Get("/chat/unread", srv.ChatUnread)
 
 		r.Post("/families", srv.CreateFamily)
 		r.Get("/family", srv.GetFamily)
