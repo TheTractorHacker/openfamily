@@ -342,7 +342,7 @@ func (s *Service) fallbackSearch(ctx context.Context, user, q string, b *Point, 
 			}
 		}
 	}
-	if f.censusBase != nil && number && !haveHouse && (p.usState != "" || looksUS(b)) {
+	if f.censusBase != nil && number && !haveHouse && (p.usState != "" || b == nil || looksUS(b)) {
 		c := census{}
 		addr := strings.Join(censusParts(p), ", ")
 		if p.usState == "" && b != nil {
@@ -381,6 +381,10 @@ func (s *Service) censusState(ctx context.Context, c census, b *Point) string {
 	}
 	return st
 }
+
+// Census runs when the query names a US state, the viewer looks to be in the
+// US, or the viewer location is unknown (the app sends no bias until the pin
+// moves); an unknown location must not hide a US address.
 
 // looksUS is a coarse bounding box around the US (including Alaska, Hawaii).
 func looksUS(b *Point) bool {

@@ -256,11 +256,18 @@ func TestFallbackCensusSkippedWhenNominatimHasHouseAndWhenNotUS(t *testing.T) {
 	if e.cen.count() != 0 || resp.Results[0].Source != "nominatim" {
 		t.Fatalf("cen=%d %+v", e.cen.count(), resp.Results)
 	}
-	// Not US-looking: no state, no bias.
+	// Not US-looking: no state and a viewer in Paris.
 	e2 := setupFallback(t, emptyNom(t), censusOwner(t))
-	e2.svc.SearchWith(context.Background(), "u1", "5 Rue de la Paix, Paris", SearchOptions{Explicit: true})
+	e2.svc.SearchWith(context.Background(), "u1", "5 Rue de la Paix, Paris", SearchOptions{Explicit: true, Bias: &Point{48.86, 2.33}})
 	if e2.cen.count() != 0 || e2.nom.count() != 1 {
 		t.Fatalf("cen=%d nom=%d", e2.cen.count(), e2.nom.count())
+	}
+	// Unknown viewer location (the app sends no bias until the pin moves): a
+	// US address without a state must still reach Census.
+	e3 := setupFallback(t, emptyNom(t), censusOwner(t))
+	resp3, _ := e3.svc.SearchWith(context.Background(), "u1", "14322 Old 88 Rd, Chester", SearchOptions{})
+	if e3.cen.count() != 1 || len(resp3.Results) == 0 || resp3.Results[0].Source != "census" {
+		t.Fatalf("cen=%d %+v", e3.cen.count(), resp3.Results)
 	}
 }
 
