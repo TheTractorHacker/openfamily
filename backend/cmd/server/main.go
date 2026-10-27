@@ -177,6 +177,11 @@ func main() {
 	r.Get("/alerts/share/{token}", srv.ShareAlert)
 	// Public invite landing page: static, no database access, no secrets.
 	r.Get("/join/{code}", srv.JoinLanding)
+	// Public share-link viewer (docs/share-links.md): hash lookup, generic 404,
+	// per-IP rate limit.
+	r.Get("/s/{token}", srv.ShareViewPage)
+	r.Get("/s/{token}/data", srv.ShareViewData)
+	r.Get("/s/{token}/photo", srv.ShareViewPhoto)
 
 	// Auth (unauthenticated).
 	r.Post("/auth/register", srv.Register)
@@ -314,6 +319,10 @@ func main() {
 		r.Post("/bubbles", srv.CreateBubble)
 		r.Get("/bubbles", srv.ListBubbles)
 		r.Delete("/bubbles/{id}", srv.DeleteBubble)
+
+		r.Post("/share-links", srv.CreateShareLink)
+		r.Get("/share-links", srv.ListShareLinks)
+		r.Delete("/share-links/{id}", srv.DeleteShareLink)
 	})
 
 	// Location ingest: accepts either a Bearer access token or the per-device

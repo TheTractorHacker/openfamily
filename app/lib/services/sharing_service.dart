@@ -83,6 +83,37 @@ class LiveShares {
       );
 }
 
+/// One active "anyone with the link" share. The secret URL is only known to
+/// the response of [SharingService.createShareLink]; later listings carry no
+/// token, so a lost link is stopped and re-created rather than recovered.
+class ShareLink {
+  const ShareLink({
+    required this.id,
+    required this.expiresAt,
+    this.label = '',
+    this.url,
+  });
+
+  final String id;
+  final DateTime expiresAt;
+  final String label;
+
+  /// Present only on the freshly created link.
+  final String? url;
+
+  bool expiredAt(DateTime now) => !expiresAt.isAfter(now);
+
+  factory ShareLink.fromJson(Map<String, dynamic> json) => ShareLink(
+        id: json['id'] as String,
+        expiresAt: DateTime.parse(json['expires_at'] as String).toLocal(),
+        label: (json['label'] as String?) ?? '',
+        url: json['url'] as String?,
+      );
+}
+
+/// Longest a share link may live (the server enforces the same cap).
+const int kMaxShareLinkMinutes = 72 * 60;
+
 /// Local 7:00 the next calendar day: the "until tomorrow" pause end.
 DateTime pauseUntilTomorrow(DateTime now) {
   final DateTime n = now.toLocal();
@@ -147,6 +178,24 @@ class SharingService {
     await ApiClient.delete('/live-shares/$id');
   }
 
+  Future<ShareLink> createShareLink({required int minutes, String label = ''}) async =>
+      ShareLink.fromJson(_map(await ApiClient.post('/share-links',
+          body: <String, dynamic>{'minutes': minutes, if (label.isNotEmpty) 'label': label})));
+
+  Future<List<ShareLink>> shareLinks() async {
+    final Object? v = _map(await ApiClient.get('/share-links'))['links'];
+    return v is List
+        ? <ShareLink>[
+            for (final Object? e in v)
+              if (e is Map<String, dynamic>) ShareLink.fromJson(e),
+          ]
+        : const <ShareLink>[];
+  }
+
+  Future<void> stopShareLink(String id) async {
+    await ApiClient.delete('/share-links/$id');
+  }
+
   static Map<String, dynamic> _map(dynamic v) =>
       v is Map<String, dynamic> ? v : <String, dynamic>{};
 }
@@ -155,7 +204,8 @@ class SharingService {
 String sharingErrorMessage(Object e, {String action = 'do that'}) {
   if (e is ApiException) {
     if (e.status == 429) return 'Please wait a minute before sending another check-in.';
-    if (e.status == 404) return 'That person is no longer in your circle.';
+    if (e.status == 404) return 'That person or link is no longer available.';
+    if (e.status == 409) return 'You have too many active links. Stop one first.';
     if (e.status >= 500) return 'The server had a problem. Try again shortly.';
     if (e.message.isNotEmpty) return e.message;
   }
