@@ -84,6 +84,7 @@ func main() {
 		URL: cfg.GeocoderURL, Type: cfg.GeocoderType, Lang: cfg.GeocoderLang,
 		AllowPrivate: cfg.GeocoderAllowPrivate, Version: config.BuildVersion(),
 		FallbackURL: cfg.GeocoderFallbackURL, CensusEnabled: cfg.GeocoderCensusEnabled,
+		GoogleAPIKey: cfg.GoogleMapsAPIKey, GoogleMonthlyCap: cfg.GoogleGeocodingMonthlyCap,
 	}); err != nil {
 		slog.Warn("geocoder disabled: invalid configuration", "reason", err.Error())
 	} else if geo != nil {
@@ -91,7 +92,10 @@ func main() {
 		if ferr := geo.FallbackError(); ferr != nil {
 			slog.Warn("geocoder fallback disabled: invalid configuration", "reason", ferr.Error())
 		}
-		slog.Info("geocoder enabled", "type", cfg.GeocoderType, "autocomplete", geo.Autocomplete())
+		if gerr := geo.GoogleError(); gerr != nil {
+			slog.Warn("google geocoding disabled: invalid configuration", "reason", gerr.Error())
+		}
+		slog.Info("geocoder enabled", "google", geo.GoogleEnabled(), "type", cfg.GeocoderType, "autocomplete", geo.Autocomplete())
 		if geo.Public() {
 			slog.Warn("GEOCODER_URL is the public nominatim.openstreetmap.org: autocomplete is disabled and explicit searches are limited to 1/second per its usage policy; prefer a self-hosted Photon")
 		}

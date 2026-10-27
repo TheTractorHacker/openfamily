@@ -101,6 +101,8 @@ Settings (server environment):
 | `GEOCODER_ALLOW_PRIVATE` | `true` to allow a loopback/private-network provider (self-hosted next to the API). Otherwise private and loopback targets are refused (SSRF guard), `http` is refused, redirects are never followed. |
 | `GEOCODER_FALLBACK_URL` | Nominatim-compatible provider asked only for **explicit** searches (the user pressed Search/Enter) that Photon could not match at house level. Unset = public `nominatim.openstreetmap.org`; empty disables. Same SSRF rules, no redirects, at most one request per second across all users (a request that would wait longer than about 2 s is answered "try again"). Never used while typing. |
 | `GEOCODER_CENSUS_ENABLED` | Default `true`. For explicit searches of US-looking street addresses that are still unmatched, also ask the US Census geocoder (`geocoding.geo.census.gov`, free, no key, house-number level by interpolating address ranges). |
+| `GOOGLE_MAPS_API_KEY` | Optional. Enables Google's Geocoding API as a last resort. Empty (default) = free providers only. The key stays on the server; the app never sees it. |
+| `GOOGLE_GEOCODING_MONTHLY_CAP` | Most Google requests per calendar month (UTC). Default `3000`; empty or invalid uses the default. Then Google is skipped silently (one log line per month). |
 
 **Search quality.** The server normalises the query ("88rd" becomes "88 rd",
 "Rd" becomes "Road", a trailing "AR" becomes "Arkansas") and, if nothing is
@@ -116,6 +118,33 @@ into an explicit search can also reach `nominatim.openstreetmap.org` (OSMF) and
 when Photon found no exact house. They see the text, the rounded bias point and
 your server's IP, not any user identity. Set `GEOCODER_FALLBACK_URL=` and
 `GEOCODER_CENSUS_ENABLED=false` to keep everything on one provider.
+
+**Google Geocoding (optional, paid).** Photon (OSM) and the Census geocoder
+miss some rural US addresses. With `GOOGLE_MAPS_API_KEY` set, the server asks
+Google only when (a) the query has a house number and neither Photon nor Census
+found an exact house match, or (b) an explicit search found nothing at all.
+Never for queries under 8 characters; never for a query without a house number
+unless it is an explicit search with no results. While typing it additionally
+needs at least two comma-separated parts ("14322 Old 88 Rd, Chester"). Results
+are cached per user for 30 days (empty answers too), the per-user rate limit
+still applies, and a global monthly cap bounds spend. The cap counter is in
+memory: it resets at the month rollover and on every server restart. Google
+results are only shown to the user (never stored), and the app shows "Powered
+by Google" while any shown result comes from Google. The query text, a ~100 m
+rounded bias area and your server's IP reach Google; no user identity does.
+
+Creating a key: in Google Cloud Console create or pick a project with billing
+enabled, enable the **Geocoding API**, then create an API key under
+Credentials. Under "API restrictions" restrict it to the Geocoding API only. A
+server key cannot be restricted by app (Android/iOS/referrer restrictions do
+not apply to server calls), so restrict by IP address if your server has a
+static IP; otherwise rely on the API restriction, the monthly cap here, and a
+Google budget alert / quota limit on the Geocoding API.
+
+Cost: Geocoding is billed at about $5 per 1000 requests beyond Google's monthly
+free credit. With the default cap of 3000 the worst case is about $15 per month
+(less after the credit). Lower the cap to spend less. Without a key nothing
+changes: only the free providers are used.
 
 `GET /config` reports only `geocoder: {"enabled", "autocomplete"}`, never the URL.
 

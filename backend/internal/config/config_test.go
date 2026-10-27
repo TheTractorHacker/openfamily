@@ -81,6 +81,25 @@ func TestGeocoderDefaultsAndDisable(t *testing.T) {
 	}
 }
 
+func TestGoogleGeocodingConfig(t *testing.T) {
+	os.Unsetenv("GOOGLE_MAPS_API_KEY")
+	os.Unsetenv("GOOGLE_GEOCODING_MONTHLY_CAP")
+	c := Load()
+	if c.GoogleMapsAPIKey != "" || c.GoogleGeocodingMonthlyCap != 3000 {
+		t.Fatalf("%q %d", c.GoogleMapsAPIKey, c.GoogleGeocodingMonthlyCap)
+	}
+	t.Setenv("GOOGLE_MAPS_API_KEY", " test-key ")
+	t.Setenv("GOOGLE_GEOCODING_MONTHLY_CAP", "50")
+	c = Load()
+	if c.GoogleMapsAPIKey != "test-key" || c.GoogleGeocodingMonthlyCap != 50 {
+		t.Fatalf("%q %d", c.GoogleMapsAPIKey, c.GoogleGeocodingMonthlyCap)
+	}
+	t.Setenv("GOOGLE_GEOCODING_MONTHLY_CAP", "junk")
+	if Load().GoogleGeocodingMonthlyCap != 3000 {
+		t.Fatal("invalid cap must fall back to the default")
+	}
+}
+
 func TestGeocoderFallbackDefaults(t *testing.T) {
 	os.Unsetenv("GEOCODER_FALLBACK_URL")
 	os.Unsetenv("GEOCODER_CENSUS_ENABLED")

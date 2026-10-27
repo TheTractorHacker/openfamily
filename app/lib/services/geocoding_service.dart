@@ -16,6 +16,7 @@ class GeocodeSuggestion {
     required this.type,
     this.approximate = false,
     this.matched,
+    this.source,
   });
 
   /// Full address line to put in the address field.
@@ -34,6 +35,9 @@ class GeocodeSuggestion {
 
   /// What a relaxed hit matched: `street` or `locality`.
   final String? matched;
+
+  /// Provider of a fallback hit (`google`, `census`, `nominatim`), if any.
+  final String? source;
 
   /// Friendly secondary text for the suggestion row.
   String get typeLabel {
@@ -65,9 +69,11 @@ class GeocodeSuggestion {
     final Object? name = json['name'];
     final Object? type = json['type'];
     final Object? matched = json['matched'];
+    final Object? source = json['source'];
     return GeocodeSuggestion(
       approximate: json['approximate'] == true,
       matched: matched is String && matched.isNotEmpty ? matched : null,
+      source: source is String && source.isNotEmpty ? source : null,
       label: label.trim(),
       name: name is String && name.trim().isNotEmpty ? name.trim() : label.trim(),
       position: LatLng(la, lo),

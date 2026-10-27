@@ -85,6 +85,9 @@ services:
       GEOCODER_ALLOW_PRIVATE: ${GEOCODER_ALLOW_PRIVATE:-false}
       GEOCODER_FALLBACK_URL: ${GEOCODER_FALLBACK_URL-https://nominatim.openstreetmap.org}
       GEOCODER_CENSUS_ENABLED: ${GEOCODER_CENSUS_ENABLED:-true}
+      # Optional paid Google Geocoding (server-side only). Empty = free providers only.
+      GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY:-}
+      GOOGLE_GEOCODING_MONTHLY_CAP: ${GOOGLE_GEOCODING_MONTHLY_CAP:-}
       # APNs (iOS push). Empty disables APNs; Android still works via ntfy.
       # To enable iOS push, add a volume mount to this service:
       #   volumes:

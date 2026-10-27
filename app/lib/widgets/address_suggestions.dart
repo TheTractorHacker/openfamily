@@ -148,7 +148,12 @@ class AddressSuggestionList extends StatelessWidget {
               horizontal: AppSpace.md,
               vertical: AppSpace.xs,
             ),
-            child: Text('Powered by OpenStreetMap data', style: muted),
+            child: Text(
+              suggester.suggestions.any((GeocodeSuggestion s) => s.source == 'google')
+                  ? 'Powered by Google'
+                  : 'Powered by OpenStreetMap data',
+              style: muted,
+            ),
           ),
         );
         return Container(

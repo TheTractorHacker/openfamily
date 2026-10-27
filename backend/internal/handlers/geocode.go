@@ -100,7 +100,7 @@ func (s *Server) GeocodeSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	slog.Info("geocode", "op", "search", "status", http.StatusOK, "results", len(res),
-		"attempts", resp.Attempts, "approximate", resp.Approximate, "fallback", resp.Fallback,
+		"attempts", resp.Attempts, "approximate", resp.Approximate, "fallback", resp.Fallback, "google", resp.Google,
 		"ms", time.Since(start).Milliseconds())
 	if res == nil {
 		res = []geocode.Result{}

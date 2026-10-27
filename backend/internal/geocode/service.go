@@ -72,6 +72,15 @@ type Settings struct {
 	CensusEnabled bool
 	// CensusURL overrides the Census endpoint (tests only).
 	CensusURL string
+
+	// GoogleAPIKey enables the optional, paid Google Geocoding provider
+	// (server-side only). Empty disables it.
+	GoogleAPIKey string
+	// GoogleMonthlyCap is the most Google requests per calendar month
+	// (default DefaultGoogleMonthlyCap), counted in memory.
+	GoogleMonthlyCap int
+	// GoogleURL overrides the Google endpoint (tests only).
+	GoogleURL string
 }
 
 // Service is a configured provider client with cache.
@@ -92,6 +101,10 @@ type Service struct {
 
 	fb          *fallbacks
 	fallbackErr error
+
+	goog         *googleGeocoder
+	googleClient *http.Client
+	googleErr    error
 }
 
 // New validates settings and builds a Service. An empty URL yields (nil, nil):
@@ -135,6 +148,9 @@ func New(s Settings) (*Service, error) {
 		now:          time.Now,
 	}
 	svc.fb, svc.fallbackErr = newFallbacks(s, base, isNom)
+	if svc.goog, svc.googleErr = newGoogle(s); svc.goog != nil {
+		svc.googleClient = newClient(s.AllowPrivate, svc.goog.base.Scheme == "http")
+	}
 	return svc, nil
 }
 
@@ -170,6 +186,18 @@ func (s *Service) FallbackError() error {
 	}
 	return s.fallbackErr
 }
+
+// GoogleError reports why a configured Google key was not enabled (nil when
+// enabled or not configured). The message holds no key or user data.
+func (s *Service) GoogleError() error {
+	if s == nil {
+		return nil
+	}
+	return s.googleErr
+}
+
+// GoogleEnabled reports whether the paid Google provider is active (nil-safe).
+func (s *Service) GoogleEnabled() bool { return s != nil && s.goog != nil }
 
 // Enabled reports whether the service can answer requests (nil-safe).
 func (s *Service) Enabled() bool { return s != nil }

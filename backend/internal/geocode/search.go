@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 )
 
 const (
@@ -33,6 +34,7 @@ type SearchResponse struct {
 	Approximate bool // all results are from relaxed attempts
 	Attempts    int  // upstream calls made or served from cache
 	Fallback    bool // a fallback provider was consulted
+	Google      bool // Google results were used (fresh or cached)
 }
 
 // SearchWith runs the relaxation ladder on the primary provider and, for
@@ -87,6 +89,18 @@ func (s *Service) SearchWith(ctx context.Context, user, q string, o SearchOption
 			firstErr = nil
 		} else if len(res) == 0 && firstErr == nil && ferr != nil {
 			firstErr = ferr
+		}
+	}
+	if s.goog != nil && wantGoogle(q, res, o.Explicit) {
+		gr, cached, ran := s.googleSearch(ctx, user, q, b, limit)
+		if ran && !cached {
+			allCached = false
+		}
+		if len(gr) > 0 {
+			out.Google = true
+			res = append(gr, res...)
+			sort.SliceStable(res, func(i, j int) bool { return !res[i].Approximate && res[j].Approximate })
+			firstErr = nil
 		}
 	}
 	if len(res) == 0 && firstErr != nil {
@@ -330,7 +344,7 @@ func (s *Service) fallbackSearch(ctx context.Context, user, q string, b *Point, 
 	}
 	if f.censusBase != nil && number && !haveHouse && (p.usState != "" || looksUS(b)) {
 		c := census{}
-		addr := strings.Join(p.parts, ", ")
+		addr := strings.Join(censusParts(p), ", ")
 		if p.usState == "" && b != nil {
 			// Census needs a state or ZIP; borrow the one the person is standing in.
 			if st := s.censusState(ctx, c, b); st != "" {
@@ -374,4 +388,46 @@ func looksUS(b *Point) bool {
 		return false
 	}
 	return b.Lat >= 17 && b.Lat <= 72 && b.Lon >= -180 && b.Lon <= -65
+}
+
+// censusParts returns the address parts to send to Census. While the state is
+// still being typed ("..., Chester A", "..., Chester, Ark") Census finds
+// nothing, so the unfinished trailing token is dropped.
+func censusParts(p parsed) []string {
+	n := len(p.parts)
+	if p.usState != "" || n < 2 {
+		return p.parts
+	}
+	toks := strings.Fields(p.parts[n-1])
+	if len(toks) == 0 || !partialStateToken(toks[len(toks)-1]) {
+		return p.parts
+	}
+	out := append([]string{}, p.parts[:n-1]...)
+	if len(toks) > 1 {
+		out = append(out, strings.Join(toks[:len(toks)-1], " "))
+	}
+	return out
+}
+
+// partialStateToken reports whether t looks like an unfinished state: one or
+// two letters that are no state code, or a proper prefix of a state name.
+func partialStateToken(t string) bool {
+	for _, r := range t {
+		if !unicode.IsLetter(r) {
+			return false
+		}
+	}
+	low := strings.ToLower(t)
+	if _, ok := usStates[strings.ToUpper(t)]; ok || stateNames[low] {
+		return false
+	}
+	if len(low) <= 2 {
+		return true
+	}
+	for n := range stateNames {
+		if strings.HasPrefix(n, low) {
+			return true
+		}
+	}
+	return false
 }

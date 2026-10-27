@@ -123,6 +123,12 @@ type Config struct {
 	// GeocoderCensusEnabled (GEOCODER_CENSUS_ENABLED, default true) adds the
 	// US Census geocoder as a further explicit-search fallback.
 	GeocoderCensusEnabled bool
+	// GoogleMapsAPIKey (GOOGLE_MAPS_API_KEY) enables the optional paid Google
+	// Geocoding provider, used server-side only. Empty = disabled.
+	GoogleMapsAPIKey string
+	// GoogleGeocodingMonthlyCap (GOOGLE_GEOCODING_MONTHLY_CAP, default 3000) is
+	// the most Google requests per month, counted in memory (resets on restart).
+	GoogleGeocodingMonthlyCap int
 
 	// APNs push notification credentials (optional; empty KeyFile disables APNs).
 	APNsKeyFile    string
@@ -238,6 +244,8 @@ func Load() Config {
 		GeocoderAllowPrivate:  getenvBool("GEOCODER_ALLOW_PRIVATE", false),
 		GeocoderFallbackURL:   strings.TrimSpace(getenvPresent("GEOCODER_FALLBACK_URL", DefaultGeocoderFallbackURL)),
 		GeocoderCensusEnabled: getenvBool("GEOCODER_CENSUS_ENABLED", true),
+		GoogleMapsAPIKey:          strings.TrimSpace(getenv("GOOGLE_MAPS_API_KEY", "")),
+		GoogleGeocodingMonthlyCap: getenvInt("GOOGLE_GEOCODING_MONTHLY_CAP", 3000),
 		APNsKeyFile:           getenv("APNS_KEY_FILE", ""),
 		APNsKeyID:             getenv("APNS_KEY_ID", ""),
 		APNsTeamID:            getenv("APNS_TEAM_ID", ""),
@@ -330,6 +338,15 @@ func getenvPresent(key, fallback string) string {
 func getenv(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
+	}
+	return fallback
+}
+
+func getenvInt(key string, fallback int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && n > 0 {
+			return n
+		}
 	}
 	return fallback
 }
