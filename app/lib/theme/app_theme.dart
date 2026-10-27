@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'accent.dart';
 import 'tokens.dart';
+export 'accent.dart';
 export 'tokens.dart';
 
 /// Brand tokens for OpenFamily.
@@ -84,6 +86,7 @@ class BrandTheme extends ThemeExtension<BrandTheme> {
     required this.accentInk,
     required this.onAccent,
     required this.spark,
+    this.accentPressed = AppColors.accentPressed,
   });
 
   static const BrandTheme ice = BrandTheme(
@@ -115,6 +118,9 @@ class BrandTheme extends ThemeExtension<BrandTheme> {
   final Color onAccent;
   final Color spark;
 
+  /// Dark stop of the brand gradient.
+  final Color accentPressed;
+
   static BrandTheme of(BuildContext context) {
     return Theme.of(context).extension<BrandTheme>() ?? BrandTheme.ice;
   }
@@ -128,6 +134,7 @@ class BrandTheme extends ThemeExtension<BrandTheme> {
     Color? accentInk,
     Color? onAccent,
     Color? spark,
+    Color? accentPressed,
   }) {
     return BrandTheme(
       paper: paper ?? this.paper,
@@ -137,6 +144,7 @@ class BrandTheme extends ThemeExtension<BrandTheme> {
       accentInk: accentInk ?? this.accentInk,
       onAccent: onAccent ?? this.onAccent,
       spark: spark ?? this.spark,
+      accentPressed: accentPressed ?? this.accentPressed,
     );
   }
 
@@ -151,6 +159,8 @@ class BrandTheme extends ThemeExtension<BrandTheme> {
       accentInk: Color.lerp(accentInk, other.accentInk, t) ?? accentInk,
       onAccent: Color.lerp(onAccent, other.onAccent, t) ?? onAccent,
       spark: Color.lerp(spark, other.spark, t) ?? spark,
+      accentPressed:
+          Color.lerp(accentPressed, other.accentPressed, t) ?? accentPressed,
     );
   }
 }
@@ -175,7 +185,7 @@ abstract final class AppGradients {
     return LinearGradient(
       begin: Alignment.topLeft,
       end: Alignment.bottomRight,
-      colors: [AppColors.accentPressed, brand.accent, brand.spark],
+      colors: [brand.accentPressed, brand.accent, brand.spark],
     );
   }
 }
@@ -201,11 +211,13 @@ SystemUiOverlayStyle systemOverlayFor(Brightness b) {
 
 ThemeData buildAppTheme() => buildLightTheme();
 
-ThemeData buildLightTheme() {
+ThemeData buildLightTheme({Color? accent}) {
+  final BrandTheme brand = iceBrandFor(accent);
   return _buildTheme(
     brightness: Brightness.light,
-    brand: BrandTheme.ice,
-    primary: AppColors.accent,
+    brand: brand,
+    primary: brand.accent,
+    seed: accent ?? AppColors.accent,
     surface: AppColors.iceSurface,
     paper: AppColors.icePaper,
     onSurface: AppColors.iceInk,
@@ -214,11 +226,13 @@ ThemeData buildLightTheme() {
   );
 }
 
-ThemeData buildDarkTheme() {
+ThemeData buildDarkTheme({Color? accent}) {
+  final BrandTheme brand = nightBrandFor(accent);
   return _buildTheme(
     brightness: Brightness.dark,
-    brand: BrandTheme.night,
-    primary: AppColors.accentBright,
+    brand: brand,
+    primary: brand.accent,
+    seed: accent ?? AppColors.accent,
     surface: AppColors.nightSurface,
     paper: AppColors.nightPaper,
     onSurface: AppColors.nightInk,
@@ -231,6 +245,7 @@ ThemeData _buildTheme({
   required Brightness brightness,
   required BrandTheme brand,
   required Color primary,
+  required Color seed,
   required Color surface,
   required Color paper,
   required Color onSurface,
@@ -238,10 +253,10 @@ ThemeData _buildTheme({
   required SystemUiOverlayStyle overlay,
 }) {
   final ColorScheme scheme = ColorScheme.fromSeed(
-    seedColor: AppColors.accent,
+    seedColor: seed,
     brightness: brightness,
     primary: primary,
-    onPrimary: AppColors.onAccent,
+    onPrimary: brand.onAccent,
     secondary: AppColors.sky,
     surface: surface,
     onSurface: onSurface,
@@ -301,7 +316,7 @@ ThemeData _buildTheme({
     filledButtonTheme: FilledButtonThemeData(
       style: FilledButton.styleFrom(
         backgroundColor: primary,
-        foregroundColor: AppColors.onAccent,
+        foregroundColor: brand.onAccent,
         minimumSize: const Size(64, kMinTarget),
         shape: const StadiumBorder(),
       ),
@@ -365,7 +380,7 @@ ThemeData _buildTheme({
     // button, so the FAB stays flat: lime on paper already has the contrast.
     floatingActionButtonTheme: FloatingActionButtonThemeData(
       backgroundColor: primary,
-      foregroundColor: AppColors.onAccent,
+      foregroundColor: brand.onAccent,
       elevation: 0,
       focusElevation: 0,
       hoverElevation: 0,
@@ -388,7 +403,7 @@ ThemeData _buildTheme({
     switchTheme: SwitchThemeData(
       thumbColor: WidgetStateProperty.resolveWith((states) {
         return states.contains(WidgetState.selected)
-            ? AppColors.onAccent
+            ? brand.onAccent
             : null;
       }),
       trackColor: WidgetStateProperty.resolveWith((states) {

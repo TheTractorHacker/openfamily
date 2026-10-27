@@ -303,10 +303,42 @@ class DsBusyButton extends StatelessWidget {
         label: 'Please wait',
         onPressed: null,
         style: style,
-        icon: Icons.hourglass_top,
+        iconWidget: const _SpinningHourglass(),
       ),
     );
   }
+}
+
+/// Hourglass that turns over every second. It keeps moving even when the OS
+/// asks for reduced motion: it is the only sign that work is in progress.
+class _SpinningHourglass extends StatefulWidget {
+  const _SpinningHourglass();
+
+  @override
+  State<_SpinningHourglass> createState() => _SpinningHourglassState();
+}
+
+class _SpinningHourglassState extends State<_SpinningHourglass>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1400),
+  )..repeat();
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => ExcludeSemantics(
+        child: RotationTransition(
+          turns: CurvedAnimation(parent: _c, curve: Curves.easeInOutCubic)
+              .drive(Tween<double>(begin: 0, end: 0.5)),
+          child: const Icon(Icons.hourglass_top, size: 20),
+        ),
+      );
 }
 
 /// Shimmer-free skeleton block. Static when the OS asks for reduced motion.

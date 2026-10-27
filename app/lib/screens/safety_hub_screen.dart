@@ -4,6 +4,7 @@ import '../theme/app_theme.dart';
 import '../widgets/ds/ds.dart';
 import 'alerts_history_screen.dart';
 import 'check_in_screen.dart';
+import 'crash_reports_screen.dart';
 import 'help_alert_screen.dart';
 import 'safety_screen.dart';
 import 'sos_screen.dart';
@@ -71,6 +72,18 @@ class SafetyHubScreen extends StatelessWidget {
             ),
             chevron: true,
             onTap: () => _push(context, const HelpAlertScreen()),
+          ),
+          const DsSectionHeader('Driving safety'),
+          DsListRow(
+            title: 'Crash reports',
+            subtitle: 'Possible crashes detected for you and your circle',
+            leading: DsListRow.iconTile(
+              context,
+              Icons.car_crash_outlined,
+              color: AppColors.sosRed,
+            ),
+            chevron: true,
+            onTap: () => _push(context, const CrashReportsScreen()),
           ),
           const DsSectionHeader('Records and contacts'),
           DsListRow(

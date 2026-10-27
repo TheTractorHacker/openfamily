@@ -7,6 +7,7 @@ import 'screens/login_screen.dart';
 import 'screens/app_shell.dart';
 import 'screens/server_config_screen.dart';
 import 'screens/welcome_screen.dart';
+import 'services/accent_preference.dart';
 import 'services/api_client.dart';
 import 'services/auth_service.dart';
 import 'services/background_credential_store.dart';
@@ -47,6 +48,7 @@ Future<void> main() async {
     'prefs',
     () => Future.wait<void>(<Future<void>>[
       ThemePreferenceService.load(),
+      AccentPreferenceService.load(),
       MapStylePreferenceService.load(),
       ServerConfig.instance.load(),
     ]),
@@ -101,13 +103,15 @@ class _OpenFamilyAppState extends State<OpenFamilyApp> {
     return ValueListenableBuilder<ThemePreference>(
       valueListenable: ThemePreferenceService.preference,
       builder: (context, preference, _) {
-        return MaterialApp(
+        return ValueListenableBuilder<Color?>(
+          valueListenable: AccentPreferenceService.effective,
+          builder: (context, accent, _) => MaterialApp(
           title: 'OpenFamily',
           debugShowCheckedModeBanner: false,
           navigatorKey: navigatorKey,
           navigatorObservers: <NavigatorObserver>[PerfRouteObserver()],
-          theme: buildLightTheme(),
-          darkTheme: buildDarkTheme(),
+          theme: buildLightTheme(accent: accent),
+          darkTheme: buildDarkTheme(accent: accent),
           themeMode: preference.themeMode,
           builder: (context, child) => AnnotatedRegion<SystemUiOverlayStyle>(
             // Bar icon colours follow the app theme, not the OS theme.
@@ -118,6 +122,7 @@ class _OpenFamilyAppState extends State<OpenFamilyApp> {
             ),
           ),
           home: const _SessionGate(),
+        ),
         );
       },
     );

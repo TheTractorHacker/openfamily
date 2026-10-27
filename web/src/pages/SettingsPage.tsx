@@ -21,6 +21,7 @@ import { Button, Card, CopyButton, Mono, Spinner } from '../components/primitive
 import { ServerVersionCard } from './ServerVersionCard'
 import { TwilioSettingsCard } from './TwilioSettingsCard'
 import { DawarichSettingsCard } from './DawarichSettingsCard'
+import { ThemeAccentCard } from './ThemeAccentCard'
 import { DomainSettingsCard } from './DomainSettingsCard'
 import './pages.css'
 import './SettingsPage.css'
@@ -337,6 +338,7 @@ export function SettingsPage({ email, onLogout }: SettingsPageProps) {
           {/* Twilio SMS is a server-wide setting: platform admins only. The
               apps never expose it to regular users either. */}
           {isPlatformAdmin && <TwilioSettingsCard />}
+          {isPlatformAdmin && <ThemeAccentCard />}
           {isPlatformAdmin && <DawarichSettingsCard />}
 
           {/* Self-update lives here too: it restarts the server the panel is

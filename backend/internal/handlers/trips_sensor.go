@@ -162,6 +162,7 @@ func (s *Server) IngestSensorEvents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	accepted, duplicate, rejected := 0, 0, 0
+	var crashCands []crashCandidate
 	if !enabled {
 		rejected = len(req.Events) // opted out: nothing is stored
 	} else {
@@ -190,6 +191,9 @@ func (s *Server) IngestSensorEvents(w http.ResponseWriter, r *http.Request) {
 			}
 			if tag.RowsAffected() == 1 {
 				accepted++
+				if ev.Kind == trips.EventHardBrake && ev.Magnitude >= crashMinBrakeMps2 {
+					crashCands = append(crashCands, crashCandidate{At: ev.Start, End: ev.End, Magnitude: ev.Magnitude, Lat: ev.Lat, Lon: ev.Lon})
+				}
 			} else {
 				duplicate++
 			}
@@ -204,6 +208,10 @@ func (s *Server) IngestSensorEvents(w http.ResponseWriter, r *http.Request) {
 	if err := tx.Commit(ctx); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to store events")
 		return
+	}
+
+	if len(crashCands) > 0 {
+		go s.detectCrashes(claims.UserID, crashCands)
 	}
 
 	// Counts only: no times, places or magnitudes in the audit log.

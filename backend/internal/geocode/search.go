@@ -75,7 +75,7 @@ func (s *Service) SearchWith(ctx context.Context, user, q string, o SearchOption
 
 	// Nominatim's policy forbids autocomplete, so typing may reach only the
 	// Census geocoder, and only for a house-number address with a locality.
-	if s.fb != nil && s.needFallback(q, res) && (o.Explicit || len(parse(q).parts) >= 2) {
+	if s.fb != nil && s.needFallback(q, res) && (o.Explicit || len(parse(q).parts) >= 2 || (b != nil && looksUS(b) && hasHouseNumber(q))) {
 		fr, cached, ran, ferr := s.fallbackSearch(ctx, user, q, b, limit, !o.Explicit)
 		out.Fallback = ran
 		if ran && !cached {
@@ -330,12 +330,42 @@ func (s *Service) fallbackSearch(ctx context.Context, user, q string, b *Point, 
 	}
 	if f.censusBase != nil && number && !haveHouse && (p.usState != "" || looksUS(b)) {
 		c := census{}
-		run("census", f.censusGate, c.searchURL(f.censusBase, strings.Join(p.parts, ", ")), c.parse, nil)
+		addr := strings.Join(p.parts, ", ")
+		if p.usState == "" && b != nil {
+			// Census needs a state or ZIP; borrow the one the person is standing in.
+			if st := s.censusState(ctx, c, b); st != "" {
+				addr += ", " + st
+			}
+		}
+		run("census", f.censusGate, c.searchURL(f.censusBase, addr), c.parse, nil)
 	}
 	if len(res) == 0 && busy {
 		err = ErrBusy
 	}
 	return res, cached, ran, err
+}
+
+// censusState returns the two-letter state containing b ("" when unknown).
+// States do not move, so the answer is cached for everyone.
+func (s *Service) censusState(ctx context.Context, c census, b *Point) string {
+	key := "f:censusstate" + biasKey(b)
+	if v, ok := s.cache.get("", key); ok {
+		st, _ := v.(string)
+		return st
+	}
+	f := s.fb
+	if err := f.censusGate.wait(ctx, fallbackMaxWait); err != nil {
+		return ""
+	}
+	body, err := doGet(ctx, f.client, s.userAgent, c.stateURL(f.censusBase, b))
+	if err != nil {
+		return ""
+	}
+	st := c.parseState(body)
+	if st != "" {
+		s.cache.put("", key, st, 24*time.Hour)
+	}
+	return st
 }
 
 // looksUS is a coarse bounding box around the US (including Alaska, Hawaii).

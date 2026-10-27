@@ -154,6 +154,15 @@ func (s *Server) broadcastAlert(ctx context.Context, a alertRow) {
 // alertID is set, records one push delivery per user: sent if any device's
 // provider (ntfy/APNs) accepted it, failed if every device failed.
 func (s *Server) pushFamilyAlert(ctx context.Context, familyID, senderID, alertID, title, body string) (sent, failed int) {
+	return s.pushFamilyAlertFor(ctx, familyID, senderID, alertID, title, body, "")
+}
+
+// pushFamilyAlertFor is pushFamilyAlert for a mutable category (see
+// notification_prefs.go); "" means the push always gets through.
+func (s *Server) pushFamilyAlertFor(ctx context.Context, familyID, senderID, alertID, title, body, category string) (sent, failed int) {
+	// category is "" for alerts that always get through (SOS, help); otherwise
+	// people who muted it are skipped.
+	muted := s.usersMuted(ctx, category)
 	rows, err := s.Pool.Query(ctx, `
 		SELECT u.id, u.name, d.platform, d.push_token, d.unifiedpush_endpoint, d.id, d.push_transport
 		FROM devices d
@@ -182,6 +191,9 @@ func (s *Server) pushFamilyAlert(ctx context.Context, familyID, senderID, alertI
 		var token, endpoint *string
 		var devID, transport string
 		if err := rows.Scan(&uid, &name, &platform, &token, &endpoint, &devID, &transport); err != nil {
+			continue
+		}
+		if muted[uid] {
 			continue
 		}
 		t := targets[uid]

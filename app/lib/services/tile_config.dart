@@ -1,3 +1,4 @@
+import 'accent_preference.dart';
 import 'api_client.dart';
 import 'secure_url.dart';
 import 'server_features.dart';
@@ -45,6 +46,7 @@ class TileConfig {
         mapStyleUrl = '';
       }
       ServerFeatures.instance.apply(cfg);
+      AccentPreferenceService.applyServer(cfg);
     } catch (_) {
       // Keep whatever we already have (defaults or a previous successful fetch).
     }

@@ -14,11 +14,15 @@ class DsPillButton extends StatelessWidget {
     this.style = DsPillStyle.filled,
     this.semanticLabel,
     this.floating = false,
+    this.iconWidget,
   });
 
   final String label;
   final VoidCallback? onPressed;
   final IconData? icon;
+
+  /// Replaces [icon] with an arbitrary leading widget (e.g. an animated one).
+  final Widget? iconWidget;
   final DsPillStyle style;
   final String? semanticLabel;
 
@@ -56,8 +60,8 @@ class DsPillButton extends StatelessWidget {
       mainAxisSize: stretched ? MainAxisSize.max : MainAxisSize.min,
       mainAxisAlignment: MainAxisAlignment.center,
       children: <Widget>[
-        if (icon != null) ...<Widget>[
-          Icon(icon, size: 20),
+        if (icon != null || iconWidget != null) ...<Widget>[
+          iconWidget ?? Icon(icon, size: 20),
           const SizedBox(width: AppSpace.sm),
         ],
         Flexible(

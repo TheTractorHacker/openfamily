@@ -3,6 +3,7 @@ package geocode
 import (
 	"encoding/json"
 	"net/url"
+	"strconv"
 	"strings"
 )
 
@@ -29,6 +30,39 @@ func (census) searchURL(base *url.URL, address string) string {
 		"address": {address}, "benchmark": {"Public_AR_Current"}, "format": {"json"},
 	}
 	return withPath(base, "/geocoder/locations/onelineaddress", v)
+}
+
+// stateURL looks up which state a coordinate is in, so a house-number address
+// typed without a state ("14322 Old 88 Rd") can still be resolved near the
+// person's own pin.
+func (census) stateURL(base *url.URL, b *Point) string {
+	v := url.Values{
+		"x":         {strconv.FormatFloat(b.Lon, 'f', 4, 64)},
+		"y":         {strconv.FormatFloat(b.Lat, 'f', 4, 64)},
+		"benchmark": {"Public_AR_Current"}, "vintage": {"Current_Current"},
+		"format": {"json"},
+	}
+	return withPath(base, "/geocoder/geographies/coordinates", v)
+}
+
+func (census) parseState(body []byte) string {
+	var r struct {
+		Result struct {
+			Geographies struct {
+				States []struct {
+					Abbr string `json:"STUSAB"`
+				} `json:"States"`
+			} `json:"geographies"`
+		} `json:"result"`
+	}
+	if json.Unmarshal(body, &r) != nil || len(r.Result.Geographies.States) == 0 {
+		return ""
+	}
+	st := strings.ToUpper(strings.TrimSpace(r.Result.Geographies.States[0].Abbr))
+	if len(st) != 2 {
+		return ""
+	}
+	return st
 }
 
 func (census) parse(body []byte) ([]Result, error) {

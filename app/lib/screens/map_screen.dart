@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -179,12 +180,39 @@ class _MapScreenState extends State<MapScreen>
   /// "Following" pill shows. [FollowUi.locked] is false after the user pans
   /// away until they hit recenter.
   late final FollowCamera _follow = FollowCamera(
-    moveTo: (LatLng c, double z) => _mapController.move(c, z),
+    moveTo: (LatLng c, double z) => _mapController.move(_aboveSheet(c, z), z),
     camera: () {
       final MapCamera cam = _mapController.camera;
-      return (center: cam.center, zoom: cam.zoom);
+      return (center: _aboveSheet(cam.center, cam.zoom, undo: true), zoom: cam.zoom);
     },
   );
+
+  /// The bottom sheet covers the lower part of the full-screen map, so the
+  /// middle of the *visible* map sits above the screen's middle. This returns
+  /// the camera center that puts [target] there ([undo] reverses it, giving
+  /// the point currently shown in the visible middle).
+  LatLng _aboveSheet(LatLng target, double zoom, {bool undo = false}) {
+    if (!mounted) return target;
+    final Size size = MediaQuery.sizeOf(context);
+    // Two-pane (tablet) layouts have no sheet over the map.
+    if (size.width >= 720 ||
+        (size.width > size.height * 1.2 && size.width >= 560)) {
+      return target;
+    }
+    final double textScale =
+        MediaQuery.textScalerOf(context).scale(1).clamp(1.0, 2.0);
+    final double inset = (236 * textScale).clamp(0.0, size.height * 0.5);
+    try {
+      final MapCamera cam = _mapController.camera;
+      final math.Point<double> p = cam.project(target, zoom);
+      return cam.unproject(
+        math.Point<double>(p.x, p.y + (undo ? -inset : inset) / 2),
+        zoom,
+      );
+    } catch (_) {
+      return target;
+    }
+  }
   final ValueNotifier<FollowUi?> _followUi = ValueNotifier<FollowUi?>(null);
 
   Timer? _watchTimer;
@@ -657,7 +685,7 @@ class _MapScreenState extends State<MapScreen>
     _cameraAnim = controller;
 
     final Animation<LatLng> latLng =
-        _LatLngTween(begin: start, end: center).animate(
+        _LatLngTween(begin: start, end: _aboveSheet(center, zoom)).animate(
       CurvedAnimation(parent: controller, curve: Curves.easeInOutCubic),
     );
     final Animation<double> zoomAnim =
@@ -734,20 +762,36 @@ class _MapScreenState extends State<MapScreen>
     _expandedClusters.retainAll(validIds);
   }
 
+  /// Height of the bottom sheet's resting peek over the map (0 on tablets).
+  double _bottomInset() {
+    if (!mounted) return 0;
+    final Size size = MediaQuery.sizeOf(context);
+    if (size.width >= 720 ||
+        (size.width > size.height * 1.2 && size.width >= 560)) {
+      return 0;
+    }
+    final double textScale =
+        MediaQuery.textScalerOf(context).scale(1).clamp(1.0, 2.0);
+    return (236 * textScale).clamp(0.0, size.height * 0.5);
+  }
+
   /// Frames all members of the current family.
   void _fitToMembers() {
     final List<Member> members =
         _liveMembers().where((Member m) => m.position != null).toList();
     if (members.isEmpty) return;
     if (members.length == 1) {
-      _mapController.move(members.first.position!, 15);
+      _mapController.move(_aboveSheet(members.first.position!, 15), 15);
       return;
     }
     final LatLngBounds bounds = LatLngBounds.fromPoints(
       members.map((Member m) => m.position!).toList(),
     );
     _mapController.fitCamera(
-      CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(80)),
+      CameraFit.bounds(
+        bounds: bounds,
+        padding: EdgeInsets.fromLTRB(80, 80, 80, 80 + _bottomInset()),
+      ),
     );
   }
 

@@ -425,7 +425,10 @@ class DrivingDaysChart extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
           Text(label, style: small),
-          Container(height: 1, color: cs.outlineVariant),
+          Container(
+            height: 1,
+            color: cs.outlineVariant.withValues(alpha: 0.5),
+          ),
         ],
       ),
     );
@@ -482,7 +485,7 @@ class DrivingDaysChart extends StatelessWidget {
                         units: units,
                         fill: days[i].date == t0
                             ? brand.accentInk
-                            : cs.outline,
+                            : brand.accentInk.withValues(alpha: 0.45),
                         onTap: () => onSelect(
                           selected == days[i].date ? null : days[i].date,
                         ),
@@ -543,23 +546,35 @@ class _Bar extends StatelessWidget {
           children: <Widget>[
             SizedBox(
               height: DrivingDaysChart.plotHeight,
-              child: Align(
+              child: Stack(
                 alignment: Alignment.bottomCenter,
-                child: FractionallySizedBox(
-                  widthFactor: narrow ? 0.7 : 0.5,
-                  heightFactor: day.drives == 0 ? 0.0 : frac.clamp(0.03, 1.0),
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: fill,
-                      borderRadius: const BorderRadius.vertical(
-                        top: Radius.circular(AppRadius.sm / 2),
+                children: <Widget>[
+                  // Faint full-height rail so empty days still read as a slot.
+                  FractionallySizedBox(
+                    widthFactor: narrow ? 0.62 : 0.5,
+                    heightFactor: 1,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: cs.onSurface.withValues(alpha: 0.05),
+                        borderRadius: BorderRadius.circular(AppRadius.sm),
                       ),
-                      border: isSelected
-                          ? Border.all(color: cs.onSurface, width: 2)
-                          : null,
                     ),
                   ),
-                ),
+                  if (day.drives > 0)
+                    FractionallySizedBox(
+                      widthFactor: narrow ? 0.62 : 0.5,
+                      heightFactor: frac.clamp(0.05, 1.0),
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: fill,
+                          borderRadius: BorderRadius.circular(AppRadius.sm),
+                          border: isSelected
+                              ? Border.all(color: cs.onSurface, width: 2)
+                              : null,
+                        ),
+                      ),
+                    ),
+                ],
               ),
             ),
             const SizedBox(height: AppSpace.xs),

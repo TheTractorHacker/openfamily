@@ -252,7 +252,7 @@ func (s *Server) fanOutAlert(a alertRow, includeContacts bool) {
 
 	var pushSent, pushFailed int
 	if s.Push != nil && a.FamilyID != "" {
-		pushSent, pushFailed = s.pushFamilyAlert(ctx, a.FamilyID, a.UserID, a.ID, title, body)
+		pushSent, pushFailed = s.pushFamilyAlertFor(ctx, a.FamilyID, a.UserID, a.ID, title, body, alertMuteCategory(a.Type))
 	}
 
 	var smsSent, smsFailed int
@@ -477,4 +477,13 @@ func sharePageHTML(a alertRow) string {
 <p>%s</p>
 %s
 </body></html>`, html.EscapeString(title), html.EscapeString(title), html.EscapeString(when), html.EscapeString(a.Status), locHTML)
+}
+
+// alertMuteCategory maps an alert type to the preference that can silence it.
+// SOS and help return "": they are never muted.
+func alertMuteCategory(typ string) string {
+	if typ == alertCheckIn {
+		return "check_in"
+	}
+	return ""
 }

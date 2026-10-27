@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:local_auth/local_auth.dart' show BiometricType;
 
+import '../services/accent_preference.dart';
 import '../services/auth_service.dart';
 import '../services/battery_optimization_service.dart';
 import '../services/biometric_service.dart';
@@ -20,6 +21,7 @@ import 'driving_detection_screen.dart';
 import 'families_screen.dart';
 import 'server_config_screen.dart';
 import 'welcome_screen.dart';
+import 'notification_settings_screen.dart';
 import 'performance_screen.dart';
 import 'privacy_policy_screen.dart';
 import 'security_screen.dart';
@@ -416,6 +418,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             const DsSectionHeader('Appearance'),
             const _AppearanceTile(),
+            const _AccentTile(),
             const _MapStyleTile(),
             const UnitsSettingTile(),
             const DsSectionHeader('Privacy & Security'),
@@ -477,6 +480,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
               subtitle: pushNotificationsSubtitle(isWeb: kIsWeb),
               value: _notifications,
               onChanged: _notificationsLoading ? null : _setPushNotifications,
+            ),
+            DsListRow(
+              leading:
+                  DsListRow.iconTile(context, Icons.tune_outlined),
+              title: 'Notification settings',
+              subtitle: 'Place alerts, check-ins, drives, battery and more',
+              chevron: true,
+              onTap: () => push(const NotificationSettingsScreen()),
             ),
             const DsSectionHeader('About'),
             DsListRow(
@@ -577,6 +588,90 @@ class _LockDelayRow extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Accent color: the person's own pick, or "Server default" to follow the
+/// operator's choice.
+class _AccentTile extends StatelessWidget {
+  const _AccentTile();
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme cs = Theme.of(context).colorScheme;
+    return ValueListenableBuilder<Color?>(
+      valueListenable: AccentPreferenceService.user,
+      builder: (context, mine, _) {
+        final int? mineRgb = mine == null ? null : mine.toARGB32() & 0xFFFFFF;
+        Widget swatch(Color c, String name) {
+          final bool on = mineRgb == (c.toARGB32() & 0xFFFFFF);
+          return Semantics(
+            button: true,
+            selected: on,
+            label: name,
+            child: InkResponse(
+              onTap: () => AccentPreferenceService.setUser(c),
+              radius: 28,
+              child: Container(
+                width: kMinTarget - 8,
+                height: kMinTarget - 8,
+                decoration: BoxDecoration(
+                  color: c,
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: on ? cs.onSurface : cs.outlineVariant,
+                    width: on ? 3 : 1.5,
+                  ),
+                ),
+                child: on
+                    ? Icon(Icons.check, size: 20, color: onAccentFor(c))
+                    : null,
+              ),
+            ),
+          );
+        }
+
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(
+            AppSpace.xl,
+            AppSpace.sm,
+            AppSpace.xl,
+            AppSpace.lg,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Semantics(
+                header: true,
+                child: const Text('Accent color', style: AppType.body),
+              ),
+              const SizedBox(height: AppSpace.xs),
+              Text(
+                mine == null
+                    ? 'Using the color your server chose.'
+                    : 'Your own color, on this device.',
+                style: AppType.secondary.copyWith(color: cs.onSurfaceVariant),
+              ),
+              const SizedBox(height: AppSpace.md),
+              Wrap(
+                spacing: AppSpace.md,
+                runSpacing: AppSpace.md,
+                children: <Widget>[
+                  for (final c in kAccentChoices) swatch(c.color, c.name),
+                ],
+              ),
+              const SizedBox(height: AppSpace.sm),
+              TextButton(
+                onPressed: mine == null
+                    ? null
+                    : () => AccentPreferenceService.setUser(null),
+                child: const Text('Use server default'),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

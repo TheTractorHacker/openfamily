@@ -578,8 +578,12 @@ class _LocationTabViewState extends State<LocationTabView> {
           child: Column(
             children: <Widget>[
               if (handle) const DsDragHandle() else SizedBox(height: topInset),
-              DsSegmentedTabs(
+              _SheetTabChips(
                 labels: const <String>['People', 'Places'],
+                icons: const <IconData>[
+                  Icons.groups_rounded,
+                  Icons.place_rounded,
+                ],
                 selected: _tab,
                 onChanged: (int i) => setState(() => _tab = i),
               ),
@@ -781,6 +785,87 @@ class _LocationTabViewState extends State<LocationTabView> {
         ),
       ),
     ];
+  }
+}
+
+/// Life360-style row of rounded chips under the sheet handle: the active one
+/// is filled dark, the others float as light cards.
+class _SheetTabChips extends StatelessWidget {
+  const _SheetTabChips({
+    required this.labels,
+    required this.icons,
+    required this.selected,
+    required this.onChanged,
+  });
+
+  final List<String> labels;
+  final List<IconData> icons;
+  final int selected;
+  final ValueChanged<int> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final BrandTheme brand = BrandTheme.of(context);
+    final ColorScheme cs = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: AppSpace.lg),
+      child: Row(
+        children: <Widget>[
+          for (int i = 0; i < labels.length; i++) ...<Widget>[
+            if (i > 0) const SizedBox(width: AppSpace.sm),
+            Expanded(
+              child: Semantics(
+                button: true,
+                selected: i == selected,
+                label: labels[i],
+                excludeSemantics: true,
+                onTap: () => onChanged(i),
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => onChanged(i),
+                  child: AnimatedContainer(
+                    duration: AppMotion.of(context, AppMotion.fast),
+                    constraints: const BoxConstraints(minHeight: kMinTarget),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpace.md,
+                      vertical: AppSpace.sm,
+                    ),
+                    decoration: BoxDecoration(
+                      color: i == selected ? cs.onSurface : brand.paper,
+                      borderRadius: BorderRadius.circular(18),
+                      boxShadow: i == selected ? null : kFloatShadow,
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: <Widget>[
+                        Icon(
+                          icons[i],
+                          size: 20,
+                          color: i == selected ? cs.surface : cs.onSurface,
+                        ),
+                        const SizedBox(width: AppSpace.sm),
+                        Flexible(
+                          child: Text(
+                            labels[i],
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: AppType.body.copyWith(
+                              fontWeight: FontWeight.w700,
+                              color:
+                                  i == selected ? cs.surface : cs.onSurface,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
   }
 }
 
@@ -986,6 +1071,72 @@ class _RowMemo {
   final Widget widget;
 }
 
+/// Avatar with a small battery-level badge on its corner, as in Life360.
+class _AvatarWithBattery extends StatelessWidget {
+  const _AvatarWithBattery({required this.member});
+
+  final Member member;
+
+  @override
+  Widget build(BuildContext context) {
+    final int pct = member.batteryPercent;
+    final ColorScheme cs = Theme.of(context).colorScheme;
+    final bool low = pct > 0 && pct <= 20;
+    return SizedBox(
+      width: 52,
+      height: 52,
+      child: Stack(
+        clipBehavior: Clip.none,
+        alignment: Alignment.center,
+        children: <Widget>[
+          StatusAvatar(member: member, size: 44),
+          if (pct > 0)
+            Positioned(
+              bottom: -2,
+              left: 0,
+              child: ExcludeSemantics(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: cs.surface,
+                    borderRadius: BorderRadius.circular(AppRadius.pill),
+                    border: Border.all(color: cs.outlineVariant),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 5,
+                      vertical: 1,
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: <Widget>[
+                        Icon(
+                          low
+                              ? Icons.battery_alert_rounded
+                              : Icons.battery_full_rounded,
+                          size: 11,
+                          color: low ? AppColors.statusRed : cs.onSurface,
+                        ),
+                        const SizedBox(width: 2),
+                        Text(
+                          '$pct%',
+                          style: AppType.secondary.copyWith(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            color: low ? AppColors.statusRed : cs.onSurface,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
 class _PersonRow extends StatelessWidget {
   const _PersonRow({
     super.key,
@@ -1040,7 +1191,7 @@ class _PersonRow extends StatelessWidget {
           wash: false,
           semanticLabel:
               '${member.name}. $status.${battery == null ? '' : ' $battery.'}',
-          leading: StatusAvatar(member: member, size: 44),
+          leading: _AvatarWithBattery(member: member),
           onTap: onTap,
           trailing: Column(
             crossAxisAlignment: CrossAxisAlignment.end,

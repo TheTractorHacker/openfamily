@@ -130,11 +130,22 @@ func main() {
 	// Background reconciliation self-heals any geofence evaluation that failed
 	// or was interrupted during ingest.
 	go srv.ReconcileGeofences(ctx)
+	if err := srv.EnsureCrashSchema(ctx); err != nil {
+		slog.Error("crash schema", "err", err)
+		os.Exit(1)
+	}
 	if err := srv.EnsureDawarichSchema(ctx); err != nil {
 		slog.Error("dawarich schema", "err", err)
 		os.Exit(1)
 	}
 	go srv.RunDawarichSync(ctx)
+	if err := srv.EnsureNotificationSchema(ctx); err != nil {
+		slog.Error("notification prefs schema", "err", err)
+		os.Exit(1)
+	}
+	if err := srv.EnsureThemeSchema(ctx); err != nil {
+		slog.Warn("theme schema", "err", err)
+	}
 
 	// Segment new locations into trips (bounded, cancelled with ctx).
 	go (&trips.Worker{Store: trips.NewStore(pool)}).Run(ctx)
@@ -198,6 +209,8 @@ func main() {
 		r.Get("/me/contacts", srv.ListContacts)
 		r.Post("/me/contacts", srv.CreateContact)
 		r.Delete("/me/contacts/{id}", srv.DeleteContact)
+		r.Get("/me/notifications", srv.GetNotificationPrefs)
+		r.Put("/me/notifications", srv.PutNotificationPrefs)
 
 		// Account profile and avatar are deliberately private to the caller.
 		r.Get("/api/profile", srv.GetProfile)
@@ -264,6 +277,9 @@ func main() {
 		r.Post("/alerts/help", srv.PostHelp)
 		r.Post("/alerts/sos", srv.PostSOS)
 		r.Get("/alerts", srv.ListAlerts)
+		r.Get("/crashes", srv.ListCrashes)
+		r.Put("/crashes/settings", srv.SetCrashDetection)
+		r.Post("/crashes/{id}/status", srv.SetCrashStatus)
 		r.Get("/alerts/{id}", srv.GetAlert)
 		r.Post("/alerts/{id}/resolve", srv.ResolveAlert)
 		r.Post("/alerts/{id}/ack", srv.AckAlert)
@@ -331,6 +347,8 @@ func main() {
 		r.Get("/api/admin/settings/sms", srv.AdminGetSMSSettings)
 		r.Put("/api/admin/settings/sms", srv.AdminPutSMSSettings)
 		r.Delete("/api/admin/settings/sms", srv.AdminDeleteSMSSettings)
+		r.Get("/api/admin/settings/theme", srv.AdminGetTheme)
+		r.Put("/api/admin/settings/theme", srv.AdminPutTheme)
 		r.Get("/api/admin/settings/dawarich", srv.AdminGetDawarich)
 		r.Put("/api/admin/settings/dawarich", srv.AdminPutDawarich)
 		r.Delete("/api/admin/settings/dawarich", srv.AdminDeleteDawarich)

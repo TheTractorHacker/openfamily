@@ -442,6 +442,17 @@ export function getApkStatus(): Promise<ApkStatus> {
   return request<ApkStatus>('/api/admin/apk/status')
 }
 
+export function getThemeSettings(): Promise<{ default_accent: string }> {
+  return request<{ default_accent: string }>('/api/admin/settings/theme')
+}
+
+export function updateThemeSettings(defaultAccent: string): Promise<{ default_accent: string }> {
+  return request<{ default_accent: string }>('/api/admin/settings/theme', {
+    method: 'PUT',
+    body: { default_accent: defaultAccent },
+  })
+}
+
 export function getSmsSettings(): Promise<SmsSettings> {
   return request<SmsSettings>('/api/admin/settings/sms')
 }
