@@ -483,9 +483,13 @@ class DrivingDaysChart extends StatelessWidget {
                                 : '')
                             : _weekdays[days[i].date.weekday - 1],
                         units: units,
-                        fill: days[i].date == t0
-                            ? brand.accentInk
-                            : brand.accentInk.withValues(alpha: 0.45),
+                        showValue: !month || selected == days[i].date,
+                        fill: _barFill(
+                          brand.accentInk,
+                          isToday: days[i].date == t0,
+                          isSelected: selected == days[i].date,
+                          anySelected: selected != null,
+                        ),
                         onTap: () => onSelect(
                           selected == days[i].date ? null : days[i].date,
                         ),
@@ -501,6 +505,24 @@ class DrivingDaysChart extends StatelessWidget {
   }
 }
 
+/// Bar colour: today and the selected day are solid; the rest are softened
+/// (less so when nothing is selected) but stay clearly readable.
+Color _barFill(
+  Color base, {
+  required bool isToday,
+  required bool isSelected,
+  required bool anySelected,
+}) {
+  if (isSelected || (isToday && !anySelected)) return base;
+  return base.withValues(alpha: anySelected ? 0.5 : 0.7);
+}
+
+/// Compact value shown above a bar ("52", "8.4").
+String barValueLabel(double v) {
+  if (v >= 10) return v.round().toString();
+  return v.toStringAsFixed(1);
+}
+
 class _Bar extends StatelessWidget {
   const _Bar({
     required this.day,
@@ -511,9 +533,11 @@ class _Bar extends StatelessWidget {
     required this.label,
     required this.units,
     required this.fill,
+    required this.showValue,
     required this.onTap,
   });
 
+  final bool showValue;
   final ReportDay day;
   final double value;
   final double frac;
@@ -548,6 +572,7 @@ class _Bar extends StatelessWidget {
               height: DrivingDaysChart.plotHeight,
               child: Stack(
                 alignment: Alignment.bottomCenter,
+                clipBehavior: Clip.none,
                 children: <Widget>[
                   // Faint full-height rail so empty days still read as a slot.
                   FractionallySizedBox(
@@ -571,6 +596,23 @@ class _Bar extends StatelessWidget {
                           border: isSelected
                               ? Border.all(color: cs.onSurface, width: 2)
                               : null,
+                        ),
+                      ),
+                    ),
+                  if (day.drives > 0 && showValue)
+                    Positioned(
+                      left: -8,
+                      right: -8,
+                      bottom: frac.clamp(0.05, 1.0) * DrivingDaysChart.plotHeight + 2,
+                      child: Text(
+                        barValueLabel(value),
+                        key: ValueKey<String>('bar-value-${day.date.toIso8601String()}'),
+                        textAlign: TextAlign.center,
+                        maxLines: 1,
+                        style: AppType.secondary.copyWith(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: cs.onSurface,
                         ),
                       ),
                     ),

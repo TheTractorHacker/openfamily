@@ -1,4 +1,3 @@
-import 'dart:math' as math;
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -352,6 +351,10 @@ class _PlacePickerScreenState extends State<PlacePickerScreen> {
   Widget build(BuildContext context) {
     final BrandTheme brand = BrandTheme.of(context);
     final ColorScheme cs = Theme.of(context).colorScheme;
+    // Read here: the Scaffold strips the keyboard inset from its body's
+    // MediaQuery (it resizes the body instead), so inside the body it is
+    // always zero.
+    final bool keyboard = MediaQuery.viewInsetsOf(context).bottom > 0;
     return Scaffold(
       appBar: AppBar(
         title: Text(
@@ -376,7 +379,6 @@ class _PlacePickerScreenState extends State<PlacePickerScreen> {
           builder: (BuildContext context, BoxConstraints box) {
             final bool wide = box.maxWidth >= 720 ||
                 (box.maxWidth > box.maxHeight * 1.2 && box.maxWidth >= 560);
-            final bool keyboard = MediaQuery.viewInsetsOf(context).bottom > 0;
             final Widget mapPane = _mapPane(
               brand,
               cs,
@@ -395,18 +397,18 @@ class _PlacePickerScreenState extends State<PlacePickerScreen> {
                 ],
               );
             }
-            // The form takes at most this share of the screen (more with the
-            // keyboard up) so the map stays visible and the form scrolls.
-            final double panelMax = keyboard
-                ? math.max(box.maxHeight * 0.6, box.maxHeight - 130)
-                : box.maxHeight * 0.6;
+            // The map takes a fixed share of the height (a thin strip while
+            // the keyboard is up, gone on very short screens) and the form
+            // gets the rest: it scrolls, with Save pinned below it.
+            final double mapH = keyboard
+                ? (box.maxHeight < 240
+                    ? 0.0
+                    : (box.maxHeight * 0.18).clamp(72.0, 120.0))
+                : (box.maxHeight * 0.34).clamp(160.0, 420.0);
             return Column(
               children: <Widget>[
-                Expanded(child: mapPane),
-                ConstrainedBox(
-                  constraints: BoxConstraints(maxHeight: panelMax),
-                  child: _panel(brand, cs),
-                ),
+                if (mapH > 0) SizedBox(height: mapH, child: mapPane),
+                Expanded(child: _panel(brand, cs)),
               ],
             );
           },
@@ -428,7 +430,7 @@ class _PlacePickerScreenState extends State<PlacePickerScreen> {
                 AppSpace.lg,
                 AppSpace.lg,
                 AppSpace.lg,
-                AppSpace.sm,
+                AppSpace.lg,
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -502,24 +504,19 @@ class _PlacePickerScreenState extends State<PlacePickerScreen> {
                       onChanged: (double v) =>
                           setState(() => _radiusMeters = v),
                     ),
-                    SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: Row(
-                        children: <Widget>[
-                          for (final double preset in _radiusPresets)
-                            Padding(
-                              padding: const EdgeInsets.only(
-                                right: AppSpace.sm,
-                              ),
-                              child: ChoiceChip(
-                                label: Text(_formatRadius(preset)),
-                                selected: (_radiusMeters - preset).abs() < 1,
-                                onSelected: (_) =>
-                                    setState(() => _radiusMeters = preset),
-                              ),
-                            ),
-                        ],
-                      ),
+                    Wrap(
+                      spacing: AppSpace.sm,
+                      runSpacing: AppSpace.xs,
+                      children: <Widget>[
+                        for (final double preset in _radiusPresets)
+                          ChoiceChip(
+                            key: ValueKey<String>('radius-${preset.round()}'),
+                            label: Text(_formatRadius(preset)),
+                            selected: (_radiusMeters - preset).abs() < 1,
+                            onSelected: (_) =>
+                                setState(() => _radiusMeters = preset),
+                          ),
+                      ],
                     ),
                 ],
               ),
