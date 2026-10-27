@@ -77,7 +77,9 @@ func (s *Server) consumeInviteCode(ctx context.Context, tx pgx.Tx, code string) 
 	)
 	err := tx.QueryRow(ctx, `
 		SELECT id, family_id, role, max_uses, uses, expires_at
-		FROM invite_codes WHERE code = $1 FOR UPDATE`, code,
+		FROM invite_codes ic WHERE code = $1
+		  AND NOT EXISTS (SELECT 1 FROM circles c WHERE c.id = COALESCE(ic.circle_id, ic.family_id) AND NOT `+circleLiveSQL+`)
+		FOR UPDATE`, code,
 	).Scan(&id, &familyID, &role, &maxUses, &uses, &expiresAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", "", &inviteError{msg: "invalid invite code"}

@@ -9,11 +9,11 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5"
 	"github.com/TheTractorHacker/openfamily/backend/internal/circles"
 	"github.com/TheTractorHacker/openfamily/backend/internal/middleware"
 	"github.com/TheTractorHacker/openfamily/backend/internal/models"
+	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 )
 
 // Circle API (stage 1). Every handler authorizes through internal/circles;
@@ -23,7 +23,47 @@ const (
 	maxCirclesPerUser = 25
 	maxCircleNameLen  = 100
 	maxCircleIconLen  = 32
+
+	// Temporary circles: bounds for the lifetime a client may request, and how
+	// long a circle lingers (invisible, extendable by an admin) before the
+	// purge loop deletes it.
+	minTempCircle       = time.Hour
+	maxTempCircle       = 30 * 24 * time.Hour
+	tempCircleGrace     = 7 * 24 * time.Hour
+	circlePurgeInterval = 10 * time.Minute
 )
+
+// resolveCircleExpiry turns the client's expires_at / duration_hours into an
+// absolute expiry. Both nil means a permanent circle (nil result). The result
+// must lie between minTempCircle and maxTempCircle from now.
+func resolveCircleExpiry(now time.Time, at *time.Time, hours *int) (*time.Time, error) {
+	if at != nil && hours != nil {
+		return nil, errors.New("send expires_at or duration_hours, not both")
+	}
+	var exp time.Time
+	switch {
+	case at != nil:
+		exp = *at
+	case hours != nil:
+		if *hours < 1 || *hours > int(maxTempCircle/time.Hour) {
+			return nil, errors.New("duration_hours must be between 1 and 720")
+		}
+		exp = now.Add(time.Duration(*hours) * time.Hour)
+	default:
+		return nil, nil
+	}
+	if exp.Before(now.Add(minTempCircle - time.Minute)) {
+		return nil, errors.New("a temporary circle must last at least 1 hour")
+	}
+	if exp.After(now.Add(maxTempCircle + time.Minute)) {
+		return nil, errors.New("a temporary circle can last at most 30 days")
+	}
+	exp = exp.UTC()
+	return &exp, nil
+}
+
+// circleLiveSQL is true for a circle (alias c) that has neither ended nor expired.
+const circleLiveSQL = `(c.ended_at IS NULL AND (c.expires_at IS NULL OR c.expires_at > now()))`
 
 // circleOut is the API representation of a circle for its caller.
 type circleOut struct {
@@ -37,6 +77,9 @@ type circleOut struct {
 	JoinedAt       time.Time    `json:"joined_at"`
 	MemberCount    int          `json:"member_count"`
 	IsPrimary      bool         `json:"is_primary"`
+	// ExpiresAt is set for a temporary circle (null = permanent). A circle past
+	// it is no longer listed or served.
+	ExpiresAt *time.Time `json:"expires_at"`
 }
 
 type circleMemberOut struct {
@@ -173,11 +216,18 @@ func (s *Server) CreateCircle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Name string `json:"name"`
-		Icon string `json:"icon"`
+		Name          string     `json:"name"`
+		Icon          string     `json:"icon"`
+		ExpiresAt     *time.Time `json:"expires_at"`
+		DurationHours *int       `json:"duration_hours"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	expires, err := resolveCircleExpiry(time.Now(), req.ExpiresAt, req.DurationHours)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	name, ok := cleanCircleName(req.Name)
@@ -208,7 +258,7 @@ func (s *Server) CreateCircle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var n int
-	if err := tx.QueryRow(r.Context(), `SELECT count(*) FROM circle_members WHERE user_id = $1`, uid).Scan(&n); err != nil {
+	if err := tx.QueryRow(r.Context(), `SELECT count(*) FROM live_circle_members WHERE user_id = $1`, uid).Scan(&n); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to count circles")
 		return
 	}
@@ -219,9 +269,9 @@ func (s *Server) CreateCircle(w http.ResponseWriter, r *http.Request) {
 
 	out := circleOut{Role: circles.RoleAdmin, SharingEnabled: true}
 	err = tx.QueryRow(r.Context(), `
-		INSERT INTO circles (name, icon, created_by) VALUES ($1, $2, $3)
-		RETURNING id, name, icon, created_by, created_at`, name, iconArg, uid,
-	).Scan(&out.ID, &out.Name, &out.Icon, &out.CreatedBy, &out.CreatedAt)
+		INSERT INTO circles (name, icon, created_by, expires_at) VALUES ($1, $2, $3, $4)
+		RETURNING id, name, icon, created_by, created_at, expires_at`, name, iconArg, uid, expires,
+	).Scan(&out.ID, &out.Name, &out.Icon, &out.CreatedBy, &out.CreatedAt, &out.ExpiresAt)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create circle")
 		return
@@ -254,11 +304,11 @@ func (s *Server) ListCircles(w http.ResponseWriter, r *http.Request) {
 		SELECT c.id, c.name, c.icon, c.created_by, c.created_at,
 		       cm.role, cm.sharing_enabled, cm.joined_at,
 		       (SELECT count(*) FROM circle_members x WHERE x.circle_id = c.id),
-		       COALESCE(u.family_id = c.id, false)
+		       COALESCE(u.family_id = c.id, false), c.expires_at
 		FROM circle_members cm
 		JOIN circles c ON c.id = cm.circle_id
 		JOIN users u ON u.id = cm.user_id
-		WHERE cm.user_id = $1
+		WHERE cm.user_id = $1 AND `+circleLiveSQL+`
 		ORDER BY cm.joined_at, c.id`, uid)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list circles")
@@ -269,7 +319,7 @@ func (s *Server) ListCircles(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var c circleOut
 		if err := rows.Scan(&c.ID, &c.Name, &c.Icon, &c.CreatedBy, &c.CreatedAt,
-			&c.Role, &c.SharingEnabled, &c.JoinedAt, &c.MemberCount, &c.IsPrimary); err != nil {
+			&c.Role, &c.SharingEnabled, &c.JoinedAt, &c.MemberCount, &c.IsPrimary, &c.ExpiresAt); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to read circles")
 			return
 		}
@@ -282,22 +332,46 @@ func (s *Server) ListCircles(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// UpdateCircle renames a circle or changes its icon (circle admin only).
+// UpdateCircle renames a circle, changes its icon, or (temporary circles only)
+// extends or ends it. Circle admin only.
+//
+// Lifetime changes: expires_at sets an absolute new expiry, extend_hours adds
+// to the current expiry (or to now when it already lapsed), end:true ends the
+// circle immediately. Only a temporary circle can be extended or ended, and a
+// circle that lapsed on its own can be extended until the purge loop deletes
+// it; one ended early cannot be revived. Name and icon edits need a live circle.
 func (s *Server) UpdateCircle(w http.ResponseWriter, r *http.Request) {
-	uid, m, ok := s.requireCircleAdmin(w, r)
+	uid, ok := circleCaller(w, r)
 	if !ok {
 		return
 	}
+	m, err := circles.New(s.Pool).RequireGraceAdmin(r.Context(), uid, chi.URLParam(r, "id"))
+	if err != nil {
+		circleAuthError(w, err)
+		return
+	}
 	var req struct {
-		Name *string `json:"name"`
-		Icon *string `json:"icon"`
+		Name        *string    `json:"name"`
+		Icon        *string    `json:"icon"`
+		ExpiresAt   *time.Time `json:"expires_at"`
+		ExtendHours *int       `json:"extend_hours"`
+		End         bool       `json:"end"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if req.Name == nil && req.Icon == nil {
+	lifetime := req.ExpiresAt != nil || req.ExtendHours != nil || req.End
+	if req.Name == nil && req.Icon == nil && !lifetime {
 		writeError(w, http.StatusBadRequest, "nothing to update")
+		return
+	}
+	if req.End && (req.ExpiresAt != nil || req.ExtendHours != nil) {
+		writeError(w, http.StatusBadRequest, "end cannot be combined with an expiry change")
+		return
+	}
+	if req.ExpiresAt != nil && req.ExtendHours != nil {
+		writeError(w, http.StatusBadRequest, "send expires_at or extend_hours, not both")
 		return
 	}
 	tx, err := s.Pool.Begin(r.Context())
@@ -306,6 +380,66 @@ func (s *Server) UpdateCircle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback(r.Context())
+
+	// Lock the circle row so a concurrent extend/end/purge is serialized.
+	var curExpires, curEnded *time.Time
+	if err := tx.QueryRow(r.Context(),
+		`SELECT expires_at, ended_at FROM circles WHERE id = $1 FOR UPDATE`, m.CircleID,
+	).Scan(&curExpires, &curEnded); err != nil {
+		writeError(w, http.StatusNotFound, "circle not found")
+		return
+	}
+	now := time.Now()
+	live := curEnded == nil && (curExpires == nil || curExpires.After(now))
+	if !live && !lifetime {
+		writeError(w, http.StatusNotFound, "circle not found")
+		return
+	}
+	lifetimeAction := ""
+	if lifetime {
+		if curExpires == nil {
+			writeError(w, http.StatusConflict, "only a temporary circle can be extended or ended")
+			return
+		}
+		if req.End {
+			if !live {
+				writeError(w, http.StatusNotFound, "circle not found")
+				return
+			}
+			if _, err := tx.Exec(r.Context(), `UPDATE circles SET ended_at = now() WHERE id = $1`, m.CircleID); err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to end circle")
+				return
+			}
+			lifetimeAction = "circle.ended"
+		} else {
+			var target *time.Time
+			if req.ExtendHours != nil {
+				if *req.ExtendHours < 1 || *req.ExtendHours > int(maxTempCircle/time.Hour) {
+					writeError(w, http.StatusBadRequest, "extend_hours must be between 1 and 720")
+					return
+				}
+				base := *curExpires
+				if base.Before(now) {
+					base = now
+				}
+				t := base.Add(time.Duration(*req.ExtendHours) * time.Hour)
+				target = &t
+			} else {
+				target = req.ExpiresAt
+			}
+			// Whatever the route, the new expiry must be in the future and at
+			// most 30 days away from now.
+			if target.Before(now.Add(minTempCircle-time.Minute)) || target.After(now.Add(maxTempCircle+time.Minute)) {
+				writeError(w, http.StatusBadRequest, "expiry must be between 1 hour and 30 days from now")
+				return
+			}
+			if _, err := tx.Exec(r.Context(), `UPDATE circles SET expires_at = $1 WHERE id = $2`, target.UTC(), m.CircleID); err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to extend circle")
+				return
+			}
+			lifetimeAction = "circle.extended"
+		}
+	}
 	if req.Name != nil {
 		name, ok := cleanCircleName(*req.Name)
 		if !ok {
@@ -339,8 +473,8 @@ func (s *Server) UpdateCircle(w http.ResponseWriter, r *http.Request) {
 	}
 	var c circleOut
 	if err := tx.QueryRow(r.Context(), `
-		SELECT id, name, icon, created_by, created_at FROM circles WHERE id = $1`, m.CircleID,
-	).Scan(&c.ID, &c.Name, &c.Icon, &c.CreatedBy, &c.CreatedAt); err != nil {
+		SELECT id, name, icon, created_by, created_at, expires_at FROM circles WHERE id = $1`, m.CircleID,
+	).Scan(&c.ID, &c.Name, &c.Icon, &c.CreatedBy, &c.CreatedAt, &c.ExpiresAt); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to read circle")
 		return
 	}
@@ -349,7 +483,20 @@ func (s *Server) UpdateCircle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c.Role, c.SharingEnabled, c.JoinedAt = m.Role, m.SharingEnabled, m.JoinedAt
-	s.auditCircle(r.Context(), uid, m.CircleID, "circle.updated", "updated circle", clientIP(r))
+	if s.hub != nil {
+		if req.End {
+			s.hub.unsubscribeCircle(m.CircleID)
+		} else if lifetimeAction == "circle.extended" {
+			// A circle revived from its grace period was unsubscribed when it
+			// lapsed; put its members' sockets back.
+			s.resubscribeCircle(r.Context(), m.CircleID)
+		}
+	}
+	if lifetimeAction != "" {
+		s.auditCircle(r.Context(), uid, m.CircleID, lifetimeAction, "changed circle lifetime", clientIP(r))
+	} else {
+		s.auditCircle(r.Context(), uid, m.CircleID, "circle.updated", "updated circle", clientIP(r))
+	}
 	writeJSON(w, http.StatusOK, c)
 }
 
@@ -423,7 +570,7 @@ func (s *Server) ListCircleMembers(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := s.Pool.Query(r.Context(), `
 		SELECT u.id, u.name, cm.role, cm.sharing_enabled, cm.joined_at
-		FROM circle_members cm JOIN users u ON u.id = cm.user_id
+		FROM live_circle_members cm JOIN users u ON u.id = cm.user_id
 		WHERE cm.circle_id = $1
 		ORDER BY u.name, u.id`, m.CircleID)
 	if err != nil {
@@ -810,7 +957,7 @@ func (s *Server) JoinCircle(w http.ResponseWriter, r *http.Request) {
 	err = tx.QueryRow(r.Context(), `
 		SELECT ic.id, COALESCE(ic.circle_id, ic.family_id), ic.family_id, ic.role, ic.max_uses, ic.uses, ic.expires_at
 		FROM invite_codes ic
-		JOIN circles c ON c.id = COALESCE(ic.circle_id, ic.family_id)
+		JOIN circles c ON c.id = COALESCE(ic.circle_id, ic.family_id) AND `+circleLiveSQL+`
 		WHERE ic.code = $1 FOR UPDATE OF ic`, code,
 	).Scan(&inviteID, &circleID, &familyID, &role, &maxUses, &uses, &expiresAt)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -837,7 +984,7 @@ func (s *Server) JoinCircle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var n int
-	if err := tx.QueryRow(r.Context(), `SELECT count(*) FROM circle_members WHERE user_id = $1`, uid).Scan(&n); err != nil {
+	if err := tx.QueryRow(r.Context(), `SELECT count(*) FROM live_circle_members WHERE user_id = $1`, uid).Scan(&n); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to count circles")
 		return
 	}

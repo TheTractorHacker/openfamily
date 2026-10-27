@@ -54,8 +54,8 @@ func (s *Server) UpdateFamilyMember(w http.ResponseWriter, r *http.Request) {
 		SELECT COUNT(*) > 0,
 		       COALESCE(bool_or(cm.role = 'admin'), false),
 		       (array_agg(cm.circle_id ORDER BY (cm.role = 'admin') DESC, cm.joined_at))[1]
-		FROM circle_members cm
-		JOIN circle_members tm ON tm.circle_id = cm.circle_id AND tm.user_id = $2
+		FROM live_circle_members cm
+		JOIN live_circle_members tm ON tm.circle_id = cm.circle_id AND tm.user_id = $2
 		WHERE cm.user_id = $1`, claims.UserID, targetID).Scan(&shared, &adminOf, &circleID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load member")

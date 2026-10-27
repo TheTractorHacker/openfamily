@@ -47,12 +47,17 @@ abstract class CircleService {
 
   Future<String> myUserId();
   Future<List<Circle>> listCircles();
-  Future<Circle> createCircle(String name, String? icon);
+  Future<Circle> createCircle(String name, String? icon, {int? durationHours});
   Future<void> updateCircle(String id, {String? name, String? icon});
 
   /// Deletes a circle. Without [force] the server refuses (409) when it is
   /// the only circle of some member.
   Future<void> deleteCircle(String id, {bool force = false});
+
+  /// Temporary circles (admin): add [hours] to the expiry, or end it now.
+  Future<Circle> extendCircle(String id, int hours);
+  Future<void> endCircle(String id);
+
   Future<List<CircleMember>> listMembers(String id);
 
   /// Removes [userId] from the circle; pass `me` to leave.
@@ -90,12 +95,23 @@ class ApiCircleService implements CircleService {
       _rows(await ApiClient.get('/circles')).map(Circle.fromJson).toList());
 
   @override
-  Future<Circle> createCircle(String name, String? icon) =>
+  Future<Circle> createCircle(String name, String? icon,
+          {int? durationHours}) =>
       _wrap(() async => Circle.fromJson(await ApiClient.post('/circles',
           body: <String, dynamic>{
             'name': name,
             if (icon != null && icon.isNotEmpty) 'icon': icon,
+            if (durationHours != null) 'duration_hours': durationHours,
           }) as Map<String, dynamic>));
+
+  @override
+  Future<Circle> extendCircle(String id, int hours) =>
+      _wrap(() async => Circle.fromJson(await ApiClient.patch('/circles/$id',
+          body: <String, dynamic>{'extend_hours': hours}) as Map<String, dynamic>));
+
+  @override
+  Future<void> endCircle(String id) => _wrap(() =>
+      ApiClient.patch('/circles/$id', body: <String, dynamic>{'end': true}));
 
   @override
   Future<void> updateCircle(String id, {String? name, String? icon}) =>

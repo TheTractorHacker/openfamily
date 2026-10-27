@@ -260,7 +260,7 @@ func (s *Server) ListLiveShares(w http.ResponseWriter, r *http.Request) {
 		JOIN users u ON u.id = ls.owner_id
 		LEFT JOIN member_positions mp ON mp.user_id = ls.owner_id
 		WHERE ls.viewer_id = $1 AND ls.expires_at > now()
-		  AND EXISTS (SELECT 1 FROM circle_members a JOIN circle_members b ON b.circle_id = a.circle_id
+		  AND EXISTS (SELECT 1 FROM live_circle_members a JOIN live_circle_members b ON b.circle_id = a.circle_id
 		              WHERE a.user_id = ls.viewer_id AND b.user_id = ls.owner_id)
 		ORDER BY ls.expires_at, ls.id`, claims.UserID)
 	if err != nil {

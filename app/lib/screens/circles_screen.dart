@@ -195,7 +195,8 @@ class _CircleTile extends StatelessWidget {
     return Semantics(
       button: true,
       label: '${circle.name}, ${circle.isAdmin ? 'admin' : 'member'}, '
-          '$members, location ${sharing ? 'shared' : 'not shared'}',
+          '$members, location ${sharing ? 'shared' : 'not shared'}'
+          '${circle.expiresAt != null ? ', ${circleTimeLeftLabel(circle.expiresAt!, DateTime.now().toUtc()).toLowerCase()}' : ''}',
       excludeSemantics: true,
       onTap: onTap,
       child: Padding(
@@ -229,6 +230,8 @@ class _CircleTile extends StatelessWidget {
                             crossAxisAlignment: WrapCrossAlignment.center,
                             children: <Widget>[
                               RoleBadge(role: circle.role),
+                              if (circle.expiresAt != null)
+                                CircleCountdownChip(expiresAt: circle.expiresAt!),
                               Text(members,
                                   style: AppType.secondary
                                       .copyWith(color: cs.onSurfaceVariant)),

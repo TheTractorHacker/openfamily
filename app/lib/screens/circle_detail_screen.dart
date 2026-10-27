@@ -9,6 +9,13 @@ import '../theme/app_theme.dart';
 import '../widgets/ds/ds.dart';
 import '../widgets/circle_widgets.dart';
 
+/// Extension presets for an admin, label to hours.
+const Map<String, int> kTempCircleExtensions = <String, int>{
+  '1 day': 24,
+  '3 days': 72,
+  '1 week': 168,
+};
+
 /// One circle: my sharing switch, members (with role changes and removal for
 /// admins), invite codes (admins), leave and delete.
 class CircleDetailScreen extends StatefulWidget {
@@ -247,6 +254,60 @@ class _CircleDetailScreenState extends State<CircleDetailScreen> {
     }
   }
 
+  Future<void> _extend(int hours) async {
+    Circle? updated;
+    final bool ok = await _run(() async {
+      updated = await _service.extendCircle(_circle.id, hours);
+    }, done: 'Circle extended');
+    if (ok && updated != null && mounted) {
+      setState(() => _circle = _circle.copyWith(expiresAt: updated!.expiresAt));
+    }
+  }
+
+  Future<void> _endNow() async {
+    if (!await _confirm(
+        'End ${_circle.name} now?',
+        'Everyone stops seeing each other in this circle right away. '
+            'This cannot be undone.',
+        'End now')) {
+      return;
+    }
+    if (await _run(() => _service.endCircle(_circle.id)) && mounted) {
+      Navigator.of(context).pop();
+    }
+  }
+
+  /// Admin sheet for a temporary circle: extend by a preset, or end it now.
+  Future<void> _manageLifetime() async {
+    final String? choice = await showModalBottomSheet<String>(
+      context: context,
+      builder: (BuildContext ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            for (final MapEntry<String, int> p in kTempCircleExtensions.entries)
+              ListTile(
+                leading: const Icon(Icons.more_time),
+                title: Text('Extend by ${p.key}'),
+                onTap: () => Navigator.of(ctx).pop('extend:${p.value}'),
+              ),
+            ListTile(
+              leading: const Icon(Icons.stop_circle_outlined),
+              title: const Text('End now'),
+              onTap: () => Navigator.of(ctx).pop('end'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (choice == null || !mounted) return;
+    if (choice == 'end') {
+      await _endNow();
+    } else {
+      await _extend(int.parse(choice.substring(7)));
+    }
+  }
+
   Future<void> _newInvite() async {
     CircleInvite? created;
     final bool ok = await _run(() async {
@@ -332,6 +393,7 @@ class _CircleDetailScreenState extends State<CircleDetailScreen> {
               AppSpace.xxxl,
             ),
             children: <Widget>[
+              if (_circle.expiresAt != null) _lifetimeCard(),
               _sharingCard(),
               _sectionTitle('Members (${_members.length})'),
               if (_members.isEmpty)
@@ -379,6 +441,34 @@ class _CircleDetailScreenState extends State<CircleDetailScreen> {
           bottom: AppSpace.sm,
         ),
       );
+
+  Widget _lifetimeCard() {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpace.md),
+      child: DsRowGroup(
+        children: <Widget>[
+          Padding(
+            padding: const EdgeInsets.all(AppSpace.md),
+            child: Wrap(
+              spacing: AppSpace.md,
+              runSpacing: AppSpace.sm,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: <Widget>[
+                CircleCountdownChip(expiresAt: _circle.expiresAt!),
+                const Text('Temporary circle'),
+                if (_circle.isAdmin)
+                  TextButton.icon(
+                    onPressed: _busy ? null : _manageLifetime,
+                    icon: const Icon(Icons.timer_outlined),
+                    label: const Text('Extend / End now'),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
   Widget _sharingCard() {
     final bool on = _circle.sharingEnabled;

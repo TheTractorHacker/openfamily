@@ -134,6 +134,7 @@ func main() {
 	// Background reconciliation self-heals any geofence evaluation that failed
 	// or was interrupted during ingest.
 	go srv.ReconcileGeofences(ctx)
+	go srv.RunCirclePurge(ctx)
 	if err := srv.EnsureCrashSchema(ctx); err != nil {
 		slog.Error("crash schema", "err", err)
 		os.Exit(1)

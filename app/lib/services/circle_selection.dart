@@ -129,6 +129,25 @@ class CircleSelection extends ChangeNotifier {
     return true;
   }
 
+  /// Drops temporary circles whose expiry has passed at [now] (the server has
+  /// stopped serving them) and falls back like [removeCircle]. Returns true when
+  /// the previous selection was among them.
+  bool pruneExpired(DateTime now) {
+    if (!_circles.any((Circle c) => c.isExpiredAt(now))) return false;
+    return update(_circles.where((Circle c) => !c.isExpiredAt(now)).toList());
+  }
+
+  /// The soonest future expiry among the temporary circles, or null.
+  DateTime? nextExpiry(DateTime now) {
+    DateTime? best;
+    for (final Circle c in _circles) {
+      final DateTime? e = c.expiresAt;
+      if (e == null || !e.isAfter(now)) continue;
+      if (best == null || e.isBefore(best)) best = e;
+    }
+    return best;
+  }
+
   /// Drops [id] from the list locally (the server said it is gone) and picks a
   /// fallback if it was selected.
   bool removeCircle(String id) {

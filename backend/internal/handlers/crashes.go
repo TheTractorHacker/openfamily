@@ -139,8 +139,8 @@ func (s *Server) announceCrash(ctx context.Context, userID, crashID string) {
 	only := map[string]bool{}
 	rows, err := s.Pool.Query(ctx, `
 		SELECT DISTINCT v.user_id::text
-		FROM circle_members s
-		JOIN circle_members v ON v.circle_id = s.circle_id AND v.user_id <> s.user_id
+		FROM live_circle_members s
+		JOIN live_circle_members v ON v.circle_id = s.circle_id AND v.user_id <> s.user_id
 		WHERE s.user_id = $1 AND s.sharing_enabled
 		  AND NOT `+pausedExprSQL("s.user_id"), userID)
 	if err != nil {
@@ -197,8 +197,8 @@ func (s *Server) ListCrashes(w http.ResponseWriter, r *http.Request) {
 		WHERE c.occurred_at > now() - interval '90 days'
 		  AND (c.user_id = $1
 		       OR EXISTS (
-		           SELECT 1 FROM circle_members v
-		           JOIN circle_members s ON s.circle_id = v.circle_id
+		           SELECT 1 FROM live_circle_members v
+		           JOIN live_circle_members s ON s.circle_id = v.circle_id
 		           WHERE v.user_id = $1 AND s.user_id = c.user_id AND s.sharing_enabled
 		             AND NOT `+pausedExprSQL("s.user_id")+`))
 		ORDER BY c.occurred_at DESC LIMIT $2`, claims.UserID, crashListLimit)
