@@ -14,6 +14,7 @@ import '../widgets/live_speed.dart';
 import '../widgets/movement_icon.dart';
 import '../services/speed_units.dart';
 import 'day_detail_screen.dart';
+import 'notification_prefs_screen.dart';
 import '../widgets/trips_entry_button.dart';
 
 /// A full-screen member profile: battery, location, and driving data, with a
@@ -138,6 +139,10 @@ class MemberProfileScreen extends StatelessWidget {
                     // Day Detail (location history) entry point.
                     _DayDetailButton(member: member),
                     TripsEntryButton(member: member),
+                    NotificationPrefsEntryButton(
+                      memberId: member.id,
+                      memberName: member.name,
+                    ),
                   ],
                 ),
               ],

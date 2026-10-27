@@ -392,7 +392,7 @@ func (s *Server) processGeofence(ctx context.Context, userID, familyID string, c
 		return
 	}
 
-	if err := s.createEventDeviceRows(ctx, tx, eventID, userID, familyID); err != nil {
+	if err := s.createEventDeviceRows(ctx, tx, eventID, userID, familyID, fireEventType); err != nil {
 		slog.Error("geofence: create device rows", "event_id", eventID, "err", err)
 		return
 	}
@@ -618,7 +618,7 @@ func (s *Server) firePendingNotification(ctx context.Context, geofenceID, userID
 		return
 	}
 
-	if err := s.createEventDeviceRows(ctx, tx, eventID, userID, familyID); err != nil {
+	if err := s.createEventDeviceRows(ctx, tx, eventID, userID, familyID, eventType); err != nil {
 		slog.Error("geofence: create device rows", "event_id", eventID, "err", err)
 		return
 	}
@@ -763,13 +763,20 @@ func (s *Server) dispatchGeofencePush(eventID, trackedUserID, placeName, eventTy
 // tracked user's family members, in the given transaction. It is called in the
 // same transaction as the event insert so the event and its delivery targets
 // are persisted atomically; a crash between them cannot lose the alert.
-func (s *Server) createEventDeviceRows(ctx context.Context, tx pgx.Tx, eventID, trackedUserID, familyID string) error {
+func (s *Server) createEventDeviceRows(ctx context.Context, tx pgx.Tx, eventID, trackedUserID, familyID, eventType string) error {
 	if s.Push == nil {
 		// No push configured: nothing to deliver, so no device rows to track.
 		return nil
 	}
+	// Honour (read before the device query: a tx runs one at a time) per-member notification settings (mute, category, quiet hours).
+	category := notifArrivals
+	if eventType == "exit" {
+		category = notifDepartures
+	}
+	skip := notifSuppressed(ctx, tx, trackedUserID, category, time.Now())
+
 	rows, err := tx.Query(ctx, `
-		SELECT d.id
+		SELECT d.id, u.id::text
 		FROM devices d
 		JOIN users u ON u.id = d.user_id
 		WHERE u.family_id = $1 AND u.id <> $2
@@ -783,9 +790,12 @@ func (s *Server) createEventDeviceRows(ctx context.Context, tx pgx.Tx, eventID, 
 	defer rows.Close()
 
 	for rows.Next() {
-		var deviceID string
-		if err := rows.Scan(&deviceID); err != nil {
+		var deviceID, recipientID string
+		if err := rows.Scan(&deviceID, &recipientID); err != nil {
 			return err
+		}
+		if skip[recipientID] {
+			continue
 		}
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO geofence_event_devices (event_id, device_id, push_sent, push_attempts)
