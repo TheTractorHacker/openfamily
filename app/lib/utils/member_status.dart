@@ -8,6 +8,38 @@ String formatClock(DateTime t) {
   return '$h:$m ${t.hour < 12 ? 'am' : 'pm'}';
 }
 
+/// "At Home since 3:42 PM" / "Left Work 25 min ago" for [p], relative to [now]
+/// (defaults to the current time). Arrivals before today carry the day:
+/// "At Home since yesterday 6:10 PM" / "since Oct 3".
+String placePresenceLabel(PlacePresence p, {DateTime? now}) {
+  final DateTime n = (now ?? DateTime.now()).toLocal();
+  final DateTime t = p.since.toLocal();
+  if (p.isAt) {
+    final DateTime today = DateTime(n.year, n.month, n.day);
+    final int days = today.difference(DateTime(t.year, t.month, t.day)).inDays;
+    final String clock = formatClock(t).toUpperCase();
+    if (days <= 0) return 'At ${p.placeName} since $clock';
+    if (days == 1) return 'At ${p.placeName} since yesterday $clock';
+    const List<String> months = <String>[
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec', //
+    ];
+    return 'At ${p.placeName} since ${months[t.month - 1]} ${t.day}';
+  }
+  final Duration age = n.difference(t);
+  final String ago;
+  if (age.inMinutes < 1) {
+    ago = 'just now';
+  } else if (age.inMinutes < 60) {
+    ago = '${age.inMinutes} min ago';
+  } else if (age.inHours < 24) {
+    ago = '${age.inHours} hr ago';
+  } else {
+    ago = '${age.inDays} d ago';
+  }
+  return 'Left ${p.placeName} $ago';
+}
+
 /// One-line, human status for a person row, e.g. "Driving 42 mph",
 /// "At Home", "Location sharing paused".
 ///
@@ -40,6 +72,8 @@ String memberStatusLine(
     case MovementType.star:
       return m.movement.label;
     case MovementType.none:
+      final PlacePresence? presence = m.placePresence;
+      if (presence != null) return placePresenceLabel(presence);
       return m.address.isEmpty ? 'Location shared' : m.address;
   }
 }

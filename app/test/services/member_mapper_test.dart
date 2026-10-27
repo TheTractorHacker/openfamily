@@ -6,6 +6,53 @@ import 'package:openfamily/services/member_mapper.dart';
 
 void main() {
   liveMapSpeedTests();
+  group('place presence', () {
+    test('parses place_presence from a members payload', () {
+      final m = memberFromJson(<String, dynamic>{
+        'id': 'm',
+        'name': 'Sam',
+        'place_presence': <String, dynamic>{
+          'place_id': 'p1',
+          'place_name': 'Home',
+          'state': 'at',
+          'since': '2026-06-10T15:42:00Z',
+        },
+      });
+      expect(m.placePresence?.placeName, 'Home');
+      expect(m.placePresence?.isAt, isTrue);
+      expect(m.placePresence?.since, DateTime.utc(2026, 6, 10, 15, 42));
+    });
+
+    test('absent or malformed place_presence is null', () {
+      expect(memberFromJson(<String, dynamic>{'id': 'm'}).placePresence,
+          isNull);
+      expect(
+          memberFromJson(<String, dynamic>{
+            'id': 'm',
+            'place_presence': <String, dynamic>{'state': 'bogus'},
+          }).placePresence,
+          isNull);
+    });
+
+    test('a live location frame keeps the snapshot place presence', () {
+      final m = memberFromJson(<String, dynamic>{
+        'id': 'm',
+        'place_presence': <String, dynamic>{
+          'place_id': 'p1',
+          'place_name': 'Work',
+          'state': 'left',
+          'since': '2026-06-10T15:42:00Z',
+        },
+      });
+      final next = memberFromLocationUpdate(m, <String, dynamic>{
+        'lat': 1.0,
+        'lon': 2.0,
+        'ts': '2026-06-10T16:00:00Z',
+      });
+      expect(next.placePresence?.placeName, 'Work');
+      expect(next.placePresence?.isAt, isFalse);
+    });
+  });
   group('member avatar metadata', () {
     test('keeps a newer avatar when a stale WebSocket frame arrives', () {
       final member = memberFromJson(<String, dynamic>{

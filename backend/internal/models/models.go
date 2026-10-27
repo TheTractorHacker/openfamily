@@ -55,6 +55,17 @@ type User struct {
 	UpdatedAt    time.Time `json:"updated_at"`
 }
 
+// PlacePresence is where a member currently is relative to the family's saved
+// places, derived from the latest geofence enter/exit events. State "at" means
+// they arrived at the place at Since and have not left; "left" means they last
+// exited the place at Since and are not inside any other tracked place.
+type PlacePresence struct {
+	PlaceID   string    `json:"place_id"`
+	PlaceName string    `json:"place_name"`
+	State     string    `json:"state"` // at | left
+	Since     time.Time `json:"since"`
+}
+
 // MemberWithLocation is a family member joined to their latest location (if
 // any). It embeds User for the identity fields and adds nullable location
 // fields; a member who has never reported a location has null lat/lon/ts.
@@ -81,6 +92,10 @@ type MemberWithLocation struct {
 	// are arriving; clients use it to keep "last seen" fresh without moving
 	// the pin.
 	LastSeenAt *time.Time `json:"last_seen_at,omitempty"`
+	// PlacePresence is "At Home since ..." / "Left Work ..." derived from
+	// geofence events; absent when the member has no place history or their
+	// location is hidden from the viewer.
+	PlacePresence *PlacePresence `json:"place_presence,omitempty"`
 	// CircleIDs are the circles (within the requested scope) the member shares
 	// with the caller; SharingCircleIDs is the subset in which they share their
 	// location. Additive: legacy clients ignore both.

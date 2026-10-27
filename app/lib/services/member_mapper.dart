@@ -62,6 +62,25 @@ Member memberFromJson(Map<String, dynamic> json) {
     fixTime: timestamp,
     lastSeen: effectiveLastSeen,
     accuracyMeters: accuracy?.toDouble(),
+    placePresence: _parsePlacePresence(json['place_presence']),
+  );
+}
+
+/// Parses the `place_presence` object (`state` "at" | "left"); null when
+/// absent or malformed.
+PlacePresence? _parsePlacePresence(dynamic v) {
+  if (v is! Map) return null;
+  final dynamic state = v['state'];
+  final String? name = v['place_name'] as String?;
+  final DateTime? since = _parseTs(v['since']);
+  if ((state != 'at' && state != 'left') || name == null || since == null) {
+    return null;
+  }
+  return PlacePresence(
+    placeId: (v['place_id'] as String?) ?? '',
+    placeName: name,
+    isAt: state == 'at',
+    since: since,
   );
 }
 

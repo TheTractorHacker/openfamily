@@ -29,6 +29,12 @@ additive; old clients keep working.
   `battery_pct`, `motion_state`: nullable (null/absent when unknown).
 - `heading_deg` is also in the members snapshot (WS `members` frame and
   `GET /family/members`), nullable.
+- `place_presence` (members snapshot and `GET /family/members` only, not `location`
+  frames; omitted when unknown or location-hidden): `{"place_id","place_name",
+  "state":"at"|"left","since":"<RFC3339>"}`, derived from the latest geofence
+  enter/exit events (no extra storage). "at" = arrived at `since` and not yet
+  exited; "left" = last exit at `since`. Powers "At Home since 3:42 PM" /
+  "Left Work 25 min ago".
 
 A fix whose `ts` is not newer than the stored position is rejected (400) on
 `POST /locations`, so the pin never moves backwards.

@@ -86,6 +86,27 @@ class LocationHistoryEntry {
   final LatLng? position;
 }
 
+/// Where a member is relative to the family's saved places, derived by the
+/// backend from geofence enter/exit events (`place_presence`).
+class PlacePresence {
+  const PlacePresence({
+    required this.placeId,
+    required this.placeName,
+    required this.isAt,
+    required this.since,
+  });
+
+  final String placeId;
+  final String placeName;
+
+  /// True while the member is inside the place ("At Home since ..."); false
+  /// once they have left it ("Left Home 25 min ago").
+  final bool isAt;
+
+  /// When they arrived (if [isAt]) or departed (otherwise).
+  final DateTime since;
+}
+
 /// A single family member rendered on the map and in the bottom sheet.
 class Member {
   const Member({
@@ -109,6 +130,7 @@ class Member {
     this.history = const [],
     this.lastSeen,
     this.accuracyMeters,
+    this.placePresence,
   }) : speedMps = speedMps ?? (speedMph == null ? null : speedMph / kMpsToMph);
 
   final String id;
@@ -188,6 +210,10 @@ class Member {
   /// blue "range" circle around the member and to label their accuracy.
   final double? accuracyMeters;
 
+  /// Current/most recent saved place with the arrival or departure time, or
+  /// null when the backend has none (no place history, or location hidden).
+  final PlacePresence? placePresence;
+
   /// Whether this member is driving fast enough to show as "speeding".
   bool get isSpeeding =>
       movement == MovementType.car && isSpeedingMps(speedMps);
@@ -225,6 +251,7 @@ class Member {
     String? eta,
     DateTime? lastSeen,
     double? accuracyMeters,
+    PlacePresence? placePresence,
   }) {
     return Member(
       id: id,
@@ -246,6 +273,7 @@ class Member {
       history: history,
       lastSeen: lastSeen ?? this.lastSeen,
       accuracyMeters: accuracyMeters ?? this.accuracyMeters,
+      placePresence: placePresence ?? this.placePresence,
     );
   }
 
@@ -278,6 +306,7 @@ class Member {
       history: history,
       lastSeen: lastSeen,
       accuracyMeters: accuracyMeters,
+      placePresence: placePresence,
     );
   }
 }

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:openfamily/models/member.dart';
 import 'package:openfamily/widgets/member_tile.dart';
 
@@ -86,5 +87,27 @@ void main() {
     await tester.tap(find.text('Sam'));
     await tester.pump();
     expect(taps, 1);
+  });
+
+  testWidgets('parked member with place presence shows the arrival line', (
+    WidgetTester tester,
+  ) async {
+    final Member m = Member(
+      id: 'amy',
+      name: 'Amy',
+      position: const LatLng(1, 2),
+      status: MemberStatus.normal,
+      batteryPercent: 70,
+      address: 'Stationary',
+      placePresence: PlacePresence(
+        placeId: 'p',
+        placeName: 'Home',
+        isAt: true,
+        since: DateTime.now(),
+      ),
+    );
+    await tester.pumpWidget(_host(m));
+    expect(find.textContaining('At Home since'), findsOneWidget);
+    expect(find.text('Stationary'), findsNothing);
   });
 }
