@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../services/pending_invite.dart';
 import '../services/api_client.dart';
 import '../services/auth_service.dart';
 import '../services/device_service.dart';
@@ -30,6 +31,13 @@ class _SignUpScreenState extends State<SignUpScreen> {
   bool _obscure = true;
   bool _submitting = false;
   String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    // An invite opened from a link or QR code pre-fills the code.
+    _inviteCode.text = PendingInvite.code ?? '';
+  }
 
   @override
   void dispose() {
@@ -97,6 +105,8 @@ class _SignUpScreenState extends State<SignUpScreen> {
       });
       return;
     }
+
+    PendingInvite.clear();
 
     // Auth succeeded; register the device (best-effort, non-blocking).
     try {

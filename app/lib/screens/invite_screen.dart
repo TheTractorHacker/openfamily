@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../services/invite_service.dart';
@@ -202,12 +203,27 @@ class _InviteScreenState extends State<InviteScreen> {
             ),
           ),
           const SizedBox(height: AppSpace.lg),
-          // Reserved for issue #40: a QR code and a tap-to-join link for this
-          // invite. Keep this slot between the code and the actions.
-          const KeyedSubtree(
-            key: Key('invite-qr-slot'),
-            child: SizedBox.shrink(),
-          ),
+          if (InviteService.inviteLink(_code!) != null)
+            Center(
+              key: const Key('invite-qr-slot'),
+              child: Semantics(
+                label: 'QR code for the invite link. Scan it with the '
+                    'OpenFamily app or a camera.',
+                image: true,
+                child: Container(
+                  padding: const EdgeInsets.all(AppSpace.md),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(AppRadius.lg),
+                  ),
+                  child: QrImageView(
+                    data: InviteService.inviteLink(_code!)!,
+                    size: 200,
+                    backgroundColor: Colors.white,
+                  ),
+                ),
+              ),
+            ),
         ] else
           Center(
             child: ExcludeSemantics(

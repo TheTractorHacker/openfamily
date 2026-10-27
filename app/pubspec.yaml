@@ -27,6 +27,8 @@ dependencies:
   vector_map_tiles: ^8.0.0
   # Geographic coordinate type used by flutter_map.
   latlong2: ^0.9.1
+  # Pure-Dart QR code rendering for invite links.
+  qr_flutter: ^4.1.0
   # Native share sheet for the "Send Code" invite flow.
   share_plus: ^10.0.0
   # Permissions (location / notifications / motion) for onboarding.

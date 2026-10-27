@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../services/api_client.dart';
 import '../services/join_service.dart';
+import '../services/pending_invite.dart';
 import '../theme/app_theme.dart';
 import '../widgets/ds/ds.dart';
 
@@ -16,7 +17,11 @@ class JoinCircleScreen extends StatefulWidget {
     this.onDone,
     this.step,
     this.totalSteps = 4,
+    this.initialCode,
   });
+
+  /// Pre-fills the code field (from an invite link or QR code).
+  final String? initialCode;
 
   /// When provided, called instead of popping on "Done" (used by onboarding
   /// so joining lands on the map).
@@ -41,6 +46,12 @@ class _JoinCircleScreenState extends State<JoinCircleScreen> {
   bool _submitting = false;
 
   @override
+  void initState() {
+    super.initState();
+    _code.text = widget.initialCode ?? PendingInvite.code ?? '';
+  }
+
+  @override
   void dispose() {
     _code.dispose();
     super.dispose();
@@ -59,6 +70,7 @@ class _JoinCircleScreenState extends State<JoinCircleScreen> {
     try {
       final bool ok = await JoinService.join(code);
       if (!mounted) return;
+      if (ok) PendingInvite.clear();
       setState(() {
         _submitting = false;
         if (ok) {

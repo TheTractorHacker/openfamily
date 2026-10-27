@@ -4,6 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:openfamily/models/circle.dart';
 import 'package:openfamily/screens/invite_screen.dart';
+import 'package:openfamily/screens/join_circle_screen.dart';
+import 'package:openfamily/services/invite_link.dart';
+import 'package:openfamily/services/pending_invite.dart';
+import 'package:openfamily/services/server_config.dart';
+import 'package:qr_flutter/qr_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:openfamily/services/api_client.dart';
 import 'package:openfamily/services/invite_service.dart';
 import 'package:openfamily/theme/app_theme.dart';
@@ -28,6 +34,7 @@ Widget _app(Widget child) =>
     MaterialApp(theme: buildLightTheme(), home: child);
 
 void main() {
+  _qrTests();
   test('parses the real family invite JSON', () {
     final Map<String, dynamic> j =
         jsonDecode(_familyInviteBody) as Map<String, dynamic>;
@@ -127,6 +134,36 @@ void main() {
     await t.pumpAndSettle();
     expect(calls, 1);
     expect(find.text('ONLY2222'), findsOneWidget);
+  });
+}
+
+void _qrTests() {
+  testWidgets('shows a QR code of the join link and shares the link',
+      (WidgetTester t) async {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    ServerConfig.instance.debugReset();
+    await ServerConfig.instance.setUrl('https://family.example.com');
+    String? shared;
+    await t.pumpWidget(_app(InviteScreen(
+      createCode: () async => 'ABCD2345',
+      shareCode: (String m, String s) async => shared = m,
+    )));
+    await t.tap(find.text('Create invite code'));
+    await t.pumpAndSettle();
+    expect(find.byType(QrImageView), findsOneWidget);
+    expect(find.byKey(const Key('invite-qr-slot')), findsOneWidget);
+    await t.tap(find.text('Share code'));
+    await t.pumpAndSettle();
+    expect(shared, contains('https://family.example.com/join/ABCD2345'));
+  });
+
+  testWidgets('join screen pre-fills the code from a pending invite',
+      (WidgetTester t) async {
+    PendingInvite.current.value = const InviteLink(
+        server: 'https://family.example.com', code: 'ABCD2345');
+    addTearDown(PendingInvite.clear);
+    await t.pumpWidget(_app(const JoinCircleScreen()));
+    expect(find.text('ABCD2345'), findsOneWidget);
   });
 }
 
