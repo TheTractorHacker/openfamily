@@ -74,6 +74,23 @@ void main() {
     expect(await TokenStorage.readRefreshToken(), fresh);
   });
 
+  test('the session survives an update that empties the Keystore stores',
+      () async {
+    FlutterSecureStorage.setMockInitialValues(<String, String>{});
+    final String access = _jwt(2000000000);
+    final String refresh = _jwt(2100000000);
+    await TokenStorage.saveTokens(access: access, refresh: refresh);
+
+    // The update: every Keystore-wrapped entry is gone, the process restarts
+    // (no in-memory copy), plain app preferences are untouched.
+    FlutterSecureStorage.setMockInitialValues(<String, String>{});
+    TokenStorage.resetForTest();
+
+    expect(await TokenStorage.readRefreshToken(), refresh);
+    expect(await TokenStorage.readAccessToken(), access);
+    expect(await TokenStorage.hasStoredSession(), isTrue);
+  });
+
   test('clear removes every copy', () async {
     FlutterSecureStorage.setMockInitialValues(<String, String>{
       'access_token': 'a',
@@ -83,6 +100,12 @@ void main() {
       'session_b_access': 'ba',
       'session_b_refresh': 'br',
     });
+    SharedPreferences.setMockInitialValues(<String, Object>{
+      'wb_api_base_url': 'https://example.test',
+      'wb_session_access': 'da',
+      'wb_session_refresh': 'dr',
+    });
+    TokenStorage.resetForTest();
     await TokenStorage.clear();
     expect(await TokenStorage.readAccessToken(), isNull);
     expect(await TokenStorage.readRefreshToken(), isNull);

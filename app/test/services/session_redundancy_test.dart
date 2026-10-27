@@ -104,12 +104,12 @@ void main() {
     expect(await TokenStorage.readRefreshToken(), newRefresh);
   });
 
-  test('saveTokens writes both stores', () async {
+  test('saveTokens writes every store', () async {
     await seed(<String, String>{});
     await TokenStorage.saveTokens(access: 'a.b.c', refresh: newRefresh);
     TokenStorage.resetForTest(); // force real reads, not the memory copy
     final List<StoredSession> all = await TokenStorage.readAllStores();
-    expect(all.map((StoredSession s) => s.source), <String>['A', 'B']);
+    expect(all.map((StoredSession s) => s.source), <String>['A', 'B', 'D']);
     expect(all.every((StoredSession s) => s.refresh == newRefresh), isTrue);
   });
 

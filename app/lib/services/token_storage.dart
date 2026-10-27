@@ -16,7 +16,8 @@ class StoredSession {
     required this.refresh,
   });
 
-  /// 'A' (EncryptedSharedPreferences) or 'B' (independent Keystore store).
+  /// 'A' (EncryptedSharedPreferences), 'B' (independent Keystore store) or
+  /// 'D' (plain app-private preferences, the copy that survives an update).
   final String source;
   final String? access;
   final String? refresh;
@@ -72,6 +73,15 @@ class TokenStorage {
   static const String _credPasswordKey = 'saved_login_password';
   static const String _keepSignedInPref = 'keep_signed_in_on_device';
   static const String _deviceIdKey = 'device_id';
+
+  // Store D: ordinary app-private SharedPreferences. Production incident: the
+  // server address (plain prefs) survived every app update while all
+  // Keystore-wrapped copies (A, B and the saved login) were lost, so the user
+  // had to sign in again after each update. Android's per-app sandbox protects
+  // this file (backups are disabled), the same protection every app's plain
+  // data gets; it is the last resort when the Keystore stores come back empty.
+  static const String _prefAccessKey = 'wb_session_access';
+  static const String _prefRefreshKey = 'wb_session_refresh';
   // Earlier app builds kept a profile-photo *path* locally. Avatars are now
   // private server data fetched as authenticated bytes, so remove that stale
   // pointer whenever it is encountered. We intentionally do not delete the
@@ -95,6 +105,37 @@ class TokenStorage {
     } catch (_) {
       return null;
     }
+  }
+
+  static Future<bool> _writePrefs(String access, String refresh) async {
+    try {
+      final SharedPreferences prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_prefAccessKey, access);
+      await prefs.setString(_prefRefreshKey, refresh);
+      return prefs.getString(_prefRefreshKey) == refresh;
+    } catch (e) {
+      _diary.record('write_error', 'store=D ${e.runtimeType}');
+      return false;
+    }
+  }
+
+  static Future<StoredSession> _readPrefs() async {
+    try {
+      final SharedPreferences prefs = await SharedPreferences.getInstance();
+      return StoredSession(
+        source: 'D',
+        access: prefs.getString(_prefAccessKey),
+        refresh: prefs.getString(_prefRefreshKey),
+      );
+    } catch (_) {
+      return const StoredSession(source: 'D', access: null, refresh: null);
+    }
+  }
+
+  static Future<void> _clearPrefs() async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_prefAccessKey);
+    await prefs.remove(_prefRefreshKey);
   }
 
   static Future<bool> _writeVerified(
@@ -136,10 +177,12 @@ class TokenStorage {
         await _writeVerified(_storage, _accessKey, _refreshKey, access, refresh);
     final bool okB = await _writeVerified(
         _storageB, _accessKeyB, _refreshKeyB, access, refresh);
+    final bool okD = await _writePrefs(access, refresh);
     _mem = StoredSession(source: 'M', access: access, refresh: refresh);
     _diary.record('save', 'refresh=${SessionDiary.shortHash(refresh)} '
-        'A=${okA ? 'ok' : 'FAIL'} B=${okB ? 'ok' : 'FAIL'}');
-    if (!okA && !okB) {
+        'A=${okA ? 'ok' : 'FAIL'} B=${okB ? 'ok' : 'FAIL'} '
+        'D=${okD ? 'ok' : 'FAIL'}');
+    if (!okA && !okB && !okD) {
       throw StateError('Could not save the session on this device.');
     }
     try {
@@ -168,8 +211,11 @@ class TokenStorage {
       access: await _safeRead(_storageB, _accessKeyB),
       refresh: await _safeRead(_storageB, _refreshKeyB),
     );
+    final StoredSession d = await _readPrefs();
     // Pre-v2 session: used only when nothing else holds a token.
-    final bool haveV2 = (a.refresh ?? '').isNotEmpty ||
+    final bool haveV2 = (d.refresh ?? '').isNotEmpty ||
+        (d.access ?? '').isNotEmpty ||
+        (a.refresh ?? '').isNotEmpty ||
         (a.access ?? '').isNotEmpty ||
         (b.refresh ?? '').isNotEmpty ||
         (b.access ?? '').isNotEmpty;
@@ -183,6 +229,7 @@ class TokenStorage {
     for (final StoredSession s in <StoredSession>[
       a,
       b,
+      d,
       if (legacy != null) legacy,
       if (_mem != null) _mem!,
     ]) {
@@ -317,6 +364,7 @@ class TokenStorage {
     await attempt(() => _storage.delete(key: _legacyRefreshKey));
     await attempt(() => _storageB.delete(key: _accessKeyB));
     await attempt(() => _storageB.delete(key: _refreshKeyB));
+    await attempt(_clearPrefs);
     await attempt(clearSavedCredentials);
     await attempt(() => _storage.delete(key: _deviceIdKey));
     await attempt(removeLegacyProfilePhotoPath);
@@ -332,6 +380,7 @@ class TokenStorage {
         await readAccessToken(),
         await readRefreshToken(),
         await _safeRead(_storageC, _credPasswordKey),
+        (await _readPrefs()).refresh,
         await readDeviceId(),
         await BackgroundCredentialStore.readApiBaseUrl(),
         await BackgroundCredentialStore.readDeviceId(),
