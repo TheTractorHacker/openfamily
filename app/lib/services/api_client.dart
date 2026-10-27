@@ -480,6 +480,10 @@ class ApiClient {
     return _send('POST', _uri(path), body: body);
   }
 
+  static Future<dynamic> put(String path, {Object? body}) {
+    return _send('PUT', _uri(path), body: body);
+  }
+
   static Future<dynamic> patch(String path, {Object? body}) {
     return _send('PATCH', _uri(path), body: body);
   }

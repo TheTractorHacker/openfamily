@@ -151,3 +151,21 @@ payload contents). The Android client has unit tests with fakes (SSE parsing,
 backoff, routing, reconnect logic). It has **not** been run on a physical device:
 foreground-service behaviour, Doze behaviour and notification tap routing from
 the background isolate still need on-device testing.
+
+## Per-member notification settings
+
+Each user can choose which alerts they get about each other member they share
+a circle with: arrivals, departures, low battery, driving/speeding, mute-all,
+and optional quiet hours (`GET/PUT/DELETE /members/{id}/notification-prefs`,
+table `notification_prefs`). A user can only read and edit their own settings,
+and only about members of circles they share (anything else is 404).
+
+- Geofence arrival/departure pushes honour the settings when the event's
+  device rows are created. A lookup error fails open (the push is sent).
+- SOS, help and check-in alerts are never filtered, whatever the settings say:
+  the filter only recognises the four optional categories.
+- Low-battery and driving/speeding settings are stored and enforced by the same
+  filter (`notifSuppressed`), but the server does not yet send push
+  notifications for those events, so nothing consumes them today.
+- Quiet hours use the phone's UTC offset (`UTC+05:30`) or an IANA zone; a
+  fixed offset does not follow daylight saving until the app re-saves.

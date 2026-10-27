@@ -251,6 +251,9 @@ func main() {
 		r.Post("/family/members/{id}/location-request", srv.RequestMemberLocation)
 		r.Patch("/family/members/{id}/role", srv.UpdateMemberRole)
 		r.Patch("/family/members/{id}", srv.UpdateFamilyMember)
+		r.Get("/members/{id}/notification-prefs", srv.GetNotificationPrefs)
+		r.Put("/members/{id}/notification-prefs", srv.PutNotificationPrefs)
+		r.Delete("/members/{id}/notification-prefs", srv.DeleteNotificationPrefs)
 		r.Post("/family/invites", srv.CreateFamilyInvite)
 		r.Post("/family/join", srv.JoinFamily)
 

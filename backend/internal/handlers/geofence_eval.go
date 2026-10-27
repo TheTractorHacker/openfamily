@@ -392,7 +392,7 @@ func (s *Server) processGeofence(ctx context.Context, userID, familyID string, c
 		return
 	}
 
-	if err := s.createEventDeviceRows(ctx, tx, eventID, userID, familyID); err != nil {
+	if err := s.createEventDeviceRows(ctx, tx, eventID, userID, familyID, fireEventType); err != nil {
 		slog.Error("geofence: create device rows", "event_id", eventID, "err", err)
 		return
 	}
@@ -618,7 +618,7 @@ func (s *Server) firePendingNotification(ctx context.Context, geofenceID, userID
 		return
 	}
 
-	if err := s.createEventDeviceRows(ctx, tx, eventID, userID, familyID); err != nil {
+	if err := s.createEventDeviceRows(ctx, tx, eventID, userID, familyID, eventType); err != nil {
 		slog.Error("geofence: create device rows", "event_id", eventID, "err", err)
 		return
 	}
@@ -763,12 +763,19 @@ func (s *Server) dispatchGeofencePush(eventID, trackedUserID, placeName, eventTy
 // tracked user's family members, in the given transaction. It is called in the
 // same transaction as the event insert so the event and its delivery targets
 // are persisted atomically; a crash between them cannot lose the alert.
-func (s *Server) createEventDeviceRows(ctx context.Context, tx pgx.Tx, eventID, trackedUserID, familyID string) error {
+func (s *Server) createEventDeviceRows(ctx context.Context, tx pgx.Tx, eventID, trackedUserID, familyID, eventType string) error {
 	if s.Push == nil {
 		// No push configured: nothing to deliver, so no device rows to track.
 		return nil
 	}
 	muted := s.usersMuted(ctx, "place_alerts")
+	// Honour (read before the device query: a tx runs one at a time) per-member notification settings (mute, category, quiet hours).
+	category := notifArrivals
+	if eventType == "exit" {
+		category = notifDepartures
+	}
+	skip := notifSuppressed(ctx, tx, trackedUserID, category, time.Now())
+
 	rows, err := tx.Query(ctx, `
 		SELECT d.id, d.user_id::text
 		FROM devices d
@@ -788,7 +795,7 @@ func (s *Server) createEventDeviceRows(ctx context.Context, tx pgx.Tx, eventID, 
 		if err := rows.Scan(&deviceID, &recipientID); err != nil {
 			return err
 		}
-		if muted[recipientID] {
+		if muted[recipientID] || skip[recipientID] {
 			continue
 		}
 		if _, err := tx.Exec(ctx, `
