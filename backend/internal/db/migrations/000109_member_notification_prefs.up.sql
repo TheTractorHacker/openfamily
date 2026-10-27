@@ -2,7 +2,7 @@
 -- about another member (subject_id). A missing row means "everything on".
 -- SOS/help/check-in alerts are deliberately NOT represented here: they can
 -- never be muted. Quiet hours are minutes after local midnight in tz.
-CREATE TABLE IF NOT EXISTS notification_prefs (
+CREATE TABLE IF NOT EXISTS member_notification_prefs (
     user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     subject_id  UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     muted       BOOLEAN NOT NULL DEFAULT FALSE,
@@ -19,4 +19,4 @@ CREATE TABLE IF NOT EXISTS notification_prefs (
     CHECK ((quiet_start IS NULL) = (quiet_end IS NULL)),
     CHECK (quiet_start IS NULL OR quiet_start <> quiet_end)
 );
-CREATE INDEX IF NOT EXISTS idx_notification_prefs_subject ON notification_prefs (subject_id);
+CREATE INDEX IF NOT EXISTS idx_member_notification_prefs_subject ON member_notification_prefs (subject_id);

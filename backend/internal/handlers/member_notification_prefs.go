@@ -107,7 +107,7 @@ func (s *Server) loadNotifPrefs(ctx context.Context, user, subject string) (noti
 	var qs, qe *int
 	err := s.Pool.QueryRow(ctx, `
 		SELECT muted, arrivals, departures, low_battery, driving, quiet_start::int, quiet_end::int, tz
-		FROM notification_prefs WHERE user_id = $1 AND subject_id = $2`, user, subject,
+		FROM member_notification_prefs WHERE user_id = $1 AND subject_id = $2`, user, subject,
 	).Scan(&p.Muted, &p.Arrivals, &p.Departures, &p.LowBattery, &p.Driving, &qs, &qe, &p.Timezone)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -176,7 +176,7 @@ func (s *Server) PutMemberNotificationPrefs(w http.ResponseWriter, r *http.Reque
 		qs, qe = &a, &b
 	}
 	if _, err := s.Pool.Exec(r.Context(), `
-		INSERT INTO notification_prefs (user_id, subject_id, muted, arrivals, departures, low_battery, driving,
+		INSERT INTO member_notification_prefs (user_id, subject_id, muted, arrivals, departures, low_battery, driving,
 		                                quiet_start, quiet_end, tz, updated_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, now())
 		ON CONFLICT (user_id, subject_id) DO UPDATE SET
@@ -203,7 +203,7 @@ func (s *Server) DeleteMemberNotificationPrefs(w http.ResponseWriter, r *http.Re
 		return
 	}
 	if _, err := s.Pool.Exec(r.Context(),
-		`DELETE FROM notification_prefs WHERE user_id = $1 AND subject_id = $2`, caller, subject); err != nil {
+		`DELETE FROM member_notification_prefs WHERE user_id = $1 AND subject_id = $2`, caller, subject); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to reset settings")
 		return
 	}
@@ -244,7 +244,7 @@ func notifSuppressed(ctx context.Context, q notifQuerier, subjectID, category st
 	}
 	rows, err := q.Query(ctx, `
 		SELECT user_id::text, muted, arrivals, departures, low_battery, driving, quiet_start::int, quiet_end::int, tz
-		FROM notification_prefs WHERE subject_id = $1`, subjectID)
+		FROM member_notification_prefs WHERE subject_id = $1`, subjectID)
 	if err != nil {
 		slog.Error("notif prefs: load", "err", err)
 		return out

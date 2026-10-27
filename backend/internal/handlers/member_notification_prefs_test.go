@@ -123,7 +123,7 @@ func TestNotificationPrefsAuthorizationAndCRUD(t *testing.T) {
 		t.Errorf("C sees A's preferences: %+v", p)
 	}
 	var n int
-	_ = fx.pool.QueryRow(ctx, `SELECT count(*) FROM notification_prefs WHERE user_id = $1`, fx.c).Scan(&n)
+	_ = fx.pool.QueryRow(ctx, `SELECT count(*) FROM member_notification_prefs WHERE user_id = $1`, fx.c).Scan(&n)
 	if n != 0 {
 		t.Errorf("body user_id must be ignored; C has %d rows", n)
 	}
@@ -132,7 +132,7 @@ func TestNotificationPrefsAuthorizationAndCRUD(t *testing.T) {
 	if w := fx.prefs("DELETE", fx.b, fx.a, ""); w.Code != 200 {
 		t.Errorf("DELETE %d", w.Code)
 	}
-	_ = fx.pool.QueryRow(ctx, `SELECT count(*) FROM notification_prefs WHERE user_id = $1`, fx.a).Scan(&n)
+	_ = fx.pool.QueryRow(ctx, `SELECT count(*) FROM member_notification_prefs WHERE user_id = $1`, fx.a).Scan(&n)
 	if n != 0 {
 		t.Errorf("row not deleted")
 	}
@@ -143,7 +143,7 @@ func TestNotificationPrefsDelivery(t *testing.T) {
 	ctx := context.Background()
 	set := func(user, subject, cols, vals string) {
 		t.Helper()
-		if _, err := fx.pool.Exec(ctx, `INSERT INTO notification_prefs (user_id, subject_id, `+cols+`) VALUES ($1,$2,`+vals+`)
+		if _, err := fx.pool.Exec(ctx, `INSERT INTO member_notification_prefs (user_id, subject_id, `+cols+`) VALUES ($1,$2,`+vals+`)
 			ON CONFLICT (user_id, subject_id) DO NOTHING`, user, subject); err != nil {
 			t.Fatal(err)
 		}
@@ -178,7 +178,7 @@ func TestNotificationPrefsDelivery(t *testing.T) {
 	}
 
 	// End to end: with everyone muting A, an SOS from A still reaches B's device.
-	if _, err := fx.pool.Exec(ctx, `UPDATE notification_prefs SET muted = true, arrivals = false WHERE subject_id = $1`, fx.a); err != nil {
+	if _, err := fx.pool.Exec(ctx, `UPDATE member_notification_prefs SET muted = true, arrivals = false WHERE subject_id = $1`, fx.a); err != nil {
 		t.Fatal(err)
 	}
 	fx.srv.fanOutAlert(fx.newSOS(t), false)
