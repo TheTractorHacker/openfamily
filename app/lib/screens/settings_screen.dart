@@ -135,7 +135,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String _versionText = 'Version …';
 
   /// App version from the installed build, plus the server release from the
-  /// public /healthz (best effort; omitted when the server is unreachable).
+  /// authenticated /version (best effort; omitted when the server is unreachable).
   Future<void> _loadVersions() async {
     String app = '';
     try {
@@ -143,7 +143,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     } catch (_) {}
     String server = '';
     try {
-      final r = await ApiClient.get('/healthz');
+      final r = await ApiClient.get('/version');
       final v = r is Map ? r['version'] : null;
       if (v is String && v.isNotEmpty) server = v;
     } catch (_) {}
