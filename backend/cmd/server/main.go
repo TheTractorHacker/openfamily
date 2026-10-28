@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io/fs"
 	"log/slog"
@@ -171,7 +172,7 @@ func main() {
 
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"status":"ok"}`))
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok", "version": srv.BuildVersion})
 	})
 	r.Get("/config", srv.GetConfig)
 	r.Get("/alerts/share/{token}", srv.ShareAlert)

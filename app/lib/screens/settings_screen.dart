@@ -1,8 +1,10 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:local_auth/local_auth.dart' show BiometricType;
+import 'package:package_info_plus/package_info_plus.dart';
 
 import '../services/accent_preference.dart';
+import '../services/api_client.dart';
 import '../services/auth_service.dart';
 import '../services/token_storage.dart';
 import '../services/battery_optimization_service.dart';
@@ -130,6 +132,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Duration _lockGrace = Duration.zero;
 
   final VersionTapCounter _versionTaps = VersionTapCounter();
+  String _versionText = 'Version …';
+
+  /// App version from the installed build, plus the server release from the
+  /// public /healthz (best effort; omitted when the server is unreachable).
+  Future<void> _loadVersions() async {
+    String app = '';
+    try {
+      app = (await PackageInfo.fromPlatform()).version;
+    } catch (_) {}
+    String server = '';
+    try {
+      final r = await ApiClient.get('/healthz');
+      final v = r is Map ? r['version'] : null;
+      if (v is String && v.isNotEmpty) server = v;
+    } catch (_) {}
+    if (!mounted) return;
+    setState(() {
+      _versionText = [
+        if (app.isNotEmpty) 'App $app',
+        if (server.isNotEmpty) 'Server $server',
+      ].join(' · ');
+      if (_versionText.isEmpty) _versionText = 'Version unknown';
+    });
+  }
 
   void _onVersionTap() {
     if (_versionTaps.tap(DateTime.now())) {
@@ -146,6 +172,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _loadKeepSignedIn();
     _loadLocationSharing();
     _loadPushNotifications();
+    _loadVersions();
   }
 
   Future<void> _loadPushNotifications() async {
@@ -532,7 +559,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               child: DsListRow(
                 leading: DsListRow.iconTile(context, Icons.info_outline),
                 title: 'OpenFamily',
-                subtitle: 'Version 0.1.0',
+                subtitle: _versionText,
               ),
             ),
             const SizedBox(height: AppSpace.lg),
