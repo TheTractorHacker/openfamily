@@ -2,7 +2,16 @@
 
 import React from 'react'
 
-export type RouteKey = 'dashboard' | 'history' | 'families' | 'users' | 'builds' | 'settings'
+export type RouteKey =
+  | 'dashboard'
+  | 'history'
+  | 'families'
+  | 'users'
+  | 'places'
+  | 'activity'
+  | 'audit'
+  | 'builds'
+  | 'settings'
 
 export interface RouteDef {
   key: RouteKey
@@ -75,6 +84,51 @@ export const ROUTES: RouteDef[] = [
     icon: icon(
       <path
         d="M12 11.5a3.25 3.25 0 1 0-3.25-3.25A3.25 3.25 0 0 0 12 11.5ZM5 20c0-3.1 3.1-5.5 7-5.5s7 2.4 7 5.5"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    ),
+  },
+  {
+    key: 'places',
+    label: 'Places',
+    hash: '#/places',
+    adminOnly: true,
+    icon: icon(
+      <path
+        d="M12 21s6.5-5.6 6.5-11a6.5 6.5 0 1 0-13 0C5.5 15.4 12 21 12 21Zm0-8.2a2.6 2.6 0 1 0 0-5.2 2.6 2.6 0 0 0 0 5.2Z"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    ),
+  },
+  {
+    key: 'activity',
+    label: 'Activity',
+    hash: '#/activity',
+    adminOnly: true,
+    icon: icon(
+      <path
+        d="M3 12h4l2.5-6 4 12 2.5-6H21"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    ),
+  },
+  {
+    key: 'audit',
+    label: 'Audit & sessions',
+    hash: '#/audit',
+    adminOnly: true,
+    icon: icon(
+      <path
+        d="M12 3 5 6v5.5c0 4.3 2.8 7.6 7 9.5 4.2-1.9 7-5.2 7-9.5V6l-7-3Zm-2.5 9 2 2 3.5-4"
         stroke="currentColor"
         strokeWidth="1.6"
         strokeLinecap="round"

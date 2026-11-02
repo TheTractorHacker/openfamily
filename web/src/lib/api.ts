@@ -22,6 +22,10 @@ import type {
   DawarichSettings,
   DawarichUser,
   DomainStatus,
+  ActivityPage,
+  AdminPlace,
+  AdminSession,
+  AuditPage,
 } from './types'
 
 const API_BASE = '/api'
@@ -337,6 +341,20 @@ export function getMemberHistory(memberId: string, from: string, to: string): Pr
   )
 }
 
+/** Downloads a member's raw fixes (admin only) as a GPX or CSV file blob. */
+export function exportMemberHistory(
+  memberId: string,
+  format: 'gpx' | 'csv',
+  from: string,
+  to: string,
+): Promise<Blob> {
+  const q = new URLSearchParams({ format, from, to })
+  return request<Blob>(
+    `/api/admin/members/${encodeURIComponent(memberId)}/history/export?${q.toString()}`,
+    { binary: true, accept: format === 'gpx' ? 'application/gpx+xml' : 'text/csv' },
+  )
+}
+
 /** Returns a member's avatar bytes through the authenticated admin endpoint. */
 export function getAdminMemberAvatar(memberId: string): Promise<Blob> {
   return request<Blob>(`/api/admin/members/${encodeURIComponent(memberId)}/avatar`, {
@@ -530,4 +548,86 @@ export function getDomainStatus(): Promise<DomainStatus> {
 /** Running server version. Upgrades are done on the host with scripts/upgrade.sh. */
 export function getServerVersion(): Promise<{ version: string }> {
   return request<{ version: string }>('/api/admin/version')
+}
+
+
+// ---- Places editor (platform admin) ----
+
+export function listAdminPlaces(): Promise<AdminPlace[]> {
+  return request<AdminPlace[]>('/api/admin/places')
+}
+
+export interface AdminPlaceInput {
+  family_id?: string
+  name?: string
+  type?: string
+  lat?: number
+  lon?: number
+  radius_meters?: number
+  address?: string
+}
+
+export function createAdminPlace(input: AdminPlaceInput): Promise<AdminPlace> {
+  return request<AdminPlace>('/api/admin/places', { method: 'POST', body: input })
+}
+
+export function updateAdminPlace(id: string, input: AdminPlaceInput): Promise<AdminPlace> {
+  return request<AdminPlace>(`/api/admin/places/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    body: input,
+  })
+}
+
+export function deleteAdminPlace(id: string): Promise<{ status: string }> {
+  return request<{ status: string }>(`/api/admin/places/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  })
+}
+
+// ---- Audit log + sessions (platform admin) ----
+
+export interface AuditQuery {
+  before_id?: number
+  user_id?: string
+  action?: string
+  q?: string
+  from?: string
+  to?: string
+  limit?: number
+}
+
+function queryString(params: Record<string, string | number | undefined>): string {
+  const q = new URLSearchParams()
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== '') q.set(k, String(v))
+  }
+  const s = q.toString()
+  return s ? `?${s}` : ''
+}
+
+export function listAudit(query: AuditQuery): Promise<AuditPage> {
+  return request<AuditPage>(`/api/admin/audit${queryString({ ...query })}`)
+}
+
+export function listAuditActions(): Promise<string[]> {
+  return request<string[]>('/api/admin/audit/actions')
+}
+
+export function listAdminSessions(userId?: string): Promise<AdminSession[]> {
+  return request<AdminSession[]>(`/api/admin/sessions${queryString({ user_id: userId })}`)
+}
+
+export function revokeAdminSession(id: string): Promise<void> {
+  return request<void>(`/api/admin/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
+
+// ---- Activity feed (platform admin) ----
+
+export function listActivity(query: {
+  before?: string
+  type?: string
+  family_id?: string
+  limit?: number
+}): Promise<ActivityPage> {
+  return request<ActivityPage>(`/api/admin/activity${queryString({ ...query })}`)
 }

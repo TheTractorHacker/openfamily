@@ -24,7 +24,10 @@ class MovementIcon extends StatelessWidget {
     if (movement == MovementType.none) {
       return const SizedBox.shrink();
     }
-    final Color c = color ?? movement.color;
+    final Color c = color ??
+        (movement.color == AppColors.purple
+            ? BrandTheme.of(context).accentInk
+            : movement.color);
     if (movement == MovementType.gym) {
       return FlexingArmIcon(size: size, color: c);
     }

@@ -103,7 +103,7 @@ class _BubbleCreateScreenState extends State<BubbleCreateScreen> {
             liveRegion: true,
             child: Container(
               width: double.infinity,
-              color: AppColors.purple,
+              color: BrandTheme.of(context).accent,
               padding: const EdgeInsets.symmetric(
                 horizontal: AppSpace.xl,
                 vertical: AppSpace.md,
@@ -113,7 +113,9 @@ class _BubbleCreateScreenState extends State<BubbleCreateScreen> {
                     ? 'Choose how long the Bubble around $name lasts'
                     : 'Use the slider to adjust the size of your Bubble',
                 textAlign: TextAlign.center,
-                style: AppType.body.copyWith(color: Colors.white),
+                style: AppType.body.copyWith(
+                  color: BrandTheme.of(context).onAccent,
+                ),
               ),
             ),
           ),
@@ -159,8 +161,8 @@ class _BubbleCreateScreenState extends State<BubbleCreateScreen> {
               point: _center,
               radius: _radius.toDouble(),
               useRadiusInMeter: true,
-              color: AppColors.purple.withValues(alpha: 0.2),
-              borderColor: AppColors.purple,
+              color: BrandTheme.of(context).accent.withValues(alpha: 0.2),
+              borderColor: BrandTheme.of(context).accent,
               borderStrokeWidth: 2,
             ),
           ],

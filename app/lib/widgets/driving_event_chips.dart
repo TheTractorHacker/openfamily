@@ -214,7 +214,7 @@ class DrivingEventChip extends StatelessWidget {
                         trendIcon(trend),
                         size: 20,
                         color: trend == Trend.fewer
-                            ? (dark ? AppColors.accentBright : brand.accentInk)
+                            ? brand.accentInk
                             : trend == Trend.more
                             ? ink
                             : cs.onSurfaceVariant,
@@ -296,7 +296,7 @@ class DrivingEventChip extends StatelessWidget {
                       trendIcon(trend),
                       size: 18,
                       color: trend == Trend.fewer
-                          ? (dark ? AppColors.accentBright : brand.accentInk)
+                          ? brand.accentInk
                           : trend == Trend.more
                           ? ink
                           : cs.onSurfaceVariant,

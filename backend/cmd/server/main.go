@@ -144,6 +144,12 @@ func main() {
 		os.Exit(1)
 	}
 	go srv.RunDawarichSync(ctx)
+	if err := srv.EnsureNotifyEventsSchema(ctx); err != nil {
+		slog.Warn("notify events schema", "err", err)
+	} else {
+		go srv.RunDriveNotifier(ctx)
+	}
+	go srv.RunSevereWeather(ctx)
 	if err := srv.EnsureNotificationSchema(ctx); err != nil {
 		slog.Error("notification prefs schema", "err", err)
 		os.Exit(1)
@@ -369,6 +375,7 @@ func main() {
 		r.Get("/api/admin/members", srv.AdminListMembers)
 		r.Get("/api/admin/members/{id}/avatar", srv.GetAdminMemberAvatar)
 		r.Get("/api/admin/members/{id}/history", srv.AdminGetMemberHistory)
+		r.Get("/api/admin/members/{id}/history/export", srv.AdminExportMemberHistory)
 		r.Patch("/api/admin/members/{id}/family", srv.AdminMoveMember)
 		r.Get("/api/admin/users", srv.AdminListUsers)
 		r.Post("/api/admin/users", srv.AdminCreateUser)
@@ -378,6 +385,14 @@ func main() {
 		r.Patch("/api/admin/users/{id}/password", srv.AdminResetUserPassword)
 		r.Post("/api/admin/users/{id}/reset-code", srv.AdminIssueResetCode)
 		r.Get("/api/admin/places", srv.AdminListPlaces)
+		r.Post("/api/admin/places", srv.AdminCreatePlace)
+		r.Put("/api/admin/places/{id}", srv.AdminUpdatePlace)
+		r.Delete("/api/admin/places/{id}", srv.AdminDeletePlace)
+		r.Get("/api/admin/audit", srv.AdminListAudit)
+		r.Get("/api/admin/audit/actions", srv.AdminListAuditActions)
+		r.Get("/api/admin/sessions", srv.AdminListSessions)
+		r.Delete("/api/admin/sessions/{id}", srv.AdminRevokeSession)
+		r.Get("/api/admin/activity", srv.AdminActivityFeed)
 		r.Get("/api/admin/invites", srv.AdminListInvites)
 		r.Post("/api/admin/invites", srv.AdminCreateInvite)
 
@@ -595,6 +610,11 @@ func adminStaticHandler(fsys fs.FS, index []byte) http.HandlerFunc {
 			return
 		}
 		if fi, err := fs.Stat(fsys, p); err == nil && !fi.IsDir() {
+			// Vite names everything under assets/ by content hash, so a
+			// given URL never changes: cache it for good.
+			if strings.HasPrefix(p, "assets/") {
+				w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+			}
 			fileServer.ServeHTTP(w, r)
 			return
 		}

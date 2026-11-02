@@ -158,3 +158,115 @@
   margin: 0;
   padding-top: 6px;
 }
+
+/* Playback, heatmap and export controls */
+.wb-history-stack {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.wb-history-stack > :first-child {
+  flex: 1 1 auto;
+  min-height: 300px;
+}
+.wb-history-playbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+.wb-history-play {
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--surface-soft);
+  color: var(--text);
+  cursor: pointer;
+  font-size: var(--font-sm);
+}
+.wb-history-play:hover {
+  border-color: var(--purple);
+}
+.wb-history-scrub {
+  flex: 1 1 auto;
+  min-width: 80px;
+  accent-color: var(--purple);
+}
+.wb-history-clock {
+  flex: 0 0 auto;
+  min-width: 120px;
+  font-size: var(--font-xs);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.wb-history-speeds {
+  display: flex;
+  gap: 2px;
+  flex: 0 0 auto;
+}
+.wb-history-speed {
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  background: var(--surface-soft);
+  color: var(--text-muted);
+  font-size: var(--font-xs);
+  cursor: pointer;
+}
+.wb-history-speed:first-child {
+  border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+}
+.wb-history-speed:last-child {
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+.wb-history-speed.is-on {
+  background: var(--purple);
+  border-color: var(--purple);
+  color: #fff;
+}
+.wb-history-heatnote {
+  margin: 0;
+  padding: var(--space-2) var(--space-4);
+  border-top: 1px solid var(--border);
+  font-size: var(--font-xs);
+  color: var(--text-muted);
+}
+.wb-history-check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 36px;
+  font-size: var(--font-sm);
+  cursor: pointer;
+}
+.wb-history-export {
+  display: flex;
+  gap: var(--space-2);
+}
+.wb-history-exportbtn {
+  min-height: 36px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--font-sm);
+  cursor: pointer;
+}
+.wb-history-exportbtn:hover:not(:disabled) {
+  border-color: var(--purple);
+}
+.wb-history-exportbtn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+@media (max-width: 860px) {
+  .wb-history-clock {
+    display: none;
+  }
+}

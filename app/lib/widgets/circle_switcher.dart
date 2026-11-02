@@ -199,7 +199,7 @@ class _CircleChip extends StatelessWidget {
         curve: Curves.easeOut,
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         decoration: BoxDecoration(
-          color: selected ? AppColors.purple : Colors.transparent,
+          color: selected ? BrandTheme.of(context).accent : Colors.transparent,
           borderRadius: BorderRadius.circular(20),
         ),
         child: Text(

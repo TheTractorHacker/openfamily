@@ -9,6 +9,7 @@
 import React from 'react'
 import { CircleMarker, MapContainer, Polyline, useMap } from 'react-leaflet'
 import {
+  exportMemberHistory,
   getFamilyMemberHistory,
   getMemberHistory,
   listAllMembers,
@@ -20,7 +21,16 @@ import { useAsync } from '../lib/useAsync'
 import { useMe } from '../lib/me'
 import { Badge, EmptyState, ErrorState, Spinner } from '../components/primitives'
 import { BaseMapLayer } from '../map/BaseMapLayer'
-import type { AdminMember, Family, HistoryVisit, Member, MemberHistory, MyFamily } from '../lib/types'
+import type {
+  AdminMember,
+  Family,
+  HistoryTrailPoint,
+  HistoryVisit,
+  Member,
+  MemberHistory,
+  MyFamily,
+} from '../lib/types'
+import { HeatLayer, PlaybackBar, PlaybackLayer, usePlayback } from './HistoryLayers'
 import './pages.css'
 import './HistoryPage.css'
 
@@ -67,6 +77,30 @@ function dayBounds(dateISO: string): { from: string; to: string } {
   return { from: from.toISOString(), to: to.toISOString() }
 }
 
+function addDays(dateISO: string, delta: number): string {
+  const d = new Date(`${dateISO}T00:00:00`)
+  d.setDate(d.getDate() + delta)
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  return `${y}-${m}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+/** [from, to) covering [days] calendar days ending on [dateISO]. */
+function rangeBounds(dateISO: string, days: number): { from: string; to: string } {
+  return { from: dayBounds(addDays(dateISO, -(days - 1))).from, to: dayBounds(dateISO).to }
+}
+
+function downloadBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
 function formatTime(iso: string): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return '—'
@@ -103,6 +137,12 @@ export function HistoryPage() {
   const [loading, setLoading] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
   const [reload, setReload] = React.useState(0)
+  const [heat, setHeat] = React.useState(false)
+  const [rangeDays, setRangeDays] = React.useState(1)
+  const [heatPoints, setHeatPoints] = React.useState<HistoryTrailPoint[]>([])
+  const [heatLoading, setHeatLoading] = React.useState(false)
+  const [exporting, setExporting] = React.useState<'gpx' | 'csv' | null>(null)
+  const [exportError, setExportError] = React.useState<string | null>(null)
 
   React.useEffect(() => {
     const onHash = () => {
@@ -167,6 +207,58 @@ export function HistoryPage() {
       cancelled = true
     }
   }, [isPlatformAdmin, memberId, date, reload])
+
+  // Heatmap over several days: one day-sized request per day, a few at a time.
+  React.useEffect(() => {
+    if (!heat || !memberId || rangeDays <= 1) {
+      setHeatPoints([])
+      setHeatLoading(false)
+      return
+    }
+    let cancelled = false
+    setHeatLoading(true)
+    const days = Array.from({ length: rangeDays }, (_, i) => addDays(date, -i))
+    const fetchDay = (d: string) => {
+      const { from, to } = dayBounds(d)
+      return (isPlatformAdmin
+        ? getMemberHistory(memberId, from, to)
+        : getFamilyMemberHistory(memberId, from, to)
+      ).then((h) => h.trail).catch(() => [] as HistoryTrailPoint[])
+    }
+    ;(async () => {
+      const all: HistoryTrailPoint[] = []
+      for (let i = 0; i < days.length; i += 5) {
+        const batch = await Promise.all(days.slice(i, i + 5).map(fetchDay))
+        if (cancelled) return
+        for (const t of batch) all.push(...t)
+      }
+      if (!cancelled) {
+        setHeatPoints(all)
+        setHeatLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [heat, memberId, date, rangeDays, isPlatformAdmin])
+
+  const doExport = async (format: 'gpx' | 'csv') => {
+    if (!memberId) return
+    setExporting(format)
+    setExportError(null)
+    try {
+      const { from, to } = rangeBounds(date, rangeDays)
+      const blob = await exportMemberHistory(memberId, format, from, to)
+      const who = (memberList.find((m) => m.id === memberId)?.name ?? 'member')
+        .replace(/[^A-Za-z0-9_-]+/g, '-')
+        .slice(0, 40)
+      downloadBlob(blob, `history-${who}-${addDays(date, -(rangeDays - 1))}-${date}.${format}`)
+    } catch (e) {
+      setExportError(e instanceof Error ? e.message : 'Export failed')
+    } finally {
+      setExporting(null)
+    }
+  }
 
   if ((families.loading && !families.data) || (members.loading && !members.data)) {
     return (
@@ -255,7 +347,54 @@ export function HistoryPage() {
             onChange={(e) => setDate(e.target.value || todayISO())}
           />
         </label>
+        <label className="wb-field" htmlFor="history-range">
+          <span className="wb-label">Range</span>
+          <select
+            id="history-range"
+            className="wb-select"
+            value={rangeDays}
+            onChange={(e) => setRangeDays(Number(e.target.value))}
+          >
+            <option value={1}>That day</option>
+            <option value={7}>Last 7 days</option>
+            <option value={30}>Last 30 days</option>
+          </select>
+        </label>
+        <label className="wb-history-check" htmlFor="history-heat">
+          <input
+            id="history-heat"
+            type="checkbox"
+            checked={heat}
+            onChange={(e) => setHeat(e.target.checked)}
+          />
+          <span>Heatmap</span>
+        </label>
+        {isPlatformAdmin && (
+          <div className="wb-history-export" role="group" aria-label="Export">
+            <button
+              type="button"
+              className="wb-history-exportbtn"
+              disabled={!memberId || exporting !== null}
+              onClick={() => void doExport('gpx')}
+            >
+              {exporting === 'gpx' ? 'Exporting…' : 'Export GPX'}
+            </button>
+            <button
+              type="button"
+              className="wb-history-exportbtn"
+              disabled={!memberId || exporting !== null}
+              onClick={() => void doExport('csv')}
+            >
+              {exporting === 'csv' ? 'Exporting…' : 'Export CSV'}
+            </button>
+          </div>
+        )}
       </div>
+      {exportError && (
+        <p className="wb-history-muted" role="alert">
+          {exportError}
+        </p>
+      )}
 
       <div className="wb-history-body">
         <div className="wb-history-map" aria-label="Location trail">
@@ -280,7 +419,14 @@ export function HistoryPage() {
               description={`${selected?.name ?? 'This member'} didn’t report any locations on this date.`}
             />
           ) : history ? (
-            <HistoryMap key={`${history.user_id}-${history.from}`} history={history} />
+            <HistoryMapPanel
+              key={`${history.user_id}-${history.from}`}
+              history={history}
+              heat={heat}
+              heatPoints={rangeDays > 1 ? heatPoints : history.trail}
+              heatLoading={heatLoading}
+              rangeDays={rangeDays}
+            />
           ) : null}
         </div>
         <aside className="wb-history-timeline" aria-label="Visit timeline">
@@ -319,7 +465,54 @@ export function HistoryPage() {
   )
 }
 
-function HistoryMap({ history }: { history: MemberHistory }) {
+function HistoryMapPanel({
+  history,
+  heat,
+  heatPoints,
+  heatLoading,
+  rangeDays,
+}: {
+  history: MemberHistory
+  heat: boolean
+  heatPoints: HistoryTrailPoint[]
+  heatLoading: boolean
+  rangeDays: number
+}) {
+  const playback = usePlayback(history.trail)
+  const canPlay = !heat && history.trail.length >= 2
+  return (
+    <div className="wb-history-stack">
+      <HistoryMap
+        history={history}
+        heat={heat}
+        heatPoints={heatPoints}
+        playback={canPlay ? playback : null}
+      />
+      {heat && (
+        <p className="wb-history-heatnote">
+          {heatLoading
+            ? 'Building heatmap…'
+            : `Heatmap of ${heatPoints.length.toLocaleString()} fixes over ${
+                rangeDays === 1 ? 'the day' : `${rangeDays} days`
+              }. Red = most time spent.`}
+        </p>
+      )}
+      {canPlay && <PlaybackBar playback={playback} />}
+    </div>
+  )
+}
+
+function HistoryMap({
+  history,
+  heat,
+  heatPoints,
+  playback,
+}: {
+  history: MemberHistory
+  heat: boolean
+  heatPoints: HistoryTrailPoint[]
+  playback: ReturnType<typeof usePlayback> | null
+}) {
   const trail = (history?.trail ?? []).map((p) => [p.lat, p.lon] as [number, number])
   const visits = (history?.visits ?? []).filter((v: HistoryVisit) => v.kind !== 'transit')
   const center: [number, number] =
@@ -334,7 +527,7 @@ function HistoryMap({ history }: { history: MemberHistory }) {
       scrollWheelZoom
     >
       <BaseMapLayer />
-      {trail.length >= 2 && (
+      {!heat && trail.length >= 2 && (
         <>
           {/* White casing drawn under the colored stroke (Leaflet stacks
               later children on top) keeps the trail readable over road
@@ -362,6 +555,8 @@ function HistoryMap({ history }: { history: MemberHistory }) {
           }}
         />
       ))}
+      {heat && <HeatLayer points={heatPoints} />}
+      {playback && <PlaybackLayer trail={history.trail} playback={playback} />}
       <FitTrail positions={trail.length >= 2 ? trail : visits.map((v) => [v.lat, v.lon] as [number, number])} />
     </MapContainer>
   )

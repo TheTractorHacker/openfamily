@@ -1095,8 +1095,9 @@ class _MapScreenState extends State<MapScreen>
           // only ever sends these to their creator.
           ValueListenableBuilder<List<Bubble>>(
             valueListenable: BubbleStore.instance.mine,
-            builder: (BuildContext _, List<Bubble> bubbles, __) {
+            builder: (BuildContext bctx, List<Bubble> bubbles, __) {
               final DateTime now = DateTime.now();
+              final Color bubbleColor = BrandTheme.of(bctx).accent;
               return CircleLayer(
                 circles: <CircleMarker>[
                   for (final Bubble b in bubbles)
@@ -1105,8 +1106,8 @@ class _MapScreenState extends State<MapScreen>
                         point: b.center,
                         radius: b.radiusM.toDouble(),
                         useRadiusInMeter: true,
-                        color: AppColors.purple.withValues(alpha: 0.18),
-                        borderColor: AppColors.purple,
+                        color: bubbleColor.withValues(alpha: 0.18),
+                        borderColor: bubbleColor,
                         borderStrokeWidth: 2,
                       ),
                 ],

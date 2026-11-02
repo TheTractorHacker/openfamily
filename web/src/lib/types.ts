@@ -122,6 +122,8 @@ export interface HistoryTrailPoint {
   lon: number
   ts: string
   motion_state?: string
+  speed_mps?: number
+  battery_pct?: number
 }
 
 export type HistoryVisitKind = 'place' | 'stop' | 'transit'
@@ -237,3 +239,59 @@ export interface MemberHistory {
 export type ApiResult<T> =
   | { ok: true; value: T }
   | { ok: false; status: number; message: string }
+
+
+/** A place from GET /api/admin/places (any family). */
+export interface AdminPlace extends FamilyPlace {
+  family_name: string
+}
+
+export interface AuditEntry {
+  id: number
+  user_id: string | null
+  user_name: string
+  user_email: string
+  family_id: string | null
+  family_name: string
+  action: string
+  detail: string
+  ip_address: string
+  created_at: string
+}
+
+export interface AuditPage {
+  entries: AuditEntry[]
+  next_before_id: number | null
+}
+
+/** One active sign-in (refresh-token family). */
+export interface AdminSession {
+  id: string
+  user_id: string
+  user_name: string
+  user_email: string
+  user_agent: string
+  created_at: string
+  last_used_at: string
+  expires_at: string
+}
+
+export type ActivityKind = 'arrival' | 'departure' | 'sos' | 'help' | 'check_in' | 'crash'
+
+export interface ActivityEvent {
+  kind: ActivityKind
+  at: string
+  user_id: string
+  user_name: string
+  family_id: string | null
+  family_name: string
+  detail: string
+  status: string
+  lat?: number
+  lon?: number
+}
+
+export interface ActivityPage {
+  events: ActivityEvent[]
+  next_before: string | null
+}

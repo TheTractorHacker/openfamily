@@ -114,7 +114,11 @@ class _BubblesScreenState extends State<BubblesScreen> {
 
   Widget _mineRow(Bubble b) {
     return DsListRow(
-      leading: DsListRow.iconTile(context, Icons.bubble_chart_outlined, color: AppColors.purple),
+      leading: DsListRow.iconTile(
+        context,
+        Icons.bubble_chart_outlined,
+        color: BrandTheme.of(context).accentInk,
+      ),
       title: b.subjectName,
       subtitle: '${formatBubbleRadius(b.radiusM)} · '
           '${formatTimeLeft(b.expiresAt.difference(_now))}',

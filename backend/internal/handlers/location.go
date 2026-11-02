@@ -189,6 +189,7 @@ func (s *Server) IngestLocation(w http.ResponseWriter, r *http.Request) {
 		// Presence is liveness, so use server receipt time rather than the GPS
 		// fix timestamp. A delayed fix must never move "last seen" backwards.
 		postCommitRunner.Submit(func() { s.broadcastPresence(ownerID, time.Now().UTC(), req.BatteryPct) })
+		s.noteBattery(ownerID, req.BatteryPct)
 
 		writeJSON(w, http.StatusOK, map[string]any{
 			"status": "deduplicated",
@@ -279,6 +280,7 @@ func (s *Server) IngestLocation(w http.ResponseWriter, r *http.Request) {
 		defer cancel()
 		s.evaluateGeofences(evalCtx, ownerID, req.Lon, req.Lat, ts)
 	})
+	s.noteBattery(ownerID, req.BatteryPct)
 
 	// Fan out the live location update to the owner's family in a goroutine so
 	// the ack is not delayed and a client disconnect cannot cancel it.

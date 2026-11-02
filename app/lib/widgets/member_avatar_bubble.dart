@@ -242,7 +242,10 @@ class _StatusAvatarState extends State<StatusAvatar> {
             height: widget.size,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: widget.member.avatarColor,
+              // The built-in default follows the chosen accent colour.
+              color: widget.member.avatarColor == AppColors.purple
+                  ? BrandTheme.of(context).accent
+                  : widget.member.avatarColor,
               boxShadow: [
                 BoxShadow(
                   color: statusColor.withValues(alpha: 0.35),
@@ -304,7 +307,9 @@ class _StatusAvatarState extends State<StatusAvatar> {
       child: Text(
         widget.member.initials,
         style: TextStyle(
-          color: Colors.white,
+          color: widget.member.avatarColor == AppColors.purple
+              ? BrandTheme.of(context).onAccent
+              : Colors.white,
           fontWeight: FontWeight.w800,
           fontSize: widget.size * 0.4,
         ),
@@ -469,14 +474,14 @@ class _CountBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
-        color: AppColors.purple,
+        color: BrandTheme.of(context).accent,
         borderRadius: BorderRadius.circular(10),
         border: Border.all(color: Colors.white, width: 1.5),
       ),
       child: Text(
         '$count',
-        style: const TextStyle(
-          color: Colors.white,
+        style: TextStyle(
+          color: BrandTheme.of(context).onAccent,
           fontWeight: FontWeight.w800,
           fontSize: 11,
         ),
@@ -488,7 +493,6 @@ class _CountBadge extends StatelessWidget {
 /// Colors shared by the circular movement glyph and the speed caption.
 /// Matches web `--status-orange-*` / `--accent-ink` / `--surface`.
 const Color _badgeFill = Colors.white;
-const Color _badgeInk = AppColors.accentInk;
 const Color _badgeBorder = Color(0x22000000);
 const Color _speedingFill = Color(0xFFFFF2DD);
 const Color _speedingInk = Color(0xFF9A5800);
@@ -529,7 +533,7 @@ class _MovementGlyphBadge extends StatelessWidget {
         child: MovementIcon(
           movement: member.movement,
           size: 12,
-          color: speeding ? _speedingInk : _badgeInk,
+          color: speeding ? _speedingInk : BrandTheme.of(context).accentInk,
         ),
       ),
     );
@@ -551,7 +555,8 @@ class _SpeedCaption extends StatelessWidget {
       member: member,
       builder: (BuildContext _, double? mps, UnitSystem units) {
         final bool speeding = isSpeedingMps(mps);
-        final Color ink = speeding ? _speedingInk : _badgeInk;
+        final Color ink =
+            speeding ? _speedingInk : BrandTheme.of(context).accentInk;
         return Container(
           padding: const EdgeInsets.fromLTRB(7, 2, 7, 2),
           decoration: BoxDecoration(

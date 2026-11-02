@@ -14,6 +14,8 @@ import { LoginPage } from './pages/LoginPage'
 import { FamiliesPage } from './pages/FamiliesPage'
 import { UsersPage } from './pages/UsersPage'
 import { BuildsPage } from './pages/BuildsPage'
+import { ActivityPage } from './pages/ActivityPage'
+import { AuditPage } from './pages/AuditPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { ROUTES, DEFAULT_ROUTE, routeFromHash, type RouteKey } from './lib/routes'
 import { clearTokens, getEmail, isAuthenticated, subscribeAuth } from './lib/auth'
@@ -26,6 +28,9 @@ import './shell.css'
 // other pages stay light.
 const DashboardPage = React.lazy(() =>
   import('./pages/DashboardPage').then((m) => ({ default: m.DashboardPage })),
+)
+const PlacesPage = React.lazy(() =>
+  import('./pages/PlacesPage').then((m) => ({ default: m.PlacesPage })),
 )
 const HistoryPage = React.lazy(() =>
   import('./pages/HistoryPage').then((m) => ({ default: m.HistoryPage })),
@@ -125,6 +130,12 @@ function renderPage(
       return <FamiliesPage />
     case 'users':
       return <UsersPage />
+    case 'places':
+      return <PlacesPage />
+    case 'activity':
+      return <ActivityPage />
+    case 'audit':
+      return <AuditPage />
     case 'builds':
       return <BuildsPage />
     case 'settings':

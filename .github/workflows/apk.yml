@@ -112,7 +112,13 @@ jobs:
       - name: Build release APK and AAB
         working-directory: app
         run: |
+          # The downloadable APK targets real phones (arm64 + 32-bit arm); the
+          # x86_64 slice only serves emulators/ChromeOS and is a third of the
+          # native code. The AAB keeps every ABI. There must stay exactly ONE
+          # .apk in the release: the server's APK cache and Obtainium take the
+          # first .apk asset they find.
           flutter build apk --release \
+            --target-platform android-arm,android-arm64 \
             --build-name='${{ steps.ver.outputs.name }}' --build-number='${{ steps.ver.outputs.code }}'
           flutter build appbundle --release \
             --build-name='${{ steps.ver.outputs.name }}' --build-number='${{ steps.ver.outputs.code }}'
