@@ -8,7 +8,7 @@ import '../widgets/member_tile.dart';
 import 'bubbles_screen.dart';
 import 'daily_history_screen.dart';
 import 'invite_screen.dart';
-import 'member_profile_screen.dart';
+import 'member_detail_screen.dart';
 
 /// The dedicated, full-screen home for a family's members.
 ///
@@ -152,7 +152,7 @@ class PeopleScreen extends StatelessWidget {
   void _openMember(BuildContext context, Member member) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => MemberProfileScreen(member: member),
+        builder: (_) => MemberDetailScreen(member: member),
       ),
     );
   }
