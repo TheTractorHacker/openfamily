@@ -6,7 +6,19 @@
 const String kFamilyNotifiedLine =
     'Your family was notified. Emergency services were NOT contacted.';
 
-enum AlertKind { checkIn, help, sos, unknown }
+enum AlertKind {
+  checkIn,
+  help,
+  sos,
+  bubbleCreated,
+  bubbleEntered,
+  bubbleLeft,
+  unknown;
+
+  /// Bubble events are history entries for the Bubble's creator, not alerts.
+  bool get isBubble =>
+      this == bubbleCreated || this == bubbleEntered || this == bubbleLeft;
+}
 
 AlertKind alertKindFrom(Object? raw) {
   switch (raw) {
@@ -16,6 +28,12 @@ AlertKind alertKindFrom(Object? raw) {
       return AlertKind.help;
     case 'sos':
       return AlertKind.sos;
+    case 'bubble_created':
+      return AlertKind.bubbleCreated;
+    case 'bubble_entered':
+      return AlertKind.bubbleEntered;
+    case 'bubble_left':
+      return AlertKind.bubbleLeft;
   }
   return AlertKind.unknown;
 }
@@ -28,6 +46,12 @@ String alertKindLabel(AlertKind k) {
       return 'Help request';
     case AlertKind.sos:
       return 'SOS';
+    case AlertKind.bubbleCreated:
+      return 'Bubble created';
+    case AlertKind.bubbleEntered:
+      return 'Back in Bubble';
+    case AlertKind.bubbleLeft:
+      return 'Left Bubble';
     case AlertKind.unknown:
       return 'Alert';
   }

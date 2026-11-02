@@ -23,6 +23,9 @@ func (s *Server) RunCirclePurge(ctx context.Context) {
 			if _, err := s.PurgeTemporaryCircles(ctx); err != nil {
 				slog.Warn("circle purge", "err", err)
 			}
+			if _, err := s.RemindExpiringCircles(ctx); err != nil {
+				slog.Warn("circle expiry reminder", "err", err)
+			}
 		}
 	}
 }
@@ -77,4 +80,66 @@ func (s *Server) resubscribeCircle(ctx context.Context, circleID string) {
 			s.hub.subscribeUser(uid, circleID)
 		}
 	}
+}
+
+// circleReminderLead is how long before expiry members are told the circle is
+// about to end.
+const circleReminderLead = time.Hour
+
+// RemindExpiringCircles pushes "ends in about an hour" to the members of live
+// temporary circles that expire within circleReminderLead. Each circle is
+// claimed exactly once (expiry_reminded_at), so repeated runs and restarts never
+// send twice. Circles that were created with less than the lead time to live
+// never get a reminder (the creator already knows). It returns how many
+// circles were reminded.
+func (s *Server) RemindExpiringCircles(ctx context.Context) (int, error) {
+	rows, err := s.Pool.Query(ctx, `
+		UPDATE circles c SET expiry_reminded_at = now()
+		WHERE c.expires_at IS NOT NULL AND c.expiry_reminded_at IS NULL
+		  AND `+circleLiveSQL+`
+		  AND c.expires_at <= now() + make_interval(secs => $1)
+		  AND c.created_at <= c.expires_at - make_interval(secs => $1)
+		RETURNING c.id::text, c.name`, int64(circleReminderLead/time.Second))
+	if err != nil {
+		return 0, err
+	}
+	type due struct{ id, name string }
+	var circlesDue []due
+	for rows.Next() {
+		var d due
+		if err := rows.Scan(&d.id, &d.name); err == nil {
+			circlesDue = append(circlesDue, d)
+		}
+	}
+	rows.Close()
+	if rows.Err() != nil {
+		return 0, rows.Err()
+	}
+	for _, d := range circlesDue {
+		if s.Push == nil {
+			continue
+		}
+		mrows, err := s.Pool.Query(ctx, `SELECT user_id::text FROM live_circle_members WHERE circle_id = $1`, d.id)
+		if err != nil {
+			slog.Warn("circle expiry reminder: members", "err", err)
+			continue
+		}
+		var uids []string
+		for mrows.Next() {
+			var uid string
+			if mrows.Scan(&uid) == nil {
+				uids = append(uids, uid)
+			}
+		}
+		mrows.Close()
+		if len(uids) == 0 {
+			continue
+		}
+		title := "A temporary circle ends in about an hour"
+		if s.VerbosePush {
+			title = d.name + " ends in about an hour"
+		}
+		s.pushUsers(ctx, uids, title, "Location sharing in this circle stops when it ends.")
+	}
+	return len(circlesDue), nil
 }

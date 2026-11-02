@@ -16,6 +16,7 @@ import '../models/member.dart';
 import '../services/api_client.dart';
 import '../services/background_location_service.dart';
 import '../services/bubble_service.dart';
+import '../services/inbox_service.dart';
 import '../services/battery_optimization_service.dart';
 import '../services/circle_selection.dart';
 import '../services/circle_service.dart';
@@ -42,6 +43,7 @@ import '../widgets/sharing_sheet.dart';
 import '../widgets/member_avatar_bubble.dart';
 import '../widgets/visible_value_builder.dart';
 import 'check_in_screen.dart';
+import 'inbox_screen.dart';
 import 'invite_screen.dart';
 import 'join_circle_screen.dart';
 import 'member_profile_screen.dart';
@@ -239,6 +241,8 @@ class _MapScreenState extends State<MapScreen>
         Connectivity().onConnectivityChanged.listen(_onConnectivityChanged);
     _load();
     unawaited(BubbleStore.instance.refresh());
+    unawaited(InboxStore.instance.refresh());
+    InboxFocus.memberId.addListener(_onInboxFocus);
     _checkLocation();
     _initLocationSharing();
     // Push registration and the operator-config refresh are not needed to
@@ -570,6 +574,7 @@ class _MapScreenState extends State<MapScreen>
 
   @override
   void dispose() {
+    InboxFocus.memberId.removeListener(_onInboxFocus);
     WidgetsBinding.instance.removeObserver(this);
     _connectivitySub?.cancel();
     _selection
@@ -943,6 +948,24 @@ class _MapScreenState extends State<MapScreen>
   /// them and follow.
   void _focusMember(Member m) => _followMember(m);
 
+  /// The Activity screen asked to show a member (check-in / live share).
+  void _onInboxFocus() {
+    final String? id = InboxFocus.memberId.value;
+    if (id == null) return;
+    InboxFocus.memberId.value = null;
+    for (final Member m in _roster.value) {
+      if (m.id == id) {
+        _focusMember(m);
+        return;
+      }
+    }
+  }
+
+  void _openInbox() {
+    Navigator.of(context)
+        .push(MaterialPageRoute<void>(builder: (_) => const InboxScreen()));
+  }
+
   void _openPlaces() {
     Navigator.of(context)
         .push(MaterialPageRoute<void>(builder: (_) => const PlacesScreen()));
@@ -1028,16 +1051,22 @@ class _MapScreenState extends State<MapScreen>
       onOpenCircle: _openCircle,
       onJoinCircle: _openJoinCircle,
       onOpenPlaces: _openPlaces,
-      topOverlay: ValueListenableBuilder<FollowUi?>(
-        valueListenable: _followUi,
-        builder: (BuildContext _, FollowUi? ui, __) => ui == null
-            ? const SizedBox.shrink()
-            : FollowPill(
-                ui: ui,
-                onStop: _stopFollow,
-                onRecenter: _refollow,
-                onOpen: _openFollowedDetails,
-              ),
+      topOverlay: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          InboxBanner(onOpen: _openInbox),
+          ValueListenableBuilder<FollowUi?>(
+            valueListenable: _followUi,
+            builder: (BuildContext _, FollowUi? ui, __) => ui == null
+                ? const SizedBox.shrink()
+                : FollowPill(
+                    ui: ui,
+                    onStop: _stopFollow,
+                    onRecenter: _refollow,
+                    onOpen: _openFollowedDetails,
+                  ),
+          ),
+        ],
       ),
       map: FlutterMap(
         mapController: _mapController,

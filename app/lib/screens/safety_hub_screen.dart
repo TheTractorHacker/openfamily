@@ -6,6 +6,7 @@ import 'alerts_history_screen.dart';
 import 'check_in_screen.dart';
 import 'crash_reports_screen.dart';
 import 'help_alert_screen.dart';
+import 'inbox_screen.dart';
 import 'safety_screen.dart';
 import 'sos_screen.dart';
 
@@ -72,6 +73,13 @@ class SafetyHubScreen extends StatelessWidget {
             ),
             chevron: true,
             onTap: () => _push(context, const HelpAlertScreen()),
+          ),
+          DsListRow(
+            title: 'Activity',
+            subtitle: 'Check-ins and live shares sent to you',
+            leading: DsListRow.iconTile(context, Icons.notifications_none),
+            chevron: true,
+            onTap: () => _push(context, const InboxScreen()),
           ),
           const DsSectionHeader('Driving safety'),
           DsListRow(

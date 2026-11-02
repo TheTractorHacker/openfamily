@@ -15,6 +15,7 @@ import { FamiliesPage } from './pages/FamiliesPage'
 import { UsersPage } from './pages/UsersPage'
 import { BuildsPage } from './pages/BuildsPage'
 import { ActivityPage } from './pages/ActivityPage'
+import { BubblesPage } from './pages/BubblesPage'
 import { AuditPage } from './pages/AuditPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { ROUTES, DEFAULT_ROUTE, routeFromHash, type RouteKey } from './lib/routes'
@@ -134,6 +135,8 @@ function renderPage(
       return <PlacesPage />
     case 'activity':
       return <ActivityPage />
+    case 'bubbles':
+      return <BubblesPage />
     case 'audit':
       return <AuditPage />
     case 'builds':

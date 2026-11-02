@@ -79,6 +79,10 @@ class _AlertReceivedScreenState extends State<AlertReceivedScreen> {
       AlertKind.sos => '${a.senderName} sent an SOS',
       AlertKind.help => '${a.senderName} asked for help',
       AlertKind.checkIn => '${a.senderName} checked in',
+      AlertKind.bubbleCreated ||
+      AlertKind.bubbleEntered ||
+      AlertKind.bubbleLeft =>
+        alertKindLabel(a.kind),
       AlertKind.unknown => 'Alert from ${a.senderName}',
     };
     return DsPage(

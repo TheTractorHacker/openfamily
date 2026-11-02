@@ -68,6 +68,18 @@ class BubbleStore {
   }
 
   void set(List<Bubble> bubbles) => mine.value = bubbles;
+
+  /// Bumped on every `bubble` WebSocket frame so open Bubble screens can
+  /// reload too.
+  final ValueNotifier<int> changes = ValueNotifier<int>(0);
+
+  /// `{"type":"bubble","event":"created|cancelled|entered|left",...}` frames:
+  /// something about a Bubble changed, so reload the caller's list.
+  void handleFrame(Map<String, dynamic> frame, [BubbleService service = const ApiBubbleService()]) {
+    if (frame['type'] != 'bubble') return;
+    changes.value++;
+    refresh(service);
+  }
 }
 
 /// Friendly text for a failed Bubble call.

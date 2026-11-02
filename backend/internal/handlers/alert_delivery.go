@@ -602,10 +602,11 @@ func (s *Server) ListAlerts(w http.ResponseWriter, r *http.Request) {
 		SELECT a.id, a.type, a.status, a.user_id, u.name, a.lat, a.lon, COALESCE(a.note, ''), a.created_at, a.resolved_at
 		FROM alerts a JOIN users u ON u.id = a.user_id
 		WHERE a.family_id = $1
+		  AND (a.type NOT LIKE 'bubble\_%' OR a.user_id = $4)
 		  AND ($2::text IS NULL OR (a.created_at, a.id) < (
 		        SELECT b.created_at, b.id FROM alerts b WHERE b.id::text = $2 AND b.family_id = $1))
 		ORDER BY a.created_at DESC, a.id DESC
-		LIMIT $3`, familyID, before, limit+1)
+		LIMIT $3`, familyID, before, limit+1, claims.UserID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list alerts")
 		return

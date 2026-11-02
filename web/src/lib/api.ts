@@ -23,6 +23,7 @@ import type {
   DawarichUser,
   DomainStatus,
   ActivityPage,
+  AdminBubble,
   AdminPlace,
   AdminSession,
   AuditPage,
@@ -630,4 +631,11 @@ export function listActivity(query: {
   limit?: number
 }): Promise<ActivityPage> {
   return request<ActivityPage>(`/api/admin/activity${queryString({ ...query })}`)
+}
+
+// ---- Bubbles (platform admin, read-only) ----
+
+export async function listAdminBubbles(): Promise<AdminBubble[]> {
+  const r = await request<{ bubbles: AdminBubble[] }>('/api/admin/bubbles')
+  return r.bubbles
 }

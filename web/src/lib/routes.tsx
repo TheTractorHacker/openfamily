@@ -9,6 +9,7 @@ export type RouteKey =
   | 'users'
   | 'places'
   | 'activity'
+  | 'bubbles'
   | 'audit'
   | 'builds'
   | 'settings'
@@ -114,6 +115,21 @@ export const ROUTES: RouteDef[] = [
     icon: icon(
       <path
         d="M3 12h4l2.5-6 4 12 2.5-6H21"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    ),
+  },
+  {
+    key: 'bubbles',
+    label: 'Bubbles',
+    hash: '#/bubbles',
+    adminOnly: true,
+    icon: icon(
+      <path
+        d="M9.5 15a5.5 5.5 0 1 0 0-11 5.5 5.5 0 0 0 0 11Zm7 5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"
         stroke="currentColor"
         strokeWidth="1.6"
         strokeLinecap="round"
