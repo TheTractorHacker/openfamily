@@ -7,6 +7,8 @@
 /// The policy never sees coordinates, only speed / accuracy / state flags.
 library;
 
+import 'dart:math' as math;
+
 /// Tunable constants. Everything the policy decides is derived from these.
 class CadenceConfig {
   const CadenceConfig({
@@ -37,6 +39,11 @@ class CadenceConfig {
     this.liveFlagBoost = const Duration(seconds: 10),
     this.minApplyGap = const Duration(seconds: 20),
     this.reassertAfter = const Duration(minutes: 5),
+    this.idleAfter = const Duration(minutes: 10),
+    this.idleRadiusM = 60,
+    this.idleGpsInterval = const Duration(minutes: 3),
+    this.idleDistanceFilterM = 30,
+    this.idleMinPost = const Duration(seconds: 10),
   });
 
   /// Smoothed speed at/above which drive mode can start...
@@ -98,9 +105,27 @@ class CadenceConfig {
   /// if unchanged, in case the native side was reset (re-registration,
   /// service restart).
   final Duration reassertAfter;
+
+  /// Background only: after this long without leaving [idleRadiusM] of the
+  /// same spot (and with no walking / driving evidence) the profile relaxes
+  /// to the battery-saving "idle" tier.
+  final Duration idleAfter;
+
+  /// A fix farther than this from the idle anchor counts as real movement and
+  /// restarts the idle timer (and so leaves the idle tier at once).
+  final double idleRadiusM;
+
+  /// Idle tier request: slow, balanced-power, but with a displacement filter
+  /// so leaving the spot still produces a fix without waiting a full interval.
+  /// Reporting never stops: the 10 minute heartbeat also keeps running.
+  final Duration idleGpsInterval;
+  final double idleDistanceFilterM;
+  final Duration idleMinPost;
 }
 
-enum CadenceTier { stationary, walking, driving, boosted, sos }
+/// `idle` = stationary at the same spot for [CadenceConfig.idleAfter]
+/// (background only): lower GPS frequency and balanced accuracy.
+enum CadenceTier { idle, stationary, walking, driving, boosted, sos }
 
 /// What the GPS source and the post gate should do right now.
 class CadenceProfile {
@@ -160,6 +185,12 @@ class TrackingCadence {
   DateTime? _lastFixAt;
   bool _motionActive = false;
 
+  // Idle (parked / at home) tracking. Position is used only to measure
+  // displacement from the anchor; it is never stored beyond this object.
+  double? _anchorLat;
+  double? _anchorLon;
+  DateTime? _stillSince;
+
   DateTime? _boostUntil;
   bool _sos = false;
   int? _batteryPct;
@@ -213,9 +244,12 @@ class TrackingCadence {
     required DateTime now,
     double? speedMps,
     String motionState = '',
+    double? lat,
+    double? lon,
   }) {
     _lastFixAt = now;
     _motionActive = isMovingMotionState(motionState);
+    _updateIdleAnchor(now, speedMps, lat, lon);
     if (speedMps == null || speedMps.isNaN || speedMps < 0) return;
 
     final double a = config.speedSmoothing;
@@ -263,6 +297,55 @@ class TrackingCadence {
     }
   }
 
+  /// Tracks how long the device has stayed around one spot. Any sign of
+  /// movement (a fix beyond the radius, walking-or-faster speed, moving
+  /// activity state) restarts the timer.
+  void _updateIdleAnchor(
+      DateTime now, double? speedMps, double? lat, double? lon) {
+    if (lat == null || lon == null || lat.isNaN || lon.isNaN) {
+      // No position: cannot prove stillness, so never idle on this evidence.
+      if (_anchorLat == null) return;
+      _stillSince = null;
+      _anchorLat = null;
+      _anchorLon = null;
+      return;
+    }
+    final bool fast = speedMps != null &&
+        !speedMps.isNaN &&
+        speedMps >= config.walkEnterSpeedMps;
+    final double? aLat = _anchorLat;
+    final double? aLon = _anchorLon;
+    final bool moved = aLat == null ||
+        aLon == null ||
+        distanceMeters(aLat, aLon, lat, lon) > config.idleRadiusM;
+    if (moved || fast || _motionActive) {
+      _anchorLat = lat;
+      _anchorLon = lon;
+      _stillSince = now;
+    }
+  }
+
+  /// Great-circle distance in meters.
+  static double distanceMeters(
+      double lat1, double lon1, double lat2, double lon2) {
+    const double r = 6371000;
+    final double p1 = lat1 * math.pi / 180;
+    final double p2 = lat2 * math.pi / 180;
+    final double dp = p2 - p1;
+    final double dl = (lon2 - lon1) * math.pi / 180;
+    final double a = math.pow(math.sin(dp / 2), 2) +
+        math.cos(p1) * math.cos(p2) * math.pow(math.sin(dl / 2), 2);
+    return 2 * r * math.asin(math.min(1, math.sqrt(a)));
+  }
+
+  bool _isIdle(DateTime now) {
+    final DateTime? since = _stillSince;
+    return _background &&
+        _anchorLat != null &&
+        since != null &&
+        now.difference(since) >= config.idleAfter;
+  }
+
   /// Time-driven bookkeeping (stale-fix reset, hold timers that elapse with
   /// no new fix). Called by [profile].
   void _tick(DateTime now) {
@@ -285,6 +368,7 @@ class TrackingCadence {
     if (isBoosted(now)) return CadenceTier.boosted;
     if (_driving) return CadenceTier.driving;
     if (_walking) return CadenceTier.walking;
+    if (_isIdle(now)) return CadenceTier.idle;
     return CadenceTier.stationary;
   }
 
@@ -344,6 +428,14 @@ class TrackingCadence {
           minPostInterval: config.walkMinPost,
           highAccuracy: true,
         );
+      case CadenceTier.idle:
+        return CadenceProfile(
+          tier: t,
+          gpsInterval: config.idleGpsInterval,
+          distanceFilterM: config.idleDistanceFilterM,
+          minPostInterval: config.idleMinPost,
+          highAccuracy: false,
+        );
       case CadenceTier.stationary:
         if (_background) {
           return CadenceProfile(
@@ -387,6 +479,7 @@ class ProfileApplier {
     if (!cur.gpsDiffersFrom(desired)) {
       final DateTime? at0 = _appliedAt;
       if (desired.tier != CadenceTier.stationary &&
+          desired.tier != CadenceTier.idle &&
           at0 != null &&
           now.difference(at0) >= config.reassertAfter) {
         return desired;

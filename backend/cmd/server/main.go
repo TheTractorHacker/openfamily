@@ -350,6 +350,8 @@ func main() {
 		r.Post("/locations/watch", srv.WatchMember)
 		// Motion-sensor driving events (docs/driving.md).
 		r.Post("/trips/sensor-events", srv.IngestSensorEvents)
+		// Device-detected crash after an unanswered "Are you OK?" countdown.
+		r.Post("/crash-alerts", srv.PostCrashAlert)
 		// Offline backfill: points queued while the device had no data,
 		// delivered newest-first once connectivity returns. Relaxed freshness
 		// rules, no geofence/broadcast side effects (see location_batch.go).

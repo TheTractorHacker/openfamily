@@ -177,3 +177,24 @@ user, included in `GET /me/export` (`driving_events`, `driving_sensor_enabled`,
 and pruned, including unattached sensor events, once older than
 `LOCATION_RETENTION_DAYS`. Sensor events are read through the same circle
 rules as trips.
+
+## Crash detection (opt-in, default off)
+
+Settings > Driving detection > Detect possible crashes. Needs driving
+detection on. While a drive session is active the phone feeds accelerometer and
+GPS speed to `CrashDetector` (`app/lib/services/driving/crash_detector.dart`).
+A probable crash needs all of: acceleration magnitude >= 4 g, a GPS fix >= 25
+km/h within 2.5 s before it, speed <= 2 m/s within 6 s after it, and speed staying
+<= 3 m/s for 3 s. Potholes, dropped phones and hard braking do not match. After a
+detection nothing more is reported for 5 minutes.
+
+Then a full-screen "Are you OK?" countdown (30 s, vibration and sound) runs:
+"I'm OK" cancels and nothing is sent; "I need help" sends at once and also
+posts `/alerts/help`; otherwise the alert goes out at 0. The background isolate
+sends `POST /crash-alerts` (device ingest key or Bearer token). The report
+is stored in `crash_events` (`source = 'device'`, `help_requested`, `peak_g`,
+columns added by `EnsureCrashSchema`) and pushed to circle members who can see
+the person's location, so it shows in Crash reports and the admin activity
+feed. The sender can mark it false alarm (`POST /crashes/{id}/status`). A device
+report suppresses a server-heuristic report for the same moment (+-2 min).
+Emergency services are never contacted.

@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'crash_detector.dart';
+import 'crash_responder.dart';
 import 'driving_config.dart';
 import 'driving_event.dart';
 import 'driving_events_service.dart';
@@ -36,6 +38,8 @@ class DrivingRuntime implements DrivingFeedSink {
     required this.isEnabled,
     required this.isPhoneUseEnabled,
     this.syncOptIn,
+    this.isCrashEnabled,
+    this.crashResponder,
     int Function()? clock,
     DrivingConfig config = const DrivingConfig(),
     this.uploadEvery = const Duration(seconds: 60),
@@ -53,6 +57,12 @@ class DrivingRuntime implements DrivingFeedSink {
   /// Tells the server the effective opt-in until it has acknowledged it
   /// (detection is on by default). Retried at most every [syncEvery].
   final Future<bool> Function()? syncOptIn;
+  /// Crash detection (opt-in). Both must be set for it to run.
+  final Future<bool> Function()? isCrashEnabled;
+  final CrashResponder? crashResponder;
+  final CrashDetector _crash = CrashDetector();
+  bool _crashOn = false;
+
   final Duration syncEvery = const Duration(minutes: 10);
   final Duration uploadEvery;
   final Duration tickEvery;
@@ -105,13 +115,34 @@ class DrivingRuntime implements DrivingFeedSink {
   void _start() {
     _detector.reset();
     _phoneActive = false;
-    unawaited(isPhoneUseEnabled().then((bool phone) {
+    _crash.reset();
+    _crashOn = false;
+    unawaited(_readFlags().then((List<bool> flags) {
       if (!_session.isActive) return;
+      final bool phone = flags[0];
       _phoneActive = phone;
+      _crashOn = flags[1];
       feed.start(this, withScreen: phone);
     }));
     _timer?.cancel();
     _timer = Timer.periodic(tickEvery, (_) => unawaited(_tick()));
+  }
+
+  Future<List<bool>> _readFlags() async {
+    final bool phone = await isPhoneUseEnabled();
+    bool crash = false;
+    final Future<bool> Function()? c = isCrashEnabled;
+    if (c != null && crashResponder != null) {
+      try {
+        crash = await c();
+      } catch (_) {}
+    }
+    return <bool>[phone, crash];
+  }
+
+  void _checkCrash() {
+    final CrashSignal? s = _crash.takeSignal();
+    if (s != null) unawaited(crashResponder?.handle(s));
   }
 
   void _stop() {
@@ -141,6 +172,10 @@ class DrivingRuntime implements DrivingFeedSink {
       _session.stop();
       return;
     }
+    if (_crashOn) {
+      _crash.tick(now);
+      _checkCrash();
+    }
     _session.tick(now);
     if (!_session.isActive) return;
     final List<DrivingEvent> ev = <DrivingEvent>[
@@ -164,9 +199,14 @@ class DrivingRuntime implements DrivingFeedSink {
 
   // ---- DrivingFeedSink ---------------------------------------------------
 
+  void _onAccel(int tMs, double x, double y, double z) {
+    _detector.onAccel(tMs, x, y, z);
+    if (_crashOn) _crash.onAccel(tMs, x, y, z);
+  }
+
   @override
   void onAccel(int tMs, double x, double y, double z) =>
-      _detector.onAccel(tMs, x, y, z);
+      _onAccel(tMs, x, y, z);
 
   @override
   void onGyro(int tMs, double x, double y, double z) =>
@@ -177,6 +217,10 @@ class DrivingRuntime implements DrivingFeedSink {
     _lastLat = lat;
     _lastLon = lon;
     _detector.onGps(tMs, speedMps, lat, lon);
+    if (_crashOn) {
+      _crash.onGps(tMs, speedMps, lat, lon);
+      _checkCrash();
+    }
     if (_phoneActive) _phone.onSpeed(tMs, speedMps, lat, lon);
     _session.onSpeed(tMs, speedMps);
   }
@@ -189,5 +233,6 @@ class DrivingRuntime implements DrivingFeedSink {
   Future<void> dispose() async {
     _timer?.cancel();
     _session.stop();
+    await crashResponder?.dispose();
   }
 }

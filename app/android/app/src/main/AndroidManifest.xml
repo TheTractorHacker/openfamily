@@ -27,6 +27,10 @@
     <uses-permission
         android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+    <!-- Crash detection (opt-in): lets the "Are you OK?" notification open
+         the app over the lock screen. Without it the same notification is a
+         loud heads-up instead. -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT"/>
 
     <!-- Android 11+ package visibility: let the emergency-contact picker
          resolve the system ACTION_PICK for a phone number. No READ_CONTACTS. -->

@@ -13,6 +13,10 @@ class DrivingSettings {
   static const String sensorKey = 'driving_sensor_enabled';
   static const String phoneUseKey = 'driving_phone_use_enabled';
 
+  /// Crash detection ("Are you OK?" countdown, then an alert to the circle).
+  /// Opt-in: OFF until the user turns it on. Needs [sensorKey] as well.
+  static const String crashKey = 'driving_crash_enabled';
+
   /// True once the server has acknowledged the current effective value of
   /// [sensorKey]. Cleared whenever the local value changes.
   static const String syncedKey = 'driving_sensor_server_synced';
@@ -37,11 +41,24 @@ class DrivingSettings {
   static Future<bool> phoneUseEnabled({bool reload = true}) =>
       _get(phoneUseKey, reload, false);
 
+  /// Crash detection (default off). Only effective when [sensorEnabled] is
+  /// also true, because it runs on the same driving-only sensor session.
+  static Future<bool> crashEnabled({bool reload = true}) =>
+      _get(crashKey, reload, false);
+
+  static Future<void> setCrashEnabled(bool v) async {
+    final SharedPreferences p = await SharedPreferences.getInstance();
+    await p.setBool(crashKey, v);
+  }
+
   static Future<void> setSensorEnabled(bool v) async {
     final SharedPreferences p = await SharedPreferences.getInstance();
     await p.setBool(sensorKey, v);
     await p.setBool(syncedKey, false);
-    if (!v) await p.setBool(phoneUseKey, false);
+    if (!v) {
+      await p.setBool(phoneUseKey, false);
+      await p.setBool(crashKey, false);
+    }
   }
 
   static Future<void> setPhoneUseEnabled(bool v) async {

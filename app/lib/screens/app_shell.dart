@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../models/member.dart';
+import '../services/driving/crash_watcher.dart';
 import '../services/perf/perf_monitor.dart';
 import '../theme/app_theme.dart';
 import 'circle_tab_screen.dart';
@@ -66,9 +67,12 @@ class _AppShellState extends State<AppShell> {
   /// The circle selected on the map pill, shared with the Driving tab.
   final ValueNotifier<String?> _circleId = ValueNotifier<String?>(null);
 
+  late final CrashWatcher _crashWatcher = CrashWatcher(() => context);
+
   @override
   void initState() {
     super.initState();
+    _crashWatcher.start();
     AppShell.requestedTab.addListener(_onRequested);
     WidgetsBinding.instance.addPostFrameCallback((_) => _onRequested());
   }
@@ -76,6 +80,7 @@ class _AppShellState extends State<AppShell> {
   @override
   void dispose() {
     AppShell.requestedTab.removeListener(_onRequested);
+    _crashWatcher.stop();
     _members.dispose();
     _userId.dispose();
     _circleId.dispose();

@@ -28,6 +28,7 @@ class _DrivingDetectionScreenState extends State<DrivingDetectionScreen> {
   bool _busy = false;
   bool _sensor = false;
   bool _phone = false;
+  bool _crash = false;
   String? _error;
 
   @override
@@ -39,10 +40,12 @@ class _DrivingDetectionScreenState extends State<DrivingDetectionScreen> {
   Future<void> _load() async {
     final bool s = await DrivingSettings.sensorEnabled(reload: false);
     final bool p = await DrivingSettings.phoneUseEnabled(reload: false);
+    final bool cr = await DrivingSettings.crashEnabled(reload: false);
     if (!mounted) return;
     setState(() {
       _sensor = s;
       _phone = p && s;
+      _crash = cr && s;
       _loading = false;
     });
   }
@@ -69,13 +72,19 @@ class _DrivingDetectionScreenState extends State<DrivingDetectionScreen> {
       if (!mounted) return;
       setState(() {
         _sensor = value;
-        if (!value) _phone = false;
+        if (!value) {
+          _phone = false;
+          _crash = false;
+        }
       });
     } catch (_) {
       if (!mounted) return;
       setState(() {
         _sensor = false;
-        if (!value) _phone = false;
+        if (!value) {
+          _phone = false;
+          _crash = false;
+        }
         _error = value
             ? "Couldn't reach the server, so driving detection stays off. "
                 'Try again when you are online.'
@@ -86,6 +95,11 @@ class _DrivingDetectionScreenState extends State<DrivingDetectionScreen> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  Future<void> _setCrash(bool value) async {
+    await DrivingSettings.setCrashEnabled(value);
+    if (mounted) setState(() => _crash = value);
   }
 
   Future<void> _setPhone(bool value) async {
@@ -217,6 +231,35 @@ class _DrivingDetectionScreenState extends State<DrivingDetectionScreen> {
               'estimate: a passenger using the phone looks the same as a '
               'driver, and we cannot tell a map app from anything else. We '
               'do not see which apps you use.',
+              style: body,
+            ),
+          ),
+          const DsSectionHeader('Crash detection'),
+          DsToggleRow(
+            icon: Icons.car_crash_outlined,
+            title: 'Detect possible crashes',
+            subtitle: _sensor
+                ? 'Off by default. Alerts your circle if you do not answer.'
+                : 'Turn on driving detection first.',
+            value: _crash,
+            onChanged: _sensor ? _setCrash : null,
+          ),
+          Padding(
+            padding: pad,
+            child: Text(
+              'While you drive, the phone watches for a very hard impact '
+              'followed by the car stopping from driving speed within a few '
+              'seconds. If that happens your phone shows a full-screen '
+              '"Are you OK?" with a 30 second countdown, a loud alert and '
+              'vibration. Tap "I\'m OK" to cancel and nothing is sent. Tap '
+              '"I need help" to alert your circle right away. If you do not '
+              'answer, your circle gets a notification with your location.\n\n'
+              'It can be wrong: a false alarm can be marked from the alert '
+              'screen or in Safety > Crash reports. It is not certified crash '
+              'detection and it never contacts emergency services. If your '
+              'phone is destroyed or switched off in the crash, no alert is '
+              'sent. Allow notifications and "display over lock screen" '
+              'for the prompt to appear while the phone is locked.',
               style: body,
             ),
           ),

@@ -25,6 +25,7 @@ driving > walking > stationary.
 | Tier | Entered when | GPS request | Post gate (min between POSTs) |
 | --- | --- | --- | --- |
 | stationary, foreground | default | stream, `distanceFilter` 10 m | 5 s |
+| idle (background, same spot 10 min) | balanced power | interval 3 min, `distanceFilter` 30 m | 10 s |
 | stationary, background | default | interval 60 s, filter 0 (native drops to the 15 min STILL profile when activity recognition says still, liveness alarm unchanged) | 10 s |
 | walking | smoothed speed >= 0.8 m/s, or motion state walking/running/cycling/driving | 5 s, filter 0 | 5 s |
 | driving | smoothed speed >= 3 m/s for 2 consecutive fixes, or one fix >= 8 m/s | 1 s, filter 0 | 850 ms (GPS request is 1 Hz, so never above 1 Hz) |
@@ -107,3 +108,14 @@ foreground reporter reports there; the background isolate has no UI.
 Driving at 1 Hz costs noticeably more battery than the previous 60 s
 cadence, but only while speed >= 3 m/s or someone is watching. The outbox holds
 720 points (12 minutes at 1 Hz) if the phone is offline while driving.
+
+## Idle tier (battery saver)
+
+In the background, once the device has stayed within 60 m of the same spot for
+10 minutes with no walking, driving or moving activity evidence, the profile
+relaxes to `idle`: balanced-power accuracy, a 3 minute interval and a 30 m
+displacement filter. Reporting never stops (the 10 minute heartbeat and the
+interval keep running). Any fix more than 60 m from the anchor, walking-or-faster
+speed, a moving activity state, a live boost or SOS leaves idle at once.
+Fixes without coordinates never count as stillness. The foreground reporter
+never uses it.

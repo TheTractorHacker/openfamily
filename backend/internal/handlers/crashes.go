@@ -27,6 +27,8 @@ const (
 	crashPostWindow    = 60 * time.Second
 	crashStatusPossibl = "possible"
 	crashListLimit     = 50
+	// A device report and a server-side report this close are the same crash.
+	crashDeviceDedupe = 2 * time.Minute
 )
 
 // EnsureCrashSchema creates the crash objects idempotently (not a numbered
@@ -48,7 +50,12 @@ func (s *Server) EnsureCrashSchema(ctx context.Context) error {
 			resolved_at      TIMESTAMPTZ,
 			UNIQUE (user_id, occurred_at)
 		);
-		CREATE INDEX IF NOT EXISTS crash_events_user_time ON crash_events (user_id, occurred_at DESC);`)
+		CREATE INDEX IF NOT EXISTS crash_events_user_time ON crash_events (user_id, occurred_at DESC);
+		-- Device-confirmed crashes (POST /crash-alerts): the phone detected the
+		-- impact, ran the "Are you OK?" countdown and then alerted the circle.
+		ALTER TABLE crash_events ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'server';
+		ALTER TABLE crash_events ADD COLUMN IF NOT EXISTS help_requested BOOLEAN NOT NULL DEFAULT FALSE;
+		ALTER TABLE crash_events ADD COLUMN IF NOT EXISTS peak_g DOUBLE PRECISION;`)
 	return err
 }
 
@@ -73,6 +80,14 @@ func (s *Server) detectCrashes(userID string, cands []crashCandidate) {
 		return
 	}
 	for _, c := range cands {
+		// A device-confirmed report for the same moment already covers this.
+		var dup bool
+		if err := s.Pool.QueryRow(ctx, `
+			SELECT EXISTS (SELECT 1 FROM crash_events
+			  WHERE user_id = $1 AND occurred_at BETWEEN $2 AND $3)`,
+			userID, c.At.Add(-crashDeviceDedupe), c.At.Add(crashDeviceDedupe)).Scan(&dup); err == nil && dup {
+			continue
+		}
 		var pre *float64
 		var postN int
 		var post *float64
@@ -116,11 +131,15 @@ func (s *Server) detectCrashes(userID string, cands []crashCandidate) {
 		if err != nil {
 			continue // duplicate (or error): never announce twice
 		}
-		s.announceCrash(ctx, userID, id)
+		s.announceCrash(ctx, userID, id, "")
 	}
 }
 
-func (s *Server) announceCrash(ctx context.Context, userID, crashID string) {
+// announceCrash pushes a crash report to the people who may see the sender's
+// location. kind is "" for the server heuristic, "device" for a phone that
+// detected the crash and got no answer, "device_help" when the person asked
+// for help.
+func (s *Server) announceCrash(ctx context.Context, userID, crashID, kind string) {
 	familyID, err := s.familyIDForUser(ctx, userID)
 	if err != nil || familyID == "" || s.Push == nil {
 		return
@@ -161,6 +180,13 @@ func (s *Server) announceCrash(ctx context.Context, userID, crashID string) {
 	who := s.pushName(name)
 	title := "Possible crash: " + who
 	body := who + "'s phone detected a sudden stop at driving speed. Check that they are okay."
+	switch kind {
+	case "device":
+		body = who + "'s phone detected a crash and they did not answer \"Are you OK?\". Check that they are okay."
+	case "device_help":
+		title = who + " needs help after a possible crash"
+		body = who + "'s phone detected a crash and they asked for help."
+	}
 	sent, failed := s.pushFamilyAlertOnly(ctx, familyID, userID, "", title, body, "safety_incidents", only)
 	s.logAudit(ctx, userID, familyID, "crash.detected",
 		fmt.Sprintf("crash_id=%s push_sent=%d push_failed=%d", crashID, sent, failed), "")

@@ -1,3 +1,4 @@
+import 'crash_responder.dart';
 import 'driving_events_service.dart';
 import 'driving_platform_feed.dart';
 import 'driving_runtime.dart';
@@ -19,6 +20,11 @@ class DrivingBackground {
         syncOptIn: _service.syncOptIn,
         isEnabled: DrivingSettings.sensorEnabled,
         isPhoneUseEnabled: DrivingSettings.phoneUseEnabled,
+        isCrashEnabled: DrivingSettings.crashEnabled,
+        crashResponder: CrashResponder(
+          sender: const IngestKeyCrashSender(),
+          notifier: LocalCrashNotifier(),
+        ),
       );
 
   /// Called from `onLocationUpdate` for every background fix. Cheap when the

@@ -248,4 +248,121 @@ void main() {
       expect(a.next(c.profile(at(301)), at(301)), isNotNull);
     });
   });
+
+  group('idle tier (battery saver)', () {
+    const double lat = 52.0, lon = 4.0;
+    TrackingCadence bg() => TrackingCadence()..setBackground(true);
+
+    void still(TrackingCadence c, int fromS, int toS, {double dLon = 0}) {
+      for (int s = fromS; s <= toS; s += 60) {
+        c.onFix(now: at(s), speedMps: 0, lat: lat, lon: lon + dLon);
+      }
+    }
+
+    test('stays on the 60 s profile until idleAfter has elapsed', () {
+      final TrackingCadence c = bg();
+      still(c, 0, 540);
+      expect(c.profile(at(540)).tier, CadenceTier.stationary);
+    });
+
+    test('after 10 minutes at the same spot: slow, balanced, never off', () {
+      final TrackingCadence c = bg();
+      still(c, 0, 600);
+      final CadenceProfile p = c.profile(at(600));
+      expect(p.tier, CadenceTier.idle);
+      expect(p.gpsInterval, const Duration(minutes: 3));
+      expect(p.distanceFilterM, 30);
+      expect(p.highAccuracy, isFalse);
+      expect(p.gpsInterval, greaterThan(Duration.zero));
+      // The slow profile is still bounded: a post is allowed every 10 s.
+      expect(p.minPostInterval, lessThanOrEqualTo(const Duration(minutes: 1)));
+    });
+
+    test('foreground never goes idle', () {
+      final TrackingCadence c = TrackingCadence();
+      still(c, 0, 1200);
+      expect(c.profile(at(1200)).tier, CadenceTier.stationary);
+    });
+
+    test('GPS jitter inside the radius keeps the timer running', () {
+      final TrackingCadence c = bg();
+      still(c, 0, 300);
+      // ~20 m east.
+      still(c, 360, 600, dLon: 0.0003);
+      expect(c.profile(at(600)).tier, CadenceTier.idle);
+    });
+
+    test('a fix beyond the radius wakes immediately', () {
+      final TrackingCadence c = bg();
+      still(c, 0, 600);
+      expect(c.profile(at(600)).tier, CadenceTier.idle);
+      // ~150 m east.
+      c.onFix(now: at(660), speedMps: 0, lat: lat, lon: lon + 0.0022);
+      expect(c.profile(at(660)).tier, CadenceTier.stationary);
+    });
+
+    test('walking speed wakes immediately', () {
+      final TrackingCadence c = bg();
+      still(c, 0, 600);
+      c.onFix(now: at(660), speedMps: 2.0, lat: lat, lon: lon);
+      expect(c.profile(at(660)).tier, CadenceTier.walking);
+    });
+
+    test('driving speed wakes to the 1 Hz profile', () {
+      final TrackingCadence c = bg();
+      still(c, 0, 600);
+      c.onFix(now: at(660), speedMps: 12, lat: lat, lon: lon + 0.002);
+      final CadenceProfile p = c.profile(at(660));
+      expect(p.tier, CadenceTier.driving);
+      expect(p.gpsInterval, const Duration(seconds: 1));
+    });
+
+    test('moving activity state wakes', () {
+      final TrackingCadence c = bg();
+      still(c, 0, 600);
+      c.onFix(
+          now: at(660), speedMps: 0, motionState: 'walking', lat: lat, lon: lon);
+      expect(c.profile(at(660)).tier, CadenceTier.walking);
+    });
+
+    test('fixes without a position never prove stillness', () {
+      final TrackingCadence c = bg();
+      for (int s = 0; s <= 1200; s += 60) {
+        c.onFix(now: at(s), speedMps: 0);
+      }
+      expect(c.profile(at(1200)).tier, CadenceTier.stationary);
+    });
+
+    test('boost and SOS override idle', () {
+      final TrackingCadence c = bg();
+      still(c, 0, 600);
+      c.startBoost(const Duration(seconds: 30), at(600));
+      expect(c.profile(at(601)).tier, CadenceTier.boosted);
+      expect(c.profile(at(640)).tier, CadenceTier.idle);
+      c.setSos(true);
+      expect(c.profile(at(640)).tier, CadenceTier.sos);
+    });
+
+    test('a long gap between idle fixes does not reset idle', () {
+      final TrackingCadence c = bg();
+      still(c, 0, 600);
+      // Next fix only after 3 minutes (the idle interval): stale reset must
+      // not fall back to the 60 s profile in between.
+      expect(c.profile(at(780)).tier, CadenceTier.idle);
+      c.onFix(now: at(780), speedMps: 0, lat: lat, lon: lon);
+      expect(c.profile(at(780)).tier, CadenceTier.idle);
+    });
+
+    test('applier: idle to driving is applied despite the gap rule only after '
+        'minApplyGap, idle itself is not re-asserted', () {
+      final TrackingCadence c = bg();
+      final ProfileApplier a = ProfileApplier(c.config);
+      still(c, 0, 600);
+      final CadenceProfile idle = c.profile(at(600));
+      a.markApplied(idle, at(600));
+      expect(a.next(c.profile(at(600)), at(1200)), isNull);
+      c.onFix(now: at(1260), speedMps: 12, lat: lat, lon: lon + 0.002);
+      expect(a.next(c.profile(at(1260)), at(1260)), isNotNull);
+    });
+  });
 }

@@ -218,6 +218,8 @@ Future<void> onLocationUpdate(LocationDto location) async {
       now: now,
       speedMps: location.speed,
       motionState: location.motionState,
+      lat: location.latitude,
+      lon: location.longitude,
     );
     final CadenceProfile profile = _cadence.profile(now);
     unawaited(_applyProfile(profile));
