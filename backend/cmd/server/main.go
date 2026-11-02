@@ -395,6 +395,7 @@ func main() {
 		r.Get("/api/admin/sessions", srv.AdminListSessions)
 		r.Delete("/api/admin/sessions/{id}", srv.AdminRevokeSession)
 		r.Get("/api/admin/activity", srv.AdminActivityFeed)
+		r.Get("/api/admin/bubbles", srv.AdminListBubbles)
 		r.Get("/api/admin/invites", srv.AdminListInvites)
 		r.Post("/api/admin/invites", srv.AdminCreateInvite)
 

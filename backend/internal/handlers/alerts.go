@@ -187,7 +187,7 @@ func (s *Server) postAlert(w http.ResponseWriter, r *http.Request, typ string, i
 		var n int
 		if err := s.Pool.QueryRow(r.Context(), `
 			SELECT count(*) FROM alerts
-			WHERE family_id = $1 AND type <> 'sos' AND created_at > now() - interval '1 hour'`,
+			WHERE family_id = $1 AND type IN ('check_in', 'help') AND created_at > now() - interval '1 hour'`,
 			familyID).Scan(&n); err == nil && n >= cfg.FamilyMaxPerHour {
 			writeError(w, http.StatusTooManyRequests, "your family has sent too many check-ins or help requests in the last hour")
 			return

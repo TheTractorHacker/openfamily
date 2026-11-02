@@ -17,6 +17,7 @@ const KINDS: { key: ActivityKind; label: string }[] = [
   { key: 'help', label: 'Help' },
   { key: 'check_in', label: 'Check-ins' },
   { key: 'crash', label: 'Crashes' },
+  { key: 'bubble_created', label: 'Bubbles' },
 ]
 
 type Tone = 'green' | 'neutral' | 'orange' | 'pink' | 'purple'
@@ -36,6 +37,12 @@ function describe(e: ActivityEvent): { tone: Tone; label: string; text: string }
       return { tone: 'purple', label: 'Check-in', text: `checked in${e.detail ? ` — ${e.detail}` : ''}` }
     case 'crash':
       return { tone: 'orange', label: 'Crash', text: `possible crash — ${e.detail}` }
+    case 'bubble_created':
+      return { tone: 'purple', label: 'Bubble', text: `created a Bubble around ${e.detail || 'someone'}` }
+    case 'bubble_entered':
+      return { tone: 'green', label: 'Bubble', text: `— ${e.detail || 'someone'} is back inside their Bubble` }
+    case 'bubble_left':
+      return { tone: 'orange', label: 'Bubble', text: `— ${e.detail || 'someone'} left their Bubble` }
   }
 }
 
@@ -54,7 +61,12 @@ export function ActivityPage() {
   const [loadingMore, setLoadingMore] = React.useState(false)
   const [error, setError] = React.useState<{ status: number; message: string } | null>(null)
 
-  const typeParam = React.useMemo(() => [...kinds].join(','), [kinds])
+  const typeParam = React.useMemo(() => {
+    const k = [...kinds]
+    // The "Bubbles" chip covers every bubble event.
+    if (kinds.has('bubble_created')) k.push('bubble_entered', 'bubble_left')
+    return k.join(',')
+  }, [kinds])
 
   const load = React.useCallback(
     async (before?: string) => {

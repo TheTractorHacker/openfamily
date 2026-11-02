@@ -98,6 +98,7 @@ class _AlertsHistoryScreenState extends State<AlertsHistoryScreen> {
   }
 
   void _open(AlertSummary a) {
+    if (a.kind.isBubble) return; // history only; there is no delivery to show
     final bool mine = _self != null && a.userId == _self;
     Navigator.of(context).push(MaterialPageRoute<void>(
       builder: (_) => mine
@@ -208,12 +209,18 @@ class AlertTile extends StatelessWidget {
       AlertKind.sos => Icons.sos,
       AlertKind.help => Icons.campaign_outlined,
       AlertKind.checkIn => Icons.location_on_outlined,
+      AlertKind.bubbleCreated ||
+      AlertKind.bubbleEntered ||
+      AlertKind.bubbleLeft =>
+        Icons.bubble_chart_outlined,
       AlertKind.unknown => Icons.notifications_none,
     };
     final String who = isMine ? 'You' : alert.senderName;
     final String status = alert.isActive ? 'Active' : 'Resolved';
-    final String line =
-        '${alertKindLabel(alert.kind)} · ${formatAlertTime(alert.createdAt)} · $status';
+    final bool bubble = alert.kind.isBubble;
+    final String line = bubble
+        ? '${alertKindLabel(alert.kind)}${alert.note.isEmpty ? '' : ' · ${alert.note}'} · ${formatAlertTime(alert.createdAt)}'
+        : '${alertKindLabel(alert.kind)} · ${formatAlertTime(alert.createdAt)} · $status';
     return Semantics(
       button: true,
       label: '$who, $line',
@@ -226,7 +233,9 @@ class AlertTile extends StatelessWidget {
           icon,
           color: alert.kind == AlertKind.sos ? AppColors.sosRed : null,
         ),
-        trailing: Align(
+        trailing: bubble
+            ? null
+            : Align(
           alignment: Alignment.centerRight,
           child: DsStatusChip(
             label: status,

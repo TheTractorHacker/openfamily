@@ -28,12 +28,14 @@ class LiveShare {
     required this.userId,
     required this.name,
     required this.expiresAt,
+    this.createdAt,
     this.paused = false,
     this.lat,
     this.lon,
   });
 
   final String id;
+  final DateTime? createdAt;
 
   /// The other party: the viewer of an outgoing share, the sharer of an
   /// incoming one.
@@ -51,6 +53,9 @@ class LiveShare {
         userId: json['user_id'] as String,
         name: (json['name'] as String?) ?? '',
         expiresAt: DateTime.parse(json['expires_at'] as String).toLocal(),
+        createdAt: json['created_at'] is String
+            ? DateTime.tryParse(json['created_at'] as String)?.toLocal()
+            : null,
         paused: json['paused'] == true,
         lat: (json['lat'] as num?)?.toDouble(),
         lon: (json['lon'] as num?)?.toDouble(),

@@ -276,7 +276,16 @@ export interface AdminSession {
   expires_at: string
 }
 
-export type ActivityKind = 'arrival' | 'departure' | 'sos' | 'help' | 'check_in' | 'crash'
+export type ActivityKind =
+  | 'arrival'
+  | 'departure'
+  | 'sos'
+  | 'help'
+  | 'check_in'
+  | 'crash'
+  | 'bubble_created'
+  | 'bubble_entered'
+  | 'bubble_left'
 
 export interface ActivityEvent {
   kind: ActivityKind
@@ -294,4 +303,28 @@ export interface ActivityEvent {
 export interface ActivityPage {
   events: ActivityEvent[]
   next_before: string | null
+}
+
+// ---- Bubbles (platform admin, read-only) ----
+
+export interface AdminBubbleMember {
+  id: string
+  name: string
+  role: string
+}
+
+export interface AdminBubble {
+  id: string
+  circle_id: string
+  circle_name: string
+  creator_id: string
+  creator_name: string
+  subject_id: string
+  subject_name: string
+  radius_m: number
+  notify_reenter: boolean
+  inside: boolean
+  created_at: string
+  expires_at: string
+  members: AdminBubbleMember[]
 }

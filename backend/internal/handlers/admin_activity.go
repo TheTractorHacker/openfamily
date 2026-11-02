@@ -11,7 +11,7 @@ import (
 )
 
 // Activity kinds the feed can return, in display order.
-var activityKinds = []string{"arrival", "departure", "sos", "help", "check_in", "crash"}
+var activityKinds = []string{"arrival", "departure", "sos", "help", "check_in", "crash", "bubble_created", "bubble_entered", "bubble_left"}
 
 // parseActivityKinds turns ?type=arrival,sos into a validated list; nil means
 // every kind. Unknown names are an error rather than being ignored.

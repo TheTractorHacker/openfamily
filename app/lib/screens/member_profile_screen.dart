@@ -4,6 +4,7 @@ import 'package:latlong2/latlong.dart';
 
 import '../widgets/openfamily_map_layers.dart';
 import '../models/member.dart';
+import '../services/alert_service.dart' show AlertEvents;
 import '../services/api_client.dart';
 import '../services/location_refresh_service.dart';
 import '../theme/app_theme.dart';
@@ -27,9 +28,20 @@ import '../widgets/trips_entry_button.dart';
 /// Tapping a member bubble on the map opens this screen (not a modal bottom
 /// sheet). Tapping a name in the member list still recenters the map.
 class MemberProfileScreen extends StatelessWidget {
-  const MemberProfileScreen({super.key, required this.member});
+  const MemberProfileScreen({super.key, required this.member, this.selfUserId});
 
   final Member member;
+
+  /// The signed-in user's id; defaults to the one learned from the WebSocket
+  /// welcome frame. Rows that are only about *other* people (Bubble,
+  /// per-member notifications) are hidden on your own profile, where the
+  /// server would answer 400.
+  final String? selfUserId;
+
+  bool get _isSelf {
+    final String? me = selfUserId ?? AlertEvents.selfUserId;
+    return me != null && me == member.id;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -149,12 +161,13 @@ class MemberProfileScreen extends StatelessWidget {
                     _DayDetailButton(member: member),
                     _DailyHistoryButton(member: member),
                     TripsEntryButton(member: member),
-                    if (member.position != null)
+                    if (member.position != null && !_isSelf)
                       BubbleEntryButton(member: member),
-                    NotificationPrefsEntryButton(
-                      memberId: member.id,
-                      memberName: member.name,
-                    ),
+                    if (!_isSelf)
+                      NotificationPrefsEntryButton(
+                        memberId: member.id,
+                        memberName: member.name,
+                      ),
                   ],
                 ),
               ],

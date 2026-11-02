@@ -10,7 +10,9 @@ import '../models/member.dart';
 import '../models/place.dart';
 import 'alert_service.dart';
 import 'api_client.dart';
+import 'bubble_service.dart';
 import 'chat_service.dart';
+import 'inbox_service.dart';
 import 'member_avatar_cache.dart';
 import 'member_mapper.dart';
 import 'perf/perf_monitor.dart';
@@ -520,6 +522,12 @@ class FamilyService {
       case 'alert':
       case 'alert_ack':
         AlertEvents.handleFrame(map);
+        return true;
+      case 'checkin':
+        InboxStore.instance.handleFrame(map);
+        return true;
+      case 'bubble':
+        BubbleStore.instance.handleFrame(map);
         return true;
     }
     return false;

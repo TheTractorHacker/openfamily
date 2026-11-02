@@ -166,6 +166,8 @@ func (s *Server) CreateBubble(w http.ResponseWriter, r *http.Request) {
 	s.auditSharing(r, claims.UserID, "bubble.create", fmt.Sprintf("bubble %s subject %s until %s", b.ID, subject, b.ExpiresAt.Format(time.RFC3339)))
 	go s.purgeExpiredSharing()
 	go s.notifyBubbleSubject(subject, creatorName, b.ExpiresAt)
+	go s.recordBubbleEvent(claims.UserID, subject, b.ID, alertBubbleCreated, b.SubjectName)
+	go s.publishBubbleFrame("created", b.ID, claims.UserID, subject)
 	writeJSON(w, http.StatusCreated, b)
 }
 
@@ -238,16 +240,19 @@ func (s *Server) DeleteBubble(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "bubble not found")
 		return
 	}
-	tag, err := s.Pool.Exec(r.Context(), `DELETE FROM bubbles WHERE id = $1 AND creator_id = $2`, id, claims.UserID)
+	var subjectID string
+	err := s.Pool.QueryRow(r.Context(),
+		`DELETE FROM bubbles WHERE id = $1 AND creator_id = $2 RETURNING subject_id::text`, id, claims.UserID).Scan(&subjectID)
+	if err == pgx.ErrNoRows {
+		writeError(w, http.StatusNotFound, "bubble not found")
+		return
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to cancel bubble")
 		return
 	}
-	if tag.RowsAffected() == 0 {
-		writeError(w, http.StatusNotFound, "bubble not found")
-		return
-	}
 	s.auditSharing(r, claims.UserID, "bubble.cancel", "cancelled bubble "+id)
+	go s.publishBubbleFrame("cancelled", id, claims.UserID, subjectID)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
@@ -354,13 +359,11 @@ func (s *Server) alertBubble(ctx context.Context, bubbleID, creatorID, subjectID
 	if entered {
 		event = "entered"
 	}
-	if s.hub != nil {
-		if b, err := json.Marshal(map[string]any{
-			"type": "bubble", "event": event, "bubble_id": bubbleID,
-			"user_id": subjectID, "name": name, "at": time.Now().UTC(),
-		}); err == nil {
-			s.hub.sendToUser(creatorID, b)
-		}
+	s.publishBubbleFrame(event, bubbleID, creatorID, subjectID)
+	if entered {
+		s.recordBubbleEvent(creatorID, subjectID, bubbleID, alertBubbleEntered, name)
+	} else {
+		s.recordBubbleEvent(creatorID, subjectID, bubbleID, alertBubbleLeft, name)
 	}
 	if s.Push != nil {
 		title := s.pushName(name) + " " + event + " their Bubble"
@@ -373,5 +376,59 @@ func (s *Server) alertBubble(ctx context.Context, bubbleID, creatorID, subjectID
 func (s *Server) purgeExpiredBubbles(ctx context.Context) {
 	if _, err := s.Pool.Exec(ctx, `DELETE FROM bubbles WHERE expires_at <= now()`); err != nil {
 		slog.Debug("purge expired bubbles", "err", err)
+	}
+}
+
+// Bubble events are written to the alerts history as already-resolved,
+// non-emergency rows so they appear next to check-ins and SOS in alert history
+// and the admin activity feed. They are never fanned out as alerts.
+const (
+	alertBubbleCreated = "bubble_created"
+	alertBubbleEntered = "bubble_entered"
+	alertBubbleLeft    = "bubble_left"
+)
+
+func isBubbleAlertType(t string) bool {
+	return t == alertBubbleCreated || t == alertBubbleEntered || t == alertBubbleLeft
+}
+
+// recordBubbleEvent stores one bubble event owned by the creator (user_id), with
+// the subject's name as the note. Failures are logged, never surfaced.
+func (s *Server) recordBubbleEvent(creatorID, subjectID, bubbleID, typ, subjectName string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	token, err := newShareToken()
+	if err != nil {
+		return
+	}
+	var family any
+	if fid, err := s.familyIDForUser(ctx, creatorID); err == nil && fid != "" {
+		family = fid
+	}
+	if _, err := s.Pool.Exec(ctx, `
+		INSERT INTO alerts (user_id, family_id, type, status, note, share_token, resolved_at)
+		VALUES ($1, $2, $3, 'resolved', $4, $5, now())`,
+		creatorID, family, typ, subjectName, token); err != nil {
+		slog.Warn("bubble: record alert history", "err", err)
+	}
+}
+
+// publishBubbleFrame sends a `bubble` WebSocket frame ({event: created |
+// cancelled | entered | left}) to the creator and, when known, the subject so
+// both apps can refresh. It carries no coordinates.
+func (s *Server) publishBubbleFrame(event, bubbleID, creatorID, subjectID string) {
+	if s.hub == nil {
+		return
+	}
+	b, err := json.Marshal(map[string]any{
+		"type": "bubble", "event": event, "bubble_id": bubbleID,
+		"creator_id": creatorID, "user_id": subjectID, "at": time.Now().UTC(),
+	})
+	if err != nil {
+		return
+	}
+	s.hub.sendToUser(creatorID, b)
+	if subjectID != "" {
+		s.hub.sendToUser(subjectID, b)
 	}
 }
