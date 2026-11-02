@@ -114,6 +114,7 @@ func (s *Server) evaluateGeofences(ctx context.Context, userID string, lon, lat 
 		  )))
 		  AND p.geom IS NOT NULL
 		  AND p.radius_meters IS NOT NULL
+		  AND `+placeVisibleSQL("p", "$2")+`
 		  AND (ST_DWithin(p.geom::geography, ST_SetSRID(ST_MakePoint($3, $4), 4326)::geography, p.radius_meters)
 		       OR s.inside = TRUE
 		       OR s.geofence_id IS NULL)`,
@@ -670,6 +671,7 @@ func (s *Server) redispatchFailedPushes(ctx context.Context) {
 		  AND g.enabled = TRUE
 		  AND tracked.family_id = g.family_id
 		  AND recipient.family_id = g.family_id
+		  AND (p.id IS NULL OR `+placeVisibleSQL("p", "recipient.id")+`)
 		  AND e.created_at < now() - ($2 * interval '1 second')`,
 		maxPushAttempts, pushRedispatchMinAge.Seconds())
 	if err != nil {
@@ -785,15 +787,22 @@ func (s *Server) createEventDeviceRows(ctx context.Context, tx pgx.Tx, eventID, 
 		FROM devices d
 		JOIN users u ON u.id = d.user_id
 		WHERE u.family_id = $1 AND u.id <> $2
+		  AND NOT EXISTS (
+		      SELECT 1 FROM geofence_events ge JOIN places gp ON gp.id = ge.place_id
+		      WHERE ge.id = $3 AND NOT `+placeVisibleSQL("gp", "u.id")+`)
 		  AND ((d.platform = 'ios' AND d.push_token IS NOT NULL AND d.push_token <> '')
 		       OR (d.platform = 'android' AND d.unifiedpush_endpoint IS NOT NULL AND d.unifiedpush_endpoint <> '')
 		       OR (d.platform = 'android' AND d.push_transport = 'direct'))`,
-		familyID, trackedUserID)
+		familyID, trackedUserID, eventID)
 	if err != nil {
 		return err
 	}
 	defer rows.Close()
 
+	// Read every candidate before inserting: a pgx connection runs one
+	// statement at a time, so an Exec while rows is open fails with
+	// "conn busy" and no delivery rows (hence no push) would be created.
+	var deviceIDs []string
 	for rows.Next() {
 		var deviceID, recipientID string
 		if err := rows.Scan(&deviceID, &recipientID); err != nil {
@@ -802,6 +811,13 @@ func (s *Server) createEventDeviceRows(ctx context.Context, tx pgx.Tx, eventID, 
 		if muted[recipientID] || skip[recipientID] {
 			continue
 		}
+		deviceIDs = append(deviceIDs, deviceID)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, deviceID := range deviceIDs {
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO geofence_event_devices (event_id, device_id, push_sent, push_attempts)
 			VALUES ($1, $2, FALSE, 1)
@@ -810,7 +826,7 @@ func (s *Server) createEventDeviceRows(ctx context.Context, tx pgx.Tx, eventID, 
 			return err
 		}
 	}
-	return rows.Err()
+	return nil
 }
 
 // buildNotification builds the push notification for a device, returning false

@@ -153,8 +153,8 @@ func (s *Server) ListGeofences(w http.ResponseWriter, r *http.Request) {
 		       p.name
 		FROM geofences g
 		JOIN places p ON p.id = g.place_id
-		WHERE g.family_id = $1
-		ORDER BY g.created_at`, familyID)
+		WHERE g.family_id = $1 AND `+placeVisibleSQL("p", "$2")+`
+		ORDER BY g.created_at`, familyID, claims.UserID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list geofences")
 		return
@@ -218,8 +218,8 @@ func (s *Server) CreateGeofence(w http.ResponseWriter, r *http.Request) {
 	var geomExists, radiusExists bool
 	if err := s.Pool.QueryRow(r.Context(), `
 		SELECT geom IS NOT NULL, radius_meters IS NOT NULL
-		FROM places WHERE id = $1 AND family_id = $2`,
-		req.PlaceID, familyID).Scan(&geomExists, &radiusExists); err != nil {
+		FROM places p WHERE p.id = $1 AND p.family_id = $2 AND `+placeVisibleSQL("p", "$3"),
+		req.PlaceID, familyID, claims.UserID).Scan(&geomExists, &radiusExists); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "place not found")
 			return
@@ -385,8 +385,8 @@ func (s *Server) UpdateGeofence(w http.ResponseWriter, r *http.Request) {
 		var geomExists, radiusExists bool
 		if err := s.Pool.QueryRow(r.Context(), `
 			SELECT geom IS NOT NULL, radius_meters IS NOT NULL
-			FROM places WHERE id = $1 AND family_id = $2`,
-			*req.PlaceID, familyID).Scan(&geomExists, &radiusExists); err != nil {
+			FROM places p WHERE p.id = $1 AND p.family_id = $2 AND `+placeVisibleSQL("p", "$3"),
+			*req.PlaceID, familyID, claims.UserID).Scan(&geomExists, &radiusExists); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				writeError(w, http.StatusNotFound, "place not found")
 				return

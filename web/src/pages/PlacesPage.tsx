@@ -9,6 +9,7 @@ import {
   ApiError,
   createAdminPlace,
   deleteAdminPlace,
+  listAdminCircles,
   listAdminPlaces,
   listFamilies,
   updateAdminPlace,
@@ -33,6 +34,7 @@ interface Draft {
   lon: number
   radius: number
   address: string
+  circleId: string // '' = whole family
 }
 
 const pinIcon = L.divIcon({
@@ -52,6 +54,7 @@ function toDraft(p: AdminPlace): Draft {
     lon: p.lon,
     radius: Math.round(p.radius_meters ?? 150),
     address: p.address ?? '',
+    circleId: p.circle_id ?? '',
   }
 }
 
@@ -86,6 +89,7 @@ function Fly({ target }: { target: { lat: number; lon: number; key: string } | n
 export function PlacesPage() {
   const placesQ = useAsync(listAdminPlaces, [])
   const familiesQ = useAsync(listFamilies, [])
+  const circlesQ = useAsync(listAdminCircles, [])
   const [draft, setDraft] = React.useState<Draft | null>(null)
   const [adding, setAdding] = React.useState(false)
   const [filterFamily, setFilterFamily] = React.useState('')
@@ -95,6 +99,13 @@ export function PlacesPage() {
 
   const places = placesQ.data ?? []
   const families = familiesQ.data ?? []
+  // Only circles that are still live can be chosen; the place's current one is
+  // always kept so editing never silently changes who sees it.
+  const circleOptions = (circlesQ.data ?? []).filter(
+    (c) =>
+      c.id === draft?.circleId ||
+      (!c.family_backed && (c.status === 'permanent' || c.status === 'active')),
+  )
 
   if (isAccessDenied(placesQ.error)) {
     return (
@@ -154,6 +165,7 @@ export function PlacesPage() {
       lon,
       radius: 150,
       address: '',
+      circleId: '',
     })
   }
 
@@ -179,6 +191,7 @@ export function PlacesPage() {
         lon: draft.lon,
         radius_meters: draft.radius,
         address: draft.address,
+        circle_id: draft.circleId || null,
       }
       const saved = draft.id
         ? await updateAdminPlace(draft.id, body)
@@ -332,6 +345,25 @@ export function PlacesPage() {
                   </select>
                 </label>
               )}
+              <label className="wb-field" htmlFor="place-circle">
+                <span className="wb-label">Share with</span>
+                <select
+                  id="place-circle"
+                  className="wb-select"
+                  value={draft.circleId}
+                  onChange={(e) => patch({ circleId: e.target.value })}
+                >
+                  <option value="">Whole family</option>
+                  {circleOptions.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+                <span className="wb-help">
+                  A circle place is visible to, and alerts, only that circle’s members.
+                </span>
+              </label>
               <label className="wb-field" htmlFor="place-type">
                 <span className="wb-label">Type</span>
                 <select
@@ -417,6 +449,7 @@ export function PlacesPage() {
                         <span className="wb-places-item-name">{p.name}</span>
                         <span className="wb-places-item-sub">
                           {p.family_name} · {p.type}
+                          {p.circle_name ? ` · ${p.circle_name}` : ''}
                           {p.radius_meters ? ` · ${Math.round(p.radius_meters)} m` : ''}
                         </span>
                       </button>

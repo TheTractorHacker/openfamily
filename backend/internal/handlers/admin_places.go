@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -24,6 +25,8 @@ type adminPlaceInput struct {
 	Lon          *float64 `json:"lon,omitempty"`
 	RadiusMeters *float64 `json:"radius_meters,omitempty"`
 	Address      *string  `json:"address,omitempty"`
+	// CircleID restricts the place to one circle; null/"" = whole family.
+	CircleID nullableString `json:"circle_id,omitempty"`
 }
 
 // validate returns a user-facing message for the first invalid field, or "".
@@ -50,6 +53,13 @@ func (in *adminPlaceInput) validate(create bool) string {
 	if msg := placeTextError(in.Name, in.Address); msg != "" {
 		return msg
 	}
+	if in.CircleID.set && in.CircleID.value != nil {
+		if *in.CircleID.value == "" {
+			in.CircleID.value = nil
+		} else if !circles.ValidID(*in.CircleID.value) {
+			return "circle not found"
+		}
+	}
 	if in.Type != nil && !validPlaceType(*in.Type) {
 		return "invalid type"
 	}
@@ -67,8 +77,20 @@ func (in *adminPlaceInput) validate(create bool) string {
 
 const adminPlaceSelect = `
 	SELECT p.id, p.family_id, f.name, p.name, p.type,
-	       ST_Y(p.geom), ST_X(p.geom), p.radius_meters, p.address, p.created_at
-	FROM places p JOIN families f ON f.id = p.family_id`
+	       ST_Y(p.geom), ST_X(p.geom), p.radius_meters, p.address, p.created_at,
+	       p.circle_id, c.name
+	FROM places p JOIN families f ON f.id = p.family_id
+	LEFT JOIN circles c ON c.id = p.circle_id`
+
+// adminLiveCircleExists reports whether circleID is a live (not ended or
+// expired) circle. Admins may scope a place to any live circle.
+func adminLiveCircleExists(ctx context.Context, q queryRower, circleID string) (bool, error) {
+	var ok bool
+	err := q.QueryRow(ctx, `
+		SELECT EXISTS(SELECT 1 FROM circles WHERE id = $1 AND ended_at IS NULL
+		              AND (expires_at IS NULL OR expires_at > now()))`, circleID).Scan(&ok)
+	return ok, err
+}
 
 // AdminCreatePlace creates a place in any family.
 // POST /api/admin/places
@@ -123,12 +145,21 @@ func (s *Server) AdminCreatePlace(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "place overlaps an existing place")
 		return
 	}
+	if in.CircleID.value != nil {
+		if ok, err := adminLiveCircleExists(r.Context(), tx, *in.CircleID.value); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to check circle")
+			return
+		} else if !ok {
+			writeError(w, http.StatusBadRequest, "circle not found")
+			return
+		}
+	}
 	var id string
 	if err := tx.QueryRow(r.Context(), `
-		INSERT INTO places (family_id, name, type, geom, radius_meters, created_by, address)
-		VALUES ($1, $2, $3, ST_SetSRID(ST_MakePoint($4, $5), 4326), $6, $7, $8)
+		INSERT INTO places (family_id, name, type, geom, radius_meters, created_by, address, circle_id)
+		VALUES ($1, $2, $3, ST_SetSRID(ST_MakePoint($4, $5), 4326), $6, $7, $8, $9)
 		RETURNING id`,
-		in.FamilyID, *in.Name, placeType, *in.Lon, *in.Lat, *in.RadiusMeters, claims.UserID, address,
+		in.FamilyID, *in.Name, placeType, *in.Lon, *in.Lat, *in.RadiusMeters, claims.UserID, address, in.CircleID.value,
 	).Scan(&id); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create place")
 		return
@@ -136,7 +167,7 @@ func (s *Server) AdminCreatePlace(w http.ResponseWriter, r *http.Request) {
 	var out adminPlaceOut
 	if err := tx.QueryRow(r.Context(), adminPlaceSelect+` WHERE p.id = $1`, id).Scan(
 		&out.ID, &out.FamilyID, &out.FamilyName, &out.Name, &out.Type,
-		&out.Lat, &out.Lon, &out.RadiusMeters, &out.Address, &out.CreatedAt); err != nil {
+		&out.Lat, &out.Lon, &out.RadiusMeters, &out.Address, &out.CreatedAt, &out.CircleID, &out.CircleName); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load place")
 		return
 	}
@@ -195,9 +226,9 @@ func (s *Server) AdminUpdatePlace(w http.ResponseWriter, r *http.Request) {
 	}
 	var cur placeOut
 	if err := tx.QueryRow(r.Context(), `
-		SELECT id, family_id, name, type, ST_Y(geom), ST_X(geom), radius_meters, address, created_at
+		SELECT id, family_id, name, type, ST_Y(geom), ST_X(geom), radius_meters, address, created_at, circle_id
 		FROM places WHERE id = $1`, id).Scan(
-		&cur.ID, &cur.FamilyID, &cur.Name, &cur.Type, &cur.Lat, &cur.Lon, &cur.RadiusMeters, &cur.Address, &cur.CreatedAt); err != nil {
+		&cur.ID, &cur.FamilyID, &cur.Name, &cur.Type, &cur.Lat, &cur.Lon, &cur.RadiusMeters, &cur.Address, &cur.CreatedAt, &cur.CircleID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "place not found")
 			return
@@ -224,6 +255,19 @@ func (s *Server) AdminUpdatePlace(w http.ResponseWriter, r *http.Request) {
 	}
 	if in.Address != nil {
 		address = *in.Address
+	}
+	circleID := cur.CircleID
+	if in.CircleID.set {
+		circleID = in.CircleID.value
+	}
+	if in.CircleID.set && in.CircleID.value != nil {
+		if ok, err := adminLiveCircleExists(r.Context(), tx, *in.CircleID.value); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to check circle")
+			return
+		} else if !ok {
+			writeError(w, http.StatusBadRequest, "circle not found")
+			return
+		}
 	}
 	geometryChanged := lat != cur.Lat || lon != cur.Lon || !floatPtrsEqual(radius, cur.RadiusMeters)
 
@@ -257,8 +301,8 @@ func (s *Server) AdminUpdatePlace(w http.ResponseWriter, r *http.Request) {
 	}
 	if _, err := tx.Exec(r.Context(), `
 		UPDATE places SET name = $2, type = $3, geom = ST_SetSRID(ST_MakePoint($4, $5), 4326),
-		       radius_meters = $6, address = $7
-		WHERE id = $1`, id, name, placeType, lon, lat, radius, address); err != nil {
+		       radius_meters = $6, address = $7, circle_id = $8
+		WHERE id = $1`, id, name, placeType, lon, lat, radius, address, circleID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update place")
 		return
 	}
@@ -273,7 +317,7 @@ func (s *Server) AdminUpdatePlace(w http.ResponseWriter, r *http.Request) {
 	var out adminPlaceOut
 	if err := tx.QueryRow(r.Context(), adminPlaceSelect+` WHERE p.id = $1`, id).Scan(
 		&out.ID, &out.FamilyID, &out.FamilyName, &out.Name, &out.Type,
-		&out.Lat, &out.Lon, &out.RadiusMeters, &out.Address, &out.CreatedAt); err != nil {
+		&out.Lat, &out.Lon, &out.RadiusMeters, &out.Address, &out.CreatedAt, &out.CircleID, &out.CircleName); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load place")
 		return
 	}

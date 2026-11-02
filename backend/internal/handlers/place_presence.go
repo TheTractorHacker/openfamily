@@ -28,7 +28,7 @@ func (s *Server) placePresence(ctx context.Context, userIDs []string) (map[strin
 				WHERE user_id = ANY($1::uuid[]) AND place_id IS NOT NULL
 				ORDER BY user_id, geofence_id, ts DESC
 			) l
-			JOIN places p ON p.id = l.place_id
+			JOIN places p ON p.id = l.place_id AND p.circle_id IS NULL
 		) x
 		ORDER BY user_id, (state = 'at') DESC, ts DESC`, userIDs)
 	if err != nil {

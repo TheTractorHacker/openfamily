@@ -23,6 +23,8 @@ class Place {
     this.type = 'custom',
     this.alertsOn = false,
     this.geofenceId,
+    this.circleId,
+    this.circleName,
   });
 
   final String id;
@@ -40,8 +42,17 @@ class Place {
   /// only — never serialized to the backend.
   final String? geofenceId;
 
+  /// The circle this place is shared with, or null for the whole family.
+  final String? circleId;
+
+  /// Display name of [circleId] (server-provided; may lag a rename).
+  final String? circleName;
+
   /// Sentinel passed to [copyWith] to explicitly clear [geofenceId].
   static const Object clearGeofence = Object();
+
+  /// Sentinel passed to [copyWith] as `circleId` to make the place family-wide.
+  static const Object clearCircle = Object();
 
   /// Maps a backend place [type] to its Material icon.
   static IconData iconForType(String type) {
@@ -87,6 +98,8 @@ class Place {
     String? type,
     bool? alertsOn,
     Object? geofenceId,
+    Object? circleId,
+    String? circleName,
   }) {
     return Place(
       id: id,
@@ -100,6 +113,12 @@ class Place {
       geofenceId: identical(geofenceId, clearGeofence)
           ? null
           : (geofenceId as String? ?? this.geofenceId),
+      circleId: identical(circleId, clearCircle)
+          ? null
+          : (circleId as String? ?? this.circleId),
+      circleName: identical(circleId, clearCircle)
+          ? null
+          : (circleName ?? this.circleName),
     );
   }
 }

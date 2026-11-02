@@ -12,6 +12,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/TheTractorHacker/openfamily/backend/internal/circles"
 	"github.com/TheTractorHacker/openfamily/backend/internal/middleware"
 )
 
@@ -26,6 +28,44 @@ type placeOut struct {
 	RadiusMeters *float64  `json:"radius_meters,omitempty"`
 	Address      string    `json:"address"`
 	CreatedAt    time.Time `json:"created_at"`
+	// CircleID is set when the place is shared with one circle only; nil means
+	// family-wide. CircleName is the circle's name for display.
+	CircleID   *string `json:"circle_id"`
+	CircleName *string `json:"circle_name"`
+}
+
+// placeVisibleSQL is a SQL predicate true when the place row aliased `alias` is
+// visible to the user whose id is the SQL expression userExpr: family-wide
+// places (circle_id NULL) always, circle places only to live circle members.
+func placeVisibleSQL(alias, userExpr string) string {
+	return "(" + alias + ".circle_id IS NULL OR EXISTS (SELECT 1 FROM live_circle_members plm WHERE plm.circle_id = " +
+		alias + ".circle_id AND plm.user_id = " + userExpr + "))"
+}
+
+// placeCircleError validates a requested circle for a place: the acting user
+// must be a live member of it. It returns a user-facing message or "".
+func (s *Server) placeCircleError(ctx context.Context, q circles.DB, userID string, circleID *string) (string, error) {
+	if circleID == nil {
+		return "", nil
+	}
+	if _, err := circles.New(q).RequireMember(ctx, userID, *circleID); err != nil {
+		if errors.Is(err, circles.ErrNotFound) {
+			return "circle not found", nil
+		}
+		return "", err
+	}
+	return "", nil
+}
+
+// fillPlaceCircleName sets p.CircleName from p.CircleID.
+func fillPlaceCircleName(ctx context.Context, q queryRower, p *placeOut) {
+	if p.CircleID == nil {
+		return
+	}
+	var name string
+	if err := q.QueryRow(ctx, `SELECT name FROM circles WHERE id = $1`, *p.CircleID).Scan(&name); err == nil {
+		p.CircleName = &name
+	}
 }
 
 // nullableFloat64 distinguishes an absent JSON field from an explicit null.
@@ -160,8 +200,11 @@ func (s *Server) ListPlaces(w http.ResponseWriter, r *http.Request) {
 	// remain restricted to the creator.
 
 	rows, err := s.Pool.Query(r.Context(), `
-		SELECT id, family_id, name, type, ST_Y(geom), ST_X(geom), radius_meters, address, created_at
-		FROM places WHERE family_id = $1 ORDER BY created_at`, familyID)
+		SELECT p.id, p.family_id, p.name, p.type, ST_Y(p.geom), ST_X(p.geom), p.radius_meters, p.address, p.created_at,
+		       p.circle_id, c.name
+		FROM places p LEFT JOIN circles c ON c.id = p.circle_id
+		WHERE p.family_id = $1 AND `+placeVisibleSQL("p", "$2")+`
+		ORDER BY p.created_at`, familyID, claims.UserID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list places")
 		return
@@ -171,7 +214,7 @@ func (s *Server) ListPlaces(w http.ResponseWriter, r *http.Request) {
 	places := []placeOut{}
 	for rows.Next() {
 		var p placeOut
-		if err := rows.Scan(&p.ID, &p.FamilyID, &p.Name, &p.Type, &p.Lat, &p.Lon, &p.RadiusMeters, &p.Address, &p.CreatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.FamilyID, &p.Name, &p.Type, &p.Lat, &p.Lon, &p.RadiusMeters, &p.Address, &p.CreatedAt, &p.CircleID, &p.CircleName); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to scan place")
 			return
 		}
@@ -203,9 +246,11 @@ func (s *Server) AdminListPlaces(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := s.Pool.Query(r.Context(), `
 		SELECT p.id, p.family_id, f.name, p.name, p.type,
-		       ST_Y(p.geom), ST_X(p.geom), p.radius_meters, p.address, p.created_at
+		       ST_Y(p.geom), ST_X(p.geom), p.radius_meters, p.address, p.created_at,
+		       p.circle_id, c.name
 		FROM places p
 		JOIN families f ON f.id = p.family_id
+		LEFT JOIN circles c ON c.id = p.circle_id
 		ORDER BY f.name, p.created_at`)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list places")
@@ -216,7 +261,7 @@ func (s *Server) AdminListPlaces(w http.ResponseWriter, r *http.Request) {
 	places := []adminPlaceOut{}
 	for rows.Next() {
 		var p adminPlaceOut
-		if err := rows.Scan(&p.ID, &p.FamilyID, &p.FamilyName, &p.Name, &p.Type, &p.Lat, &p.Lon, &p.RadiusMeters, &p.Address, &p.CreatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.FamilyID, &p.FamilyName, &p.Name, &p.Type, &p.Lat, &p.Lon, &p.RadiusMeters, &p.Address, &p.CreatedAt, &p.CircleID, &p.CircleName); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to scan place")
 			return
 		}
@@ -256,10 +301,14 @@ func (s *Server) CreatePlace(w http.ResponseWriter, r *http.Request) {
 		Lon          float64  `json:"lon"`
 		RadiusMeters *float64 `json:"radius_meters,omitempty"`
 		Address      string   `json:"address,omitempty"`
+		CircleID     *string  `json:"circle_id,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
+	}
+	if req.CircleID != nil && *req.CircleID == "" {
+		req.CircleID = nil
 	}
 	if req.Name == "" {
 		writeError(w, http.StatusBadRequest, "name is required")
@@ -318,17 +367,26 @@ func (s *Server) CreatePlace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if msg, err := s.placeCircleError(r.Context(), tx, claims.UserID, req.CircleID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to check circle")
+		return
+	} else if msg != "" {
+		writeError(w, http.StatusBadRequest, msg)
+		return
+	}
+
 	var p placeOut
 	err = tx.QueryRow(r.Context(), `
-		INSERT INTO places (family_id, name, type, geom, radius_meters, created_by, address)
-		VALUES ($1, $2, $3, ST_SetSRID(ST_MakePoint($4, $5), 4326), $6, $7, $8)
-		RETURNING id, family_id, name, type, ST_Y(geom), ST_X(geom), radius_meters, address, created_at`,
-		familyID, req.Name, placeType, req.Lon, req.Lat, req.RadiusMeters, claims.UserID, req.Address,
-	).Scan(&p.ID, &p.FamilyID, &p.Name, &p.Type, &p.Lat, &p.Lon, &p.RadiusMeters, &p.Address, &p.CreatedAt)
+		INSERT INTO places (family_id, name, type, geom, radius_meters, created_by, address, circle_id)
+		VALUES ($1, $2, $3, ST_SetSRID(ST_MakePoint($4, $5), 4326), $6, $7, $8, $9)
+		RETURNING id, family_id, name, type, ST_Y(geom), ST_X(geom), radius_meters, address, created_at, circle_id`,
+		familyID, req.Name, placeType, req.Lon, req.Lat, req.RadiusMeters, claims.UserID, req.Address, req.CircleID,
+	).Scan(&p.ID, &p.FamilyID, &p.Name, &p.Type, &p.Lat, &p.Lon, &p.RadiusMeters, &p.Address, &p.CreatedAt, &p.CircleID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create place")
 		return
 	}
+	fillPlaceCircleName(r.Context(), tx, &p)
 
 	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to commit")
@@ -362,7 +420,7 @@ func (s *Server) UpdatePlace(w http.ResponseWriter, r *http.Request) {
 	// Only the creator may edit (or an admin when the creator was deleted).
 	var createdBy *string
 	if err := s.Pool.QueryRow(r.Context(), `
-		SELECT created_by FROM places WHERE id = $1 AND family_id = $2`, id, familyID).Scan(&createdBy); err != nil {
+		SELECT p.created_by FROM places p WHERE p.id = $1 AND p.family_id = $2 AND `+placeVisibleSQL("p", "$3"), id, familyID, claims.UserID).Scan(&createdBy); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "place not found")
 			return
@@ -381,10 +439,14 @@ func (s *Server) UpdatePlace(w http.ResponseWriter, r *http.Request) {
 		Lon          *float64        `json:"lon,omitempty"`
 		RadiusMeters nullableFloat64 `json:"radius_meters,omitempty"`
 		Address      *string         `json:"address,omitempty"`
+		CircleID     nullableString  `json:"circle_id,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
+	}
+	if req.CircleID.set && req.CircleID.value != nil && *req.CircleID.value == "" {
+		req.CircleID.value = nil
 	}
 	if msg := placeTextError(req.Name, req.Address); msg != "" {
 		writeError(w, http.StatusBadRequest, msg)
@@ -434,9 +496,9 @@ func (s *Server) UpdatePlace(w http.ResponseWriter, r *http.Request) {
 	// and cannot be raced by a concurrent update (lost-update).
 	var cur placeOut
 	err = tx.QueryRow(r.Context(), `
-		SELECT id, family_id, name, type, ST_Y(geom), ST_X(geom), radius_meters, address, created_at
+		SELECT id, family_id, name, type, ST_Y(geom), ST_X(geom), radius_meters, address, created_at, circle_id
 		FROM places WHERE id = $1 AND family_id = $2`, id, familyID,
-	).Scan(&cur.ID, &cur.FamilyID, &cur.Name, &cur.Type, &cur.Lat, &cur.Lon, &cur.RadiusMeters, &cur.Address, &cur.CreatedAt)
+	).Scan(&cur.ID, &cur.FamilyID, &cur.Name, &cur.Type, &cur.Lat, &cur.Lon, &cur.RadiusMeters, &cur.Address, &cur.CreatedAt, &cur.CircleID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, http.StatusNotFound, "place not found")
 		return
@@ -469,6 +531,19 @@ func (s *Server) UpdatePlace(w http.ResponseWriter, r *http.Request) {
 	address := cur.Address
 	if req.Address != nil {
 		address = *req.Address
+	}
+	circleID := cur.CircleID
+	if req.CircleID.set {
+		circleID = req.CircleID.value // nil makes the place family-wide
+		if circleID != nil && (cur.CircleID == nil || *cur.CircleID != *circleID) {
+			if msg, err := s.placeCircleError(r.Context(), tx, claims.UserID, circleID); err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to check circle")
+				return
+			} else if msg != "" {
+				writeError(w, http.StatusBadRequest, msg)
+				return
+			}
+		}
 	}
 
 	// Geometry/radius changes invalidate the geofence state of any geofence
@@ -515,15 +590,16 @@ func (s *Server) UpdatePlace(w http.ResponseWriter, r *http.Request) {
 
 	var p placeOut
 	err = tx.QueryRow(r.Context(), `
-		UPDATE places SET name = $3, type = $4, geom = ST_SetSRID(ST_MakePoint($5, $6), 4326), radius_meters = $7, address = $8
+		UPDATE places SET name = $3, type = $4, geom = ST_SetSRID(ST_MakePoint($5, $6), 4326), radius_meters = $7, address = $8, circle_id = $9
 		WHERE id = $1 AND family_id = $2
-		RETURNING id, family_id, name, type, ST_Y(geom), ST_X(geom), radius_meters, address, created_at`,
-		id, familyID, name, placeType, lon, lat, radius, address,
-	).Scan(&p.ID, &p.FamilyID, &p.Name, &p.Type, &p.Lat, &p.Lon, &p.RadiusMeters, &p.Address, &p.CreatedAt)
+		RETURNING id, family_id, name, type, ST_Y(geom), ST_X(geom), radius_meters, address, created_at, circle_id`,
+		id, familyID, name, placeType, lon, lat, radius, address, circleID,
+	).Scan(&p.ID, &p.FamilyID, &p.Name, &p.Type, &p.Lat, &p.Lon, &p.RadiusMeters, &p.Address, &p.CreatedAt, &p.CircleID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update place")
 		return
 	}
+	fillPlaceCircleName(r.Context(), tx, &p)
 
 	if geometryChanged {
 		if _, err := tx.Exec(r.Context(), `
@@ -566,7 +642,7 @@ func (s *Server) DeletePlace(w http.ResponseWriter, r *http.Request) {
 	// Only the creator may delete (or an admin when the creator was deleted).
 	var createdBy *string
 	if err := s.Pool.QueryRow(r.Context(), `
-		SELECT created_by FROM places WHERE id = $1 AND family_id = $2`, id, familyID).Scan(&createdBy); err != nil {
+		SELECT p.created_by FROM places p WHERE p.id = $1 AND p.family_id = $2 AND `+placeVisibleSQL("p", "$3"), id, familyID, claims.UserID).Scan(&createdBy); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "place not found")
 			return

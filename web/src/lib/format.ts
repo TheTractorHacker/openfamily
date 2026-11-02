@@ -59,3 +59,17 @@ export function initialsOf(name: string): string {
   if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase()
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
 }
+/** "in 3h" / "in 2d" for a future timestamp; "expired" once it has passed. */
+export function formatTimeLeft(iso: string | null | undefined): string {
+  if (!iso) return '—'
+  const ts = new Date(iso).getTime()
+  if (Number.isNaN(ts)) return '—'
+  const sec = Math.round((ts - Date.now()) / 1000)
+  if (sec <= 0) return 'expired'
+  if (sec < 60) return `in ${sec}s`
+  const min = Math.round(sec / 60)
+  if (min < 60) return `in ${min}m`
+  const hr = Math.round(min / 60)
+  if (hr < 24) return `in ${hr}h`
+  return `in ${Math.round(hr / 24)}d`
+}

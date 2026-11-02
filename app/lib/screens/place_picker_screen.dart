@@ -2,11 +2,13 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
-import 'package:latlong2/latlong.dart';
+import 'package:latlong2/latlong.dart' hide Circle;
 
 import '../widgets/openfamily_map_layers.dart';
+import '../models/circle.dart';
 import '../models/place.dart';
 import '../services/address_suggester.dart';
+import '../services/circle_service.dart';
 import '../services/geocoding_service.dart';
 import '../services/location_service.dart';
 import '../theme/app_theme.dart';
@@ -35,6 +37,7 @@ class PlacePickerScreen extends StatefulWidget {
     required this.icon,
     this.type = 'custom',
     this.initial,
+    this.circleLoader,
   });
 
   final String placeName;
@@ -47,6 +50,9 @@ class PlacePickerScreen extends StatefulWidget {
   /// When editing an existing place, its current values seed the picker.
   final Place? initial;
 
+  /// Replaces the circle list fetch behind the "Share with" selector (tests).
+  final Future<List<Circle>> Function()? circleLoader;
+
   @override
   State<PlacePickerScreen> createState() => _PlacePickerScreenState();
 }
@@ -57,6 +63,13 @@ class _PlacePickerScreenState extends State<PlacePickerScreen> {
   late final TextEditingController _name;
   late final TextEditingController _address;
   late double _radiusMeters;
+
+  /// "Share with" selection: null = whole family.
+  String? _circleId;
+  String? _circleName;
+
+  /// Circles offered besides "Whole family" (the primary circle is the family).
+  List<Circle> _circles = const <Circle>[];
 
   /// Neutral fallback (0,0) shown at world zoom when the user's location can't
   /// be obtained — never a hardcoded city.
@@ -102,9 +115,27 @@ class _PlacePickerScreenState extends State<PlacePickerScreen> {
       nearProvider: () => _position == _fallbackPosition ? null : _position,
     );
     _radiusMeters = widget.initial?.radiusMeters ?? 152.4; // ~500 ft
+    _circleId = widget.initial?.circleId;
+    _circleName = widget.initial?.circleName;
+    _loadCircles();
     // Only auto-locate for a brand-new place; editing keeps the saved pin.
     if (widget.initial == null) {
       _locateUser();
+    }
+  }
+
+  Future<void> _loadCircles() async {
+    try {
+      final List<Circle> all = await (widget.circleLoader ??
+          CircleService.instance.listCircles)();
+      if (!mounted) return;
+      setState(() {
+        _circles = all
+            .where((Circle c) => !c.isPrimary && !c.isExpiredAt(DateTime.now()))
+            .toList();
+      });
+    } catch (_) {
+      // Sharing stays "Whole family" when circles can't be loaded.
     }
   }
 
@@ -272,8 +303,57 @@ class _PlacePickerScreenState extends State<PlacePickerScreen> {
       radiusMeters: _radiusMeters,
       type: widget.initial?.type ?? widget.type,
       alertsOn: widget.initial?.alertsOn ?? false,
+      circleId: _circleId,
+      circleName: _circleId == null ? null : _circleName,
     );
     Navigator.of(context).pop(place);
+  }
+
+  /// "Share with": the whole family, or one circle. Only that circle's members
+  /// see the place and get its arrival/departure alerts.
+  Widget _shareWithField() {
+    final List<DropdownMenuItem<String?>> items = <DropdownMenuItem<String?>>[
+      const DropdownMenuItem<String?>(
+        value: null,
+        child: Text('Whole family'),
+      ),
+      for (final Circle c in _circles)
+        DropdownMenuItem<String?>(value: c.id, child: Text(c.name)),
+      // A circle the user can no longer pick (left it) stays visible so saving
+      // does not silently change who sees the place.
+      if (_circleId != null && !_circles.any((Circle c) => c.id == _circleId))
+        DropdownMenuItem<String?>(
+          value: _circleId,
+          child: Text(_circleName ?? 'Circle'),
+        ),
+    ];
+    return DropdownButtonFormField<String?>(
+      key: const ValueKey<String>('share-with'),
+      initialValue: _circleId,
+      isExpanded: true,
+      items: items,
+      decoration: const InputDecoration(
+        labelText: 'Share with',
+        prefixIcon: Icon(Icons.group_outlined),
+      ),
+      onChanged: (String? v) => setState(() {
+        _circleId = v;
+        _circleName = v == null
+            ? null
+            : _circles
+                .firstWhere(
+                  (Circle c) => c.id == v,
+                  orElse: () => Circle(
+                    id: v,
+                    name: _circleName ?? 'Circle',
+                    role: 'member',
+                    sharingEnabled: true,
+                    memberCount: 0,
+                  ),
+                )
+                .name;
+      }),
+    );
   }
 
   /// One status line under the address field: detecting, failure, an offer to
@@ -481,6 +561,10 @@ class _PlacePickerScreenState extends State<PlacePickerScreen> {
                       listenable: _suggester,
                       builder: (BuildContext context, _) => _addressStatus(cs),
                     ),
+                    if (_circles.isNotEmpty || _circleId != null) ...<Widget>[
+                      const SizedBox(height: AppSpace.sm),
+                      _shareWithField(),
+                    ],
                     const SizedBox(height: AppSpace.lg),
                     Row(
                       children: <Widget>[

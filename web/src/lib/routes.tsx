@@ -8,6 +8,8 @@ export type RouteKey =
   | 'families'
   | 'users'
   | 'places'
+  | 'circles'
+  | 'sharing'
   | 'activity'
   | 'audit'
   | 'builds'
@@ -99,6 +101,36 @@ export const ROUTES: RouteDef[] = [
     icon: icon(
       <path
         d="M12 21s6.5-5.6 6.5-11a6.5 6.5 0 1 0-13 0C5.5 15.4 12 21 12 21Zm0-8.2a2.6 2.6 0 1 0 0-5.2 2.6 2.6 0 0 0 0 5.2Z"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    ),
+  },
+  {
+    key: 'circles',
+    label: 'Circles & invites',
+    hash: '#/circles',
+    adminOnly: true,
+    icon: icon(
+      <path
+        d="M9 12a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm6.5 1a2.5 2.5 0 1 0 0-5M3 19c0-2.8 2.7-5 6-5s6 2.2 6 5M16 14.2c2.7.2 5 1.9 5 4.8"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    ),
+  },
+  {
+    key: 'sharing',
+    label: 'Share links',
+    hash: '#/sharing',
+    adminOnly: true,
+    icon: icon(
+      <path
+        d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3A4 4 0 0 0 11 18.7l1-1"
         stroke="currentColor"
         strokeWidth="1.6"
         strokeLinecap="round"

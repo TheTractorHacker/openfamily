@@ -24,6 +24,8 @@ import type {
   DomainStatus,
   ActivityPage,
   AdminPlace,
+  AdminCircle,
+  AdminShareLink,
   AdminSession,
   AuditPage,
 } from './types'
@@ -565,6 +567,8 @@ export interface AdminPlaceInput {
   lon?: number
   radius_meters?: number
   address?: string
+  /** Circle id to share with; null = whole family (update only). */
+  circle_id?: string | null
 }
 
 export function createAdminPlace(input: AdminPlaceInput): Promise<AdminPlace> {
@@ -630,4 +634,38 @@ export function listActivity(query: {
   limit?: number
 }): Promise<ActivityPage> {
   return request<ActivityPage>(`/api/admin/activity${queryString({ ...query })}`)
+}
+
+
+// ---- Share links, circles, invites (platform admin) ----
+
+export function listAdminShareLinks(): Promise<AdminShareLink[]> {
+  return request<AdminShareLink[]>('/api/admin/share-links')
+}
+
+export function revokeAdminShareLink(id: string): Promise<{ status: string }> {
+  return request<{ status: string }>(`/api/admin/share-links/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  })
+}
+
+export function listAdminCircles(): Promise<AdminCircle[]> {
+  return request<AdminCircle[]>('/api/admin/circles')
+}
+
+/** Ends a temporary circle now, or adds hours to its expiry. */
+export function updateAdminCircle(
+  id: string,
+  change: { end: true } | { extend_hours: number },
+): Promise<{ status: string }> {
+  return request<{ status: string }>(`/api/admin/circles/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: change,
+  })
+}
+
+export function revokeAdminInvite(id: string): Promise<{ status: string }> {
+  return request<{ status: string }>(`/api/admin/invites/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  })
 }

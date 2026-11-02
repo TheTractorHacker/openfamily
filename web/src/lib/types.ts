@@ -115,6 +115,38 @@ export interface InviteCode {
 /** Invite code tagged with its family name (GET /api/admin/invites). */
 export interface AdminInvite extends InviteCode {
   family_name: string
+  circle_id?: string | null
+  circle_name?: string | null
+}
+
+/** A circle from GET /api/admin/circles. */
+export interface AdminCircle {
+  id: string
+  name: string
+  icon: string | null
+  created_by: string | null
+  creator_name: string | null
+  created_at: string
+  expires_at: string | null
+  ended_at: string | null
+  member_count: number
+  family_backed: boolean
+  status: 'permanent' | 'active' | 'expired' | 'ended'
+}
+
+/** A share link from GET /api/admin/share-links (never includes the token). */
+export interface AdminShareLink {
+  id: string
+  user_id: string
+  user_name: string
+  user_email: string
+  family_id: string | null
+  family_name: string | null
+  label: string
+  created_at: string
+  expires_at: string
+  revoked_at: string | null
+  status: 'active' | 'expired' | 'revoked'
 }
 
 export interface HistoryTrailPoint {
@@ -225,6 +257,9 @@ export interface FamilyPlace {
   radius_meters?: number | null
   address: string
   created_at: string
+  /** Circle the place is shared with; null/absent = whole family. */
+  circle_id?: string | null
+  circle_name?: string | null
 }
 
 export interface MemberHistory {
