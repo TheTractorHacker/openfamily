@@ -44,7 +44,7 @@ import '../widgets/visible_value_builder.dart';
 import 'check_in_screen.dart';
 import 'invite_screen.dart';
 import 'join_circle_screen.dart';
-import 'member_profile_screen.dart';
+import 'member_detail_screen.dart';
 import 'circle_detail_screen.dart';
 import 'circles_screen.dart';
 import 'places_screen.dart';
@@ -804,7 +804,7 @@ class _MapScreenState extends State<MapScreen>
   void _openMemberDetails(Member member) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => MemberProfileScreen(member: member),
+        builder: (_) => MemberDetailScreen(member: member),
       ),
     );
   }
