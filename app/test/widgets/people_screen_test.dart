@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:openfamily/models/member.dart';
-import 'package:openfamily/screens/member_profile_screen.dart';
+import 'package:openfamily/screens/member_detail_screen.dart';
 import 'package:openfamily/screens/people_screen.dart';
 
 /// A member with no position so no FlutterMap preview is built in member
@@ -59,7 +59,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('tapping a member opens their profile', (
+  testWidgets('tapping a member opens their detail screen', (
     WidgetTester tester,
   ) async {
     final roster = ValueNotifier<List<Member>>(const [_frank]);
@@ -67,9 +67,12 @@ void main() {
 
     await tester.pumpWidget(_app(roster));
     await tester.tap(find.text('Frank'));
-    await tester.pumpAndSettle();
+    // The detail screen loads the day from the network; one frame is enough to
+    // see the route pushed without waiting on it.
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
 
-    expect(find.byType(MemberProfileScreen), findsOneWidget);
+    expect(find.byType(MemberDetailScreen), findsOneWidget);
   });
 
   testWidgets('empty roster shows an invite state that calls onInvite', (
