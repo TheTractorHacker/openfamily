@@ -100,7 +100,7 @@ func TestRemindExpiringCirclesOnce(t *testing.T) {
 	}
 	set(soon, "40 minutes", "5 hours")
 	set(far, "30 hours", "5 hours")
-	set(short, "30 minutes", "30 minutes")
+	set(short, "30 minutes", "10 minutes")
 
 	n, err := e.srv.RemindExpiringCircles(ctx)
 	if err != nil || n != 1 {
