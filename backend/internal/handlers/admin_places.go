@@ -135,7 +135,7 @@ func (s *Server) AdminCreatePlace(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to lock family")
 		return
 	}
-	overlaps, err := s.placeOverlaps(r.Context(), tx, in.FamilyID, "", *in.Lon, *in.Lat, *in.RadiusMeters)
+	overlaps, err := s.placeOverlaps(r.Context(), tx, in.FamilyID, "", "", *in.Lon, *in.Lat, *in.RadiusMeters)
 	if err != nil {
 		slog.Error("admin place overlap check failed", "err", err)
 		writeError(w, http.StatusInternalServerError, "failed to check place overlap")
@@ -272,7 +272,7 @@ func (s *Server) AdminUpdatePlace(w http.ResponseWriter, r *http.Request) {
 	geometryChanged := lat != cur.Lat || lon != cur.Lon || !floatPtrsEqual(radius, cur.RadiusMeters)
 
 	if radius != nil {
-		overlaps, err := s.placeOverlaps(r.Context(), tx, familyID, id, lon, lat, *radius)
+		overlaps, err := s.placeOverlaps(r.Context(), tx, familyID, id, "", lon, lat, *radius)
 		if err != nil {
 			slog.Error("admin place overlap check failed", "err", err, "place_id", id)
 			writeError(w, http.StatusInternalServerError, "failed to check place overlap")

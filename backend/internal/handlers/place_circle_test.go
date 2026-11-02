@@ -146,3 +146,16 @@ func TestCirclePlaceAlertRecipients(t *testing.T) {
 		t.Fatalf("circle place must alert B only: %v", got)
 	}
 }
+
+// A conflict must never reveal a circle place the caller cannot see.
+func TestPlaceOverlapIgnoresInvisibleCirclePlaces(t *testing.T) {
+	e, _, x := newPlaceCircleEnv(t)
+	at := func(name string, circle any) map[string]any {
+		return map[string]any{"name": name, "lat": 43.0, "lon": -75.0, "radius_meters": 200.0, "circle_id": circle}
+	}
+	e.mustCode("A", "POST", "/family/places", at("Cabin", x), 201)
+	// C is not in the circle: the overlapping place is allowed, not rejected.
+	e.mustCode("C", "POST", "/family/places", at("Same spot", nil), 201)
+	// B is in the circle and still gets the overlap error against Cabin.
+	e.mustCode("B", "POST", "/family/places", at("Dup", x), 400)
+}

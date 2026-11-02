@@ -165,17 +165,22 @@ func nullableUUID(id string) any {
 //
 // excludeID is the place being updated (empty on create). Empty is sent as
 // NULL so the UUID comparison does not try to cast ''.
-func (s *Server) placeOverlaps(ctx context.Context, q queryRower, familyID, excludeID string, lon, lat, radius float64) (bool, error) {
+//
+// viewerID limits the check to places that user can see, so a conflict never
+// reveals a circle-scoped place they are not in. Empty (platform admin) checks
+// every place.
+func (s *Server) placeOverlaps(ctx context.Context, q queryRower, familyID, excludeID, viewerID string, lon, lat, radius float64) (bool, error) {
 	var overlaps bool
 	err := q.QueryRow(ctx, `
 		SELECT EXISTS(
 			SELECT 1 FROM places p
 			WHERE p.family_id = $1
 			  AND p.id IS DISTINCT FROM $2::uuid
+			  AND ($6::uuid IS NULL OR `+placeVisibleSQL("p", "$6::uuid")+`)
 			  AND p.geom IS NOT NULL
 			  AND p.radius_meters IS NOT NULL
 			  AND ST_DWithin(p.geom::geography, ST_SetSRID(ST_MakePoint($3, $4), 4326)::geography, p.radius_meters + $5)
-		)`, familyID, nullableUUID(excludeID), lon, lat, radius).Scan(&overlaps)
+		)`, familyID, nullableUUID(excludeID), lon, lat, radius, nullableUUID(viewerID)).Scan(&overlaps)
 	return overlaps, err
 }
 
@@ -356,7 +361,7 @@ func (s *Server) CreatePlace(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Reject if the new place's circle overlaps an existing place's circle.
-	overlaps, err := s.placeOverlaps(r.Context(), tx, familyID, "", req.Lon, req.Lat, *req.RadiusMeters)
+	overlaps, err := s.placeOverlaps(r.Context(), tx, familyID, "", claims.UserID, req.Lon, req.Lat, *req.RadiusMeters)
 	if err != nil {
 		slog.Error("place overlap check failed", "err", err)
 		writeError(w, http.StatusInternalServerError, "failed to check place overlap")
@@ -557,7 +562,7 @@ func (s *Server) UpdatePlace(w http.ResponseWriter, r *http.Request) {
 
 	// Reject if the updated circle overlaps another place's circle.
 	if radius != nil {
-		overlaps, err := s.placeOverlaps(r.Context(), tx, familyID, id, lon, lat, *radius)
+		overlaps, err := s.placeOverlaps(r.Context(), tx, familyID, id, claims.UserID, lon, lat, *radius)
 		if err != nil {
 			slog.Error("place overlap check failed", "err", err, "place_id", id)
 			writeError(w, http.StatusInternalServerError, "failed to check place overlap")
