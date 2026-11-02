@@ -219,6 +219,7 @@ class _AddLocationsScreenState extends State<AddLocationsScreen> {
           lon: place.position.longitude,
           radiusMeters: place.radiusMeters,
           address: place.address,
+          circleId: place.circleId,
         );
         _createdPlaceIds.add(place.id);
         if (place.alertsOn) {

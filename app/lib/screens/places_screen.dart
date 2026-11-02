@@ -187,6 +187,8 @@ class _PlacesScreenState extends State<PlacesScreen> {
                 lon: p.position.longitude,
                 radiusMeters: p.radiusMeters,
                 address: p.address,
+                setCircle: true,
+                circleId: p.circleId,
               ))(optimistic);
       if (!mounted) return;
       setState(() {
@@ -238,6 +240,7 @@ class _PlacesScreenState extends State<PlacesScreen> {
         lon: picked.position.longitude,
         radiusMeters: picked.radiusMeters,
         address: picked.address,
+        circleId: picked.circleId,
       );
       if (!mounted) return;
       setState(() => _places = <Place>[...?_places, created]);
@@ -423,8 +426,12 @@ class _PlaceTile extends StatelessWidget {
         ? place.radiusLabel
         : '${place.address} · ${place.radiusLabel}';
     // Words, not just colour: the alert state is part of the subtitle.
+    final String? sharedWith = place.circleId == null
+        ? null
+        : 'Shared with ${place.circleName ?? 'a circle'}';
     final String subtitle =
-        '$where\nArrival and departure alerts: ${place.alertsOn ? 'on' : 'off'}';
+        '$where\nArrival and departure alerts: ${place.alertsOn ? 'on' : 'off'}'
+        '${sharedWith == null ? '' : '\n$sharedWith'}';
     final bool large = MediaQuery.textScalerOf(context).scale(16) > 16 * 1.4;
     final String alertsLabel = place.alertsOn ? 'Alerts on' : 'Alerts off';
     final IconData alertsIcon = place.alertsOn

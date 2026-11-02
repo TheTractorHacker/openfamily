@@ -304,6 +304,10 @@ func (s *Server) JoinFamily(w http.ResponseWriter, r *http.Request) {
 type adminInvite struct {
 	models.InviteCode
 	FamilyName string `json:"family_name"`
+	// CircleID/CircleName are set for invites that join a circle (family-backed
+	// circles share the family id).
+	CircleID   *string `json:"circle_id"`
+	CircleName *string `json:"circle_name"`
 }
 
 // AdminCreateInvite generates an invite code for any family (platform admin).
@@ -375,11 +379,12 @@ func (s *Server) AdminListInvites(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rows, err := s.Pool.Query(r.Context(), `
-		SELECT ic.id, ic.code, ic.family_id, ic.created_by, ic.role, ic.max_uses,
-		       ic.uses, ic.expires_at, ic.created_at, COALESCE(f.name, '')
+		SELECT ic.id, ic.code, COALESCE(ic.family_id, ic.circle_id), ic.created_by, ic.role, ic.max_uses,
+		       ic.uses, ic.expires_at, ic.created_at, COALESCE(f.name, ''),
+		       ic.circle_id, c.name
 		FROM invite_codes ic
 		LEFT JOIN families f ON f.id = ic.family_id
-		WHERE ic.family_id IS NOT NULL
+		LEFT JOIN circles c ON c.id = ic.circle_id
 		ORDER BY ic.created_at DESC`)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list invite codes")
@@ -391,7 +396,8 @@ func (s *Server) AdminListInvites(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var inv adminInvite
 		if err := rows.Scan(&inv.ID, &inv.Code, &inv.FamilyID, &inv.CreatedBy, &inv.Role,
-			&inv.MaxUses, &inv.Uses, &inv.ExpiresAt, &inv.CreatedAt, &inv.FamilyName); err != nil {
+			&inv.MaxUses, &inv.Uses, &inv.ExpiresAt, &inv.CreatedAt, &inv.FamilyName,
+			&inv.CircleID, &inv.CircleName); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to scan invite code")
 			return
 		}

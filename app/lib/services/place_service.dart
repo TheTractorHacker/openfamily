@@ -75,6 +75,7 @@ class PlaceService {
     required double lon,
     required double radiusMeters,
     String? address,
+    String? circleId,
   }) async {
     final Map<String, dynamic> body = <String, dynamic>{
       'name': name,
@@ -85,6 +86,9 @@ class PlaceService {
     };
     if (address != null && address.isNotEmpty) {
       body['address'] = address;
+    }
+    if (circleId != null) {
+      body['circle_id'] = circleId;
     }
     invalidateCache();
     final dynamic data = await ApiClient.post('/family/places', body: body);
@@ -98,6 +102,7 @@ class PlaceService {
 
   /// Updates a place (PATCH) and returns the saved [Place]. Only the fields
   /// passed are sent, so omitted fields are left unchanged on the server.
+  /// Pass [setCircle] to change sharing: [circleId] null = whole family.
   static Future<Place> updatePlace(
     String id, {
     String? name,
@@ -106,6 +111,8 @@ class PlaceService {
     double? lon,
     double? radiusMeters,
     String? address,
+    bool setCircle = false,
+    String? circleId,
   }) async {
     final Map<String, dynamic> body = <String, dynamic>{
       if (name != null) 'name': name,
@@ -114,6 +121,8 @@ class PlaceService {
       if (lon != null) 'lon': lon,
       if (radiusMeters != null) 'radius_meters': radiusMeters,
       if (address != null) 'address': address,
+      // Explicit null makes the place family-wide.
+      if (setCircle) 'circle_id': circleId,
     };
     invalidateCache();
     final dynamic data = await ApiClient.patch('/family/places/$id', body: body);
@@ -152,6 +161,8 @@ class PlaceService {
           kMinPlaceRadiusMeters,
       type: type,
       alertsOn: false,
+      circleId: json['circle_id'] as String?,
+      circleName: json['circle_name'] as String?,
     );
   }
 }

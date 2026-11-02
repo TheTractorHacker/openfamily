@@ -398,6 +398,11 @@ func main() {
 		r.Get("/api/admin/bubbles", srv.AdminListBubbles)
 		r.Get("/api/admin/invites", srv.AdminListInvites)
 		r.Post("/api/admin/invites", srv.AdminCreateInvite)
+		r.Delete("/api/admin/invites/{id}", srv.AdminRevokeInvite)
+		r.Get("/api/admin/share-links", srv.AdminListShareLinks)
+		r.Delete("/api/admin/share-links/{id}", srv.AdminRevokeShareLink)
+		r.Get("/api/admin/circles", srv.AdminListCircles)
+		r.Patch("/api/admin/circles/{id}", srv.AdminUpdateCircle)
 
 		r.Get("/api/admin/apk", srv.AdminDownloadAPK)
 		r.Post("/api/admin/apk/build", srv.AdminBuildAPK)

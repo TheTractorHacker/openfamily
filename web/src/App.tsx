@@ -18,6 +18,8 @@ import { ActivityPage } from './pages/ActivityPage'
 import { BubblesPage } from './pages/BubblesPage'
 import { AuditPage } from './pages/AuditPage'
 import { SettingsPage } from './pages/SettingsPage'
+import { CirclesPage } from './pages/CirclesPage'
+import { ShareLinksPage } from './pages/ShareLinksPage'
 import { ROUTES, DEFAULT_ROUTE, routeFromHash, type RouteKey } from './lib/routes'
 import { clearTokens, getEmail, isAuthenticated, subscribeAuth } from './lib/auth'
 import { useMe } from './lib/me'
@@ -133,6 +135,10 @@ function renderPage(
       return <UsersPage />
     case 'places':
       return <PlacesPage />
+    case 'circles':
+      return <CirclesPage />
+    case 'sharing':
+      return <ShareLinksPage />
     case 'activity':
       return <ActivityPage />
     case 'bubbles':

@@ -312,7 +312,7 @@ func (s *Server) loadFamilyPlaces(ctx context.Context, familyID string) ([]histo
 	rows, err := s.Pool.Query(ctx, `
 		SELECT id, name, type, ST_Y(geom), ST_X(geom), radius_meters
 		FROM places
-		WHERE family_id = $1 AND geom IS NOT NULL AND radius_meters IS NOT NULL`, familyID)
+		WHERE family_id = $1 AND circle_id IS NULL AND geom IS NOT NULL AND radius_meters IS NOT NULL`, familyID)
 	if err != nil {
 		return nil, err
 	}
