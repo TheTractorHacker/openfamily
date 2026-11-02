@@ -507,15 +507,15 @@ class _MovementGlyphBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (member.movement != MovementType.car) return _glyph(false);
+    if (member.movement != MovementType.car) return _glyph(context, false);
     return LiveSpeedBuilder(
       member: member,
       builder: (BuildContext _, double? mps, UnitSystem __) =>
-          _glyph(isSpeedingMps(mps)),
+          _glyph(context, isSpeedingMps(mps)),
     );
   }
 
-  Widget _glyph(bool speeding) {
+  Widget _glyph(BuildContext context, bool speeding) {
     return Container(
       width: 20,
       height: 20,
