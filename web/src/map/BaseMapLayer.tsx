@@ -40,18 +40,14 @@ function loadConfig(): Promise<PublicConfig> {
   return configPromise;
 }
 
-function currentTheme(): "light" | "dark" {
-  const t = document.documentElement.getAttribute("data-theme");
-  if (t === "dark" || t === "light") return t;
-  return window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-}
-
-/** Use OpenFreeMap's dark style in dark mode when the stock OpenFreeMap style is configured. */
-export function styleForTheme(styleUrl: string, theme: "light" | "dark"): string {
-  const m = /^(https:\/\/tiles\.openfreemap\.org\/styles\/)(liberty|bright|positron|dark)$/.exec(styleUrl);
-  if (!m) return styleUrl;
-  if (theme === "dark") return m[1] + "dark";
-  return styleUrl === m[1] + "dark" ? m[1] + "liberty" : styleUrl;
+/**
+ * Maps stay light in dark mode too: the dark basemap hides roads and labels
+ * that matter here. A stock OpenFreeMap "dark" style falls back to "liberty";
+ * any other configured style is used as is.
+ */
+export function lightStyle(styleUrl: string): string {
+  const m = /^(https:\/\/tiles\.openfreemap\.org\/styles\/)dark$/.exec(styleUrl);
+  return m ? m[1] + "liberty" : styleUrl;
 }
 
 function webglAvailable(): boolean {
@@ -66,7 +62,6 @@ function webglAvailable(): boolean {
 export function BaseMapLayer({ rasterUrl }: { rasterUrl?: string }) {
   const map = useMap();
   const [cfg, setCfg] = useState<PublicConfig | null>(null);
-  const [theme, setTheme] = useState(currentTheme);
   const [failed, setFailed] = useState(() => !webglAvailable());
 
   useEffect(() => {
@@ -77,13 +72,7 @@ export function BaseMapLayer({ rasterUrl }: { rasterUrl?: string }) {
     };
   }, []);
 
-  useEffect(() => {
-    const obs = new MutationObserver(() => setTheme(currentTheme()));
-    obs.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
-    return () => obs.disconnect();
-  }, []);
-
-  const style = cfg ? styleForTheme(cfg.styleUrl, theme) : null;
+  const style = cfg ? lightStyle(cfg.styleUrl) : null;
 
   useEffect(() => {
     if (!style || failed) return;
