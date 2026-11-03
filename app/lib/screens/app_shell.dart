@@ -9,6 +9,7 @@ import '../theme/app_theme.dart';
 import 'circle_tab_screen.dart';
 import 'driving_tab_screen.dart';
 import 'map_screen.dart';
+import 'onboarding_screen.dart';
 import 'safety_hub_screen.dart';
 
 /// The four top-level destinations.
@@ -74,6 +75,7 @@ class _AppShellState extends State<AppShell> {
     super.initState();
     _crashWatcher.start();
     AppShell.requestedTab.addListener(_onRequested);
+    _userId.addListener(_onUser);
     WidgetsBinding.instance.addPostFrameCallback((_) => _onRequested());
   }
 
@@ -82,9 +84,18 @@ class _AppShellState extends State<AppShell> {
     AppShell.requestedTab.removeListener(_onRequested);
     _crashWatcher.stop();
     _members.dispose();
+    _userId.removeListener(_onUser);
     _userId.dispose();
     _circleId.dispose();
     super.dispose();
+  }
+
+  /// First-run walkthrough: once the signed-in user's id is known, show it
+  /// if this user has not seen it on this device.
+  void _onUser() {
+    final String? id = _userId.value;
+    if (id == null || id.isEmpty || !mounted) return;
+    OnboardingScreen.maybeShow(context, id);
   }
 
   void _onRequested() {

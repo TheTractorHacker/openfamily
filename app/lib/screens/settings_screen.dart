@@ -25,6 +25,7 @@ import 'families_screen.dart';
 import 'server_config_screen.dart';
 import 'welcome_screen.dart';
 import 'notification_settings_screen.dart';
+import 'onboarding_screen.dart';
 import 'performance_screen.dart';
 import 'privacy_policy_screen.dart';
 import 'security_screen.dart';
@@ -155,6 +156,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ].join(' · ');
       if (_versionText.isEmpty) _versionText = 'Version unknown';
     });
+  }
+
+  Future<void> _replayWalkthrough() async {
+    String id = 'unknown';
+    try {
+      final Map<String, dynamic> me = await ApiClient.getAccount();
+      id = (me['id'] ?? me['user_id'] ?? id).toString();
+    } catch (_) {
+      // Offline: replay anyway, under a generic key.
+    }
+    if (!mounted) return;
+    await OnboardingScreen.show(context, id);
   }
 
   void _onVersionTap() {
@@ -544,6 +557,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
               onTap: () => push(const NotificationSettingsScreen()),
             ),
             const DsSectionHeader('About'),
+            DsListRow(
+              leading: DsListRow.iconTile(context, Icons.slideshow_outlined),
+              title: 'Replay walkthrough',
+              subtitle: 'A quick tour of how OpenFamily works',
+              chevron: true,
+              onTap: _replayWalkthrough,
+            ),
             DsListRow(
               leading: DsListRow.iconTile(context, Icons.privacy_tip_outlined),
               title: 'Privacy policy',
