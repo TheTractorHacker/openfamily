@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:openfamily/models/chat_message.dart';
 import 'package:openfamily/screens/chat_screen.dart';
 import 'package:openfamily/services/chat_service.dart';
@@ -24,6 +26,7 @@ class _FakeChat implements ChatService {
   final List<ChatMessage> history;
   final List<String> sent = <String>[];
   int reads = 0;
+  List<ChatReader> readers = const <ChatReader>[];
   Object? sendError;
 
   @override
@@ -31,7 +34,7 @@ class _FakeChat implements ChatService {
 
   @override
   Future<ChatPage> messages(String circleId, {int? before, int limit = 50}) async {
-    return ChatPage(history, null);
+    return ChatPage(history, null, readers);
   }
 
   @override
@@ -45,16 +48,33 @@ class _FakeChat implements ChatService {
   Future<void> markRead(String circleId, {int? seq}) async => reads++;
 
   @override
+  Future<ChatMessage> sendPhoto(String circleId, Uint8List bytes,
+      {String contentType = 'image/jpeg'}) async {
+    photosSent++;
+    return _msg(200, 'me', '');
+  }
+
+  @override
+  Future<Uint8List> photo(String circleId, String messageId) async =>
+      throw StateError('no photo');
+
+  int photosSent = 0;
+
+  @override
   Future<Map<String, int>> unread() async => <String, int>{'c1': 0};
 }
 
-Widget _app(ChatService svc, Stream<ChatMessage> live) => MaterialApp(
+Widget _app(ChatService svc, Stream<ChatMessage> live,
+        {Stream<(String, ChatReader)>? reads,
+        Future<Uint8List?> Function(ImageSource)? picker}) => MaterialApp(
       theme: buildLightTheme(),
       home: ChatScreen(
         circleId: 'c1',
         circleName: 'Family',
         service: svc,
         incoming: live,
+        reads: reads,
+        picker: picker,
       ),
     );
 
@@ -208,6 +228,50 @@ void main() {
     expect(m.senderName, 'Sam');
     expect(m.createdAt.toUtc().hour, 5);
   });
+
+  testWidgets('Seen by shows under my last message, live updates, capped',
+      (WidgetTester t) async {
+    final _FakeChat svc = _FakeChat(
+        <ChatMessage>[_msg(2, 'me', 'Later'), _msg(1, 'mom', 'Earlier')]);
+    svc.readers = const <ChatReader>[
+      ChatReader(userId: 'sam', name: 'Sam', lastSeq: 2),
+      ChatReader(userId: 'old', name: 'Old', lastSeq: 1),
+    ];
+    final StreamController<(String, ChatReader)> reads =
+        StreamController.broadcast();
+    addTearDown(reads.close);
+    await t.pumpWidget(_app(svc, const Stream<ChatMessage>.empty(), reads: reads.stream));
+    await t.pumpAndSettle();
+    expect(find.text('Seen by Sam'), findsOneWidget);
+
+    reads.add(('c1', const ChatReader(userId: 'ava', name: 'Ava', lastSeq: 2)));
+    await t.pumpAndSettle();
+    expect(find.text('Seen by Ava, Sam'), findsOneWidget);
+    for (final String n in <String>['Bo', 'Cy', 'Di']) {
+      reads.add(('c1', ChatReader(userId: n, name: n, lastSeq: 2)));
+    }
+    await t.pumpAndSettle();
+    expect(find.text('Seen by Ava, Bo, Cy +2'), findsOneWidget);
+  });
+
+  testWidgets('date separator and photo send', (WidgetTester t) async {
+    final _FakeChat svc = _FakeChat(<ChatMessage>[
+      _msg(2, 'mom', 'b'),
+      _msg(1, 'mom', 'a'),
+    ]);
+    final Uint8List jpg = Uint8List.fromList(<int>[1, 2, 3]);
+    await t.pumpWidget(_app(svc, const Stream<ChatMessage>.empty(),
+        picker: (ImageSource s) async => jpg));
+    await t.pumpAndSettle();
+    expect(find.text(chatDayLabel(DateTime(2026, 1, 1, 9))), findsOneWidget); // one header for the day
+    expect(chatDayLabel(DateTime.now()), 'Today');
+
+    await t.tap(find.byKey(const Key('chat-attach')));
+    await t.pumpAndSettle();
+    await t.tap(find.byKey(const Key('chat-attach-gallery')));
+    await t.pumpAndSettle();
+    expect(svc.photosSent, 1);
+  });
 }
 
 class _ThrowingChat extends _FakeChat {
@@ -219,4 +283,5 @@ class _ThrowingChat extends _FakeChat {
     if (fail) throw const ChatException('Can\'t reach the server.');
     return ChatPage(<ChatMessage>[_msg(1, 'mom', 'Hello')], null);
   }
+
 }

@@ -519,6 +519,8 @@ class FamilyService {
         return _applyAvatar(map);
       case 'chat':
         return ChatEvents.handleFrame(map);
+      case 'chat_read':
+        return ChatEvents.handleReadFrame(map);
       case 'alert':
       case 'alert_ack':
         AlertEvents.handleFrame(map);

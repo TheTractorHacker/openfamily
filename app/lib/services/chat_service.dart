@@ -42,6 +42,13 @@ abstract class ChatService {
   Future<ChatMessage> send(String circleId, String body);
   Future<void> markRead(String circleId, {int? seq});
 
+  /// Posts a JPEG/PNG photo message.
+  Future<ChatMessage> sendPhoto(String circleId, Uint8List bytes,
+      {String contentType = 'image/jpeg'});
+
+  /// The bytes of a photo message.
+  Future<Uint8List> photo(String circleId, String messageId);
+
   /// Unread counts per circle id.
   Future<Map<String, int>> unread();
 }
@@ -76,13 +83,29 @@ class ApiChatService implements ChatService {
             .whereType<Map<String, dynamic>>()
             .map(ChatMessage.fromJson)
             .toList();
-        return ChatPage(list, (map['next_before'] as num?)?.toInt());
+        final List<ChatReader> readers = ((map['readers'] as List?) ?? const [])
+            .whereType<Map<String, dynamic>>()
+            .map(ChatReader.fromJson)
+            .toList();
+        return ChatPage(list, (map['next_before'] as num?)?.toInt(), readers);
       });
 
   @override
   Future<ChatMessage> send(String circleId, String body) => _wrap(() async =>
       ChatMessage.fromJson(await ApiClient.post('/circles/$circleId/chat',
           body: <String, dynamic>{'body': body}) as Map<String, dynamic>));
+
+  @override
+  Future<ChatMessage> sendPhoto(String circleId, Uint8List bytes,
+          {String contentType = 'image/jpeg'}) =>
+      _wrap(() async => ChatMessage.fromJson(await ApiClient.postBytes(
+          '/circles/$circleId/chat/photo',
+          bytes: bytes,
+          contentType: contentType) as Map<String, dynamic>));
+
+  @override
+  Future<Uint8List> photo(String circleId, String messageId) => _wrap(() =>
+      ApiClient.getImageBytes('/circles/$circleId/chat/$messageId/photo'));
 
   @override
   Future<void> markRead(String circleId, {int? seq}) => _wrap(() =>
@@ -111,6 +134,21 @@ class ChatEvents {
   /// Every live message delivered to this device (including our own sends
   /// echoed by the server; consumers dedupe on [ChatMessage.id]).
   static Stream<ChatMessage> get incoming => _incoming.stream;
+
+  static final StreamController<(String, ChatReader)> _reads =
+      StreamController<(String, ChatReader)>.broadcast();
+
+  /// Read-receipt frames: (circleId, reader).
+  static Stream<(String, ChatReader)> get reads => _reads.stream;
+
+  /// Handles a `chat_read` WebSocket frame.
+  static bool handleReadFrame(Map<String, dynamic> frame) {
+    final String circle = frame['circle_id'] as String? ?? '';
+    final ChatReader r = ChatReader.fromJson(frame);
+    if (circle.isEmpty || r.userId.isEmpty) return false;
+    _reads.add((circle, r));
+    return true;
+  }
 
   /// Unread messages across all circles, for the badge on the Circle tab.
   static final ValueNotifier<int> unreadTotal = ValueNotifier<int>(0);
