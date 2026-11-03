@@ -255,6 +255,8 @@ func main() {
 		r.Get("/circles/{id}/chat", srv.ListChatMessages)
 		r.Post("/circles/{id}/chat", srv.SendChatMessage)
 		r.Post("/circles/{id}/chat/read", srv.MarkChatRead)
+		r.Post("/circles/{id}/chat/photo", srv.SendChatPhoto)
+		r.Get("/circles/{id}/chat/{msgId}/photo", srv.GetChatPhoto)
 		r.Get("/chat/unread", srv.ChatUnread)
 
 		r.Post("/families", srv.CreateFamily)

@@ -474,6 +474,29 @@ class ApiClient {
     _ensureSuccess(response);
   }
 
+  /// POST raw bytes (e.g. a chat photo) and decode the JSON reply.
+  static Future<dynamic> postBytes(String path,
+      {required Uint8List bytes, required String contentType}) async {
+    final http.Response response = await _sendResponse(
+      'POST',
+      _uri(path),
+      bytes: bytes,
+      contentType: contentType,
+    );
+    _ensureSuccess(response);
+    return _decodeMaybeOffThread(response);
+  }
+
+  /// GET private image bytes (chat photos) with the usual auth/refresh flow.
+  static Future<Uint8List> getImageBytes(String path) async {
+    final http.Response response = await _sendResponse(
+      'GET',
+      _uri(path),
+      accept: 'image/jpeg, image/png, application/json',
+    );
+    return _avatarBytesFromResponse(response, label: 'photo');
+  }
+
   // ---------------------------------------------------------------------------
   // Generic verbs (for later pieces)
   // ---------------------------------------------------------------------------

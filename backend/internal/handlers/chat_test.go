@@ -15,6 +15,8 @@ func chatEnv(t *testing.T) *circleEnv {
 	e.rt.Get("/circles/{id}/chat", e.srv.ListChatMessages)
 	e.rt.Post("/circles/{id}/chat", e.srv.SendChatMessage)
 	e.rt.Post("/circles/{id}/chat/read", e.srv.MarkChatRead)
+	e.rt.Post("/circles/{id}/chat/photo", e.srv.SendChatPhoto)
+	e.rt.Get("/circles/{id}/chat/{msgId}/photo", e.srv.GetChatPhoto)
 	e.rt.Get("/chat/unread", e.srv.ChatUnread)
 	return e
 }

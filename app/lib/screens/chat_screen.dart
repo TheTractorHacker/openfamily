@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../models/chat_message.dart';
 import '../services/chat_service.dart';
@@ -16,6 +18,8 @@ class ChatScreen extends StatefulWidget {
     required this.circleName,
     this.service,
     this.incoming,
+    this.reads,
+    this.picker,
   });
 
   final String circleId;
@@ -26,6 +30,12 @@ class ChatScreen extends StatefulWidget {
 
   /// Overrides [ChatEvents.incoming] (tests).
   final Stream<ChatMessage>? incoming;
+
+  /// Overrides [ChatEvents.reads] (tests).
+  final Stream<(String, ChatReader)>? reads;
+
+  /// Overrides the photo picker (tests): returns JPEG/PNG bytes or null.
+  final Future<Uint8List?> Function(ImageSource source)? picker;
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -39,6 +49,9 @@ class _ChatScreenState extends State<ChatScreen> {
   final List<ChatMessage> _messages = <ChatMessage>[];
   final Set<String> _ids = <String>{};
   StreamSubscription<ChatMessage>? _sub;
+  StreamSubscription<(String, ChatReader)>? _readSub;
+  final Map<String, ChatReader> _readers = <String, ChatReader>{};
+  final Map<String, Future<Uint8List>> _photos = <String, Future<Uint8List>>{};
   String? _me;
   int? _nextBefore;
   bool _loading = true;
@@ -54,6 +67,12 @@ class _ChatScreenState extends State<ChatScreen> {
     super.initState();
     ChatEvents.viewingCircleId = widget.circleId;
     _sub = (widget.incoming ?? ChatEvents.incoming).listen(_onIncoming);
+    _readSub = (widget.reads ?? ChatEvents.reads).listen(((String, ChatReader) e) {
+      if (e.$1 != widget.circleId || !mounted) return;
+      final ChatReader? old = _readers[e.$2.userId];
+      if (old != null && old.lastSeq >= e.$2.lastSeq) return;
+      setState(() => _readers[e.$2.userId] = e.$2);
+    });
     _scroll.addListener(_onScroll);
     _text.addListener(() => setState(() {}));
     unawaited(_load());
@@ -65,6 +84,7 @@ class _ChatScreenState extends State<ChatScreen> {
       ChatEvents.viewingCircleId = null;
     }
     _sub?.cancel();
+    _readSub?.cancel();
     _scroll.dispose();
     _text.dispose();
     super.dispose();
@@ -86,6 +106,10 @@ class _ChatScreenState extends State<ChatScreen> {
         _ids.clear();
         _addAll(page.messages);
         _nextBefore = page.nextBefore;
+        _readers
+          ..clear()
+          ..addEntries(page.readers
+              .map((ChatReader r) => MapEntry<String, ChatReader>(r.userId, r)));
         _loading = false;
       });
       unawaited(_markRead());
@@ -178,6 +202,88 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  Future<Uint8List?> _pick(ImageSource source) async {
+    if (widget.picker != null) return widget.picker!(source);
+    // image_picker downsizes to ~1600px and re-encodes as JPEG (which also
+    // drops EXIF/GPS); the server re-encodes again regardless.
+    final XFile? f = await ImagePicker().pickImage(
+      source: source,
+      maxWidth: 1600,
+      maxHeight: 1600,
+      imageQuality: 85,
+      requestFullMetadata: false,
+    );
+    if (f == null) return null;
+    return f.readAsBytes();
+  }
+
+  Future<void> _sendPhoto(ImageSource source) async {
+    if (_sending) return;
+    try {
+      final Uint8List? bytes = await _pick(source);
+      if (bytes == null || bytes.isEmpty || !mounted) return;
+      if (bytes.length > 5 * 1024 * 1024) {
+        setState(() => _sendError = 'That photo is too large (max 5 MB).');
+        return;
+      }
+      setState(() {
+        _sending = true;
+        _sendError = null;
+      });
+      final ChatMessage sent = await _svc.sendPhoto(widget.circleId, bytes);
+      if (!mounted) return;
+      _photos[sent.id] = Future<Uint8List>.value(bytes);
+      setState(() {
+        _sending = false;
+        _addAll(<ChatMessage>[sent]);
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _sending = false;
+        _sendError = describeChatError(e).message;
+      });
+    }
+  }
+
+  void _attachMenu() {
+    showModalBottomSheet<void>(
+      context: context,
+      builder: (BuildContext ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            ListTile(
+              key: const Key('chat-attach-gallery'),
+              leading: const Icon(Icons.photo_library_outlined),
+              title: const Text('Choose from gallery'),
+              onTap: () {
+                Navigator.pop(ctx);
+                unawaited(_sendPhoto(ImageSource.gallery));
+              },
+            ),
+            ListTile(
+              key: const Key('chat-attach-camera'),
+              leading: const Icon(Icons.photo_camera_outlined),
+              title: const Text('Take a photo'),
+              onTap: () {
+                Navigator.pop(ctx);
+                unawaited(_sendPhoto(ImageSource.camera));
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<Uint8List> _photoBytes(String id) => _photos.putIfAbsent(
+      id,
+      () => _svc.photo(widget.circleId, id).catchError((Object e) {
+            _photos.remove(id);
+            throw e;
+          }));
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -226,12 +332,62 @@ class _ChatScreenState extends State<ChatScreen> {
       itemCount: _messages.length,
       itemBuilder: (BuildContext context, int i) {
         final ChatMessage m = _messages[i];
-        // Older neighbour (next index) decides whether to repeat the name.
-        final bool sameAsOlder =
-            i + 1 < _messages.length && _messages[i + 1].senderId == m.senderId;
-        return _Bubble(message: m, mine: m.senderId == _me, showName: !sameAsOlder);
+        final ChatMessage? older = i + 1 < _messages.length ? _messages[i + 1] : null;
+        // Older neighbour (next index) decides grouping and the day header.
+        final bool sameAsOlder = older != null &&
+            older.senderId == m.senderId &&
+            _sameDay(older.createdAt, m.createdAt);
+        final bool newDay = older == null || !_sameDay(older.createdAt, m.createdAt);
+        final bool mine = m.senderId == _me;
+        String? seen;
+        if (mine && _me != null && identical(m, _lastMine)) {
+          seen = seenByLabel(_readers.values, m, _me!);
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            if (newDay)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: AppSpace.sm),
+                child: Center(
+                  child: Text(
+                    chatDayLabel(m.createdAt),
+                    key: Key('chat-day-${m.seq}'),
+                    style: AppType.secondary,
+                  ),
+                ),
+              ),
+            Padding(
+              padding: EdgeInsets.only(top: sameAsOlder || newDay ? 0 : AppSpace.sm),
+              child: _Bubble(
+                message: m,
+                mine: mine,
+                showName: !sameAsOlder,
+                photo: m.hasImage ? _photoBytes(m.id) : null,
+              ),
+            ),
+            if (seen != null)
+              Padding(
+                padding: const EdgeInsets.only(right: 4, top: 2),
+                child: Text(
+                  seen,
+                  key: const Key('chat-seen'),
+                  textAlign: TextAlign.right,
+                  style: AppType.secondary.copyWith(fontSize: 11),
+                ),
+              ),
+          ],
+        );
       },
     );
+  }
+
+  /// The newest message sent by this user (the one that shows "Seen by").
+  ChatMessage? get _lastMine {
+    for (final ChatMessage m in _messages) {
+      if (m.senderId == _me) return m;
+    }
+    return null;
   }
 
   Widget _composer(BuildContext context) {
@@ -244,6 +400,14 @@ class _ChatScreenState extends State<ChatScreen> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.end,
         children: <Widget>[
+          IconButton(
+            key: const Key('chat-attach'),
+            tooltip: 'Send a photo',
+            constraints: const BoxConstraints(
+                minWidth: kMinTarget, minHeight: kMinTarget),
+            onPressed: _sending ? null : _attachMenu,
+            icon: const Icon(Icons.add_photo_alternate_outlined),
+          ),
           Expanded(
             child: TextField(
               key: const Key('chat-input'),
@@ -278,16 +442,36 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 }
 
+bool _sameDay(DateTime a, DateTime b) =>
+    a.year == b.year && a.month == b.month && a.day == b.day;
+
+/// 'Today' / 'Yesterday' / 'Mar 4' for a day separator.
+String chatDayLabel(DateTime d, [DateTime? now]) {
+  final DateTime n = now ?? DateTime.now();
+  if (_sameDay(d, n)) return 'Today';
+  if (_sameDay(d, n.subtract(const Duration(days: 1)))) return 'Yesterday';
+  const List<String> mon = <String>[
+    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+  ];
+  return d.year == n.year
+      ? '${mon[d.month - 1]} ${d.day}'
+      : '${mon[d.month - 1]} ${d.day}, ${d.year}';
+}
+
+
 class _Bubble extends StatelessWidget {
   const _Bubble({
     required this.message,
     required this.mine,
     required this.showName,
+    this.photo,
   });
 
   final ChatMessage message;
   final bool mine;
   final bool showName;
+  final Future<Uint8List>? photo;
 
   static String _time(DateTime t) {
     final String h = t.hour.toString().padLeft(2, '0');
@@ -322,13 +506,80 @@ class _Bubble extends StatelessWidget {
                 style: AppType.secondary
                     .copyWith(color: cs.primary, fontWeight: FontWeight.w600),
               ),
-            Text(message.body, style: AppType.body.copyWith(color: fg)),
+            if (photo != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: _PhotoThumb(photo: photo!),
+              ),
+            if (message.body.isNotEmpty)
+              Text(message.body, style: AppType.body.copyWith(color: fg)),
             Text(
               _time(message.createdAt),
               style: AppType.secondary
                   .copyWith(color: fg.withValues(alpha: 0.7), fontSize: 11),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PhotoThumb extends StatelessWidget {
+  const _PhotoThumb({required this.photo});
+
+  final Future<Uint8List> photo;
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<Uint8List>(
+      future: photo,
+      builder: (BuildContext context, AsyncSnapshot<Uint8List> snap) {
+        Widget child;
+        if (snap.hasData) {
+          child = GestureDetector(
+            key: const Key('chat-photo'),
+            onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
+              builder: (_) => _PhotoViewer(bytes: snap.data!),
+            )),
+            child: Image.memory(snap.data!,
+                width: 220, height: 220, fit: BoxFit.cover, cacheWidth: 660),
+          );
+        } else if (snap.hasError) {
+          child = const Center(child: Icon(Icons.broken_image_outlined));
+        } else {
+          child = const Center(
+              child: SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2)));
+        }
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(AppRadius.md),
+          child: SizedBox(width: 220, height: 220, child: child),
+        );
+      },
+    );
+  }
+}
+
+class _PhotoViewer extends StatelessWidget {
+  const _PhotoViewer({required this.bytes});
+
+  final Uint8List bytes;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
+      ),
+      body: Center(
+        child: InteractiveViewer(
+          maxScale: 5,
+          child: Image.memory(bytes, key: const Key('chat-photo-full')),
         ),
       ),
     );
