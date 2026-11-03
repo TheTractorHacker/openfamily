@@ -58,3 +58,38 @@ func TestJoinLandingRejectsBadInput(t *testing.T) {
 		t.Errorf("bad host accepted: %d", rec.Code)
 	}
 }
+
+func TestJoinLandingHasInstallPathAndQR(t *testing.T) {
+	rec := joinReq(&Server{PublicBaseURL: "https://fam.example.com"}, "/join/AB23CDEF", "x")
+	body := rec.Body.String()
+	for _, want := range []string{`href="/app.apk"`, "<svg", "QR code for this invite page", "Install anyway"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("page missing %q", want)
+		}
+	}
+	// The CSP forbids scripts, so the page must not rely on any.
+	if strings.Contains(body, "<script") {
+		t.Error("page must not contain scripts")
+	}
+	if got := rec.Header().Get("Content-Security-Policy"); !strings.Contains(got, "default-src 'none'") {
+		t.Errorf("CSP loosened: %q", got)
+	}
+}
+
+func TestQRSVGEncodesAndIsDeterministic(t *testing.T) {
+	a := qrSVG("https://fam.example.com/join/AB23CDEF")
+	if !strings.HasPrefix(string(a), "<svg") || !strings.Contains(string(a), "<path") {
+		t.Fatalf("unexpected svg: %.80s", a)
+	}
+	if a != qrSVG("https://fam.example.com/join/AB23CDEF") {
+		t.Error("QR output not deterministic")
+	}
+}
+
+func TestPublicDownloadAPKWithoutConfigIs404(t *testing.T) {
+	rec := httptest.NewRecorder()
+	(&Server{}).PublicDownloadAPK(rec, httptest.NewRequest(http.MethodGet, "/app.apk", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status %d", rec.Code)
+	}
+}

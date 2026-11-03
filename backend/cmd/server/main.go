@@ -183,6 +183,8 @@ func main() {
 	r.Get("/alerts/share/{token}", srv.ShareAlert)
 	// Public invite landing page: static, no database access, no secrets.
 	r.Get("/join/{code}", srv.JoinLanding)
+	// Public signed-APK download for invited family members (rate limited).
+	r.Get("/app.apk", srv.PublicDownloadAPK)
 	// Public share-link viewer (docs/share-links.md): hash lookup, generic 404,
 	// per-IP rate limit.
 	r.Get("/s/{token}", srv.ShareViewPage)
