@@ -3,6 +3,7 @@ import 'dart:math' as math;
 
 
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:flutter/foundation.dart' show ValueListenable, visibleForTesting;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart' show Ticker;
@@ -16,6 +17,7 @@ import '../models/member.dart';
 import '../services/api_client.dart';
 import '../services/background_location_service.dart';
 import '../services/bubble_service.dart';
+import '../services/invite_service.dart';
 import '../services/inbox_service.dart';
 import '../services/battery_optimization_service.dart';
 import '../services/circle_selection.dart';
@@ -986,6 +988,25 @@ class _MapScreenState extends State<MapScreen>
         .push(MaterialPageRoute<void>(builder: (_) => const InviteScreen()));
   }
 
+  /// One tap: make an invite and open the share sheet with the join link. Any
+  /// failure drops back to the invite screen, which explains the problem and
+  /// still offers the code.
+  Future<void> _quickInvite() async {
+    try {
+      final String code = await InviteService.createCode();
+      await Share.share(
+        InviteService.shareMessage(code),
+        subject: InviteService.shareSubject,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(describeInviteError(e))),
+      );
+      _openAddPerson();
+    }
+  }
+
   void _openJoinCircle() {
     Navigator.of(context)
         .push(
@@ -1042,6 +1063,7 @@ class _MapScreenState extends State<MapScreen>
       onLocate: _centerOnUser,
       onOpenSettings: _openSettings,
       onInvite: _openAddPerson,
+      onQuickInvite: _quickInvite,
       onCheckIn: _openCheckIn,
       onOpenSharing: _openSharing,
       onSos: _openSos,
