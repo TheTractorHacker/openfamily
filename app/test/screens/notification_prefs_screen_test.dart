@@ -116,6 +116,7 @@ void main() {
     });
 
     testWidgets('quiet hours toggle sets a default window', (tester) async {
+      _tall(tester);
       final FakePrefsService svc = FakePrefsService();
       await tester.pumpWidget(_screen(svc));
       await tester.pumpAndSettle();

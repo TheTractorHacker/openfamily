@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../services/api_client.dart';
 import '../services/security_format.dart';
 import '../widgets/ds/ds.dart';
+import 'place_alert_rules_screen.dart';
 import 'security_widgets.dart';
 
 /// Which notifications this person wants. SOS and help alerts from family are
@@ -113,6 +114,7 @@ class _NotificationSettingsScreenState
                 children: <Widget>[
                   const DsSectionHeader('Places & check-ins'),
                   for (final _Pref p in _places) _row(p),
+                  const QuietHoursSection(),
                   const DsSectionHeader('Member notifications'),
                   for (final _Pref p in _members) _row(p),
                   const Padding(

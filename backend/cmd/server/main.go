@@ -231,6 +231,10 @@ func main() {
 		r.Delete("/me/contacts/{id}", srv.DeleteContact)
 		r.Get("/me/notifications", srv.GetNotificationPrefs)
 		r.Put("/me/notifications", srv.PutNotificationPrefs)
+		r.Get("/me/quiet-hours", srv.GetQuietHours)
+		r.Put("/me/quiet-hours", srv.PutQuietHours)
+		r.Get("/members/{id}/place-alert-rules", srv.ListPlaceAlertRules)
+		r.Put("/members/{id}/place-alert-rules/{placeId}", srv.PutPlaceAlertRule)
 
 		// Account profile and avatar are deliberately private to the caller.
 		r.Get("/api/profile", srv.GetProfile)
