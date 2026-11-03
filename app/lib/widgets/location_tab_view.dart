@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 
@@ -122,7 +124,7 @@ class LocationTabView extends StatefulWidget {
 
 class _LocationTabViewState extends State<LocationTabView> {
   /// Sheet heights, as fractions of the tab body.
-  static const double _peekPx = 236;
+  static const double _peekPx = 188;
   static const double _half = 0.5;
 
   final DraggableScrollableController _sheet = DraggableScrollableController();
@@ -328,7 +330,8 @@ class _LocationTabViewState extends State<LocationTabView> {
           final double textScale = MediaQuery.textScalerOf(
             context,
           ).scale(1).clamp(1.0, 2.0);
-          final double peek = (minSize * textScale).clamp(minSize, 0.5);
+          // Capped so the docked buttons stay below the map centre at huge text.
+          final double peek = (minSize * textScale).clamp(minSize, math.max(minSize, 0.38));
           return Stack(
             children: <Widget>[
               Positioned.fill(child: widget.map),
@@ -506,7 +509,7 @@ class _LocationTabViewState extends State<LocationTabView> {
         return Positioned(
           left: AppSpace.md,
           right: AppSpace.md,
-          bottom: extent * h + AppSpace.md,
+          bottom: extent * h + AppSpace.sm,
           child: IgnorePointer(
             ignoring: !visible,
             child: AnimatedOpacity(
@@ -521,61 +524,74 @@ class _LocationTabViewState extends State<LocationTabView> {
   }
 
   Widget _floatingRow(BuildContext context) {
+    // Life360-style docking: the quick actions sit at the left edge and the
+    // layers / recenter buttons at the right edge, both just above the
+    // sheet. The middle stays empty so the map's centre and markers are
+    // never covered.
     return Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: <Widget>[
+        Expanded(
+          child: Align(
+            alignment: Alignment.bottomLeft,
+            // Scales down rather than wrapping or overflowing at large text.
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.bottomLeft,
+              child: Row(
+                key: const ValueKey<String>('map-quick-actions'),
+                mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
-                  Expanded(
-                    child: Wrap(
-                      spacing: AppSpace.sm,
-                      runSpacing: AppSpace.sm,
-                      children: <Widget>[
-                        DsPillButton(
-                          label: 'Check in',
-                          icon: Icons.check_circle_outline,
-                          floating: true,
-                          onPressed: widget.onCheckIn,
-                        ),
-                        if (widget.onOpenSharing != null)
-                          DsPillButton(
-                            label: 'Share',
-                            icon: Icons.share_location,
-                            floating: true,
-                            onPressed: widget.onOpenSharing,
-                            semanticLabel:
-                                'Check in, pause sharing or share live location',
-                          ),
-                        DsPillButton(
-                          label: 'SOS',
-                          icon: Icons.warning_amber_rounded,
-                          style: DsPillStyle.danger,
-                          floating: true,
-                          onPressed: widget.onSos,
-                          semanticLabel: 'Send an SOS to your family',
-                        ),
-                      ],
-                    ),
+                  _QuickAction(
+                    label: 'Check in',
+                    icon: Icons.check_circle_outline,
+                    onPressed: widget.onCheckIn,
                   ),
+                  if (widget.onOpenSharing != null) ...<Widget>[
+                    const SizedBox(width: AppSpace.sm),
+                    _QuickAction(
+                      label: 'Share',
+                      icon: Icons.share_location,
+                      onPressed: widget.onOpenSharing,
+                      semanticLabel:
+                          'Check in, pause sharing or share live location',
+                    ),
+                  ],
                   const SizedBox(width: AppSpace.sm),
-                  Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: <Widget>[
-                      DsMapButton(
-                        icon: widget.satellite ? Icons.map : Icons.layers,
-                        tooltip: widget.satellite
-                            ? 'Switch to standard map'
-                            : 'Switch to satellite',
-                        onPressed: widget.onToggleSatellite,
-                      ),
-                      const SizedBox(height: AppSpace.sm),
-                      DsMapButton(
-                        icon: Icons.my_location,
-                        tooltip: 'Center on my location',
-                        onPressed: widget.onLocate,
-                      ),
-                    ],
+                  _QuickAction(
+                    label: 'SOS',
+                    icon: Icons.warning_amber_rounded,
+                    danger: true,
+                    onPressed: widget.onSos,
+                    semanticLabel: 'Send an SOS to your family',
                   ),
                 ],
-              );
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: AppSpace.sm),
+        Column(
+          key: const ValueKey<String>('map-side-buttons'),
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            DsMapButton(
+              icon: widget.satellite ? Icons.map : Icons.layers,
+              tooltip: widget.satellite
+                  ? 'Switch to standard map'
+                  : 'Switch to satellite',
+              onPressed: widget.onToggleSatellite,
+            ),
+            const SizedBox(height: AppSpace.sm),
+            DsMapButton(
+              icon: Icons.my_location,
+              tooltip: 'Center on my location',
+              onPressed: widget.onLocate,
+            ),
+          ],
+        ),
+      ],
+    );
   }
 
   Widget _buildSheetBody(
@@ -1253,6 +1269,73 @@ class _PersonRow extends StatelessWidget {
           ),
       ],
     ),
+    );
+  }
+}
+
+/// Compact floating action: a small pill (icon + short label) used for the
+/// map's Check in / Share / SOS shortcuts.
+class _QuickAction extends StatelessWidget {
+  const _QuickAction({
+    required this.label,
+    required this.icon,
+    required this.onPressed,
+    this.danger = false,
+    this.semanticLabel,
+  });
+
+  final String label;
+  final IconData icon;
+  final VoidCallback? onPressed;
+  final bool danger;
+  final String? semanticLabel;
+
+  @override
+  Widget build(BuildContext context) {
+    final BrandTheme brand = BrandTheme.of(context);
+    final Color bg = danger ? AppColors.sosRed : brand.sheet;
+    final Color fg = danger ? Colors.white : brand.accentInk;
+    return Semantics(
+      button: true,
+      label: semanticLabel ?? label,
+      excludeSemantics: true,
+      onTap: onPressed,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(AppRadius.pill),
+          boxShadow: kFloatShadow,
+        ),
+        child: Material(
+          color: bg,
+          shape: const StadiumBorder(),
+          child: InkWell(
+            customBorder: const StadiumBorder(),
+            onTap: onPressed,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(minHeight: kMinTarget),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: AppSpace.md),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    Icon(icon, size: 18, color: fg),
+                    const SizedBox(width: 6),
+                    Text(
+                      label,
+                      maxLines: 1,
+                      style: AppType.body.copyWith(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: fg,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

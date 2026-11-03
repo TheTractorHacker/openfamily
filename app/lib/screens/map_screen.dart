@@ -1228,10 +1228,10 @@ class FollowPill extends StatelessWidget {
     final ColorScheme cs = Theme.of(context).colorScheme;
     return Material(
       color: cs.surface,
-      elevation: 3,
+      elevation: 2,
       shape: const StadiumBorder(),
       child: Padding(
-        padding: const EdgeInsets.only(left: 14),
+        padding: const EdgeInsets.only(left: 12),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
@@ -1248,18 +1248,24 @@ class FollowPill extends StatelessWidget {
                   'Following ${ui.name}',
                   key: const ValueKey<String>('follow-pill-label'),
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontWeight: FontWeight.w600),
+                  maxLines: 1,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13,
+                  ),
                 ),
               ),
             ),
             if (!ui.locked)
               IconButton(
+                visualDensity: VisualDensity.compact,
                 key: const ValueKey<String>('follow-recenter'),
                 tooltip: 'Recenter on ${ui.name}',
                 icon: const Icon(Icons.my_location),
                 onPressed: onRecenter,
               ),
             IconButton(
+              visualDensity: VisualDensity.compact,
               key: const ValueKey<String>('follow-stop'),
               tooltip: 'Stop following ${ui.name}',
               icon: const Icon(Icons.close),

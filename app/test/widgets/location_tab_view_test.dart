@@ -287,6 +287,33 @@ void main() {
     );
   });
 
+  for (final double scale in <double>[1, 2]) {
+    testWidgets('quick actions never cover the map centre (text x$scale)', (
+      tester,
+    ) async {
+      _phone(tester);
+      await tester.pumpWidget(_app(textScale: scale));
+      await tester.pump();
+      final Size screen = tester.view.physicalSize;
+      final Offset centre = Offset(screen.width / 2, screen.height / 2);
+      final Rect actions = tester.getRect(
+        find.byKey(const ValueKey<String>('map-quick-actions')),
+      );
+      final Rect side = tester.getRect(
+        find.byKey(const ValueKey<String>('map-side-buttons')),
+      );
+      expect(actions.contains(centre), isFalse);
+      expect(side.contains(centre), isFalse);
+      // Docked in the lower part of the screen, within the width.
+      expect(actions.top, greaterThan(screen.height / 2));
+      expect(side.top, greaterThan(screen.height / 2 - 60));
+      expect(actions.left, greaterThanOrEqualTo(0));
+      expect(side.right, lessThanOrEqualTo(screen.width));
+      expect(actions.right, lessThanOrEqualTo(side.left));
+      expect(tester.takeException(), isNull);
+    });
+  }
+
   testWidgets('dark theme at 2x text does not overflow', (tester) async {
     _phone(tester);
     await tester.pumpWidget(
