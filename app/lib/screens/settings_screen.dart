@@ -7,6 +7,7 @@ import '../services/accent_preference.dart';
 import '../services/api_client.dart';
 import '../services/auth_service.dart';
 import '../services/token_storage.dart';
+import '../services/widget_snapshot.dart';
 import '../services/battery_optimization_service.dart';
 import '../services/biometric_service.dart';
 import '../services/location_sharing_service.dart';
@@ -118,6 +119,7 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   bool _locationSharing = true;
   bool _locationSharingLoading = true;
+  bool _widgetShowFamily = true;
   bool _notifications = true;
   bool _notificationsLoading = true;
   bool _loggingOut = false;
@@ -171,6 +173,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _loadBiometricSettings();
     _loadKeepSignedIn();
     _loadLocationSharing();
+    HomeWidgetService.isEnabled().then((bool v) {
+      if (mounted) setState(() => _widgetShowFamily = v);
+    });
     _loadPushNotifications();
     _loadVersions();
   }
@@ -517,6 +522,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
               value: _locationSharing,
               onChanged: _locationSharingLoading ? null : _setLocationSharing,
             ),
+            if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android)
+              DsToggleRow(
+                icon: Icons.widgets_outlined,
+                title: 'Show family on home screen widget',
+                subtitle: 'Names and status are stored on this phone for the '
+                    'widget. Turning this off removes them.',
+                value: _widgetShowFamily,
+                onChanged: (bool v) {
+                  setState(() => _widgetShowFamily = v);
+                  HomeWidgetService.setEnabled(v);
+                },
+              ),
             if (BatteryOptimizationService.isSupported)
               DsListRow(
                 leading:

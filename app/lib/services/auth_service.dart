@@ -2,6 +2,7 @@ import 'api_client.dart';
 import 'background_location_service.dart';
 import 'biometric_service.dart';
 import 'place_service.dart';
+import 'widget_snapshot.dart';
 import 'token_storage.dart';
 
 /// Thrown when the backend requires a TOTP code (2FA) to complete login.
@@ -115,6 +116,8 @@ class AuthService {
     await TokenStorage.clear(reason: 'logout');
     // Family-scoped caches must never outlive the account.
     PlaceService.invalidateCache();
+    // No family names may linger on the home-screen widget after sign-out.
+    await HomeWidgetService.clear();
   }
 
   static Future<void> _loginAndPersist({
