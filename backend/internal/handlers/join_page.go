@@ -25,34 +25,70 @@ var joinPageTmpl = template.Must(template.New("join").Parse(`<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
-<title>Join on OpenFamily</title>
+<meta name="color-scheme" content="dark light">
+<meta name="theme-color" content="#0f1318">
+<title>Join your family on OpenFamily</title>
 <style>
-body{font-family:system-ui,sans-serif;margin:0;padding:24px;background:#f6f7f9;color:#1b1f24}
-main{max-width:30rem;margin:8vh auto 0;background:#fff;border-radius:16px;padding:24px;box-shadow:0 1px 4px rgba(0,0,0,.12)}
-h1{font-size:1.4rem;margin-top:0}
-.code{font-size:2rem;font-weight:800;letter-spacing:.3rem;text-align:center;margin:16px 0}
-a.btn{display:block;text-align:center;background:#1a73e8;color:#fff;text-decoration:none;padding:14px;border-radius:999px;font-weight:600}
-ol{padding-left:1.2rem}
-small{color:#5f6770}
-@media (prefers-color-scheme:dark){body{background:#101317;color:#e6e8eb}main{background:#1a1f25}small{color:#9aa3ad}}
+:root{--bg:#eef2f4;--card:#fff;--fg:#14181d;--muted:#566370;--line:#dde3e8;--accent:#0b8f84;--accent-fg:#fff;--accent-soft:#d9f4f0;--warn:#fff6e0;--warn-fg:#6b4e00}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1318;--card:#1a2027;--fg:#eef2f5;--muted:#98a4b0;--line:#2b343d;--accent:#3de8d6;--accent-fg:#06211e;--accent-soft:#123a37;--warn:#2d2610;--warn-fg:#f1d38a}}
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--fg);line-height:1.5;padding:max(20px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) max(24px,env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left))}
+main{max-width:30rem;margin:0 auto;display:flex;flex-direction:column;gap:18px}
+.brand{display:flex;align-items:center;gap:10px;font-weight:700;letter-spacing:.01em}
+.brand svg{width:34px;height:34px;flex:none}
+h1{font-size:1.75rem;line-height:1.15;margin:6px 0 0;text-wrap:balance}
+.lead{margin:10px 0 0;color:var(--muted);text-wrap:pretty}
+.code{background:var(--card);border:1px dashed var(--line);border-radius:14px;padding:12px 16px;text-align:center}
+.code small{display:block;color:var(--muted);font-size:.72rem;letter-spacing:.12em;text-transform:uppercase}
+.code b{display:block;font:700 1.9rem/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.28rem;padding-left:.28rem}
+ol{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:12px}
+li{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;display:grid;grid-template-columns:2rem 1fr;gap:4px 12px}
+.n{grid-row:span 3;width:2rem;height:2rem;border-radius:50%;background:var(--accent-soft);color:var(--accent);font-weight:800;display:grid;place-items:center}
+li h2{font-size:1rem;margin:0;align-self:center}
+li p{margin:0;color:var(--muted);font-size:.92rem}
+a.btn{display:block;text-align:center;background:var(--accent);color:var(--accent-fg);text-decoration:none;padding:14px 18px;border-radius:999px;font-weight:700;margin-top:6px}
+a.btn.alt{background:transparent;color:var(--accent);border:1.5px solid var(--accent)}
+.help{background:var(--warn);color:var(--warn-fg);border-radius:12px;padding:10px 12px;font-size:.86rem;margin-top:6px}
+.desk{display:none;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;gap:16px;align-items:center}
+.desk svg{width:132px;height:132px;flex:none;border-radius:10px}
+.desk p{margin:0;color:var(--muted);font-size:.92rem}
+.desk strong{color:var(--fg);display:block;font-size:1rem}
+@media (hover:hover) and (pointer:fine){.desk{display:flex}}
+.fine{color:var(--muted);font-size:.8rem;text-align:center;text-wrap:balance}
+.fine b{color:var(--fg)}
+a:focus-visible{outline:3px solid var(--accent);outline-offset:3px}
 </style>
 </head>
 <body>
 <main>
+<div class="brand">
+<svg viewBox="0 0 48 48" aria-hidden="true"><rect width="48" height="48" rx="12" fill="var(--accent)"/><path d="M24 11c-5.5 0-9.5 4.2-9.5 9.6 0 6.6 9.5 16.4 9.5 16.4s9.5-9.800 9.5-16.400C33.500 15.200 29.500 11 24 11z" fill="var(--accent-fg)"/><circle cx="24" cy="20.800" r="3.600" fill="var(--accent)"/></svg>
+OpenFamily
+</div>
 {{if .Code}}
-<h1>You are invited to join a family on OpenFamily</h1>
-<p>OpenFamily is a private, self-hosted family location app. Someone on this server invited you.</p>
-<div class="code" aria-label="Invite code">{{.Code}}</div>
-<p><a class="btn" href="{{.AppLink}}">Open in the OpenFamily app</a></p>
+<div>
+<h1>You&rsquo;re invited to join a family circle</h1>
+<p class="lead">See where your family is, get arrival alerts and check in, on a private server run by your family. No ads, no tracking, nothing sold.</p>
+</div>
+<div class="code"><small>Your invite code</small><b aria-label="Invite code">{{.Code}}</b></div>
 <ol>
-<li>Install the OpenFamily Android app if you have not already.</li>
-<li>Tap the button above. The app fills in this server and your invite code.</li>
-<li>If the button does nothing, open the app, enter the server <strong>{{.Server}}</strong> and the code above.</li>
+<li><span class="n">1</span><h2>Get the app</h2>
+<p>Android phones. It&rsquo;s a free, signed app that comes straight from your family&rsquo;s server.</p>
+<a class="btn" href="{{.Download}}">Download OpenFamily</a></li>
+<li><span class="n">2</span><h2>Allow the install</h2>
+<p>Open the downloaded file. If Android asks, allow your browser to install apps, then tap <b>Install</b>.</p>
+<div class="help">If Google Play Protect offers to scan the app, tap <b>Scan app</b>. If it blocks the install, tap <b>More details &rarr; Install anyway</b>.</div></li>
+<li><span class="n">3</span><h2>Open it and join</h2>
+<p>This fills in your server and invite code for you.</p>
+<a class="btn alt" href="{{.AppLink}}">Open OpenFamily &amp; join</a></li>
 </ol>
-<small>The invite expires and can only be used a limited number of times. Never share it with people you do not know.</small>
+<div class="desk">{{.QR}}<p><strong>On a computer?</strong>Scan this with your phone&rsquo;s camera to open this page there.</p></div>
+<p class="fine">Button does nothing? Open the app, tap <b>Join</b>, and enter the server <b>{{.Server}}</b> and the code above.<br>OpenFamily is Android-only for now. The invite expires and has limited uses, so only share it with family.</p>
 {{else}}
-<h1>This invite link is not valid</h1>
-<p>Ask the person who invited you to send a new link.</p>
+<div>
+<h1>This invite link isn&rsquo;t valid</h1>
+<p class="lead">It may have expired or been mistyped. Ask the person who invited you to send a new link.</p>
+</div>
 {{end}}
 </main>
 </body>
@@ -60,9 +96,13 @@ small{color:#5f6770}
 
 // joinPageData is what the landing page template renders.
 type joinPageData struct {
-	Code    string
-	Server  string
-	AppLink template.URL
+	Code     string
+	Server   string
+	AppLink  template.URL
+	Download template.URL
+	// QR is a generated inline SVG of this page's own URL (trusted: built here
+	// from a validated origin and code, never from raw request input).
+	QR template.HTML
 }
 
 // publicOrigin returns the origin clients should use to reach this server: the
@@ -97,9 +137,11 @@ func (s *Server) JoinLanding(w http.ResponseWriter, r *http.Request) {
 		q.Set("server", server)
 		q.Set("code", code)
 		data = joinPageData{
-			Code:    code,
-			Server:  server,
-			AppLink: template.URL("openfamily://join?" + q.Encode()),
+			Code:     code,
+			Server:   server,
+			AppLink:  template.URL("openfamily://join?" + q.Encode()),
+			Download: "/app.apk",
+			QR:       qrSVG(server + "/join/" + code),
 		}
 	} else {
 		status = http.StatusNotFound
