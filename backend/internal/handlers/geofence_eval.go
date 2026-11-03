@@ -776,11 +776,11 @@ func (s *Server) createEventDeviceRows(ctx context.Context, tx pgx.Tx, eventID, 
 	}
 	muted := s.usersMuted(ctx, "place_alerts")
 	// Honour (read before the device query: a tx runs one at a time) per-member notification settings (mute, category, quiet hours).
-	category := notifArrivals
-	if eventType == "exit" {
-		category = notifDepartures
+	var placeID string
+	if err := tx.QueryRow(ctx, `SELECT COALESCE(place_id::text, '') FROM geofence_events WHERE id = $1`, eventID).Scan(&placeID); err != nil {
+		return err
 	}
-	skip := notifSuppressed(ctx, tx, trackedUserID, category, time.Now())
+	skip := placeAlertSuppressed(ctx, tx, trackedUserID, placeID, eventType, time.Now())
 
 	rows, err := tx.Query(ctx, `
 		SELECT d.id, d.user_id::text

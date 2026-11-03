@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../services/api_client.dart';
 import '../services/notification_prefs_service.dart';
+import '../services/place_alert_rules_service.dart';
+import 'place_alert_rules_screen.dart';
 import '../theme/app_theme.dart';
 import '../widgets/ds/ds.dart';
 import 'security_widgets.dart';
@@ -14,11 +16,13 @@ class NotificationPrefsScreen extends StatefulWidget {
     required this.memberId,
     required this.memberName,
     this.service = const ApiNotificationPrefsService(),
+    this.rulesService = const ApiPlaceAlertRulesService(),
   });
 
   final String memberId;
   final String memberName;
   final NotificationPrefsService service;
+  final PlaceAlertRulesService rulesService;
 
   @override
   State<NotificationPrefsScreen> createState() =>
@@ -164,6 +168,25 @@ class _NotificationPrefsScreenState extends State<NotificationPrefsScreen> {
               onChanged: _saving || p.muted
                   ? null
                   : (v) => _apply(p.copyWith(driving: v)),
+            ),
+          ]),
+          const SizedBox(height: AppSpace.lg),
+          DsRowGroup(children: <Widget>[
+            DsListRow(
+              leading: DsListRow.iconTile(context, Icons.place_outlined),
+              title: 'Choose by place',
+              subtitle: 'Arrivals only, departures only or off for a place',
+              chevron: true,
+              semanticLabel: 'Per-place alerts for $name',
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => PlaceAlertRulesScreen(
+                    memberId: widget.memberId,
+                    memberName: name,
+                    service: widget.rulesService,
+                  ),
+                ),
+              ),
             ),
           ]),
           const SizedBox(height: AppSpace.lg),
