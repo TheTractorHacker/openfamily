@@ -27,6 +27,7 @@ Widget _app({
   _Calls? calls,
   ThemeData? theme,
   double textScale = 1,
+  Future<void> Function()? quickInvite,
 }) {
   final _Calls c = calls ?? _Calls();
   return MaterialApp(
@@ -53,6 +54,7 @@ Widget _app({
         onSos: () => c.log.add('sos'),
         onOpenSettings: () => c.log.add('settings'),
         onInvite: () => c.log.add('invite'),
+        onQuickInvite: quickInvite,
         onToggleSatellite: () => c.log.add('layers'),
         onLocate: () => c.log.add('locate'),
         onSelectMember: (Member m) => c.log.add('select:${m.id}'),
@@ -485,6 +487,56 @@ void main() {
       await tester.tap(find.text('Frank Family'));
       await tester.pumpAndSettle();
       expect(find.text('Open circle details'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+  });
+
+  group('solo circle invite card', () {
+    testWidgets('replaces "Add a person" and sends in one tap', (tester) async {
+      _phone(tester);
+      final _Calls c = _Calls();
+      int sent = 0;
+      await tester.pumpWidget(
+        _app(
+          members: const <Member>[kSelf],
+          calls: c,
+          quickInvite: () async => sent++,
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Your family isn\u2019t on the map yet'), findsOneWidget);
+      expect(find.text('Add a person'), findsNothing);
+      await tester.tap(find.text('Send invite link'));
+      await tester.pumpAndSettle();
+      expect(sent, 1);
+      expect(c.log, isNot(contains('invite')));
+    });
+
+    testWidgets('the secondary button opens the code screen', (tester) async {
+      _phone(tester);
+      final _Calls c = _Calls();
+      await tester.pumpWidget(_app(members: const <Member>[kSelf], calls: c));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Show code or QR instead'));
+      await tester.pump();
+      expect(c.log, contains('invite'));
+    });
+
+    testWidgets('is not shown once someone else is in the circle', (
+      tester,
+    ) async {
+      _phone(tester);
+      await tester.pumpWidget(_app());
+      await tester.pumpAndSettle();
+      expect(find.text('Your family isn\u2019t on the map yet'), findsNothing);
+    });
+
+    testWidgets('fits at 200% text', (tester) async {
+      _phone(tester);
+      await tester.pumpWidget(
+        _app(members: const <Member>[kSelf], textScale: 2),
+      );
+      await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
     });
   });

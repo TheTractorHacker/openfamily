@@ -12,6 +12,7 @@ import '../services/perf/perf_monitor.dart';
 import 'ds/ds.dart';
 import '../services/speed_units.dart';
 import 'live_speed.dart';
+import 'invite_hero_card.dart';
 import 'member_avatar_bubble.dart';
 import 'visible_value_builder.dart';
 
@@ -49,6 +50,7 @@ class LocationTabView extends StatefulWidget {
     this.onLocate,
     this.onOpenSettings,
     this.onInvite,
+    this.onQuickInvite,
     this.onCheckIn,
     this.onOpenSharing,
     this.onSos,
@@ -99,6 +101,10 @@ class LocationTabView extends StatefulWidget {
   final VoidCallback? onLocate;
   final VoidCallback? onOpenSettings;
   final VoidCallback? onInvite;
+
+  /// One-tap invite (create a link and open the share sheet). When null the
+  /// solo-circle card falls back to [onInvite].
+  final Future<void> Function()? onQuickInvite;
   final VoidCallback? onCheckIn;
 
   /// Opens the check-in / pause / live-share sheet.
@@ -128,6 +134,38 @@ class _LocationTabViewState extends State<LocationTabView> {
   static const double _half = 0.5;
 
   final DraggableScrollableController _sheet = DraggableScrollableController();
+
+  // A solo circle has nothing to look at but the invite card, so the sheet
+  // opens to half height once (never again, so the user's own dragging wins).
+  bool _soloOpened = false;
+
+  // Tall enough for the handle, tabs, your own row and the whole invite card;
+  // clamped to the sheet's maximum in build.
+  double _soloTarget = 0.72;
+
+  bool get _isSolo =>
+      !widget.loading && widget.hasFamily && widget.members.length <= 1;
+
+  @override
+  void initState() {
+    super.initState();
+    _soloOpened = _isSolo;
+  }
+
+  @override
+  void didUpdateWidget(LocationTabView old) {
+    super.didUpdateWidget(old);
+    if (_soloOpened || !_isSolo) return;
+    _soloOpened = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_sheet.isAttached) return;
+      _sheet.animateTo(
+        _soloTarget,
+        duration: const Duration(milliseconds: 280),
+        curve: Curves.easeOutCubic,
+      );
+    });
+  }
   final ValueNotifier<double> _extent = ValueNotifier<double>(0);
 
   int _tab = 0;
@@ -327,6 +365,7 @@ class _LocationTabViewState extends State<LocationTabView> {
           // Leave the top row (settings / circle pill) visible when fully open.
           final double full = (1 - (MediaQuery.paddingOf(context).top + 72) / h)
               .clamp(0.5, 0.92);
+          _soloTarget = math.min(0.72, full);
           final double textScale = MediaQuery.textScalerOf(
             context,
           ).scale(1).clamp(1.0, 2.0);
@@ -344,7 +383,7 @@ class _LocationTabViewState extends State<LocationTabView> {
                 },
                 child: DraggableScrollableSheet(
                   controller: _sheet,
-                  initialChildSize: peek,
+                  initialChildSize: _isSolo ? math.max(peek, _soloTarget) : peek,
                   minChildSize: peek,
                   maxChildSize: full,
                   snap: true,
@@ -747,11 +786,20 @@ class _LocationTabViewState extends State<LocationTabView> {
         itemBuilder: (BuildContext ctx, int i) => _personRow(ms[i]),
       ),
       SliverToBoxAdapter(
-        child: DsListRow(
-          title: 'Add a person',
-          leading: DsListRow.iconTile(context, Icons.person_add_alt_1_outlined),
-          onTap: widget.onInvite,
-        ),
+        child: ms.length <= 1 && widget.hasFamily
+            ? InviteHeroCard(
+                onSend: widget.onQuickInvite ??
+                    () async => widget.onInvite?.call(),
+                onShowCode: () => widget.onInvite?.call(),
+              )
+            : DsListRow(
+                title: 'Add a person',
+                leading: DsListRow.iconTile(
+                  context,
+                  Icons.person_add_alt_1_outlined,
+                ),
+                onTap: widget.onInvite,
+              ),
       ),
     ];
   }
