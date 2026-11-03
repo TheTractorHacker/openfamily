@@ -19,6 +19,7 @@ import '../widgets/ds/ds.dart';
 import 'driving_detection_screen.dart';
 import 'trip_detail_screen.dart';
 import 'trips_screen.dart';
+import 'weekly_summary_screen.dart';
 
 /// The Driving tab: who is driving now, the period's totals, a per-day chart,
 /// the latest drives and one card per member. Everything comes from one
@@ -292,6 +293,21 @@ class _State extends State<FamilyDrivingReportScreen> {
                           ),
                           const UnitToggleButton(),
                         ],
+                      ),
+                      const SizedBox(height: AppSpace.sm),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: ActionChip(
+                          key: const ValueKey<String>('weekly-summary-link'),
+                          avatar: const Icon(Icons.insights_outlined, size: 18),
+                          label: const Text('Weekly summary'),
+                          onPressed: () => Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (_) => WeeklySummaryScreen(
+                                  selfId: widget.userId.value),
+                            ),
+                          ),
+                        ),
                       ),
                       const SizedBox(height: AppSpace.sm),
                       DrivingPeriodBar(

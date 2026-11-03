@@ -228,6 +228,7 @@ func (s *Server) pushFamilyAlertOnly(ctx context.Context, familyID, senderID, al
 			n := push.Notification{
 				Title: title, Body: body, Platform: d.platform,
 				PushToken: d.token, UnifiedPushEndpoint: d.endpoint,
+				Route: pushRouteFrom(ctx),
 			}
 			if d.direct {
 				n = directNotification(n, d.id, uid, alertID, "")
@@ -634,4 +635,17 @@ func (s *Server) ListAlerts(w http.ResponseWriter, r *http.Request) {
 		next = items[limit-1].ID
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"alerts": items, "next_before": next})
+}
+
+type pushRouteKey struct{}
+
+// withPushRoute makes pushes sent with the returned context carry a route
+// the app opens on tap (see push.Notification.Route).
+func withPushRoute(ctx context.Context, route string) context.Context {
+	return context.WithValue(ctx, pushRouteKey{}, route)
+}
+
+func pushRouteFrom(ctx context.Context) string {
+	r, _ := ctx.Value(pushRouteKey{}).(string)
+	return r
 }

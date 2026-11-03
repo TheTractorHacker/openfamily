@@ -14,7 +14,7 @@ func TestAlertMuteCategory(t *testing.T) {
 }
 
 func TestDefaultNotificationPrefsAllOn(t *testing.T) {
-	if p := defaultNotificationPrefs(); p != (NotificationPrefs{true, true, true, true, true, true}) {
+	if p := defaultNotificationPrefs(); p != (NotificationPrefs{true, true, true, true, true, true, true}) {
 		t.Fatalf("defaults not all on: %+v", p)
 	}
 }
