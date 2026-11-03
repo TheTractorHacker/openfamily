@@ -238,6 +238,9 @@ func BuildDirectPayload(n Notification, dedupeID string) (kind string, payload [
 	if n.AlertID != "" {
 		m["alert_id"] = n.AlertID
 	}
+	if n.Route != "" {
+		m["route"] = n.Route
+	}
 	if kind == KindCommand {
 		var raw json.RawMessage
 		if json.Unmarshal([]byte(n.Body), &raw) == nil {

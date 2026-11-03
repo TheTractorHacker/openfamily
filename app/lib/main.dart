@@ -8,6 +8,7 @@ import 'screens/app_shell.dart';
 import 'screens/join_circle_screen.dart';
 import 'screens/server_config_screen.dart';
 import 'screens/sign_up_screen.dart';
+import 'screens/weekly_summary_screen.dart';
 import 'screens/welcome_screen.dart';
 import 'services/accent_preference.dart';
 import 'services/api_client.dart';
@@ -15,6 +16,7 @@ import 'services/auth_service.dart';
 import 'services/background_credential_store.dart';
 import 'services/background_location_service.dart';
 import 'services/deep_link_service.dart';
+import 'services/direct_push_service.dart' show onOpenRoute;
 import 'services/invite_link.dart';
 import 'services/pending_invite.dart';
 import 'services/perf/perf_monitor.dart';
@@ -76,6 +78,15 @@ class _OpenFamilyAppState extends State<OpenFamilyApp> {
     // When a session expires mid-use (refresh fails), redirect to login.
     ApiClient.onSessionExpired = _handleSessionExpired;
     DeepLinkService.listen(_handleInviteLink);
+    onOpenRoute = _handleNotificationRoute;
+  }
+
+  /// A tap on a push that names a screen (see direct_push_service.dart).
+  Future<void> _handleNotificationRoute(String route) async {
+    if (route != 'weekly_summary') return;
+    navigatorKey.currentState?.push(MaterialPageRoute<void>(
+      builder: (_) => const WeeklySummaryScreen(),
+    ));
   }
 
   /// An invite link opened while the app is running.

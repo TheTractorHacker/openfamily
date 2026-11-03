@@ -19,7 +19,7 @@ import (
 // starts sending those pushes.
 var notificationCategories = []string{
 	"place_alerts", "check_in", "low_battery",
-	"completed_drives", "safety_incidents", "severe_weather",
+	"completed_drives", "safety_incidents", "severe_weather", "weekly_summary",
 }
 
 // NotificationPrefs is the wire shape of GET/PUT /me/notifications.
@@ -30,10 +30,11 @@ type NotificationPrefs struct {
 	CompletedDrives bool `json:"completed_drives"`
 	SafetyIncidents bool `json:"safety_incidents"`
 	SevereWeather   bool `json:"severe_weather"`
+	WeeklySummary   bool `json:"weekly_summary"`
 }
 
 func defaultNotificationPrefs() NotificationPrefs {
-	return NotificationPrefs{true, true, true, true, true, true}
+	return NotificationPrefs{true, true, true, true, true, true, true}
 }
 
 // EnsureNotificationSchema creates the preferences table. Idempotent; it is
@@ -50,15 +51,20 @@ func (s *Server) EnsureNotificationSchema(ctx context.Context) error {
 			severe_weather    BOOLEAN NOT NULL DEFAULT TRUE,
 			updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
 		)`)
+	if err != nil {
+		return err
+	}
+	// Added later than the table itself (weekly driving summary opt-out).
+	_, err = s.Pool.Exec(ctx, `ALTER TABLE notification_prefs ADD COLUMN IF NOT EXISTS weekly_summary BOOLEAN NOT NULL DEFAULT TRUE`)
 	return err
 }
 
 func (s *Server) loadNotificationPrefs(ctx context.Context, userID string) (NotificationPrefs, error) {
 	p := defaultNotificationPrefs()
 	err := s.Pool.QueryRow(ctx, `
-		SELECT place_alerts, check_in, low_battery, completed_drives, safety_incidents, severe_weather
+		SELECT place_alerts, check_in, low_battery, completed_drives, safety_incidents, severe_weather, weekly_summary
 		FROM notification_prefs WHERE user_id = $1`, userID).
-		Scan(&p.PlaceAlerts, &p.CheckIn, &p.LowBattery, &p.CompletedDrives, &p.SafetyIncidents, &p.SevereWeather)
+		Scan(&p.PlaceAlerts, &p.CheckIn, &p.LowBattery, &p.CompletedDrives, &p.SafetyIncidents, &p.SevereWeather, &p.WeeklySummary)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return defaultNotificationPrefs(), nil
@@ -98,6 +104,7 @@ func (s *Server) PutNotificationPrefs(w http.ResponseWriter, r *http.Request) {
 		CompletedDrives *bool `json:"completed_drives"`
 		SafetyIncidents *bool `json:"safety_incidents"`
 		SevereWeather   *bool `json:"severe_weather"`
+		WeeklySummary   *bool `json:"weekly_summary"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&in); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -119,16 +126,17 @@ func (s *Server) PutNotificationPrefs(w http.ResponseWriter, r *http.Request) {
 	apply(&p.CompletedDrives, in.CompletedDrives)
 	apply(&p.SafetyIncidents, in.SafetyIncidents)
 	apply(&p.SevereWeather, in.SevereWeather)
+	apply(&p.WeeklySummary, in.WeeklySummary)
 	_, err = s.Pool.Exec(r.Context(), `
 		INSERT INTO notification_prefs
-			(user_id, place_alerts, check_in, low_battery, completed_drives, safety_incidents, severe_weather, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7, now())
+			(user_id, place_alerts, check_in, low_battery, completed_drives, safety_incidents, severe_weather, weekly_summary, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8, now())
 		ON CONFLICT (user_id) DO UPDATE SET
 			place_alerts = EXCLUDED.place_alerts, check_in = EXCLUDED.check_in,
 			low_battery = EXCLUDED.low_battery, completed_drives = EXCLUDED.completed_drives,
-			safety_incidents = EXCLUDED.safety_incidents, severe_weather = EXCLUDED.severe_weather,
+			safety_incidents = EXCLUDED.safety_incidents, severe_weather = EXCLUDED.severe_weather, weekly_summary = EXCLUDED.weekly_summary,
 			updated_at = now()`,
-		claims.UserID, p.PlaceAlerts, p.CheckIn, p.LowBattery, p.CompletedDrives, p.SafetyIncidents, p.SevereWeather)
+		claims.UserID, p.PlaceAlerts, p.CheckIn, p.LowBattery, p.CompletedDrives, p.SafetyIncidents, p.SevereWeather, p.WeeklySummary)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to save notification settings")
 		return

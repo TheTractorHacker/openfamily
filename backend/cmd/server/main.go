@@ -150,6 +150,7 @@ func main() {
 		go srv.RunDriveNotifier(ctx)
 	}
 	go srv.RunSevereWeather(ctx)
+	go srv.RunWeeklySummary(ctx)
 	if err := srv.EnsureNotificationSchema(ctx); err != nil {
 		slog.Error("notification prefs schema", "err", err)
 		os.Exit(1)
@@ -267,6 +268,7 @@ func main() {
 		r.Get("/trips", srv.ListTrips)
 		r.Get("/trips/summary", srv.TripsSummary)
 		r.Get("/trips/report", srv.TripsReport)
+		r.Get("/trips/weekly-summary", srv.WeeklySummary)
 		r.Get("/trips/{id}/events", srv.TripEvents)
 		r.Post("/trips/compute", srv.ComputeTrips)
 		r.Get("/trips/{id}", srv.GetTrip)

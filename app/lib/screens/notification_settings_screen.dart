@@ -37,6 +37,8 @@ const List<_Pref> _members = <_Pref>[
       'When a circle member completes a drive'),
   _Pref('safety_incidents', Icons.warning_amber_rounded, 'Safety incidents',
       'Crashes and other incidents near your circle'),
+  _Pref('weekly_summary', Icons.insights_outlined, 'Weekly driving summary',
+      'Sunday evening: your family\'s drives, miles and hard braking'),
   _Pref('severe_weather', Icons.thunderstorm_outlined, 'Severe weather alerts',
       'Severe weather in your area'),
 ];

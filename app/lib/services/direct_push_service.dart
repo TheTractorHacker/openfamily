@@ -84,6 +84,7 @@ class DirectPushEvent {
     this.body = '',
     this.alertId = '',
     this.command = '',
+    this.route = '',
   });
 
   /// Deduplication id; also what is acknowledged to the server.
@@ -92,6 +93,9 @@ class DirectPushEvent {
   final String title;
   final String body;
   final String alertId;
+
+  /// Screen a tap should open (e.g. 'weekly_summary'); empty = none.
+  final String route;
 
   /// Raw command JSON for [DirectPushKind.command].
   final String command;
@@ -123,6 +127,7 @@ class DirectPushEvent {
         body: (j['body'] as String?) ?? '',
         alertId: (j['alert_id'] as String?) ?? '',
         command: command,
+        route: (j['route'] as String?) ?? '',
       );
     } catch (_) {
       return null;
@@ -272,8 +277,9 @@ class DirectPushDispatcher {
   static int notificationId(String eventId) => eventId.hashCode & 0x7fffffff;
 
   /// Tap payload understood by [routeNotificationTap].
-  static String? payloadFor(DirectPushEvent e) =>
-      e.alertId.isEmpty ? null : 'alert:${e.alertId}';
+  static String? payloadFor(DirectPushEvent e) => e.alertId.isNotEmpty
+      ? 'alert:${e.alertId}'
+      : (e.route.isNotEmpty ? 'route:${e.route}' : null);
 
   Future<bool> handle(DirectPushEvent e) async {
     try {
@@ -305,7 +311,12 @@ Future<void> routeNotificationTap(
   String? payload, {
   required Future<void> Function(String alertId) openAlert,
   required Future<void> Function() checkActive,
+  Future<void> Function(String route)? openRoute,
 }) async {
+  if (payload != null && payload.startsWith('route:') && openRoute != null) {
+    final String route = payload.substring('route:'.length);
+    if (route.isNotEmpty) return openRoute(route);
+  }
   if (payload != null && payload.startsWith('alert:')) {
     final String id = payload.substring('alert:'.length);
     if (id.isNotEmpty) return openAlert(id);
@@ -318,7 +329,12 @@ Future<void> onDirectNotificationTap(String? payload) => routeNotificationTap(
       payload,
       openAlert: AlertRouter.instance.openById,
       checkActive: AlertRouter.instance.checkActive,
+      openRoute: (String route) async => onOpenRoute?.call(route),
     );
+
+/// Set by the app shell: opens the screen named by a notification's route
+/// (e.g. 'weekly_summary'). Null while the app UI is not up.
+Future<void> Function(String route)? onOpenRoute;
 
 /// Real notifier on top of flutter_local_notifications. Works from the
 /// background isolate too (it initialises its own plugin instance).

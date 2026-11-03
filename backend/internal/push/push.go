@@ -61,6 +61,10 @@ type Notification struct {
 	UserID   string
 	AlertID  string
 	DedupeID string
+
+	// Route (optional) tells the app which screen a tap on this notification
+	// opens (direct channel only), e.g. "weekly_summary".
+	Route string
 }
 
 // Dispatcher delivers push notifications. It is an interface so tests can
