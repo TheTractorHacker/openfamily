@@ -85,7 +85,9 @@ class _TopSpeedCard extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.all(AppSpace.lg),
         decoration: _card(context),
+        alignment: Alignment.centerLeft,
         child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: <Widget>[
             if (member != null) ...<Widget>[
               StatusAvatar(member: member!, size: 48),
@@ -96,6 +98,7 @@ class _TopSpeedCard extends StatelessWidget {
             ],
             Expanded(
               child: Column(
+                mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
                   Text(

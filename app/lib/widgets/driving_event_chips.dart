@@ -192,11 +192,11 @@ class DrivingEventChip extends StatelessWidget {
     final Widget name = FittedBox(
       fit: BoxFit.scaleDown,
       child: Text(
-        kind.label,
+        kind == DrivingEventKind.rapidAccel ? 'Rapid accel' : kind.label,
         maxLines: 1,
         style: AppType.secondary.copyWith(
           color: cs.onSurfaceVariant,
-          fontSize: 11,
+          fontSize: 12,
         ),
       ),
     );
