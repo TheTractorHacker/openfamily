@@ -48,7 +48,6 @@ import 'check_in_screen.dart';
 import 'inbox_screen.dart';
 import 'invite_screen.dart';
 import 'join_circle_screen.dart';
-import 'member_detail_screen.dart';
 import 'circle_detail_screen.dart';
 import 'circles_screen.dart';
 import 'places_screen.dart';
@@ -808,23 +807,18 @@ class _MapScreenState extends State<MapScreen>
     );
   }
 
-  void _openMemberDetails(Member member) {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => MemberDetailScreen(member: member),
-      ),
-    );
-  }
+  /// The person whose full view is open over the map, or null.
+  String? _personId;
 
+  /// Opens the full person view over the live map (followed by the camera).
   void _openFollowedDetails() {
     final String? id = _follow.targetId;
-    if (id == null) return;
-    for (final Member m in _roster.value) {
-      if (m.id == id) {
-        _openMemberDetails(m);
-        return;
-      }
-    }
+    if (id != null && mounted) setState(() => _personId = id);
+  }
+
+  void _closePerson() {
+    if (mounted) setState(() => _personId = null);
+    _stopFollow();
   }
 
   void _openSos() {
@@ -948,7 +942,10 @@ class _MapScreenState extends State<MapScreen>
 
   /// A member picked from the People list or tapped on the map: center on
   /// them and follow.
-  void _focusMember(Member m) => _followMember(m);
+  void _focusMember(Member m) {
+    if (mounted) setState(() => _personId = m.id);
+    _followMember(m);
+  }
 
   /// The Activity screen asked to show a member (check-in / live share).
   void _onInboxFocus() {
@@ -1068,7 +1065,8 @@ class _MapScreenState extends State<MapScreen>
       onOpenSharing: _openSharing,
       onSos: _openSos,
       onSelectMember: _focusMember,
-      onOpenMember: _openMemberDetails,
+      personId: _personId,
+      onClosePerson: _closePerson,
       onManageCircles: _openCircles,
       onOpenCircle: _openCircle,
       onJoinCircle: _openJoinCircle,
@@ -1083,7 +1081,7 @@ class _MapScreenState extends State<MapScreen>
                 ? const SizedBox.shrink()
                 : FollowPill(
                     ui: ui,
-                    onStop: _stopFollow,
+                    onStop: _closePerson,
                     onRecenter: _refollow,
                     onOpen: _openFollowedDetails,
                   ),

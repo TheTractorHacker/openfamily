@@ -77,6 +77,20 @@ func placeAlertSuppressed(ctx context.Context, q notifQuerier, subjectID, placeI
 		rows.Close()
 	}
 
+	// Per-person master switch ("Get Place Alerts if X leaves or arrives").
+	if rows, err := q.Query(ctx,
+		`SELECT user_id::text FROM member_place_alerts WHERE subject_id = $1 AND NOT enabled`, subjectID); err != nil {
+		slog.Error("member place alerts: load", "err", err)
+	} else {
+		for rows.Next() {
+			var uid string
+			if err := rows.Scan(&uid); err == nil {
+				out[uid] = true
+			}
+		}
+		rows.Close()
+	}
+
 	if placeID != "" {
 		rows, err := q.Query(ctx, `
 			SELECT user_id::text, mode FROM place_alert_rules WHERE subject_id = $1 AND place_id = $2`,
@@ -185,6 +199,48 @@ func (s *Server) PutPlaceAlertRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, placeRuleJSON{PlaceID: placeID, Mode: in.Mode})
+}
+
+// GetMemberPlaceAlerts returns whether the caller gets arrive/leave pushes
+// about one member (default true).
+func (s *Server) GetMemberPlaceAlerts(w http.ResponseWriter, r *http.Request) {
+	caller, subject, ok := s.notifPrefsTarget(w, r)
+	if !ok {
+		return
+	}
+	enabled := true
+	err := s.Pool.QueryRow(r.Context(),
+		`SELECT enabled FROM member_place_alerts WHERE user_id = $1 AND subject_id = $2`,
+		caller, subject).Scan(&enabled)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusInternalServerError, "failed to load place alerts")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"enabled": enabled})
+}
+
+// PutMemberPlaceAlerts sets the caller's switch about one member.
+func (s *Server) PutMemberPlaceAlerts(w http.ResponseWriter, r *http.Request) {
+	caller, subject, ok := s.notifPrefsTarget(w, r)
+	if !ok {
+		return
+	}
+	var in struct {
+		Enabled *bool `json:"enabled"`
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 1024)
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil || in.Enabled == nil {
+		writeError(w, http.StatusBadRequest, "enabled is required")
+		return
+	}
+	if _, err := s.Pool.Exec(r.Context(), `
+		INSERT INTO member_place_alerts (user_id, subject_id, enabled) VALUES ($1,$2,$3)
+		ON CONFLICT (user_id, subject_id) DO UPDATE SET enabled = EXCLUDED.enabled, updated_at = now()`,
+		caller, subject, *in.Enabled); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to save place alerts")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"enabled": *in.Enabled})
 }
 
 // ---- API: user-wide quiet hours -------------------------------------------

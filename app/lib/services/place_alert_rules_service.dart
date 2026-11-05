@@ -78,3 +78,28 @@ class ApiPlaceAlertRulesService implements PlaceAlertRulesService {
         'timezone': currentUtcOffsetLabel(),
       }) as Map<String, dynamic>);
 }
+
+/// The signed-in user's master switch for arrive/leave alerts about one
+/// person ("Get Place Alerts if Brian leaves or arrives"). Default on.
+abstract class MemberPlaceAlertsApi {
+  Future<bool> enabled(String memberId);
+  Future<void> setEnabled(String memberId, bool value);
+}
+
+class ApiMemberPlaceAlerts implements MemberPlaceAlertsApi {
+  const ApiMemberPlaceAlerts();
+
+  static const MemberPlaceAlertsApi instance = ApiMemberPlaceAlerts();
+
+  @override
+  Future<bool> enabled(String memberId) async {
+    final dynamic r = await ApiClient.get('/members/$memberId/place-alerts');
+    return (r as Map<String, dynamic>)['enabled'] != false;
+  }
+
+  @override
+  Future<void> setEnabled(String memberId, bool value) async {
+    await ApiClient.put('/members/$memberId/place-alerts',
+        body: <String, dynamic>{'enabled': value});
+  }
+}

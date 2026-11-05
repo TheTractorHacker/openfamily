@@ -151,3 +151,38 @@ func TestQuietHoursAndRulesAPI(t *testing.T) {
 		t.Fatalf("both should clear the row, have %d", n)
 	}
 }
+
+func TestMemberPlaceAlertsSwitch(t *testing.T) {
+	e, _, _ := newPlaceCircleEnv(t)
+	ctx := context.Background()
+	e.rt.Get("/members/{id}/place-alerts", e.srv.GetMemberPlaceAlerts)
+	e.rt.Put("/members/{id}/place-alerts", e.srv.PutMemberPlaceAlerts)
+	a, b, c := e.ids["A"], e.ids["B"], e.ids["C"]
+	path := "/members/" + a + "/place-alerts"
+
+	if got := e.mustCode("B", "GET", path, nil, 200); got["enabled"] != true {
+		t.Fatalf("default should be enabled: %v", got)
+	}
+	e.mustCode("B", "PUT", path, map[string]any{}, 400)
+	e.mustCode("B", "PUT", "/members/"+b+"/place-alerts", map[string]any{"enabled": false}, 400)
+	if got := e.mustCode("B", "PUT", path, map[string]any{"enabled": false}, 200); got["enabled"] != false {
+		t.Fatalf("put: %v", got)
+	}
+	if got := e.mustCode("B", "GET", path, nil, 200); got["enabled"] != false {
+		t.Fatalf("get after put: %v", got)
+	}
+	// Only B is suppressed; C (and the default for everyone else) is unaffected.
+	now := time.Date(2026, 1, 5, 12, 0, 0, 0, time.UTC)
+	s := placeAlertSuppressed(ctx, e.pool, a, "", "enter", now)
+	if !s[b] || s[c] {
+		t.Fatalf("suppression must only affect the viewer who switched off: %v", s)
+	}
+	if got := e.mustCode("C", "GET", path, nil, 200); got["enabled"] != true {
+		t.Fatalf("C unaffected: %v", got)
+	}
+	// Switching back on lifts it.
+	e.mustCode("B", "PUT", path, map[string]any{"enabled": true}, 200)
+	if s := placeAlertSuppressed(ctx, e.pool, a, "", "exit", now); s[b] {
+		t.Fatalf("re-enabled: %v", s)
+	}
+}

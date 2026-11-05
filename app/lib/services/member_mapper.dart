@@ -63,6 +63,7 @@ Member memberFromJson(Map<String, dynamic> json) {
     lastSeen: effectiveLastSeen,
     accuracyMeters: accuracy?.toDouble(),
     placePresence: _parsePlacePresence(json['place_presence']),
+    phone: _phoneFrom(json['phone']),
   );
 }
 
@@ -422,4 +423,10 @@ Member refreshStaleness(Member member) {
     address: label,
     movement: MovementType.none,
   );
+}
+
+String? _phoneFrom(dynamic v) {
+  if (v is! String) return null;
+  final String t = v.trim();
+  return t.isEmpty ? null : t;
 }

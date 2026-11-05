@@ -6,6 +6,13 @@ import 'package:flutter/material.dart';
 import '../models/circle.dart';
 import '../models/member.dart';
 import '../models/place.dart';
+import '../screens/chat_screen.dart';
+import '../services/person_launcher.dart';
+import '../services/place_alert_rules_service.dart';
+import '../services/weekly_summary_service.dart';
+import '../services/member_day_service.dart';
+import 'person_panel.dart';
+import 'package:latlong2/latlong.dart' show LatLng;
 import '../theme/app_theme.dart';
 import '../utils/member_status.dart';
 import '../services/perf/perf_monitor.dart';
@@ -56,6 +63,13 @@ class LocationTabView extends StatefulWidget {
     this.onSos,
     this.onSelectMember,
     this.onOpenMember,
+    this.personId,
+    this.onClosePerson,
+    this.placeAlerts,
+    this.weeklyApi,
+    this.dayLoader,
+    this.uriLauncher,
+    this.requestUpdate,
     this.onManageCircles,
     this.onOpenCircle,
     this.onJoinCircle,
@@ -116,6 +130,20 @@ class LocationTabView extends StatefulWidget {
 
   /// "Details" on the selected person: profile, history, location request.
   final ValueChanged<Member>? onOpenMember;
+
+  /// The person whose full view is open (tapped on the map or in the list).
+  /// The sheet shows their view instead of the People / Places tabs.
+  final String? personId;
+
+  /// The person view's back arrow; the host stops following them.
+  final VoidCallback? onClosePerson;
+
+  /// Injected services for the person view (tests); defaults use the API.
+  final MemberPlaceAlertsApi? placeAlerts;
+  final WeeklySummaryApi? weeklyApi;
+  final MemberDayLoader? dayLoader;
+  final UriLauncher? uriLauncher;
+  final Future<void> Function(String memberId)? requestUpdate;
   final VoidCallback? onManageCircles;
   final ValueChanged<Circle>? onOpenCircle;
   final VoidCallback? onJoinCircle;
@@ -149,12 +177,18 @@ class _LocationTabViewState extends State<LocationTabView> {
   @override
   void initState() {
     super.initState();
+    _selectedId = widget.personId;
     _soloOpened = _isSolo;
+    if (_selectedId != null) _openSheetFor();
   }
 
   @override
   void didUpdateWidget(LocationTabView old) {
     super.didUpdateWidget(old);
+    if (widget.personId != old.personId) {
+      _selectedId = widget.personId;
+      if (_selectedId != null) _openSheetFor();
+    }
     if (_soloOpened || !_isSolo) return;
     _soloOpened = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -184,9 +218,63 @@ class _LocationTabViewState extends State<LocationTabView> {
 
   void _reloadPlaces() => setState(() => _places = widget.placesLoader());
 
+  /// Tapping a person opens their full view straight away (no extra
+  /// "details" tap) and asks the map to follow them.
   void _select(Member m) {
-    setState(() => _selectedId = _selectedId == m.id ? null : m.id);
-    if (_selectedId != null) widget.onSelectMember?.call(m);
+    setState(() => _selectedId = m.id);
+    widget.onSelectMember?.call(m);
+    _openSheetFor();
+  }
+
+  void _closePerson() {
+    setState(() => _selectedId = null);
+    widget.onClosePerson?.call();
+  }
+
+  /// Lifts the sheet so the person's card is readable with the map above it.
+  void _openSheetFor() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_sheet.isAttached) return;
+      if (_sheet.size >= 0.55) return;
+      _sheet.animateTo(
+        0.6,
+        duration: const Duration(milliseconds: 280),
+        curve: Curves.easeOutCubic,
+      );
+    });
+  }
+
+  Member? _personMember() {
+    final String? id = _selectedId;
+    if (id == null) return null;
+    final List<Member> ms = widget.membersListenable?.value ?? widget.members;
+    for (final Member m in ms) {
+      if (m.id == id) return m;
+    }
+    return null;
+  }
+
+  LatLng? _myPosition() {
+    final String? me = widget.selfId;
+    if (me == null) return null;
+    final List<Member> ms = widget.membersListenable?.value ?? widget.members;
+    for (final Member m in ms) {
+      if (m.id == me) return m.position;
+    }
+    return null;
+  }
+
+  /// Message: the circle's chat when one is known, else the phone's SMS app.
+  VoidCallback? _messageFor(Member m) {
+    final Circle? c = _activeCircle ??
+        (widget.circles.isEmpty
+            ? null
+            : widget.circles.firstWhere((Circle x) => x.isPrimary,
+                orElse: () => widget.circles.first));
+    if (c == null) return null;
+    return () => Navigator.of(context).push(MaterialPageRoute<void>(
+          builder: (_) => ChatScreen(circleId: c.id, circleName: c.name),
+        ));
   }
 
   void _showCircles() {
@@ -376,6 +464,7 @@ class _LocationTabViewState extends State<LocationTabView> {
               Positioned.fill(child: widget.map),
               _buildTop(context),
               _buildFloating(context, h, peek),
+              _buildSpeedChip(context, h, peek),
               NotificationListener<DraggableScrollableNotification>(
                 onNotification: (DraggableScrollableNotification n) {
                   _extent.value = n.extent;
@@ -435,12 +524,13 @@ class _LocationTabViewState extends State<LocationTabView> {
             children: <Widget>[
               Positioned.fill(child: widget.map),
               _buildTop(context),
-              Positioned(
-                left: AppSpace.md,
-                right: AppSpace.md,
-                bottom: AppSpace.md + pad.bottom,
-                child: _floatingRow(context),
-              ),
+              if (_selectedId == null)
+                Positioned(
+                  left: AppSpace.md,
+                  right: AppSpace.md,
+                  bottom: AppSpace.md + pad.bottom,
+                  child: _floatingRow(context),
+                ),
             ],
           ),
         ),
@@ -535,7 +625,54 @@ class _LocationTabViewState extends State<LocationTabView> {
     );
   }
 
+  /// Life360-style speed chip over the map while the open person is driving.
+  Widget _buildSpeedChip(BuildContext context, double h, double peek) {
+    final Member? m = _personMember();
+    if (m == null || m.movement != MovementType.car) {
+      return const SizedBox.shrink();
+    }
+    return ValueListenableBuilder<double>(
+      valueListenable: _extent,
+      builder: (BuildContext context, double raw, _) => Positioned(
+        right: AppSpace.lg,
+        bottom: (raw < peek ? peek : raw) * h + AppSpace.md,
+        child: LiveSpeedBuilder(
+          member: m,
+          builder: (BuildContext _, double? mps, UnitSystem u) {
+            if (mps == null) return const SizedBox.shrink();
+            return DecoratedBox(
+              key: const Key('person_speed_chip'),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.92),
+                borderRadius: BorderRadius.circular(AppRadius.lg),
+                boxShadow: const <BoxShadow>[
+                  BoxShadow(color: Color(0x33000000), blurRadius: 8),
+                ],
+              ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpace.md, vertical: AppSpace.sm),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    const Icon(Icons.directions_car,
+                        size: 20, color: Colors.black87),
+                    const SizedBox(width: AppSpace.sm),
+                    Text(u.formatSpeed(mps),
+                        style: AppType.body.copyWith(
+                            color: Colors.black87, fontWeight: FontWeight.w700)),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
   Widget _buildFloating(BuildContext context, double h, double peek) {
+    if (_selectedId != null) return const SizedBox.shrink();
     // The row itself is built once per tab rebuild and passed as the
     // builder's `child`, so a drag frame only repositions it.
     final Widget row = _floatingRow(context);
@@ -639,6 +776,41 @@ class _LocationTabViewState extends State<LocationTabView> {
     bool handle = true,
     double topInset = 0,
   }) {
+    if (_selectedId != null) {
+      Widget panel(Member m) => PersonPanel(
+            key: ValueKey<String>('person-panel-${m.id}'),
+            member: m,
+            controller: sc,
+            onClose: _closePerson,
+            selfId: widget.selfId,
+            myPosition: _myPosition(),
+            handle: handle,
+            topInset: topInset,
+            onMessage: _messageFor(m),
+            alerts: widget.placeAlerts,
+            weekly: widget.weeklyApi,
+            dayLoader: widget.dayLoader,
+            launcher: widget.uriLauncher,
+            requestUpdate: widget.requestUpdate,
+          );
+      final ValueListenable<List<Member>>? live = widget.membersListenable;
+      if (live != null) {
+        return ValueListenableBuilder<List<Member>>(
+          valueListenable: live,
+          builder: (BuildContext _, List<Member> __, Widget? ___) {
+            final Member? m = _personMember();
+            return m == null ? _peopleBody(context, sc, handle, topInset) : panel(m);
+          },
+        );
+      }
+      final Member? m = _personMember();
+      if (m != null) return panel(m);
+    }
+    return _peopleBody(context, sc, handle, topInset);
+  }
+
+  Widget _peopleBody(
+      BuildContext context, ScrollController sc, bool handle, double topInset) {
     return CustomScrollView(
       controller: sc,
       slivers: <Widget>[
@@ -711,7 +883,6 @@ class _LocationTabViewState extends State<LocationTabView> {
       paused: paused,
       selected: selected,
       onTap: () => _select(m),
-      onDetails: () => widget.onOpenMember?.call(m),
     );
     _rows[m.id] = _RowMemo(m, paused, selected, w);
     return w;
@@ -1221,14 +1392,12 @@ class _PersonRow extends StatelessWidget {
     required this.paused,
     required this.selected,
     required this.onTap,
-    required this.onDetails,
   });
 
   final Member member;
   final bool paused;
   final bool selected;
   final VoidCallback onTap;
-  final VoidCallback onDetails;
 
   @override
   Widget build(BuildContext context) {
@@ -1294,27 +1463,6 @@ class _PersonRow extends StatelessWidget {
             ],
           ),
         ),
-        if (selected)
-          Padding(
-            // Aligned under the name (xl gutter + 44 avatar + md gap), with
-            // air above and below so it never touches the row.
-            padding: const EdgeInsets.fromLTRB(
-              AppSpace.xl + 44 + AppSpace.md,
-              AppSpace.xs,
-              AppSpace.xl,
-              AppSpace.lg,
-            ),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: DsPillButton(
-                label: 'Details and history',
-                icon: Icons.history,
-                style: DsPillStyle.outlined,
-                onPressed: onDetails,
-                semanticLabel: 'Open ${member.name}\'s details and history',
-              ),
-            ),
-          ),
       ],
     ),
     );
