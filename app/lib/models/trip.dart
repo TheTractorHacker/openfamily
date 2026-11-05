@@ -103,6 +103,7 @@ class TripDetail {
     required this.trip,
     required this.route,
     this.events = const <TripEvent>[],
+    this.passenger = false,
   });
 
   factory TripDetail.fromJson(Map<String, dynamic> j) {
@@ -120,6 +121,7 @@ class TripDetail {
               .toList()
           : const <TripRoutePoint>[],
       events: parseTripEvents(j['events']),
+      passenger: j['passenger'] == true,
     );
   }
 
@@ -128,6 +130,9 @@ class TripDetail {
 
   /// Detected driving events (empty on older servers).
   final List<TripEvent> events;
+
+  /// The owner marked the drive "I was a passenger": its events do not count.
+  final bool passenger;
 }
 
 /// A dwell between two consecutive trips.

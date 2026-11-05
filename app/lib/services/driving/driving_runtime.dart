@@ -2,11 +2,13 @@ import 'dart:async';
 
 import 'crash_detector.dart';
 import 'crash_responder.dart';
-import 'driving_config.dart';
 import 'driving_event.dart';
 import 'driving_events_service.dart';
 import 'driving_session.dart';
 import 'motion_detector.dart';
+import 'driving_config.dart' show DrivingConfig;
+import 'handling_analyzer.dart';
+import 'phone_context.dart';
 import 'phone_use_tracker.dart';
 
 /// Receives raw samples from a [DrivingFeed]. Samples stay in memory inside
@@ -16,6 +18,9 @@ abstract class DrivingFeedSink {
   void onGyro(int tMs, double x, double y, double z);
   void onGps(int tMs, double speedMps, double lat, double lon);
   void onScreen(int tMs, ScreenSignal signal);
+
+  /// Proximity / call / audio-route snapshot (phone-use detection only).
+  void onContext(PhoneContext context);
 }
 
 /// Source of sensor/GPS/screen data. Started and stopped strictly by the
@@ -69,6 +74,10 @@ class DrivingRuntime implements DrivingFeedSink {
   final int Function() _clock;
   final DrivingMotionDetector _detector;
   final PhoneUseTracker _phone = PhoneUseTracker();
+  late final HandlingAnalyzer _handling =
+      HandlingAnalyzer(onWindow: _phone.onHandling);
+  bool _screenOn = false;
+  bool _inCall = false;
   late final DrivingSessionController _session;
 
   Timer? _timer;
@@ -115,6 +124,10 @@ class DrivingRuntime implements DrivingFeedSink {
   void _start() {
     _detector.reset();
     _phoneActive = false;
+    _screenOn = false;
+    _inCall = false;
+    _handling.setActive(false);
+    _phone.begin(_clock());
     _crash.reset();
     _crashOn = false;
     unawaited(_readFlags().then((List<bool> flags) {
@@ -153,6 +166,7 @@ class DrivingRuntime implements DrivingFeedSink {
 
   Future<void> _finish() async {
     await feed.stop();
+    _handling.setActive(false);
     final int now = _clock();
     _phone.finish(now);
     final List<DrivingEvent> ev = <DrivingEvent>[
@@ -201,6 +215,7 @@ class DrivingRuntime implements DrivingFeedSink {
 
   void _onAccel(int tMs, double x, double y, double z) {
     _detector.onAccel(tMs, x, y, z);
+    if (_phoneActive) _handling.onAccel(tMs, x, y, z);
     if (_crashOn) _crash.onAccel(tMs, x, y, z);
   }
 
@@ -209,8 +224,10 @@ class DrivingRuntime implements DrivingFeedSink {
       _onAccel(tMs, x, y, z);
 
   @override
-  void onGyro(int tMs, double x, double y, double z) =>
-      _detector.onGyro(tMs, x, y, z);
+  void onGyro(int tMs, double x, double y, double z) {
+    _detector.onGyro(tMs, x, y, z);
+    if (_phoneActive) _handling.onGyro(tMs, x, y, z);
+  }
 
   @override
   void onGps(int tMs, double speedMps, double lat, double lon) {
@@ -227,8 +244,26 @@ class DrivingRuntime implements DrivingFeedSink {
 
   @override
   void onScreen(int tMs, ScreenSignal signal) {
-    if (_phoneActive) _phone.onScreen(tMs, signal);
+    if (!_phoneActive) return;
+    _phone.onScreen(tMs, signal);
+    if (signal == ScreenSignal.screenOff) {
+      _screenOn = false;
+    } else {
+      _screenOn = true;
+    }
+    _syncHandling();
   }
+
+  @override
+  void onContext(PhoneContext context) {
+    if (!_phoneActive) return;
+    _phone.onContext(context);
+    _inCall = context.inCall;
+    _syncHandling();
+  }
+
+  /// Motion analysis only runs while the screen is lit or a call is active.
+  void _syncHandling() => _handling.setActive(_screenOn || _inCall);
 
   Future<void> dispose() async {
     _timer?.cancel();

@@ -73,6 +73,18 @@ effect are returned in the report (`thresholds`). The older per-request
 - `GET /trips/{id}/events` lists a trip's events. `GET /trips/{id}` includes
   the same list as `events`.
 
+## Reviewing events (owner only)
+
+- `PUT /trips/{id}/passenger` `{"passenger":true|false}`: mark the drive "I was a
+  passenger". Its events leave reports, scores and the weekly summary. The mark
+  is kept per (user, trip start) so it survives trip recomputation.
+- `PATCH /trips/events/{eventId}` `{"dismissed":true|false}`: mark one
+  `phone_use` event as a false alarm. Same effect.
+- Anyone else, an unknown id or a non-phone-use event gets `404`. `GET
+  /trips/{id}` and `/trips/{id}/events` add `passenger`, and event rows add
+  `max_speed_mps`, `confidence`, `activity` and `dismissed` (dismissed events
+  are listed only to their owner so they can be restored).
+
 ## Phone sensor events
 
 The Android app can detect `hard_brake` and `rapid_accel` with the motion
@@ -105,6 +117,9 @@ normal Bearer access token. Body, at most 64 KB (413 above):
 - `magnitude`: m/s^2 in 0-30 for braking and acceleration; for `phone_use`
   the interaction duration in seconds, 0-300.
 - `lat` / `lon`: both or neither (null), within -90..90 / -180..180.
+- `phone_use` only, all optional: `max_speed_mps` (0-100), `confidence` (0-1;
+  out of range rejects the event), `activity` (`screen` or `call`; anything else
+  is ignored).
 - At most 100 events per request (400 above). `events` may be empty when
   `sensor_enabled` or `phone_use_enabled` is given. 30 requests per minute per device (429).
 - `sensor_enabled` (optional) sets the opt-in. `false` turns the feature off:

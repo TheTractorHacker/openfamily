@@ -46,6 +46,11 @@ class DrivingNative {
   static const EventChannel _gps =
       EventChannel('app.openfamily/driving_native/gps');
 
+  static const EventChannel _context =
+      EventChannel('app.openfamily/driving_native/context');
+  static const MethodChannel _methods =
+      MethodChannel('app.openfamily/driving_native/methods');
+
   static bool get _supported =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
 
@@ -71,5 +76,23 @@ class DrivingNative {
         mock: m['mock'] == true,
       );
     });
+  }
+
+  /// Proximity / call / audio-route snapshots: `{t, proximity: near|far|
+  /// unknown, mode: none|call|voip, route: earpiece|speaker|bluetooth|wired|
+  /// car|unknown, car: bool}`. Emitted on change (proximity immediately,
+  /// audio state polled every ~2 s). Needs no permission; no call numbers or
+  /// contacts are read.
+  static Stream<Map<dynamic, dynamic>> get contextEvents {
+    if (!_supported) return const Stream<Map<dynamic, dynamic>>.empty();
+    return _context
+        .receiveBroadcastStream()
+        .map((dynamic e) => e as Map<dynamic, dynamic>);
+  }
+
+  /// Whether the screen is currently on (PowerManager.isInteractive).
+  static Future<bool> isInteractive() async {
+    if (!_supported) return false;
+    return (await _methods.invokeMethod<bool>('isInteractive')) ?? false;
   }
 }

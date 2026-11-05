@@ -169,12 +169,11 @@ func (s *Server) GetTrip(w http.ResponseWriter, r *http.Request) {
 	}
 	// Events are as sensitive as the trip and follow the circle sharing rule.
 	events := []trips.EventRow{}
+	passenger := false
 	if ok, err := s.canViewSubject(r, claims.UserID, trip.UserID); err == nil && ok {
-		if ev, err := st.Events(r.Context(), trip.ID); err == nil {
-			events = ev
-		}
+		events, passenger = s.tripEventsView(r.Context(), st, claims.UserID, trip)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"units": tripUnits, "trip": trip, "route": route, "events": events})
+	writeJSON(w, http.StatusOK, map[string]any{"units": tripUnits, "trip": trip, "route": route, "events": events, "passenger": passenger})
 }
 
 // periodBounds returns [start, end) for a day/week(Mon)/month period that

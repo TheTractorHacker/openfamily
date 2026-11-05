@@ -72,6 +72,12 @@ class FakeTrips implements TripsApi {
 
   @override
   Future<String?> currentUserId() async => null;
+
+  @override
+  Future<void> setPassenger(String tripId, bool passenger) async {}
+
+  @override
+  Future<void> setEventDismissed(String eventId, bool dismissed) async {}
 }
 
 TripSummary _summary(int trips) => TripSummary(

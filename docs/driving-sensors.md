@@ -98,13 +98,39 @@ Implemented, **default OFF and not changed by the detection default** (second sw
 manifest-declared) on the application context, only while a driving session is
 running. Because it is registered in the headless engine hosted by the
 foreground service, the process and receiver live as long as tracking does.
-An interaction starts at an **unlock** while speed > 7 m/s and ends at
-screen-off, when the vehicle stops, or after 120 s (shorter than 3 s ignored);
-`magnitude` is the duration in seconds. A screen that is simply on (mounted
-navigation) or woken by a notification without unlock is not counted. It cannot
-tell a passenger from a driver or a navigation app from anything else, so it is
-labelled "screen activity while moving". No UsageStats permission. The
-accelerometer pick-up cue was not implemented.
+Detection (`phone_use_tracker.dart`, `handling_analyzer.dart`, thresholds in
+`PhoneUseConfig`, `driving_config.dart`) only counts time while GPS speed says
+the car is really moving (start >= 7 m/s, speed < 2 m/s is never counted, a stop
+of 6 s or more ends the event, the first and last 10 s of a drive are ignored).
+Evidence:
+
+* **Screen + handling.** The accelerometer/gyroscope are already sampled while
+  driving; a pure `HandlingAnalyzer` reduces them to one verdict per 2 s window
+  (rotation about non-vertical axes, corroborated accelerometer deviation). It
+  only runs while the screen is lit or a call is active. An unlocked, handled
+  phone counts, also when it was already lit before the drive (no unlock event).
+  A tap on an unlock counts 12 s; a lit screen that is not being handled is a
+  mounted navigation display and is not counted; proximity "near" without
+  handling (pocket/bag) is ignored. With no motion data at all it falls back to
+  the unlocked screen.
+* **Calls.** The plugin's `context` channel reports proximity, call mode
+  (`AudioManager.mode`), the call audio route and Android car UI mode, with no
+  permission (no READ_PHONE_STATE, no BLUETOOTH_CONNECT). A handset call at the
+  ear counts; a speakerphone call only while handled; Bluetooth, wired headset,
+  Android Auto/car routes are hands-free and are NOT counted. If the route
+  cannot be determined, a call is counted only with proximity "near".
+* Interactions < 10 s apart merge; `magnitude` is the seconds of actual
+  interaction, an event spans at most 180 s and at most 8 events per drive are
+  kept. Optional fields `max_speed_mps`, `confidence` (0..1) and `activity`
+  (`screen` / `call`) are sent; the server stores them (migration 000122).
+* The owner can dismiss one phone-use event (`PATCH /trips/events/{id}`) or mark
+  a drive as passenger (`PUT /trips/{id}/passenger`); both leave every report,
+  score and weekly summary (view `trip_events_effective`). Nobody else can.
+
+All thresholds are educated guesses, not calibrated on real vehicles. It cannot
+tell a passenger from a driver (hence the passenger/dismiss actions), cannot tell
+Android Auto reliably on every phone, and never sees apps or content. No
+UsageStats or accessibility permission.
 
 ## Not covered / known limits
 

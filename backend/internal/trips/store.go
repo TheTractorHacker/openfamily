@@ -343,12 +343,31 @@ type EventRow struct {
 	Lat    *float64 `json:"lat"`
 	Lon    *float64 `json:"lon"`
 	Source string   `json:"source"`
+	// Optional phone_use detail (null for old clients and other kinds).
+	MaxSpeedMps *float64 `json:"max_speed_mps"`
+	Confidence  *float64 `json:"confidence"`
+	Activity    *string  `json:"activity"`
+	// Dismissed is only ever true in the owner's own view (Events with
+	// includeHidden): the owner marked the event as a false alarm.
+	Dismissed bool `json:"dismissed"`
 }
 
-// Events returns a trip's stored events, oldest first (never nil).
+// Events returns a trip's stored events as counted by reports, oldest first
+// (never nil): dismissed events and the events of passenger drives are hidden.
 func (s *Store) Events(ctx context.Context, tripID string) ([]EventRow, error) {
-	rows, err := s.Pool.Query(ctx, `SELECT id::text, kind, started_at, ended_at, magnitude, lat, lon, source
-		FROM trip_events_effective WHERE trip_id = $1::uuid ORDER BY started_at, id`, tripID)
+	return s.EventsFor(ctx, tripID, false)
+}
+
+// EventsFor is Events; with includeHidden (owner view only) dismissed events
+// are returned too, flagged Dismissed, so they can be restored.
+func (s *Store) EventsFor(ctx context.Context, tripID string, includeHidden bool) ([]EventRow, error) {
+	view := "trip_events_effective"
+	if includeHidden {
+		view = "trip_events_visible"
+	}
+	rows, err := s.Pool.Query(ctx, `SELECT id::text, kind, started_at, ended_at, magnitude, lat, lon, source,
+		max_speed_mps, confidence::float8, activity, dismissed_at IS NOT NULL
+		FROM `+view+` WHERE trip_id = $1::uuid ORDER BY started_at, id`, tripID)
 	if err != nil {
 		return nil, err
 	}
@@ -356,12 +375,22 @@ func (s *Store) Events(ctx context.Context, tripID string) ([]EventRow, error) {
 	out := []EventRow{}
 	for rows.Next() {
 		var e EventRow
-		if err := rows.Scan(&e.ID, &e.Kind, &e.StartedAt, &e.EndedAt, &e.Magnitude, &e.Lat, &e.Lon, &e.Source); err != nil {
+		if err := rows.Scan(&e.ID, &e.Kind, &e.StartedAt, &e.EndedAt, &e.Magnitude, &e.Lat, &e.Lon, &e.Source,
+			&e.MaxSpeedMps, &e.Confidence, &e.Activity, &e.Dismissed); err != nil {
 			return nil, err
 		}
 		out = append(out, e)
 	}
 	return out, rows.Err()
+}
+
+// IsPassenger reports whether the user marked the trip starting at startedAt
+// as "I was a passenger".
+func (s *Store) IsPassenger(ctx context.Context, userID string, startedAt time.Time) (bool, error) {
+	var ok bool
+	err := s.Pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM trip_passenger_marks WHERE user_id = $1::uuid AND started_at = $2)`,
+		userID, startedAt).Scan(&ok)
+	return ok, err
 }
 
 // Downsample keeps at most max evenly spaced points, always the first and last.

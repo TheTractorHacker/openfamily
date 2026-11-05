@@ -25,6 +25,7 @@ const (
 	sensorMaxBrakeAccelDuration = 10 * time.Second
 	sensorMaxAccel    = 30.0  // m/s^2
 	sensorMaxPhoneS   = 300.0 // seconds of interaction
+	sensorMaxSpeedMps = 100.0 // phone_use max_speed_mps
 	sensorRateLimit   = 30
 	sensorRateWindow  = time.Minute
 )
@@ -36,6 +37,10 @@ type sensorEventIn struct {
 	Magnitude *float64 `json:"magnitude"`
 	Lat       *float64 `json:"lat"`
 	Lon       *float64 `json:"lon"`
+	// Optional phone_use detail (older clients omit all three).
+	MaxSpeedMps *float64 `json:"max_speed_mps"`
+	Confidence  *float64 `json:"confidence"`
+	Activity    *string  `json:"activity"`
 }
 
 type sensorEvent struct {
@@ -43,6 +48,10 @@ type sensorEvent struct {
 	Start, End time.Time
 	Magnitude  float64
 	Lat, Lon   *float64
+	// Optional phone_use detail; nil when not sent.
+	MaxSpeed   *float64
+	Confidence *float64
+	Activity   *string
 }
 
 func finite(f float64) bool { return !math.IsNaN(f) && !math.IsInf(f, 0) }
@@ -87,7 +96,26 @@ func validateSensorEvent(in sensorEventIn, now time.Time) (sensorEvent, bool) {
 			return ev, false
 		}
 	}
-	return sensorEvent{Kind: in.Kind, Start: start.UTC(), End: end.UTC(), Magnitude: *in.Magnitude, Lat: in.Lat, Lon: in.Lon}, true
+	ev = sensorEvent{Kind: in.Kind, Start: start.UTC(), End: end.UTC(), Magnitude: *in.Magnitude, Lat: in.Lat, Lon: in.Lon}
+	if in.Kind == trips.EventPhoneUse {
+		if v := in.MaxSpeedMps; v != nil {
+			if !finite(*v) || *v < 0 || *v > sensorMaxSpeedMps {
+				return sensorEvent{}, false
+			}
+			ev.MaxSpeed = v
+		}
+		if v := in.Confidence; v != nil {
+			if !finite(*v) || *v < 0 || *v > 1 {
+				return sensorEvent{}, false
+			}
+			ev.Confidence = v
+		}
+		// An unknown activity from a newer client is dropped, not rejected.
+		if a := in.Activity; a != nil && (*a == "screen" || *a == "call") {
+			ev.Activity = a
+		}
+	}
+	return ev, true
 }
 
 // IngestSensorEvents stores motion-sensor driving events for the caller.
@@ -181,10 +209,12 @@ func (s *Server) IngestSensorEvents(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			tag, err := tx.Exec(ctx, `
-				INSERT INTO trip_events (user_id, device_id, source, kind, started_at, ended_at, magnitude, lat, lon)
-				VALUES ($1, $2::uuid, 'sensor', $3, $4, $5, $6, $7, $8)
+				INSERT INTO trip_events (user_id, device_id, source, kind, started_at, ended_at, magnitude, lat, lon,
+				                         max_speed_mps, confidence, activity)
+				VALUES ($1, $2::uuid, 'sensor', $3, $4, $5, $6, $7, $8, $9, $10, $11)
 				ON CONFLICT (user_id, kind, started_at) WHERE source = 'sensor' DO NOTHING`,
-				claims.UserID, dev, ev.Kind, ev.Start, ev.End, ev.Magnitude, ev.Lat, ev.Lon)
+				claims.UserID, dev, ev.Kind, ev.Start, ev.End, ev.Magnitude, ev.Lat, ev.Lon,
+				ev.MaxSpeed, ev.Confidence, ev.Activity)
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "failed to store events")
 				return

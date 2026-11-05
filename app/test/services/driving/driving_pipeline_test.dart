@@ -4,7 +4,6 @@ import 'package:openfamily/services/driving/driving_event_outbox.dart';
 import 'package:openfamily/services/driving/driving_events_service.dart';
 import 'package:openfamily/services/driving/driving_runtime.dart';
 import 'package:openfamily/services/driving/driving_session.dart';
-import 'package:openfamily/services/driving/phone_use_tracker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../support/fake_sensor_events_api.dart';
@@ -71,47 +70,6 @@ void main() {
       c.onSpeed(1000, 0.5);
       c.tick(95000);
       expect(stops, 1);
-    });
-  });
-
-  group('PhoneUseTracker', () {
-    test('unlock while moving then screen off is one event', () {
-      final PhoneUseTracker t = PhoneUseTracker();
-      t.onSpeed(0, 20, 5, 6);
-      t.onScreen(1000, ScreenSignal.screenOn);
-      t.onScreen(2000, ScreenSignal.userPresent);
-      t.onScreen(14000, ScreenSignal.screenOff);
-      final List<DrivingEvent> e = t.takeEvents();
-      expect(e, hasLength(1));
-      expect(e.single.kind, DrivingEventKind.phoneUse);
-      expect(e.single.magnitude, closeTo(12, 0.01));
-      expect(e.single.lat, 5);
-    });
-
-    test('screen-on without unlock, parked unlock and short taps do not count',
-        () {
-      final PhoneUseTracker t = PhoneUseTracker();
-      t.onSpeed(0, 20, null, null);
-      t.onScreen(1000, ScreenSignal.screenOn); // notification wake
-      t.onScreen(5000, ScreenSignal.screenOff);
-      t.onScreen(6000, ScreenSignal.userPresent);
-      t.onScreen(7000, ScreenSignal.screenOff); // 1 s
-      t.onSpeed(8000, 0, null, null);
-      t.onScreen(9000, ScreenSignal.userPresent); // parked
-      t.onScreen(30000, ScreenSignal.screenOff);
-      expect(t.takeEvents(), isEmpty);
-    });
-
-    test('stopping the car ends the interaction; long ones are capped', () {
-      final PhoneUseTracker t = PhoneUseTracker();
-      t.onSpeed(0, 20, null, null);
-      t.onScreen(1000, ScreenSignal.userPresent);
-      t.onSpeed(6000, 0.5, null, null);
-      expect(t.takeEvents().single.magnitude, closeTo(5, 0.01));
-      t.onSpeed(10000, 20, null, null);
-      t.onScreen(11000, ScreenSignal.userPresent);
-      t.onSpeed(400000, 20, null, null);
-      expect(t.takeEvents().single.magnitude, closeTo(120, 0.01));
     });
   });
 

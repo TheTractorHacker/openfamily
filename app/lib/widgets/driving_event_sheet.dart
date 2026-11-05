@@ -37,9 +37,15 @@ String eventExplanation(
     DrivingEventKind.phoneUse =>
       off
           ? phoneUseOffText
-          : 'Phone use counts times the screen was active while the car was '
-              'moving, on phones that turned it on. It is experimental and '
-              'cannot tell a driver from a passenger.',
+          : 'Phone use counts time someone handled the phone while the car '
+              'was really moving: the screen was unlocked and the phone was '
+              'picked up or tilted, or a call was held to the ear. It does '
+              'not count red lights or time parked, the first and last '
+              'seconds of a drive, hands-free calls (Bluetooth, Android Auto '
+              'or a car kit), or a phone resting in a mount for navigation. '
+              'It never sees apps or content and cannot tell a driver from a '
+              'passenger, so open a drive to mark "I was a passenger" or '
+              'dismiss a false alarm.',
   };
 }
 

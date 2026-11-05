@@ -359,6 +359,10 @@ class TripEvent {
     this.endedAt,
     this.magnitude,
     this.position,
+    this.maxSpeedMps,
+    this.confidence,
+    this.activity,
+    this.dismissed = false,
   });
 
   /// Null when the kind is one this app version does not know.
@@ -375,6 +379,13 @@ class TripEvent {
       position: j['lat'] is num && j['lon'] is num
           ? LatLng((j['lat'] as num).toDouble(), (j['lon'] as num).toDouble())
           : null,
+      maxSpeedMps: j['max_speed_mps'] is num
+          ? (j['max_speed_mps'] as num).toDouble()
+          : null,
+      confidence:
+          j['confidence'] is num ? (j['confidence'] as num).toDouble() : null,
+      activity: j['activity'] is String ? j['activity'] as String : null,
+      dismissed: j['dismissed'] == true,
     );
   }
 
@@ -386,6 +397,25 @@ class TripEvent {
   /// m/s for speeding (peak speed), m/s^2 for braking / acceleration.
   final double? magnitude;
   final LatLng? position;
+
+  /// Phone use: highest GPS speed during the event (m/s).
+  final double? maxSpeedMps;
+
+  /// Phone use: 0..1 how sure the phone detected real use (null = unknown).
+  final double? confidence;
+
+  /// Phone use: `screen` or `call`.
+  final String? activity;
+
+  /// The owner marked this as a false alarm (only the owner's view has it).
+  final bool dismissed;
+
+  /// Phone use with low confidence: show a "possible false alarm" hint.
+  bool get possibleFalseAlarm =>
+      kind == DrivingEventKind.phoneUse && (confidence ?? 1) < 0.5;
+
+  /// Duration the event spans (null if the server gave no end).
+  Duration? get span => endedAt?.difference(startedAt);
 }
 
 List<TripEvent> parseTripEvents(Object? raw) => raw is List

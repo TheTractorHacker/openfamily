@@ -85,3 +85,93 @@ class DrivingConfig {
   /// Sensor history kept to replay once the forward axis becomes known.
   final int bufferMs;
 }
+
+/// Tunables for phone-use detection (screen + handling + hands-free).
+///
+/// HONESTY NOTE: none of these were calibrated on real cars. The speed and
+/// timing values are design choices; the handling thresholds (`tilt*`,
+/// `accelStd*`) are educated guesses from typical phone/vehicle motion
+/// magnitudes and need field tuning before anything is read into the numbers.
+class PhoneUseConfig {
+  const PhoneUseConfig({
+    this.startSpeedMps = 7.0,
+    this.movingSpeedMps = 2.0,
+    this.stopGraceMs = 6000,
+    this.speedMaxAgeMs = 5000,
+    this.mergeGapMs = 10000,
+    this.driveEdgeMs = 10000,
+    this.minActiveMs = 3000,
+    this.maxEpisodeMs = 180000,
+    this.maxEventsPerDrive = 8,
+    this.unlockGraceMs = 12000,
+    this.handlingHoldMs = 8000,
+    this.noSensorFallbackMs = 6000,
+    this.windowMs = 2000,
+    this.tiltRateRadPerSec = 0.35,
+    this.tiltRateWeakRadPerSec = 0.25,
+    this.accelStdMps2 = 2.0,
+    this.noGyroAccelStdMps2 = 3.0,
+    this.gravityTauMs = 1000,
+  });
+
+  /// Speed at/above which a drive counts as moving (start of counting).
+  final double startSpeedMps;
+
+  /// Below this the vehicle is considered stationary (red light, parked):
+  /// that time is never counted.
+  final double movingSpeedMps;
+
+  /// Stationary this long ends the moving state (and the open event).
+  /// Shorter stops (a red light) neither split nor extend an event.
+  final int stopGraceMs;
+
+  /// A GPS speed older than this is not trusted.
+  final int speedMaxAgeMs;
+
+  /// Interactions closer than this are one event.
+  final int mergeGapMs;
+
+  /// Activity in the first/last this-long of a drive is ignored (putting the
+  /// phone into / taking it out of a mount or pocket).
+  final int driveEdgeMs;
+
+  /// Events with less counted interaction than this are dropped.
+  final int minActiveMs;
+
+  /// One event spans at most this long (the server accepts 5 minutes).
+  final int maxEpisodeMs;
+
+  /// At most this many events per drive; further ones are dropped.
+  final int maxEventsPerDrive;
+
+  /// After an unlock, tapping counts this long even without handling (a
+  /// deliberate unlock is an interaction); after that a phone that is
+  /// not being handled is treated as mounted/navigating.
+  final int unlockGraceMs;
+
+  /// A handling window keeps counting as handling for this long.
+  final int handlingHoldMs;
+
+  /// With no handling data at all after this long, fall back to counting the
+  /// unlocked screen (older/limited hardware).
+  final int noSensorFallbackMs;
+
+  /// Handling analysis window.
+  final int windowMs;
+
+  /// Rotation rate (rad/s, about axes other than the vertical one) that on
+  /// its own means the phone is in a hand.
+  final double tiltRateRadPerSec;
+
+  /// Weaker rotation that counts when combined with [accelStdMps2].
+  final double tiltRateWeakRadPerSec;
+
+  /// Accelerometer-magnitude deviation (m/s^2) typical of hand motion.
+  final double accelStdMps2;
+
+  /// Same, used when the phone has no gyroscope.
+  final double noGyroAccelStdMps2;
+
+  /// Gravity low-pass time constant used to remove vehicle yaw.
+  final int gravityTauMs;
+}

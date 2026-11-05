@@ -65,6 +65,7 @@ String? eventMagnitudeText(TripEvent e, UnitSystem u) {
   final double? m = e.magnitude;
   if (m == null) return null;
   if (e.kind == DrivingEventKind.speeding) return 'Peak ${u.formatSpeed(m)}';
+  if (e.kind == DrivingEventKind.phoneUse) return phoneUseDetailText(e, u);
   return '${u.speedFromMps(m).toStringAsFixed(1)} ${u.speedLabel} per second';
 }
 
@@ -254,4 +255,17 @@ class DrivingEventChip extends StatelessWidget {
       ),
     );
   }
+}
+
+/// "14 s of use at up to 45 mph" for a phone-use event (no app or content is
+/// ever known). Falls back to what the server sent.
+String? phoneUseDetailText(TripEvent e, UnitSystem u) {
+  final double? sec = e.magnitude;
+  if (sec == null) return null;
+  final String use = sec < 90
+      ? '${sec.round()} s'
+      : '${(sec / 60).toStringAsFixed(1)} min';
+  final String what = e.activity == 'call' ? 'phone call' : 'screen use';
+  final double? v = e.maxSpeedMps;
+  return '$use of $what${v == null ? '' : ' at up to ${u.formatSpeed(v)}'}';
 }

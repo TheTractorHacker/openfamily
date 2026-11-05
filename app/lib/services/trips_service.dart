@@ -66,6 +66,14 @@ abstract class TripsApi {
 
   /// The signed-in user's id, or null if unknown (hides self-only actions).
   Future<String?> currentUserId();
+
+  /// Marks (or unmarks) one of the caller's own drives as "I was a passenger":
+  /// its events leave their report and score.
+  Future<void> setPassenger(String tripId, bool passenger);
+
+  /// Marks one of the caller's own phone-use events as a false alarm (or
+  /// restores it).
+  Future<void> setEventDismissed(String eventId, bool dismissed);
 }
 
 class TripsService implements TripsApi {
@@ -125,6 +133,24 @@ class TripsService implements TripsApi {
           ),
         ),
       );
+    } catch (e) {
+      throw mapTripsError(e);
+    }
+  }
+
+  @override
+  Future<void> setPassenger(String tripId, bool passenger) async {
+    try {
+      await ApiClient.setTripPassenger(tripId, passenger);
+    } catch (e) {
+      throw mapTripsError(e);
+    }
+  }
+
+  @override
+  Future<void> setEventDismissed(String eventId, bool dismissed) async {
+    try {
+      await ApiClient.setEventDismissed(eventId, dismissed);
     } catch (e) {
       throw mapTripsError(e);
     }

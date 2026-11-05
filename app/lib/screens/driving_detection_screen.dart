@@ -216,9 +216,9 @@ class _DrivingDetectionScreenState extends State<DrivingDetectionScreen> {
           const DsSectionHeader('Screen activity while moving'),
           DsToggleRow(
             icon: Icons.phone_android_outlined,
-            title: 'Count screen activity while moving',
+            title: 'Detect phone use while driving',
             subtitle: _sensor
-                ? 'Estimate only. Android only.'
+                ? 'Estimate only. Android only. Hands-free is not counted.'
                 : 'Turn on driving detection first.',
             value: _phone,
             onChanged: _sensor ? _setPhone : null,
@@ -226,11 +226,26 @@ class _DrivingDetectionScreenState extends State<DrivingDetectionScreen> {
           Padding(
             padding: pad,
             child: Text(
-              'When the phone is unlocked while the vehicle is moving fast, '
-              'we record how long the screen stayed on. This is a rough '
-              'estimate: a passenger using the phone looks the same as a '
-              'driver, and we cannot tell a map app from anything else. We '
-              'do not see which apps you use.',
+              'What is used: the screen being unlocked, how the phone moves '
+              '(picked up, tilted or shaken in a hand versus resting in a '
+              'mount), whether it is at your ear on a call, and GPS speed. '
+              'Phone use only counts while the car is really moving, so red '
+              'lights, parking, and the first and last seconds of a drive '
+              'are ignored.\n\n'
+              'What is not counted: a screen that stays lit in a mount for '
+              'navigation, a phone in a pocket or bag, and calls over '
+              'Bluetooth, Android Auto or a car kit. A call on the speaker '
+              'counts only while the phone is being handled. If this phone '
+              'cannot report its call audio route, calls are not counted at '
+              'all.\n\n'
+              'What is never collected: messages, calls\' numbers or '
+              'contacts, web pages, which app is open, screenshots, or any '
+              'accessibility access. Only the event leaves your phone: when, '
+              'seconds of use, top speed and a confidence value.\n\n'
+              'It is still an estimate. It can be wrong, for example for a '
+              'passenger, or when the phone is jostled. Open any drive to '
+              'mark "I was a passenger" or dismiss a single false alarm; '
+              'both remove it from your report and score.',
               style: body,
             ),
           ),

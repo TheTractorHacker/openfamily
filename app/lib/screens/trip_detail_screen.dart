@@ -37,12 +37,61 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
   List<TripStop> _stops = const <TripStop>[];
   TripsException? _error;
   bool _loading = true;
+  bool _isSelf = false;
+  bool? _passengerOverride;
+  bool _busy = false;
+  String? _actionError;
+  final Map<String, bool> _dismissedOverride = <String, bool>{};
 
   @override
   void initState() {
     super.initState();
     UnitPreferenceService.ensureLoaded();
     _load();
+    _api.currentUserId().then((String? id) {
+      if (mounted && id != null && id == widget.trip.userId) {
+        setState(() => _isSelf = true);
+      }
+    });
+  }
+
+  bool get _passenger => _passengerOverride ?? _detail?.passenger ?? false;
+
+  bool _isDismissed(TripEvent e) => _dismissedOverride[e.id] ?? e.dismissed;
+
+  Future<void> _togglePassenger() async {
+    final bool next = !_passenger;
+    setState(() {
+      _busy = true;
+      _actionError = null;
+    });
+    try {
+      await _api.setPassenger(widget.trip.id, next);
+      if (!mounted) return;
+      setState(() => _passengerOverride = next);
+      // Reload so the event list matches what the server now counts.
+      await _load();
+    } on TripsException catch (e) {
+      if (mounted) setState(() => _actionError = e.message);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _toggleDismiss(TripEvent e) async {
+    final bool next = !_isDismissed(e);
+    setState(() {
+      _busy = true;
+      _actionError = null;
+    });
+    try {
+      await _api.setEventDismissed(e.id, next);
+      if (mounted) setState(() => _dismissedOverride[e.id] = next);
+    } on TripsException catch (err) {
+      if (mounted) setState(() => _actionError = err.message);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   Future<void> _load() async {
@@ -178,6 +227,20 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
               ),
             ],
           ),
+          if (_isSelf && t.mode == TripMode.driving)
+            ..._passengerSection(context),
+          if (_actionError != null)
+            Padding(
+              padding: const EdgeInsets.only(top: AppSpace.sm),
+              child: Semantics(
+                liveRegion: true,
+                child: Text(
+                  _actionError!,
+                  style:
+                      AppType.secondary.copyWith(color: AppColors.statusRed),
+                ),
+              ),
+            ),
           if (_detail != null && _detail!.events.isNotEmpty)
             ..._eventsSection(context, _detail!.events, units),
           if (_stops.isNotEmpty) ...<Widget>[
@@ -217,27 +280,92 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
 }
 
 extension on _TripDetailScreenState {
+  List<Widget> _passengerSection(BuildContext context) {
+    final ColorScheme cs = Theme.of(context).colorScheme;
+    final bool p = _passenger;
+    return <Widget>[
+      const SizedBox(height: AppSpace.lg),
+      Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Icon(
+            p ? Icons.airline_seat_recline_normal : Icons.directions_car_outlined,
+            size: 20,
+            color: cs.onSurfaceVariant,
+          ),
+          const SizedBox(width: AppSpace.sm),
+          Expanded(
+            child: Text(
+              p
+                  ? 'Marked as passenger. Braking, speeding and phone use '
+                      'from this drive are not counted in your report or '
+                      'score.'
+                  : 'Were you a passenger? Mark it and this drive\'s events '
+                      'will not count against you.',
+              style: AppType.secondary.copyWith(color: cs.onSurfaceVariant),
+            ),
+          ),
+        ],
+      ),
+      const SizedBox(height: AppSpace.sm),
+      Align(
+        alignment: Alignment.centerLeft,
+        child: DsPillButton(
+          label: p ? 'Undo passenger' : 'I was a passenger',
+          style: DsPillStyle.tonal,
+          onPressed: _busy ? null : _togglePassenger,
+        ),
+      ),
+    ];
+  }
+
   List<Widget> _eventsSection(
     BuildContext context,
     List<TripEvent> events,
     UnitSystem units,
   ) {
     final ColorScheme cs = Theme.of(context).colorScheme;
+    final bool anyPhone =
+        events.any((TripEvent e) => e.kind == DrivingEventKind.phoneUse);
     return <Widget>[
       const SizedBox(height: AppSpace.lg),
       Semantics(
         header: true,
         child: const Text('Driving events', style: AppType.headline),
       ),
-      for (final TripEvent e in events)
-        Padding(
-          padding: const EdgeInsets.only(top: AppSpace.sm),
-          child: Semantics(
+      for (final TripEvent e in events) _eventRow(context, e, units),
+      Padding(
+        padding: const EdgeInsets.only(top: AppSpace.xs),
+        child: Text(
+          anyPhone
+              ? 'Braking and speeding are estimated from GPS. Phone use is '
+                  'an estimate from screen unlocks and phone motion while '
+                  'the car moves; no apps or content are seen.'
+              : 'Estimated from GPS',
+          style: AppType.secondary.copyWith(color: cs.onSurfaceVariant),
+        ),
+      ),
+    ];
+  }
+
+  Widget _eventRow(BuildContext context, TripEvent e, UnitSystem units) {
+    final ColorScheme cs = Theme.of(context).colorScheme;
+    final String? detail = eventMagnitudeText(e, units);
+    final bool phone = e.kind == DrivingEventKind.phoneUse;
+    final bool dismissed = phone && _isDismissed(e);
+    return Padding(
+      padding: const EdgeInsets.only(top: AppSpace.sm),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Semantics(
             container: true,
             excludeSemantics: true,
             label: '${e.kind.label} at ${tripClock(context, e.startedAt)}'
-                '${eventMagnitudeText(e, units) == null ? '' : ', ${eventMagnitudeText(e, units)}'}'
-                ', estimated from GPS',
+                '${detail == null ? '' : ', $detail'}'
+                '${phone ? '' : ', estimated from GPS'}'
+                '${dismissed ? ', marked as false alarm, not counted' : ''}'
+                '${!dismissed && e.possibleFalseAlarm ? ', possible false alarm' : ''}',
             child: Row(
               children: <Widget>[
                 EventIconDisc(kind: e.kind, size: 28),
@@ -245,22 +373,45 @@ extension on _TripDetailScreenState {
                 Expanded(
                   child: Text(
                     '${e.kind.label}, ${tripClock(context, e.startedAt)}'
-                    '${eventMagnitudeText(e, units) == null ? '' : ' \u00b7 ${eventMagnitudeText(e, units)}'}',
-                    style: AppType.body.copyWith(fontWeight: FontWeight.w500),
+                    '${detail == null ? '' : ' \u00b7 $detail'}',
+                    style: AppType.body.copyWith(
+                      fontWeight: FontWeight.w500,
+                      decoration:
+                          dismissed ? TextDecoration.lineThrough : null,
+                    ),
                   ),
                 ),
               ],
             ),
           ),
-        ),
-      Padding(
-        padding: const EdgeInsets.only(top: AppSpace.xs),
-        child: Text(
-          'Estimated from GPS',
-          style: AppType.secondary.copyWith(color: cs.onSurfaceVariant),
-        ),
+          if (phone && (dismissed || e.possibleFalseAlarm || _isSelf))
+            Padding(
+              padding: const EdgeInsets.only(left: 36),
+              child: Wrap(
+                spacing: AppSpace.sm,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: <Widget>[
+                  if (dismissed)
+                    Text('False alarm, not counted',
+                        style: AppType.secondary
+                            .copyWith(color: cs.onSurfaceVariant))
+                  else if (e.possibleFalseAlarm)
+                    Text('Possible false alarm',
+                        style: AppType.secondary
+                            .copyWith(color: AppColors.statusOrange)),
+                  if (_isSelf)
+                    TextButton(
+                      onPressed: _busy ? null : () => _toggleDismiss(e),
+                      child: Text(dismissed
+                          ? 'Count it again'
+                          : 'Not me / false alarm'),
+                    ),
+                ],
+              ),
+            ),
+        ],
       ),
-    ];
+    );
   }
 }
 

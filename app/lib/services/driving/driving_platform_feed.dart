@@ -4,6 +4,7 @@ import 'package:driving_native/driving_native.dart';
 import 'package:sensors_plus/sensors_plus.dart';
 
 import 'driving_runtime.dart';
+import 'phone_context.dart';
 import 'phone_use_tracker.dart';
 
 /// Real sensor feed: accelerometer + gyroscope via `sensors_plus`
@@ -51,6 +52,17 @@ class PlatformDrivingFeed implements DrivingFeed {
       cancelOnError: false,
     ));
     if (withScreen) {
+      // A screen that is already lit when the drive starts emits no broadcast.
+      unawaited(DrivingNative.isInteractive().then((bool on) {
+        if (on && _subs.isNotEmpty) {
+          sink.onScreen(_clock(), ScreenSignal.screenOn);
+        }
+      }).catchError((Object _) {}));
+      _subs.add(DrivingNative.contextEvents.listen(
+        (Map<dynamic, dynamic> m) => sink.onContext(PhoneContext.fromWire(m)),
+        onError: (Object _) {}, // Context unavailable: screen-only mode.
+        cancelOnError: false,
+      ));
       _subs.add(DrivingNative.screenEvents.listen(
         (ScreenBroadcast b) {
           switch (b.type) {

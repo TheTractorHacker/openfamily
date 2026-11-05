@@ -280,6 +280,8 @@ func main() {
 		r.Get("/trips/report", srv.TripsReport)
 		r.Get("/trips/weekly-summary", srv.WeeklySummary)
 		r.Get("/trips/{id}/events", srv.TripEvents)
+		r.Put("/trips/{id}/passenger", srv.SetTripPassenger)
+		r.Patch("/trips/events/{eventId}", srv.SetEventDismissed)
 		r.Post("/trips/compute", srv.ComputeTrips)
 		r.Get("/trips/{id}", srv.GetTrip)
 		r.Post("/family/members/{id}/location-request", srv.RequestMemberLocation)

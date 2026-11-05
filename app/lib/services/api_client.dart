@@ -1236,6 +1236,18 @@ class ApiClient {
     return get('/trips/${Uri.encodeComponent(id)}/events');
   }
 
+  /// `PUT /trips/{id}/passenger`: mark / unmark a drive as "I was a passenger".
+  static Future<dynamic> setTripPassenger(String id, bool passenger) {
+    return put('/trips/${Uri.encodeComponent(id)}/passenger',
+        body: <String, dynamic>{'passenger': passenger});
+  }
+
+  /// `PATCH /trips/events/{id}`: mark a phone-use event as a false alarm.
+  static Future<dynamic> setEventDismissed(String id, bool dismissed) {
+    return patch('/trips/events/${Uri.encodeComponent(id)}',
+        body: <String, dynamic>{'dismissed': dismissed});
+  }
+
   // --- driving sensor ---
 
   /// Request body of `POST /trips/sensor-events`. Only detected events and the

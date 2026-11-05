@@ -99,12 +99,12 @@ void main() {
     addTearDown(t.view.reset);
     final FakeSensorEventsApi api = FakeSensorEventsApi();
     await pump(t, api);
-    await t.tap(find.text('Count screen activity while moving'));
+    await t.tap(find.text('Detect phone use while driving'));
     await t.pumpAndSettle();
     expect(api.phoneFlags, <bool>[true]);
     expect(api.flags, <bool>[true]);
     expect(await DrivingSettings.phoneUseEnabled(), isTrue);
-    await t.tap(find.text('Count screen activity while moving'));
+    await t.tap(find.text('Detect phone use while driving'));
     await t.pumpAndSettle();
     expect(api.phoneFlags, <bool>[true, false]);
     expect(await DrivingSettings.phoneUseEnabled(), isFalse);
@@ -117,7 +117,7 @@ void main() {
     addTearDown(t.view.reset);
     final FakeSensorEventsApi api = FakeSensorEventsApi()..offline = true;
     await pump(t, api);
-    await t.tap(find.text('Count screen activity while moving'));
+    await t.tap(find.text('Detect phone use while driving'));
     await t.pumpAndSettle();
     expect(await DrivingSettings.phoneUseEnabled(), isFalse);
     expect(find.textContaining('phone use stays off'), findsOneWidget);

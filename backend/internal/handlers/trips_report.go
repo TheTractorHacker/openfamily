@@ -352,10 +352,6 @@ func (s *Server) TripEvents(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "trip not found")
 		return
 	}
-	ev, err := st.Events(r.Context(), trip.ID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load events")
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"trip_id": trip.ID, "estimated": true, "events": ev})
+	ev, passenger := s.tripEventsView(r.Context(), st, claims.UserID, trip)
+	writeJSON(w, http.StatusOK, map[string]any{"trip_id": trip.ID, "estimated": true, "events": ev, "passenger": passenger})
 }
