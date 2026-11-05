@@ -8,7 +8,6 @@ import '../services/trips_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/ds/ds.dart';
 import '../widgets/trip_widgets.dart';
-import 'trips_screen.dart' show UnitToggleButton;
 
 const List<String> kReportPeriods = <String>['day', 'week', 'month'];
 
@@ -55,7 +54,6 @@ class _DrivingReportScreenState extends State<DrivingReportScreen> {
       child: Scaffold(
         appBar: AppBar(
           title: Text('${widget.member.name}\'s driving'),
-          actions: const <Widget>[UnitToggleButton()],
           bottom: const TabBar(
             tabs: <Widget>[
               Tab(text: 'Day'),

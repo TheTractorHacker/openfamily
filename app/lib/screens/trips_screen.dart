@@ -281,13 +281,3 @@ class _StaleBanner extends StatelessWidget {
     );
   }
 }
-
-/// Retired: units are one setting (Settings > Distance & speed units). Kept
-/// as an empty widget only so the driving screens that still list it compile;
-/// remove those usages together with this class.
-class UnitToggleButton extends StatelessWidget {
-  const UnitToggleButton({super.key});
-
-  @override
-  Widget build(BuildContext context) => const SizedBox.shrink();
-}

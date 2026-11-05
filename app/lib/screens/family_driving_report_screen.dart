@@ -306,7 +306,6 @@ class _State extends State<FamilyDrivingReportScreen> {
                             ),
                           ),
                           )),
-                          const UnitToggleButton(),
                           IconButton(
                             key: const ValueKey<String>('driving-inbox'),
                             tooltip: 'Inbox',
