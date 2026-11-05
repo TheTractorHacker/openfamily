@@ -247,8 +247,8 @@ class _State extends State<FamilyDrivingReportScreen> {
         child: ValueListenableBuilder<UnitSystem>(
           valueListenable: UnitPreferenceService.units,
           builder: (BuildContext context, UnitSystem units, _) {
-            return Stack(children: <Widget>[
-              Positioned.fill(child: RefreshIndicator(
+            return Column(children: <Widget>[
+              Expanded(child: RefreshIndicator(
               onRefresh: _load,
               child: Center(
                 child: ConstrainedBox(
@@ -262,7 +262,7 @@ class _State extends State<FamilyDrivingReportScreen> {
                       AppSpace.gutter,
                       AppSpace.lg,
                       AppSpace.gutter,
-                      96,
+                      AppSpace.xl,
                     ),
                     children: <Widget>[
                       if (!_disclosureSeen && _detectionOn == true) ...<Widget>[
@@ -318,7 +318,22 @@ class _State extends State<FamilyDrivingReportScreen> {
                           ),
                         ],
                       ),
-                      const SizedBox(height: AppSpace.sm),
+                      const SizedBox(height: AppSpace.lg),
+                      Semantics(
+                        header: true,
+                        child: Text(
+                          _period == 'month'
+                              ? 'Monthly Driving Report'
+                              : 'Weekly Driving Report',
+                          style: AppType.title.copyWith(
+                            fontSize: 30,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: -0.6,
+                            height: 1.1,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: AppSpace.lg),
                       DrivingPeriodBar(
                         period: _period,
                         title: periodTitle(_period, _anchor, now: _now),
@@ -338,24 +353,7 @@ class _State extends State<FamilyDrivingReportScreen> {
                         ),
                         onPick: _pickDate,
                       ),
-                      Semantics(
-                        header: true,
-                        child: Padding(
-                          padding: const EdgeInsets.only(bottom: AppSpace.lg),
-                          child: Text(
-                            _period == 'month'
-                                ? 'Monthly Driving Report'
-                                : 'Weekly Driving Report',
-                            style: AppType.title.copyWith(
-                              fontSize: 30,
-                              fontWeight: FontWeight.w900,
-                              letterSpacing: -0.6,
-                              height: 1.1,
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: AppSpace.md),
+                      const SizedBox(height: AppSpace.xl),
                       ValueListenableBuilder<List<Member>>(
                         valueListenable: widget.members,
                         builder: (BuildContext context, List<Member> all, _) =>
@@ -380,16 +378,12 @@ class _State extends State<FamilyDrivingReportScreen> {
               ),
               )),
               if (_report != null && _report!.members.length > 1)
-                Positioned(
-                  left: AppSpace.gutter,
-                  bottom: AppSpace.md,
-                  child: DrivingMemberDock(
-                    members: <Member>[
-                      for (final MemberReport m in _report!.members)
-                        _memberFor(m.userId, m.name),
-                    ],
-                    onTap: _openMember,
-                  ),
+                DrivingMemberDock(
+                  members: <Member>[
+                    for (final MemberReport m in _report!.members)
+                      _memberFor(m.userId, m.name),
+                  ],
+                  onTap: _openMember,
                 ),
             ]);
           },
@@ -558,7 +552,7 @@ class _State extends State<FamilyDrivingReportScreen> {
             style: AppType.headline,
           ),
         ),
-        const SizedBox(height: AppSpace.sm),
+        const SizedBox(height: AppSpace.md),
         for (final MemberReport m in active)
           Padding(
             padding: const EdgeInsets.only(bottom: AppSpace.md),

@@ -83,9 +83,12 @@ class _TopSpeedCard extends StatelessWidget {
       label: 'Top speed $value, GPS speed$who',
       excludeSemantics: true,
       child: Container(
-        padding: const EdgeInsets.all(AppSpace.lg),
+        constraints: const BoxConstraints(minHeight: 96),
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpace.lg,
+          vertical: AppSpace.md,
+        ),
         decoration: _card(context),
-        alignment: Alignment.centerLeft,
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: <Widget>[
@@ -117,7 +120,7 @@ class _TopSpeedCard extends StatelessWidget {
                     'GPS speed',
                     style: AppType.secondary.copyWith(
                       color: cs.onSurfaceVariant,
-                      fontSize: 11,
+                      fontSize: 12,
                     ),
                   ),
                 ],
@@ -161,13 +164,18 @@ class _StatsCard extends StatelessWidget {
       ),
     );
     return Container(
-      padding: const EdgeInsets.all(AppSpace.lg),
+      constraints: const BoxConstraints(minHeight: 96),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpace.lg,
+        vertical: AppSpace.md,
+      ),
       decoration: _card(context),
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         mainAxisAlignment: MainAxisAlignment.center,
         children: <Widget>[
           line('Drives', '$drives'),
-          const SizedBox(height: AppSpace.md),
+          const SizedBox(height: AppSpace.sm),
           line(distanceLabel, distance),
         ],
       ),
@@ -238,19 +246,7 @@ class MemberDrivingCard extends StatelessWidget {
               padding: const EdgeInsets.all(AppSpace.xl),
               child: Row(
                 children: <Widget>[
-                  Container(
-                    padding: const EdgeInsets.all(3),
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                        color: BrandTheme.of(context).accent.withValues(
-                          alpha: report.drives > 0 ? 0.9 : 0.25,
-                        ),
-                        width: 2.5,
-                      ),
-                    ),
-                    child: StatusAvatar(member: member, size: 56),
-                  ),
+                  StatusAvatar(member: member, size: 60),
                   const SizedBox(width: AppSpace.lg),
                   Expanded(
                     child: Column(

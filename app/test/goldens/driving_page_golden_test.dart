@@ -57,12 +57,13 @@ void _golden(
   bool settle = true,
   Future<void> Function(WidgetTester)? after,
   void Function()? before,
+  Size size = const Size(780, 3000),
 }) {
   for (final bool dark in <bool>[false, true]) {
     final String file = '${name}_${dark ? 'dark' : 'light'}'
         '${scale == 1 ? '' : '_x${scale.toStringAsFixed(0)}'}';
     testWidgets('golden $file', (WidgetTester t) async {
-      t.view.physicalSize = const Size(780, 3000);
+      t.view.physicalSize = size;
       t.view.devicePixelRatio = 2;
       addTearDown(t.view.reset);
       before?.call();
@@ -229,6 +230,22 @@ void main() {
       scale: scale,
     );
   }
+  _golden(
+    'drv_busy_412_bottom',
+    () => _screen(
+      _busy(),
+      members: <Member>[
+        _m('u1', 'Blake', const Color(0xFF0284C7), driving: true),
+        _m('u2', 'Brian', const Color(0xFF7C3AED)),
+        _m('u3', 'Sam', const Color(0xFF16A34A)),
+      ],
+    ),
+    size: const Size(824, 1700),
+    after: (WidgetTester t) async {
+      await t.drag(find.byType(ListView), const Offset(0, -420));
+      await t.pumpAndSettle();
+    },
+  );
   _golden('drv_disclosure', () => _screen(_oneDrive()), scale: 1,
       before: () => SharedPreferences.setMockInitialValues(<String, Object>{}));
   _golden('drv_disclosure', () => _screen(_oneDrive()), scale: 2,

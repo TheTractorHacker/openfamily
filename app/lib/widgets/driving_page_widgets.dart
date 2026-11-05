@@ -42,11 +42,27 @@ BoxDecoration _cardBox(BuildContext context) => driveCardDecoration(context);
 // ---------------------------------------------------------------------------
 
 const List<String> _weekdays = <String>[
-  'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun',
+  'Mon',
+  'Tue',
+  'Wed',
+  'Thu',
+  'Fri',
+  'Sat',
+  'Sun',
 ];
 const List<String> _mon = <String>[
-  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
 ];
 
 /// "7:52 am" (or 24-hour when the device uses it).
@@ -196,10 +212,10 @@ class _NowRow extends StatelessWidget {
 // Period navigation
 // ---------------------------------------------------------------------------
 
-/// Horizontally scrolling period pills ("This week", "Last week" and a
-/// date-range pill that opens the calendar), plus a Week / Month switch and
-/// previous / next arrows around the selected range. [canNext] is false at
-/// the current period.
+/// One period control: a horizontally scrolling pill row ("This week",
+/// "Last week", a calendar pill that opens the date picker), and beneath it
+/// the selected range with small previous / next arrows next to a compact
+/// Week / Month switch. [canNext] is false at the current period.
 class DrivingPeriodBar extends StatelessWidget {
   const DrivingPeriodBar({
     super.key,
@@ -236,6 +252,7 @@ class DrivingPeriodBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final String unit = period == 'month' ? 'month' : 'week';
     final bool custom = caption == null;
+    final ColorScheme cs = Theme.of(context).colorScheme;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
@@ -257,7 +274,7 @@ class DrivingPeriodBar extends StatelessWidget {
               ),
               const SizedBox(width: AppSpace.sm),
               DrivingChoiceChip(
-                label: custom ? title : 'Pick a $unit',
+                label: custom ? title : 'Custom',
                 icon: Icons.calendar_month_outlined,
                 selected: custom,
                 semanticLabel: 'Pick a $unit from the calendar',
@@ -266,63 +283,147 @@ class DrivingPeriodBar extends StatelessWidget {
             ],
           ),
         ),
-        const SizedBox(height: AppSpace.sm),
-        Row(
-          children: <Widget>[
-            IconButton(
-              tooltip: 'Previous $unit',
-              constraints: const BoxConstraints(
-                minWidth: kMinTarget,
-                minHeight: kMinTarget,
+        const SizedBox(height: AppSpace.md),
+        Builder(builder: (BuildContext context) {
+          final bool big =
+              MediaQuery.textScalerOf(context).scale(16) > 16 * 1.15;
+          final Widget nav = Row(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              _ArrowButton(
+                tooltip: 'Previous $unit',
+                icon: Icons.chevron_left_rounded,
+                onPressed: onPrev,
               ),
-              onPressed: onPrev,
-              icon: const Icon(Icons.chevron_left_rounded),
-            ),
-            Expanded(
-              child: Semantics(
-                liveRegion: true,
-                label: caption == null ? title : '$caption, $title',
-                excludeSemantics: true,
-                child: Text(
-                  title,
-                  textAlign: TextAlign.center,
-                  style: AppType.headline,
+              Flexible(
+                child: Semantics(
+                  liveRegion: true,
+                  label: caption == null ? title : '$caption, $title',
+                  excludeSemantics: true,
+                  child: Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppType.body.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: cs.onSurface,
+                    ),
+                  ),
                 ),
               ),
-            ),
-            IconButton(
-              tooltip:
-                  canNext ? 'Next $unit' : 'Next $unit (this is the latest)',
-              constraints: const BoxConstraints(
-                minWidth: kMinTarget,
-                minHeight: kMinTarget,
+              _ArrowButton(
+                tooltip:
+                    canNext ? 'Next $unit' : 'Next $unit (this is the latest)',
+                icon: Icons.chevron_right_rounded,
+                onPressed: canNext ? onNext : null,
               ),
-              onPressed: canNext ? onNext : null,
-              icon: const Icon(Icons.chevron_right_rounded),
-            ),
-          ],
-        ),
-        Wrap(
-          spacing: AppSpace.sm,
-          runSpacing: AppSpace.xs,
-          children: <Widget>[
-            DrivingChoiceChip(
-              label: 'Week',
-              selected: period == 'week',
-              onTap: () => onPeriod('week'),
-              quiet: true,
-            ),
-            DrivingChoiceChip(
-              label: 'Month',
-              selected: period == 'month',
-              onTap: () => onPeriod('month'),
-              quiet: true,
-            ),
-          ],
-        ),
+            ],
+          );
+          final Widget toggle = _ModeToggle(period: period, onPeriod: onPeriod);
+          if (big) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                nav,
+                const SizedBox(height: AppSpace.sm),
+                toggle
+              ],
+            );
+          }
+          return Row(
+            children: <Widget>[
+              Expanded(
+                child: Align(alignment: Alignment.centerLeft, child: nav),
+              ),
+              const SizedBox(width: AppSpace.sm),
+              toggle,
+            ],
+          );
+        }),
       ],
     );
   }
+}
+
+/// Compact Week / Month switch.
+class _ModeToggle extends StatelessWidget {
+  const _ModeToggle({required this.period, required this.onPeriod});
+
+  final String period;
+  final ValueChanged<String> onPeriod;
+
+  @override
+  Widget build(BuildContext context) {
+    final BrandTheme brand = BrandTheme.of(context);
+    final ColorScheme cs = Theme.of(context).colorScheme;
+    Widget seg(String value, String label) {
+      final bool sel = period == value;
+      return Semantics(
+        button: true,
+        selected: sel,
+        label: label,
+        excludeSemantics: true,
+        onTap: () => onPeriod(value),
+        child: InkWell(
+          customBorder: const StadiumBorder(),
+          onTap: () => onPeriod(value),
+          child: Container(
+            height: kMinTarget,
+            padding: const EdgeInsets.symmetric(horizontal: 2),
+            alignment: Alignment.center,
+            child: Container(
+              height: 34,
+              padding: const EdgeInsets.symmetric(horizontal: AppSpace.lg),
+              alignment: Alignment.center,
+              decoration: ShapeDecoration(
+                shape: StadiumBorder(
+                  side: sel
+                      ? BorderSide.none
+                      : BorderSide(color: cs.outlineVariant),
+                ),
+                color: sel ? brand.accent : Colors.transparent,
+              ),
+              child: Text(
+                label,
+                style: AppType.body.copyWith(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: sel ? brand.onAccent : cs.onSurface,
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[seg('week', 'Week'), seg('month', 'Month')],
+    );
+  }
+}
+
+class _ArrowButton extends StatelessWidget {
+  const _ArrowButton({
+    required this.tooltip,
+    required this.icon,
+    required this.onPressed,
+  });
+
+  final String tooltip;
+  final IconData icon;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) => IconButton(
+        tooltip: tooltip,
+        visualDensity: VisualDensity.compact,
+        constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+        padding: EdgeInsets.zero,
+        onPressed: onPressed,
+        icon: Icon(icon),
+      );
 }
 
 /// Pill chip with a 48dp target.
@@ -371,10 +472,10 @@ class DrivingChoiceChip extends StatelessWidget {
           customBorder: const StadiumBorder(),
           onTap: onTap,
           child: ConstrainedBox(
-            constraints: const BoxConstraints(minHeight: kMinTarget),
+            constraints: const BoxConstraints(minHeight: 40),
             child: Padding(
               padding: EdgeInsets.symmetric(
-                horizontal: quiet ? AppSpace.md : AppSpace.xl,
+                horizontal: quiet ? AppSpace.md : AppSpace.lg,
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
@@ -471,21 +572,21 @@ class DrivingDaysChart extends StatelessWidget {
     final int total = days.fold<int>(0, (int a, ReportDay d) => a + d.drives);
 
     Widget gridLine(double frac, String label) => Positioned(
-      left: 0,
-      right: 0,
-      bottom: frac * plotHeight,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          Text(label, style: small),
-          Container(
-            height: 1,
-            color: cs.outlineVariant.withValues(alpha: 0.5),
+          left: 0,
+          right: 0,
+          bottom: frac * plotHeight,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Text(label, style: small),
+              Container(
+                height: 1,
+                color: cs.outlineVariant.withValues(alpha: 0.5),
+              ),
+            ],
           ),
-        ],
-      ),
-    );
+        );
 
     return Container(
       padding: const EdgeInsets.all(AppSpace.lg),
@@ -606,11 +707,11 @@ class _Bar extends StatelessWidget {
   Widget build(BuildContext context) {
     final ColorScheme cs = Theme.of(context).colorScheme;
     final String drives = day.drives == 1 ? '1 drive' : '${day.drives} drives';
-    final String sem =
-        '${dayText(day.date)}${isToday ? ', today' : ''}: '
+    final String sem = '${dayText(day.date)}${isToday ? ', today' : ''}: '
         '${day.drives == 0 ? 'no drives' : '${units.formatDistance(day.distanceM)}, $drives'}'
         '${isSelected ? ', selected' : ''}';
-    final bool narrow = label.length < 3 && MediaQuery.sizeOf(context).width < 900;
+    final bool narrow =
+        label.length < 3 && MediaQuery.sizeOf(context).width < 900;
     return Semantics(
       button: true,
       selected: isSelected,
@@ -657,10 +758,13 @@ class _Bar extends StatelessWidget {
                     Positioned(
                       left: -8,
                       right: -8,
-                      bottom: frac.clamp(0.05, 1.0) * DrivingDaysChart.plotHeight + 2,
+                      bottom:
+                          frac.clamp(0.05, 1.0) * DrivingDaysChart.plotHeight +
+                              2,
                       child: Text(
                         barValueLabel(value),
-                        key: ValueKey<String>('bar-value-${day.date.toIso8601String()}'),
+                        key: ValueKey<String>(
+                            'bar-value-${day.date.toIso8601String()}'),
                         textAlign: TextAlign.center,
                         maxLines: 1,
                         style: AppType.secondary.copyWith(
@@ -680,12 +784,10 @@ class _Bar extends StatelessWidget {
               overflow: TextOverflow.clip,
               style: AppType.secondary.copyWith(
                 fontSize: 11,
-                fontWeight: isToday || isSelected
-                    ? FontWeight.w800
-                    : FontWeight.w500,
-                color: isToday || isSelected
-                    ? cs.onSurface
-                    : cs.onSurfaceVariant,
+                fontWeight:
+                    isToday || isSelected ? FontWeight.w800 : FontWeight.w500,
+                color:
+                    isToday || isSelected ? cs.onSurface : cs.onSurfaceVariant,
                 decoration:
                     isToday ? TextDecoration.underline : TextDecoration.none,
               ),
@@ -750,8 +852,7 @@ class RecentDriveTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final ColorScheme cs = Theme.of(context).colorScheme;
     final String when = driveWhen(context, trip.startedAt, now);
-    final String facts =
-        '${units.formatDistance(trip.distanceM)} · '
+    final String facts = '${units.formatDistance(trip.distanceM)} · '
         '${formatTripDuration(trip.duration)} · '
         'top ${units.formatSpeed(trip.maxSpeedMps)}';
     final List<Widget> badges = _badges();
@@ -897,9 +998,9 @@ class DrivingHint extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Text(
-    text,
-    style: AppType.secondary.copyWith(
-      color: Theme.of(context).colorScheme.onSurfaceVariant,
-    ),
-  );
+        text,
+        style: AppType.secondary.copyWith(
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+        ),
+      );
 }

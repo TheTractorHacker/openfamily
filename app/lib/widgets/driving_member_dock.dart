@@ -4,8 +4,9 @@ import '../models/member.dart';
 import '../theme/app_theme.dart';
 import 'member_avatar_bubble.dart';
 
-/// Overlapping member avatars floating at the bottom of the Driving page.
-/// Tapping one opens that member's trips.
+/// Overlapping member avatars in a slim strip below the Driving page's scroll
+/// view (in flow, so it never covers a card). Tapping one opens that member's
+/// trips.
 class DrivingMemberDock extends StatelessWidget {
   const DrivingMemberDock({
     super.key,
@@ -25,7 +26,19 @@ class DrivingMemberDock extends StatelessWidget {
     final Color ring = BrandTheme.of(context).sheet;
     final List<Member> shown = members.take(6).toList();
     final double width = _slot + (shown.length - 1) * _step;
-    return SizedBox(
+    final ColorScheme cs = Theme.of(context).colorScheme;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpace.gutter,
+        vertical: AppSpace.xs,
+      ),
+      decoration: BoxDecoration(
+        color: BrandTheme.of(context).sheet,
+        border: Border(top: BorderSide(color: cs.outlineVariant)),
+      ),
+      child: Row(children: <Widget>[
+        SizedBox(
       width: width,
       height: _slot,
       child: Stack(
@@ -65,6 +78,15 @@ class DrivingMemberDock extends StatelessWidget {
             ),
         ],
       ),
+        ),
+        const SizedBox(width: AppSpace.md),
+        Expanded(
+          child: Text(
+            'Open a driver',
+            style: AppType.secondary.copyWith(color: cs.onSurfaceVariant),
+          ),
+        ),
+      ]),
     );
   }
 }
