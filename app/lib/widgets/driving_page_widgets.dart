@@ -8,14 +8,34 @@ import 'driving_event_chips.dart';
 import 'ds/ds.dart';
 import 'member_avatar_bubble.dart';
 
-BoxDecoration _cardBox(BuildContext context) {
+/// Corner radius of the big rounded cards on the Driving pages.
+const double kDriveCardRadius = 28;
+
+/// Soft elevated card used across the Driving area: large radius, a faint
+/// shadow in light theme and a hairline border in dark theme.
+BoxDecoration driveCardDecoration(
+  BuildContext context, {
+  double radius = kDriveCardRadius,
+}) {
   final ColorScheme cs = Theme.of(context).colorScheme;
+  final bool dark = Theme.of(context).brightness == Brightness.dark;
   return BoxDecoration(
     color: BrandTheme.of(context).sheet,
-    borderRadius: BorderRadius.circular(AppRadius.lg),
-    border: Border.all(color: cs.outlineVariant),
+    borderRadius: BorderRadius.circular(radius),
+    border: dark ? Border.all(color: cs.outlineVariant) : null,
+    boxShadow: dark
+        ? null
+        : <BoxShadow>[
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.07),
+              blurRadius: 18,
+              offset: const Offset(0, 6),
+            ),
+          ],
   );
 }
+
+BoxDecoration _cardBox(BuildContext context) => driveCardDecoration(context);
 
 // ---------------------------------------------------------------------------
 // Times and numbers
@@ -176,8 +196,10 @@ class _NowRow extends StatelessWidget {
 // Period navigation
 // ---------------------------------------------------------------------------
 
-/// Week / Month toggle, previous / next arrows, the period label and
-/// "Pick a week". [canNext] is false at the current period.
+/// Horizontally scrolling period pills ("This week", "Last week" and a
+/// date-range pill that opens the calendar), plus a Week / Month switch and
+/// previous / next arrows around the selected range. [canNext] is false at
+/// the current period.
 class DrivingPeriodBar extends StatelessWidget {
   const DrivingPeriodBar({
     super.key,
@@ -189,12 +211,16 @@ class DrivingPeriodBar extends StatelessWidget {
     required this.onPrev,
     required this.onNext,
     required this.onPick,
+    this.onThis,
+    this.onLast,
   });
 
   final String period;
+
+  /// The selected range, e.g. "Oct 19 – Oct 25".
   final String title;
 
-  /// "This week" / "Last week" / null.
+  /// "This week" / "Last week" / null (a custom range is selected).
   final String? caption;
   final bool canNext;
   final ValueChanged<String> onPeriod;
@@ -202,35 +228,43 @@ class DrivingPeriodBar extends StatelessWidget {
   final VoidCallback onNext;
   final VoidCallback onPick;
 
+  /// Jump to the current / previous period. Fall back to prev/next when null.
+  final VoidCallback? onThis;
+  final VoidCallback? onLast;
+
   @override
   Widget build(BuildContext context) {
-    final ColorScheme cs = Theme.of(context).colorScheme;
     final String unit = period == 'month' ? 'month' : 'week';
+    final bool custom = caption == null;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
-        Wrap(
-          spacing: AppSpace.sm,
-          runSpacing: AppSpace.sm,
-          children: <Widget>[
-            DrivingChoiceChip(
-              label: 'Week',
-              selected: period == 'week',
-              onTap: () => onPeriod('week'),
-            ),
-            DrivingChoiceChip(
-              label: 'Month',
-              selected: period == 'month',
-              onTap: () => onPeriod('month'),
-            ),
-            DrivingChoiceChip(
-              label: period == 'month' ? 'Pick a month' : 'Pick a week',
-              icon: Icons.calendar_month_outlined,
-              selected: false,
-              semanticLabel: 'Pick a $unit from the calendar',
-              onTap: onPick,
-            ),
-          ],
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          clipBehavior: Clip.none,
+          child: Row(
+            children: <Widget>[
+              DrivingChoiceChip(
+                label: 'This $unit',
+                selected: caption == 'This $unit',
+                onTap: onThis ?? () {},
+              ),
+              const SizedBox(width: AppSpace.sm),
+              DrivingChoiceChip(
+                label: 'Last $unit',
+                selected: caption == 'Last $unit',
+                onTap: onLast ?? onPrev,
+              ),
+              const SizedBox(width: AppSpace.sm),
+              DrivingChoiceChip(
+                label: custom ? title : 'Pick a $unit',
+                icon: Icons.calendar_month_outlined,
+                selected: custom,
+                semanticLabel: 'Pick a $unit from the calendar',
+                onTap: onPick,
+              ),
+            ],
+          ),
         ),
         const SizedBox(height: AppSpace.sm),
         Row(
@@ -249,32 +283,40 @@ class DrivingPeriodBar extends StatelessWidget {
                 liveRegion: true,
                 label: caption == null ? title : '$caption, $title',
                 excludeSemantics: true,
-                child: Column(
-                  children: <Widget>[
-                    Text(
-                      title,
-                      textAlign: TextAlign.center,
-                      style: AppType.headline,
-                    ),
-                    if (caption != null)
-                      Text(
-                        caption!,
-                        textAlign: TextAlign.center,
-                        style: AppType.secondary
-                            .copyWith(color: cs.onSurfaceVariant),
-                      ),
-                  ],
+                child: Text(
+                  title,
+                  textAlign: TextAlign.center,
+                  style: AppType.headline,
                 ),
               ),
             ),
             IconButton(
-              tooltip: canNext ? 'Next $unit' : 'Next $unit (this is the latest)',
+              tooltip:
+                  canNext ? 'Next $unit' : 'Next $unit (this is the latest)',
               constraints: const BoxConstraints(
                 minWidth: kMinTarget,
                 minHeight: kMinTarget,
               ),
               onPressed: canNext ? onNext : null,
               icon: const Icon(Icons.chevron_right_rounded),
+            ),
+          ],
+        ),
+        Wrap(
+          spacing: AppSpace.sm,
+          runSpacing: AppSpace.xs,
+          children: <Widget>[
+            DrivingChoiceChip(
+              label: 'Week',
+              selected: period == 'week',
+              onTap: () => onPeriod('week'),
+              quiet: true,
+            ),
+            DrivingChoiceChip(
+              label: 'Month',
+              selected: period == 'month',
+              onTap: () => onPeriod('month'),
+              quiet: true,
             ),
           ],
         ),
@@ -292,8 +334,11 @@ class DrivingChoiceChip extends StatelessWidget {
     required this.onTap,
     this.icon,
     this.semanticLabel,
+    this.quiet = false,
   });
 
+  /// Smaller, flat variant for secondary switches (Week / Month).
+  final bool quiet;
   final String label;
   final bool selected;
   final VoidCallback onTap;
@@ -312,9 +357,15 @@ class DrivingChoiceChip extends StatelessWidget {
       excludeSemantics: true,
       onTap: onTap,
       child: Material(
-        color: selected ? brand.accent : brand.sheet,
+        color: selected
+            ? brand.accent
+            : (quiet ? Colors.transparent : cs.surfaceContainerHighest),
+        elevation: selected && !quiet ? 3 : 0,
+        shadowColor: brand.accent.withValues(alpha: 0.45),
         shape: StadiumBorder(
-          side: selected ? BorderSide.none : BorderSide(color: cs.outlineVariant),
+          side: quiet && !selected
+              ? BorderSide(color: cs.outlineVariant)
+              : BorderSide.none,
         ),
         child: InkWell(
           customBorder: const StadiumBorder(),
@@ -322,7 +373,9 @@ class DrivingChoiceChip extends StatelessWidget {
           child: ConstrainedBox(
             constraints: const BoxConstraints(minHeight: kMinTarget),
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: AppSpace.lg),
+              padding: EdgeInsets.symmetric(
+                horizontal: quiet ? AppSpace.md : AppSpace.xl,
+              ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
@@ -335,6 +388,7 @@ class DrivingChoiceChip extends StatelessWidget {
                       label,
                       style: AppType.body.copyWith(
                         fontWeight: FontWeight.w700,
+                        fontSize: quiet ? 13 : 15,
                         color: fg,
                       ),
                     ),

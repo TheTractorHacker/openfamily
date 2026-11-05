@@ -94,7 +94,7 @@ void main() {
   testWidgets('shows loading skeleton, then the report', (WidgetTester t) async {
     final FakeTripReportApi api = FakeTripReportApi();
     await _pump(t, api);
-    expect(find.text('Driving'), findsOneWidget);
+    expect(find.text('Weekly Driving Report'), findsOneWidget);
     expect(find.text('Blake', skipOffstage: false), findsOneWidget);
     expect(find.text('You'), findsOneWidget, reason: 'self is labelled You');
     expect(find.text('84 mph'), findsOneWidget);
@@ -206,7 +206,9 @@ void main() {
     await t.pump();
     expect(api.calls.last.$1, DateTime(2026, 10, 19));
     expect(find.text('Last week'), findsOneWidget);
-    await t.tap(find.text('Pick a week'));
+    await t.ensureVisible(find.byIcon(Icons.calendar_month_outlined));
+    await t.pump();
+    await t.tap(find.byIcon(Icons.calendar_month_outlined));
     await t.pump();
     await t.pump();
     expect(api.calls.last.$1, DateTime(2026, 10, 12));
@@ -232,6 +234,59 @@ void main() {
     await t.pump();
     expect(api.periods.last, 'week');
     expect(api.calls.last.$1, DateTime(2026, 8, 31));
+  });
+
+  testWidgets('This week / Last week pills jump between periods',
+      (WidgetTester t) async {
+    final FakeTripReportApi api = FakeTripReportApi();
+    await _pump(t, api);
+    await t.tap(find.text('Last week'));
+    await t.pump();
+    await t.pump();
+    expect(api.calls.last.$1, DateTime(2026, 10, 19));
+    await t.tap(find.text('This week'));
+    await t.pump();
+    await t.pump();
+    expect(api.calls.last.$1, DateTime(2026, 10, 26));
+  });
+
+  for (final bool dark in <bool>[false, true]) {
+    testWidgets('lays out at 320dp wide without overflow (dark=$dark)',
+        (WidgetTester t) async {
+      t.view.physicalSize = const Size(320, 2400);
+      t.view.devicePixelRatio = 1;
+      addTearDown(t.view.reset);
+      await t.pumpWidget(
+        MaterialApp(
+          theme: dark ? buildDarkTheme() : buildLightTheme(),
+          home: FamilyDrivingReportScreen(
+            members: ValueNotifier<List<Member>>(<Member>[_blake, _brian]),
+            userId: ValueNotifier<String?>('u2'),
+            api: FakeTripReportApi(),
+            tripsApi: FakeTrips(),
+            clock: () => _now,
+          ),
+        ),
+      );
+      await t.pump();
+      await t.pump();
+      expect(t.takeException(), isNull);
+      expect(find.text('Speeding'), findsOneWidget);
+      expect(find.text('Total mi'), findsOneWidget);
+      // The four chips share one row.
+      final double y = t.getTopLeft(find.text('Speeding')).dy;
+      for (final String l in <String>['Phone use', 'Hard braking']) {
+        expect(t.getTopLeft(find.text(l)).dy, closeTo(y, 14));
+      }
+    });
+  }
+
+  testWidgets('floating member dock opens that member\'s trips',
+      (WidgetTester t) async {
+    await _pump(t, FakeTripReportApi());
+    await t.tap(find.bySemanticsLabel('Open Blake driving'));
+    await t.pumpAndSettle();
+    expect(find.byType(TripsScreen), findsOneWidget);
   });
 
   testWidgets('uses the selected circle and reloads when it changes', (WidgetTester t) async {
@@ -327,7 +382,8 @@ void main() {
   testWidgets('works at 200% text without overflow', (WidgetTester t) async {
     await _pump(t, FakeTripReportApi(), scale: 2);
     expect(t.takeException(), isNull);
-    await t.scrollUntilVisible(find.text('Blake'), 300);
+    await t.scrollUntilVisible(find.text('Blake'), 300,
+        scrollable: find.byType(Scrollable).first);
     expect(t.takeException(), isNull);
     expect(find.text('Blake'), findsOneWidget);
   });

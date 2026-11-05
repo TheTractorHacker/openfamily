@@ -1,3 +1,4 @@
+import '../widgets/driving_page_widgets.dart' show driveCardDecoration;
 import 'package:flutter/material.dart';
 
 import '../models/member.dart';
@@ -265,7 +266,6 @@ class _ReportPeriodViewState extends State<ReportPeriodView>
     }
     final UnitSystem u = widget.units;
     final DrivingStats d = s.driving;
-    final BrandTheme brand = BrandTheme.of(context);
     final ColorScheme cs = Theme.of(context).colorScheme;
     final MaterialLocalizations loc = MaterialLocalizations.of(context);
     final String range = widget.period == 'day'
@@ -309,10 +309,7 @@ class _ReportPeriodViewState extends State<ReportPeriodView>
           ),
         Container(
           padding: const EdgeInsets.all(AppSpace.lg),
-          decoration: BoxDecoration(
-            color: brand.sheet,
-            borderRadius: BorderRadius.circular(AppRadius.lg),
-          ),
+          decoration: driveCardDecoration(context),
           child: Wrap(
             spacing: AppSpace.xxl,
             runSpacing: AppSpace.lg,

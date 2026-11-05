@@ -86,8 +86,6 @@ class DrivingEventSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ColorScheme cs = Theme.of(context).colorScheme;
-    final bool dark = Theme.of(context).brightness == Brightness.dark;
-    final Color tint = eventColor(kind);
     final int? count = report.totals.events.of(kind);
     final List<MemberReport> who = report.membersWith(kind);
     final bool brakeOrAccel =
@@ -104,21 +102,7 @@ class DrivingEventSheet extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             Center(
-              child: Container(
-                width: 64,
-                height: 64,
-                decoration: BoxDecoration(
-                  color: tint.withValues(alpha: dark ? 0.28 : 0.16),
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(
-                  eventIcon(kind),
-                  size: 32,
-                  color: dark
-                      ? Color.lerp(tint, Colors.white, 0.45)
-                      : Color.lerp(tint, Colors.black, 0.35),
-                ),
-              ),
+              child: EventIconDisc(kind: kind, size: 64),
             ),
             const SizedBox(height: AppSpace.md),
             Center(

@@ -1,3 +1,4 @@
+import 'driving_page_widgets.dart' show driveCardDecoration;
 import 'package:flutter/material.dart';
 
 import '../models/trip.dart';
@@ -139,17 +140,17 @@ class TripCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final BrandTheme brand = BrandTheme.of(context);
     final ColorScheme cs = Theme.of(context).colorScheme;
     return Semantics(
       button: true,
       label: tripSemanticLabel(context, trip, units),
       excludeSemantics: true,
       child: Material(
-        color: brand.sheet,
-        borderRadius: BorderRadius.circular(AppRadius.lg),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(AppRadius.lg),
+        color: Colors.transparent,
+        child: Ink(
+          decoration: driveCardDecoration(context, radius: 24),
+          child: InkWell(
+          borderRadius: BorderRadius.circular(24),
           onTap: onTap,
           child: ConstrainedBox(
             constraints: const BoxConstraints(minHeight: kMinTarget),
@@ -198,6 +199,7 @@ class TripCard extends StatelessWidget {
               ),
             ),
           ),
+        ),
         ),
       ),
     );

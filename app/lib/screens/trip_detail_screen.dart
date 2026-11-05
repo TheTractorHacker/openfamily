@@ -1,3 +1,4 @@
+import '../widgets/driving_page_widgets.dart' show driveCardDecoration;
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -137,13 +138,9 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
   }
 
   Widget _summary(BuildContext context, Trip t, UnitSystem units) {
-    final BrandTheme brand = BrandTheme.of(context);
     return Container(
       padding: const EdgeInsets.all(AppSpace.lg),
-      decoration: BoxDecoration(
-        color: brand.sheet,
-        borderRadius: BorderRadius.circular(AppRadius.lg),
-      ),
+      decoration: driveCardDecoration(context),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
@@ -245,7 +242,7 @@ extension on _TripDetailScreenState {
                 ', estimated from GPS',
             child: Row(
               children: <Widget>[
-                Icon(eventIcon(e.kind), size: 20, color: eventColor(e.kind)),
+                EventIconDisc(kind: e.kind, size: 28),
                 const SizedBox(width: AppSpace.sm),
                 Expanded(
                   child: Text(
