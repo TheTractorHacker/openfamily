@@ -36,6 +36,26 @@ class MainActivity : FlutterFragmentActivity() {
             }
         }
         linkChannel = channel
+
+        // Home-screen widget snapshot store. Never throws into Dart.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "app.openfamily/widget")
+            .setMethodCallHandler { call, result ->
+                try {
+                    when (call.method) {
+                        "write" -> result.success(
+                            FamilyWidgetProvider.write(applicationContext, call.arguments as? String ?: "")
+                        )
+                        "clear" -> {
+                            FamilyWidgetProvider.clear(applicationContext)
+                            result.success(null)
+                        }
+                        "hasWidgets" -> result.success(FamilyWidgetProvider.hasWidgets(applicationContext))
+                        else -> result.notImplemented()
+                    }
+                } catch (_: Throwable) {
+                    result.success(false)
+                }
+            }
     }
 
     // singleTop: a link opened while the app is running arrives here.

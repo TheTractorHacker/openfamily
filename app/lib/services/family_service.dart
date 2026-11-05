@@ -19,6 +19,7 @@ import 'perf/perf_monitor.dart';
 import 'place_service.dart';
 import 'server_config.dart';
 import 'token_storage.dart';
+import 'widget_snapshot.dart';
 
 /// The caller's family summary from `GET /family`.
 class FamilyInfo {
@@ -106,6 +107,7 @@ class FamilyService {
     _coalesceTimer?.cancel();
     _coalesceTimer = null;
     PerfMonitor.instance.recordWsUiUpdate();
+    HomeWidgetService.update(_members);
     onMembersChanged?.call(_members);
   }
 
@@ -118,6 +120,7 @@ class FamilyService {
       return;
     }
     PerfMonitor.instance.recordWsUiUpdate();
+    HomeWidgetService.update(_members);
     onMembersChanged?.call(_members);
     _coalesceTimer = Timer(uiCoalesceWindow, _onCoalesceWindowEnd);
   }
@@ -127,6 +130,7 @@ class FamilyService {
     if (_disposed || !_coalescePending) return;
     _coalescePending = false;
     PerfMonitor.instance.recordWsUiUpdate();
+    HomeWidgetService.update(_members);
     onMembersChanged?.call(_members);
     _coalesceTimer = Timer(uiCoalesceWindow, _onCoalesceWindowEnd);
   }
