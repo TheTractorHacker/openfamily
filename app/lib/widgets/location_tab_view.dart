@@ -1012,7 +1012,7 @@ class _LocationTabViewState extends State<LocationTabView> {
                   DsListRow(
                     title: p.name,
                     subtitle: p.address.isEmpty
-                        ? '${p.radiusMeters.round()} m radius'
+                        ? '${p.radiusLabel} radius'
                         : p.address,
                     leading: DsListRow.iconTile(ctx, p.icon),
                     chevron: true,
