@@ -237,6 +237,8 @@ func main() {
 		r.Get("/me/quiet-hours", srv.GetQuietHours)
 		r.Put("/me/quiet-hours", srv.PutQuietHours)
 		r.Get("/members/{id}/place-alert-rules", srv.ListPlaceAlertRules)
+		r.Get("/members/{id}/place-alerts", srv.GetMemberPlaceAlerts)
+		r.Put("/members/{id}/place-alerts", srv.PutMemberPlaceAlerts)
 		r.Put("/members/{id}/place-alert-rules/{placeId}", srv.PutPlaceAlertRule)
 
 		// Account profile and avatar are deliberately private to the caller.

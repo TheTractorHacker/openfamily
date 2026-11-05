@@ -131,6 +131,7 @@ class Member {
     this.lastSeen,
     this.accuracyMeters,
     this.placePresence,
+    this.phone,
   }) : speedMps = speedMps ?? (speedMph == null ? null : speedMph / kMpsToMph);
 
   final String id;
@@ -214,6 +215,9 @@ class Member {
   /// null when the backend has none (no place history, or location hidden).
   final PlacePresence? placePresence;
 
+  /// Phone number, only sent by the server to circle admins; otherwise null.
+  final String? phone;
+
   /// Whether this member is driving fast enough to show as "speeding".
   bool get isSpeeding =>
       movement == MovementType.car && isSpeedingMps(speedMps);
@@ -274,6 +278,7 @@ class Member {
       lastSeen: lastSeen ?? this.lastSeen,
       accuracyMeters: accuracyMeters ?? this.accuracyMeters,
       placePresence: placePresence ?? this.placePresence,
+      phone: phone,
     );
   }
 
@@ -307,6 +312,7 @@ class Member {
       lastSeen: lastSeen,
       accuracyMeters: accuracyMeters,
       placePresence: placePresence,
+      phone: phone,
     );
   }
 }

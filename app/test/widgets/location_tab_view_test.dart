@@ -58,7 +58,6 @@ Widget _app({
         onToggleSatellite: () => c.log.add('layers'),
         onLocate: () => c.log.add('locate'),
         onSelectMember: (Member m) => c.log.add('select:${m.id}'),
-        onOpenMember: (Member m) => c.log.add('open:${m.id}'),
         onOpenCircle: (Circle x) => c.log.add('circle:${x.id}'),
         onManageCircles: () => c.log.add('manage'),
         onJoinCircle: () => c.log.add('join'),
@@ -173,7 +172,7 @@ void main() {
     expect(calls.log, contains('manage'));
   });
 
-  testWidgets('tapping a person selects them and reveals Details', (
+  testWidgets('tapping a person opens their full view with no extra tap', (
     tester,
   ) async {
     _phone(tester);
@@ -182,14 +181,12 @@ void main() {
     await tester.pump();
 
     await _expand(tester);
-    expect(find.text('Details and history'), findsNothing);
+    expect(find.byKey(const Key('person_name')), findsNothing);
     await tester.tap(find.text('Driving 42 mph'));
     await tester.pump();
     expect(calls.log, contains('select:u1'));
-    expect(find.text('Details and history'), findsOneWidget);
-
-    await tester.tap(find.text('Details and history'));
-    expect(calls.log, contains('open:u1'));
+    expect(find.text('Details and history'), findsNothing);
+    expect(find.byKey(const Key('person_name')), findsOneWidget);
   });
 
   testWidgets('own row says Location sharing paused when sharing is off', (

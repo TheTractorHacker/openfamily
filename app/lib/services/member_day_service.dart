@@ -39,9 +39,15 @@ class DayTrip {
 
 /// Everything the member detail "Today" timeline needs, newest trip first.
 class MemberDay {
-  const MemberDay({this.trips = const <DayTrip>[]});
+  const MemberDay({
+    this.trips = const <DayTrip>[],
+    this.places = const <HistoryVisit>[],
+  });
 
   final List<DayTrip> trips;
+
+  /// Saved places visited today, oldest first (empty when history failed).
+  final List<HistoryVisit> places;
 }
 
 typedef MemberDayLoader = Future<MemberDay> Function(Member member, DateTime now);
@@ -110,5 +116,10 @@ Future<MemberDay> loadMemberDay(
   final MemberHistory? h = await visitsF;
   return MemberDay(
     trips: h == null ? detailed : nameTripEndpoints(detailed, h.visits),
+    places: h == null
+        ? const <HistoryVisit>[]
+        : (h.visits.where((HistoryVisit v) => v.isPlace).toList()
+          ..sort((HistoryVisit a, HistoryVisit b) =>
+              a.arrivedAt.compareTo(b.arrivedAt))),
   );
 }
