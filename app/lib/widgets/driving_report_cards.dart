@@ -4,16 +4,16 @@ import '../models/member.dart';
 import '../models/trip_report.dart';
 import '../services/speed_units.dart';
 import '../theme/app_theme.dart';
+import 'driving_page_widgets.dart' show driveCardDecoration, kDriveCardRadius;
 import 'ds/ds.dart';
 import 'member_avatar_bubble.dart';
 
-BoxDecoration _card(BuildContext context) {
-  final ColorScheme cs = Theme.of(context).colorScheme;
-  return BoxDecoration(
-    color: BrandTheme.of(context).sheet,
-    borderRadius: BorderRadius.circular(AppRadius.lg),
-    border: Border.all(color: cs.outlineVariant),
-  );
+BoxDecoration _card(BuildContext context) => driveCardDecoration(context);
+
+/// "178" / "3.6": the distance without its unit, for the "Total mi" row.
+String _distanceNumber(UnitSystem units, double meters) {
+  final double v = units.distanceFromMeters(meters);
+  return v.toStringAsFixed(v < 10 ? 1 : 0);
 }
 
 /// Top speed (with who set it), drives and total distance.
@@ -41,7 +41,8 @@ class DrivingSummaryCards extends StatelessWidget {
     );
     final Widget stats = _StatsCard(
       drives: report.totals.drives,
-      distance: units.formatDistance(report.totals.distanceM),
+      distanceLabel: 'Total ${units.distanceLabel}',
+      distance: _distanceNumber(units, report.totals.distanceM),
     );
     if (big) {
       return Column(
@@ -87,7 +88,7 @@ class _TopSpeedCard extends StatelessWidget {
         child: Row(
           children: <Widget>[
             if (member != null) ...<Widget>[
-              StatusAvatar(member: member!, size: 44),
+              StatusAvatar(member: member!, size: 48),
               const SizedBox(width: AppSpace.md),
             ] else ...<Widget>[
               Icon(Icons.speed_rounded, size: 32, color: cs.onSurfaceVariant),
@@ -101,7 +102,14 @@ class _TopSpeedCard extends StatelessWidget {
                     'Top speed',
                     style: AppType.secondary.copyWith(color: cs.onSurfaceVariant),
                   ),
-                  Text(value, style: AppType.title),
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      value,
+                      style: AppType.title.copyWith(fontSize: 26),
+                    ),
+                  ),
                   Text(
                     'GPS speed',
                     style: AppType.secondary.copyWith(
@@ -120,10 +128,15 @@ class _TopSpeedCard extends StatelessWidget {
 }
 
 class _StatsCard extends StatelessWidget {
-  const _StatsCard({required this.drives, required this.distance});
+  const _StatsCard({
+    required this.drives,
+    required this.distance,
+    required this.distanceLabel,
+  });
 
   final int drives;
   final String distance;
+  final String distanceLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -140,7 +153,7 @@ class _StatsCard extends StatelessWidget {
               style: AppType.secondary.copyWith(color: cs.onSurfaceVariant),
             ),
           ),
-          Text(value, style: AppType.headline),
+          Text(value, style: AppType.title.copyWith(fontSize: 20)),
         ],
       ),
     );
@@ -152,7 +165,7 @@ class _StatsCard extends StatelessWidget {
         children: <Widget>[
           line('Drives', '$drives'),
           const SizedBox(height: AppSpace.md),
-          line('Total distance', distance),
+          line(distanceLabel, distance),
         ],
       ),
     );
@@ -211,48 +224,63 @@ class MemberDrivingCard extends StatelessWidget {
       excludeSemantics: true,
       onTap: onTap,
       child: Material(
-        color: BrandTheme.of(context).sheet,
-        borderRadius: BorderRadius.circular(AppRadius.lg),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(AppRadius.lg),
-          onTap: onTap,
-          child: Container(
-            constraints: const BoxConstraints(minHeight: 72),
-            padding: const EdgeInsets.all(AppSpace.lg),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(AppRadius.lg),
-              border: Border.all(color: cs.outlineVariant),
-            ),
-            child: Row(
-              children: <Widget>[
-                StatusAvatar(member: member, size: 52),
-                const SizedBox(width: AppSpace.lg),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      Text(displayName, style: AppType.headline),
-                      const SizedBox(height: AppSpace.xxs),
-                      Text(
-                        _summary,
-                        style: AppType.secondary.copyWith(
-                          color: cs.onSurfaceVariant,
+        color: Colors.transparent,
+        child: Ink(
+          decoration: driveCardDecoration(context),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(kDriveCardRadius),
+            onTap: onTap,
+            child: Container(
+              constraints: const BoxConstraints(minHeight: 96),
+              padding: const EdgeInsets.all(AppSpace.xl),
+              child: Row(
+                children: <Widget>[
+                  Container(
+                    padding: const EdgeInsets.all(3),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: BrandTheme.of(context).accent.withValues(
+                          alpha: report.drives > 0 ? 0.9 : 0.25,
                         ),
+                        width: 2.5,
                       ),
-                      if (report.drives > 0 && (report.topSpeedMps ?? 0) > 0)
+                    ),
+                    child: StatusAvatar(member: member, size: 56),
+                  ),
+                  const SizedBox(width: AppSpace.lg),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
                         Text(
-                          'Top speed ${units.formatSpeed(report.topSpeedMps!)} (GPS)',
+                          displayName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppType.title.copyWith(fontSize: 20),
+                        ),
+                        const SizedBox(height: AppSpace.xxs),
+                        Text(
+                          _summary,
                           style: AppType.secondary.copyWith(
                             color: cs.onSurfaceVariant,
                           ),
                         ),
-                      const SizedBox(height: AppSpace.sm),
-                      pill,
-                    ],
+                        if (report.drives > 0 && (report.topSpeedMps ?? 0) > 0)
+                          Text(
+                            'Top speed ${units.formatSpeed(report.topSpeedMps!)} (GPS)',
+                            style: AppType.secondary.copyWith(
+                              color: cs.onSurfaceVariant,
+                            ),
+                          ),
+                        const SizedBox(height: AppSpace.md),
+                        pill,
+                      ],
+                    ),
                   ),
-                ),
-                Icon(Icons.chevron_right, color: cs.onSurfaceVariant),
-              ],
+                  Icon(Icons.chevron_right_rounded, color: cs.onSurfaceVariant),
+                ],
+              ),
             ),
           ),
         ),
@@ -290,18 +318,15 @@ class _NoDrivesGroupState extends State<NoDrivesGroup> {
           excludeSemantics: true,
           onTap: () => setState(() => _open = !_open),
           child: Material(
-            color: BrandTheme.of(context).sheet,
-            borderRadius: BorderRadius.circular(AppRadius.lg),
-            child: InkWell(
-              borderRadius: BorderRadius.circular(AppRadius.lg),
-              onTap: () => setState(() => _open = !_open),
-              child: Container(
-                constraints: const BoxConstraints(minHeight: kMinTarget),
-                padding: const EdgeInsets.all(AppSpace.lg),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(AppRadius.lg),
-                  border: Border.all(color: cs.outlineVariant),
-                ),
+            color: Colors.transparent,
+            child: Ink(
+              decoration: driveCardDecoration(context),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(kDriveCardRadius),
+                onTap: () => setState(() => _open = !_open),
+                child: Container(
+                  constraints: const BoxConstraints(minHeight: kMinTarget),
+                  padding: const EdgeInsets.all(AppSpace.xl),
                 child: Row(
                   children: <Widget>[
                     Icon(Icons.hourglass_empty_rounded,
@@ -325,6 +350,7 @@ class _NoDrivesGroupState extends State<NoDrivesGroup> {
                       color: cs.onSurfaceVariant,
                     ),
                   ],
+                ),
                 ),
               ),
             ),
@@ -351,23 +377,23 @@ class DrivingReportSkeleton extends StatelessWidget {
         children: <Widget>[
           Row(
             children: <Widget>[
-              Expanded(child: DsSkeleton(height: 96, radius: AppRadius.lg)),
+              Expanded(child: DsSkeleton(height: 96, radius: kDriveCardRadius)),
               SizedBox(width: AppSpace.sm),
-              Expanded(child: DsSkeleton(height: 96, radius: AppRadius.lg)),
+              Expanded(child: DsSkeleton(height: 96, radius: kDriveCardRadius)),
               SizedBox(width: AppSpace.sm),
-              Expanded(child: DsSkeleton(height: 96, radius: AppRadius.lg)),
+              Expanded(child: DsSkeleton(height: 96, radius: kDriveCardRadius)),
               SizedBox(width: AppSpace.sm),
-              Expanded(child: DsSkeleton(height: 96, radius: AppRadius.lg)),
+              Expanded(child: DsSkeleton(height: 96, radius: kDriveCardRadius)),
             ],
           ),
           SizedBox(height: AppSpace.md),
-          DsSkeleton(height: 84, radius: AppRadius.lg),
+          DsSkeleton(height: 84, radius: kDriveCardRadius),
           SizedBox(height: AppSpace.lg),
-          DsSkeleton(height: 190, radius: AppRadius.lg),
+          DsSkeleton(height: 190, radius: kDriveCardRadius),
           SizedBox(height: AppSpace.lg),
-          DsSkeleton(height: 88, radius: AppRadius.lg),
+          DsSkeleton(height: 88, radius: kDriveCardRadius),
           SizedBox(height: AppSpace.md),
-          DsSkeleton(height: 88, radius: AppRadius.lg),
+          DsSkeleton(height: 88, radius: kDriveCardRadius),
         ],
       ),
     );

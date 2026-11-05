@@ -15,8 +15,10 @@ import '../widgets/driving_event_chips.dart';
 import '../widgets/driving_event_sheet.dart';
 import '../widgets/driving_page_widgets.dart';
 import '../widgets/driving_report_cards.dart';
+import '../widgets/driving_member_dock.dart';
 import '../widgets/ds/ds.dart';
 import 'driving_detection_screen.dart';
+import 'inbox_screen.dart';
 import 'trip_detail_screen.dart';
 import 'trips_screen.dart';
 import 'weekly_summary_screen.dart';
@@ -245,7 +247,8 @@ class _State extends State<FamilyDrivingReportScreen> {
         child: ValueListenableBuilder<UnitSystem>(
           valueListenable: UnitPreferenceService.units,
           builder: (BuildContext context, UnitSystem units, _) {
-            return RefreshIndicator(
+            return Stack(children: <Widget>[
+              Positioned.fill(child: RefreshIndicator(
               onRefresh: _load,
               child: Center(
                 child: ConstrainedBox(
@@ -259,7 +262,7 @@ class _State extends State<FamilyDrivingReportScreen> {
                       AppSpace.gutter,
                       AppSpace.lg,
                       AppSpace.gutter,
-                      AppSpace.xxxl,
+                      96,
                     ),
                     children: <Widget>[
                       if (!_disclosureSeen && _detectionOn == true) ...<Widget>[
@@ -282,32 +285,38 @@ class _State extends State<FamilyDrivingReportScreen> {
                       ],
                       Row(
                         children: <Widget>[
-                          Expanded(
-                            child: Semantics(
-                              header: true,
-                              child: Text(
-                                'Driving',
-                                style: AppType.title.copyWith(fontSize: 28),
+                          Expanded(child: Align(
+                            alignment: Alignment.centerLeft,
+                            child: ActionChip(
+                            key: const ValueKey<String>('weekly-summary-link'),
+                            avatar: const Icon(Icons.insights_outlined, size: 18),
+                            label: const Text(
+                              'Weekly summary',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            side: BorderSide.none,
+                            backgroundColor:
+                                Theme.of(context).colorScheme.surfaceContainerHighest,
+                            onPressed: () => Navigator.of(context).push(
+                              MaterialPageRoute<void>(
+                                builder: (_) => WeeklySummaryScreen(
+                                    selfId: widget.userId.value),
                               ),
                             ),
                           ),
-                          const UnitToggleButton(),
-                        ],
-                      ),
-                      const SizedBox(height: AppSpace.sm),
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: ActionChip(
-                          key: const ValueKey<String>('weekly-summary-link'),
-                          avatar: const Icon(Icons.insights_outlined, size: 18),
-                          label: const Text('Weekly summary'),
-                          onPressed: () => Navigator.of(context).push(
-                            MaterialPageRoute<void>(
-                              builder: (_) => WeeklySummaryScreen(
-                                  selfId: widget.userId.value),
+                          )),
+                          IconButton(
+                            key: const ValueKey<String>('driving-inbox'),
+                            tooltip: 'Inbox',
+                            icon: const Icon(Icons.mail_outline_rounded),
+                            onPressed: () => Navigator.of(context).push(
+                              MaterialPageRoute<void>(
+                                builder: (_) => const InboxScreen(),
+                              ),
                             ),
                           ),
-                        ),
+                        ],
                       ),
                       const SizedBox(height: AppSpace.sm),
                       DrivingPeriodBar(
@@ -322,7 +331,29 @@ class _State extends State<FamilyDrivingReportScreen> {
                             _goTo(_period, shiftPeriod(_period, _anchor, -1)),
                         onNext: () =>
                             _goTo(_period, shiftPeriod(_period, _anchor, 1)),
+                        onThis: () => _goTo(_period, _now),
+                        onLast: () => _goTo(
+                          _period,
+                          shiftPeriod(_period, periodStartOf(_period, _now), -1),
+                        ),
                         onPick: _pickDate,
+                      ),
+                      Semantics(
+                        header: true,
+                        child: Padding(
+                          padding: const EdgeInsets.only(bottom: AppSpace.lg),
+                          child: Text(
+                            _period == 'month'
+                                ? 'Monthly Driving Report'
+                                : 'Weekly Driving Report',
+                            style: AppType.title.copyWith(
+                              fontSize: 30,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: -0.6,
+                              height: 1.1,
+                            ),
+                          ),
+                        ),
                       ),
                       const SizedBox(height: AppSpace.md),
                       ValueListenableBuilder<List<Member>>(
@@ -347,7 +378,20 @@ class _State extends State<FamilyDrivingReportScreen> {
                   ),
                 ),
               ),
-            );
+              )),
+              if (_report != null && _report!.members.length > 1)
+                Positioned(
+                  left: AppSpace.gutter,
+                  bottom: AppSpace.md,
+                  child: DrivingMemberDock(
+                    members: <Member>[
+                      for (final MemberReport m in _report!.members)
+                        _memberFor(m.userId, m.name),
+                    ],
+                    onTap: _openMember,
+                  ),
+                ),
+            ]);
           },
         ),
       ),
@@ -507,6 +551,25 @@ class _State extends State<FamilyDrivingReportScreen> {
           topSpeedMember: topM == null ? null : _memberFor(topM.userId, topM.name),
         ),
         const SizedBox(height: AppSpace.lg),
+        Semantics(
+          header: true,
+          child: Text(
+            sorted.length == 1 ? 'Driver' : 'Drivers',
+            style: AppType.headline,
+          ),
+        ),
+        const SizedBox(height: AppSpace.sm),
+        for (final MemberReport m in active)
+          Padding(
+            padding: const EdgeInsets.only(bottom: AppSpace.md),
+            child: card(m),
+          ),
+        if (idle.isNotEmpty)
+          NoDrivesGroup(
+            names: idle.map(_nameOf).toList(),
+            children: idle.map(card).toList(),
+          ),
+        const SizedBox(height: AppSpace.lg),
         if (r.days.isNotEmpty) ...<Widget>[
           DrivingDaysChart(
             days: r.days,
@@ -558,24 +621,6 @@ class _State extends State<FamilyDrivingReportScreen> {
             ),
           const SizedBox(height: AppSpace.sm),
         ],
-        Semantics(
-          header: true,
-          child: Text(
-            sorted.length == 1 ? 'Driver' : 'Drivers',
-            style: AppType.headline,
-          ),
-        ),
-        const SizedBox(height: AppSpace.sm),
-        for (final MemberReport m in active)
-          Padding(
-            padding: const EdgeInsets.only(bottom: AppSpace.md),
-            child: card(m),
-          ),
-        if (idle.isNotEmpty)
-          NoDrivesGroup(
-            names: idle.map(_nameOf).toList(),
-            children: idle.map(card).toList(),
-          ),
         if (r.gpsOnly)
           const Padding(
             padding: EdgeInsets.only(top: AppSpace.md),

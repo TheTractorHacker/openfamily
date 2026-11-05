@@ -1,3 +1,4 @@
+import '../widgets/driving_page_widgets.dart' show driveCardDecoration;
 import 'package:flutter/material.dart';
 
 import '../models/member.dart';
@@ -7,7 +8,6 @@ import '../services/trips_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/ds/ds.dart';
 import '../widgets/trip_widgets.dart';
-import 'trips_screen.dart' show UnitToggleButton;
 
 const List<String> kReportPeriods = <String>['day', 'week', 'month'];
 
@@ -54,7 +54,6 @@ class _DrivingReportScreenState extends State<DrivingReportScreen> {
       child: Scaffold(
         appBar: AppBar(
           title: Text('${widget.member.name}\'s driving'),
-          actions: const <Widget>[UnitToggleButton()],
           bottom: const TabBar(
             tabs: <Widget>[
               Tab(text: 'Day'),
@@ -265,7 +264,6 @@ class _ReportPeriodViewState extends State<ReportPeriodView>
     }
     final UnitSystem u = widget.units;
     final DrivingStats d = s.driving;
-    final BrandTheme brand = BrandTheme.of(context);
     final ColorScheme cs = Theme.of(context).colorScheme;
     final MaterialLocalizations loc = MaterialLocalizations.of(context);
     final String range = widget.period == 'day'
@@ -309,10 +307,7 @@ class _ReportPeriodViewState extends State<ReportPeriodView>
           ),
         Container(
           padding: const EdgeInsets.all(AppSpace.lg),
-          decoration: BoxDecoration(
-            color: brand.sheet,
-            borderRadius: BorderRadius.circular(AppRadius.lg),
-          ),
+          decoration: driveCardDecoration(context),
           child: Wrap(
             spacing: AppSpace.xxl,
             runSpacing: AppSpace.lg,
