@@ -272,9 +272,10 @@ func (s *Server) notifyBubbleSubject(subjectID, creatorName string, until time.T
 			loc, label = l, ""
 		}
 	}
-	title := s.pushName(creatorName) + " created a Bubble around you"
-	body := title + " until " + until.In(loc).Format("15:04") + label
-	s.pushUsers(ctx, []string{subjectID}, title, body)
+	s.pushUsersRender(ctx, []string{subjectID}, func(rc pushRecipient) (string, string) {
+		title := nameIf(rc.Show, creatorName) + " created a Bubble around you"
+		return title, title + " until " + until.In(loc).Format("15:04") + label
+	})
 }
 
 // haversineM is the great-circle distance in metres.
@@ -366,8 +367,10 @@ func (s *Server) alertBubble(ctx context.Context, bubbleID, creatorID, subjectID
 		s.recordBubbleEvent(creatorID, subjectID, bubbleID, alertBubbleLeft, name)
 	}
 	if s.Push != nil {
-		title := s.pushName(name) + " " + event + " their Bubble"
-		s.pushUsers(ctx, []string{creatorID}, title, title)
+		s.pushUsersRender(ctx, []string{creatorID}, func(rc pushRecipient) (string, string) {
+			t := nameIf(rc.Show, name) + " " + event + " their Bubble"
+			return t, t
+		})
 	}
 }
 

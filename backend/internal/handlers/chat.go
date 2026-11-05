@@ -302,17 +302,7 @@ func (s *Server) pushChatMessage(ctx context.Context, msg chatMessageOut) {
 		slog.Warn("chat push: load circle", "err", err)
 		return
 	}
-	title, body := "New message in "+circleName, ""
-	if s.VerbosePush {
-		switch {
-		case msg.HasImage && msg.Body == "":
-			title, body = msg.SenderName+" sent a photo", circleName
-		case msg.HasImage:
-			title, body = msg.SenderName+" sent a photo", truncateRunes(msg.Body, chatPushPreview)
-		default:
-			body = msg.SenderName + ": " + truncateRunes(msg.Body, chatPushPreview)
-		}
-	}
+	dir := s.recipients(ctx)
 	// Recipients who muted the sender (per-member notification settings) get
 	// no chat push.
 	muted := map[string]bool{}
@@ -348,6 +338,7 @@ func (s *Server) pushChatMessage(ctx context.Context, msg chatMessageOut) {
 		if muted[uid] {
 			continue
 		}
+		title, body := chatPushCopy(dir.For(uid).Show, circleName, msg)
 		n := push.Notification{
 			Title: title, Body: body, Platform: platform,
 			PushToken: derefOrEmpty(token), UnifiedPushEndpoint: derefOrEmpty(endpoint),
@@ -363,6 +354,23 @@ func (s *Server) pushChatMessage(ctx context.Context, msg chatMessageOut) {
 			slog.Warn("chat push: dispatch failed", "err", err)
 		}
 	}
+}
+
+// chatPushCopy is the push copy for one recipient: just the circle name unless
+// they opted in to names (or VERBOSE_PUSH), in which case it also carries the
+// sender and a short preview.
+func chatPushCopy(show bool, circleName string, msg chatMessageOut) (title, body string) {
+	title = "New message in " + circleName
+	if !show {
+		return title, ""
+	}
+	switch {
+	case msg.HasImage && msg.Body == "":
+		return msg.SenderName + " sent a photo", circleName
+	case msg.HasImage:
+		return msg.SenderName + " sent a photo", truncateRunes(msg.Body, chatPushPreview)
+	}
+	return title, msg.SenderName + ": " + truncateRunes(msg.Body, chatPushPreview)
 }
 
 func truncateRunes(s string, n int) string {

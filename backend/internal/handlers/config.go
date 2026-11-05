@@ -28,6 +28,7 @@ func (s *Server) GetConfig(w http.ResponseWriter, r *http.Request) {
 		"map_style_url":      s.MapStyleURL,
 		// Operator's default accent ("#RRGGBB"), empty for the built-in green.
 		"default_accent": s.defaultAccent(r.Context()),
+		"default_units":  s.defaultUnits(r.Context()),
 		// Availability only; the provider URL is never exposed.
 		"geocoder": map[string]bool{
 			"enabled":      s.Geocoder.Enabled(),

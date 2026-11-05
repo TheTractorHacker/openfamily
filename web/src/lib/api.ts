@@ -463,14 +463,24 @@ export function getApkStatus(): Promise<ApkStatus> {
   return request<ApkStatus>('/api/admin/apk/status')
 }
 
-export function getThemeSettings(): Promise<{ default_accent: string }> {
-  return request<{ default_accent: string }>('/api/admin/settings/theme')
+export type ThemeSettings = { default_accent: string; default_units?: 'imperial' | 'metric' }
+
+export function getThemeSettings(): Promise<ThemeSettings> {
+  return request<ThemeSettings>('/api/admin/settings/theme')
 }
 
-export function updateThemeSettings(defaultAccent: string): Promise<{ default_accent: string }> {
-  return request<{ default_accent: string }>('/api/admin/settings/theme', {
+export function updateThemeSettings(defaultAccent: string): Promise<ThemeSettings> {
+  return request<ThemeSettings>('/api/admin/settings/theme', {
     method: 'PUT',
     body: { default_accent: defaultAccent },
+  })
+}
+
+// Sends only default_units, so the accent colour is left as it is.
+export function updateDefaultUnits(defaultUnits: 'imperial' | 'metric'): Promise<ThemeSettings> {
+  return request<ThemeSettings>('/api/admin/settings/theme', {
+    method: 'PUT',
+    body: { default_units: defaultUnits },
   })
 }
 

@@ -12,7 +12,6 @@ import '../theme/app_theme.dart';
 import '../widgets/driving_event_chips.dart';
 import '../widgets/ds/ds.dart';
 import '../widgets/trip_widgets.dart';
-import 'trips_screen.dart' show UnitToggleButton;
 
 /// One trip: stats from the list row immediately, the route from the API.
 class TripDetailScreen extends StatefulWidget {
@@ -92,7 +91,6 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text('${tripModeLabel(t.mode)} trip'),
-        actions: const <Widget>[UnitToggleButton()],
       ),
       body: DsBody(maxWidth: 760, child: ValueListenableBuilder<UnitSystem>(
         valueListenable: UnitPreferenceService.units,

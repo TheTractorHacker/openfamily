@@ -177,17 +177,9 @@ func (s *Server) announceCrash(ctx context.Context, userID, crashID, kind string
 	}
 	var name string
 	_ = s.Pool.QueryRow(ctx, `SELECT name FROM users WHERE id = $1`, userID).Scan(&name)
-	who := s.pushName(name)
-	title := "Possible crash: " + who
-	body := who + "'s phone detected a sudden stop at driving speed. Check that they are okay."
-	switch kind {
-	case "device":
-		body = who + "'s phone detected a crash and they did not answer \"Are you OK?\". Check that they are okay."
-	case "device_help":
-		title = who + " needs help after a possible crash"
-		body = who + "'s phone detected a crash and they asked for help."
-	}
-	sent, failed := s.pushFamilyAlertOnly(ctx, familyID, userID, "", title, body, "safety_incidents", only)
+	sent, failed := s.pushFamilyAlertRender(ctx, familyID, userID, "", "safety_incidents", only, func(rc pushRecipient) (string, string) {
+		return crashCopy(nameIf(rc.Show, name), kind)
+	})
 	s.logAudit(ctx, userID, familyID, "crash.detected",
 		fmt.Sprintf("crash_id=%s push_sent=%d push_failed=%d", crashID, sent, failed), "")
 }
@@ -300,4 +292,18 @@ func (s *Server) SetCrashDetection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"detection_enabled": *req.Enabled})
+}
+
+// crashCopy is the push title/body for a crash announcement about who.
+func crashCopy(who, kind string) (title, body string) {
+	title = "Possible crash: " + who
+	body = who + "'s phone detected a sudden stop at driving speed. Check that they are okay."
+	switch kind {
+	case "device":
+		body = who + "'s phone detected a crash and they did not answer \"Are you OK?\". Check that they are okay."
+	case "device_help":
+		title = who + " needs help after a possible crash"
+		body = who + "'s phone detected a crash and they asked for help."
+	}
+	return title, body
 }

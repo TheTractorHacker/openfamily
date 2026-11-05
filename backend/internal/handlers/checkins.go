@@ -165,14 +165,21 @@ func (s *Server) fanOutCheckin(c checkinJSON, recipients []string) {
 		}
 	}
 	if s.Push != nil {
-		title, body := s.alertPushCopy(alertCheckIn, c.Name, c.Note)
-		s.pushUsers(ctx, recipients, title, body)
+		s.pushUsersRender(ctx, recipients, func(rc pushRecipient) (string, string) {
+			return s.alertPushCopy(rc.Show, alertCheckIn, c.Name, c.Note)
+		})
 	}
 }
 
 // pushUsers pushes one notification to every registered device of the given
 // users (same transports as pushFamilyAlert, without delivery tracking).
 func (s *Server) pushUsers(ctx context.Context, userIDs []string, title, body string) {
+	s.pushUsersRender(ctx, userIDs, fixedRender(title, body))
+}
+
+// pushUsersRender is pushUsers with per-recipient copy (see pushRender).
+func (s *Server) pushUsersRender(ctx context.Context, userIDs []string, render pushRender) {
+	dir := s.recipients(ctx)
 	rows, err := s.Pool.Query(ctx, `
 		SELECT d.user_id, d.platform, d.push_token, d.unifiedpush_endpoint, d.id, d.push_transport
 		FROM devices d
@@ -197,6 +204,7 @@ func (s *Server) pushUsers(ctx context.Context, userIDs []string, title, body st
 	}
 	rows.Close()
 	for _, d := range devs {
+		title, body := render(dir.For(d.uid))
 		n := push.Notification{Title: title, Body: body, Platform: d.platform, PushToken: d.token, UnifiedPushEndpoint: d.endpoint}
 		if d.platform == "android" && d.transport == "direct" && s.Direct != nil {
 			n = directNotification(n, d.id, d.uid, "", "")

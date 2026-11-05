@@ -31,10 +31,17 @@ type NotificationPrefs struct {
 	SafetyIncidents bool `json:"safety_incidents"`
 	SevereWeather   bool `json:"severe_weather"`
 	WeeklySummary   bool `json:"weekly_summary"`
+	// ShowNames puts first names (and check-in notes) in pushes sent to this
+	// person. Off by default: the push provider then never learns who.
+	ShowNames bool `json:"show_names"`
+	// Units is "imperial" or "metric" for server-written text; "" means the
+	// person has not chosen and the instance default applies.
+	Units string `json:"units"`
 }
 
 func defaultNotificationPrefs() NotificationPrefs {
-	return NotificationPrefs{true, true, true, true, true, true, true}
+	return NotificationPrefs{PlaceAlerts: true, CheckIn: true, LowBattery: true, CompletedDrives: true,
+		SafetyIncidents: true, SevereWeather: true, WeeklySummary: true}
 }
 
 // EnsureNotificationSchema creates the preferences table. Idempotent; it is
@@ -55,16 +62,93 @@ func (s *Server) EnsureNotificationSchema(ctx context.Context) error {
 		return err
 	}
 	// Added later than the table itself (weekly driving summary opt-out).
-	_, err = s.Pool.Exec(ctx, `ALTER TABLE notification_prefs ADD COLUMN IF NOT EXISTS weekly_summary BOOLEAN NOT NULL DEFAULT TRUE`)
+	if _, err = s.Pool.Exec(ctx, `ALTER TABLE notification_prefs ADD COLUMN IF NOT EXISTS weekly_summary BOOLEAN NOT NULL DEFAULT TRUE`); err != nil {
+		return err
+	}
+	// Per-recipient opt-in for names in pushes, and the distance/speed unit.
+	if _, err = s.Pool.Exec(ctx, `ALTER TABLE notification_prefs ADD COLUMN IF NOT EXISTS show_names BOOLEAN NOT NULL DEFAULT FALSE`); err != nil {
+		return err
+	}
+	_, err = s.Pool.Exec(ctx, `ALTER TABLE notification_prefs ADD COLUMN IF NOT EXISTS units TEXT NOT NULL DEFAULT ''`)
 	return err
+}
+
+// validUnits reports whether v is an accepted unit system ("" = unset).
+func validUnits(v string) bool { return v == "" || v == "imperial" || v == "metric" }
+
+// pushRecipient is what the copy for one recipient may reveal and how it
+// should be written for them.
+type pushRecipient struct {
+	// Show is true when names and notes may appear (the recipient opted in, or
+	// VERBOSE_PUSH is on server-wide).
+	Show bool
+	// Units is "imperial" or "metric".
+	Units string
+}
+
+// pushRender builds the title and body for one recipient.
+type pushRender func(rc pushRecipient) (title, body string)
+
+func fixedRender(title, body string) pushRender {
+	return func(pushRecipient) (string, string) { return title, body }
+}
+
+// recipientDirectory resolves per-recipient push settings from one query.
+type recipientDirectory struct {
+	verbose  bool
+	def      string
+	showName map[string]bool
+	units    map[string]string
+}
+
+// recipients loads every person's show_names/units choice. It fails closed for
+// names (nobody opted in) and open for units (instance default).
+func (s *Server) recipients(ctx context.Context) *recipientDirectory {
+	d := &recipientDirectory{verbose: s.VerbosePush, def: s.defaultUnits(ctx),
+		showName: map[string]bool{}, units: map[string]string{}}
+	rows, err := s.Pool.Query(ctx, `SELECT user_id::text, show_names, units FROM notification_prefs WHERE show_names OR units <> ''`)
+	if err != nil {
+		slog.Warn("notification prefs: load recipients", "err", err)
+		return d
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, u string
+		var show bool
+		if rows.Scan(&id, &show, &u) == nil {
+			d.showName[id] = show
+			if u == "imperial" || u == "metric" {
+				d.units[id] = u
+			}
+		}
+	}
+	return d
+}
+
+// For returns the settings for one recipient.
+func (d *recipientDirectory) For(uid string) pushRecipient {
+	u := d.def
+	if v, ok := d.units[uid]; ok {
+		u = v
+	}
+	return pushRecipient{Show: d.verbose || d.showName[uid], Units: u}
+}
+
+// nameIf is the name allowed in a push to a recipient: the first name when
+// show is true, "A family member" otherwise.
+func nameIf(show bool, fullName string) string {
+	if show {
+		return firstName(fullName)
+	}
+	return "A family member"
 }
 
 func (s *Server) loadNotificationPrefs(ctx context.Context, userID string) (NotificationPrefs, error) {
 	p := defaultNotificationPrefs()
 	err := s.Pool.QueryRow(ctx, `
-		SELECT place_alerts, check_in, low_battery, completed_drives, safety_incidents, severe_weather, weekly_summary
+		SELECT place_alerts, check_in, low_battery, completed_drives, safety_incidents, severe_weather, weekly_summary, show_names, units
 		FROM notification_prefs WHERE user_id = $1`, userID).
-		Scan(&p.PlaceAlerts, &p.CheckIn, &p.LowBattery, &p.CompletedDrives, &p.SafetyIncidents, &p.SevereWeather, &p.WeeklySummary)
+		Scan(&p.PlaceAlerts, &p.CheckIn, &p.LowBattery, &p.CompletedDrives, &p.SafetyIncidents, &p.SevereWeather, &p.WeeklySummary, &p.ShowNames, &p.Units)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return defaultNotificationPrefs(), nil
@@ -105,6 +189,8 @@ func (s *Server) PutNotificationPrefs(w http.ResponseWriter, r *http.Request) {
 		SafetyIncidents *bool `json:"safety_incidents"`
 		SevereWeather   *bool `json:"severe_weather"`
 		WeeklySummary   *bool `json:"weekly_summary"`
+		ShowNames       *bool `json:"show_names"`
+		Units           *string `json:"units"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&in); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -127,16 +213,25 @@ func (s *Server) PutNotificationPrefs(w http.ResponseWriter, r *http.Request) {
 	apply(&p.SafetyIncidents, in.SafetyIncidents)
 	apply(&p.SevereWeather, in.SevereWeather)
 	apply(&p.WeeklySummary, in.WeeklySummary)
+	apply(&p.ShowNames, in.ShowNames)
+	if in.Units != nil {
+		if !validUnits(*in.Units) {
+			writeError(w, http.StatusBadRequest, "units must be imperial or metric")
+			return
+		}
+		p.Units = *in.Units
+	}
 	_, err = s.Pool.Exec(r.Context(), `
 		INSERT INTO notification_prefs
-			(user_id, place_alerts, check_in, low_battery, completed_drives, safety_incidents, severe_weather, weekly_summary, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8, now())
+			(user_id, place_alerts, check_in, low_battery, completed_drives, safety_incidents, severe_weather, weekly_summary, show_names, units, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, now())
 		ON CONFLICT (user_id) DO UPDATE SET
 			place_alerts = EXCLUDED.place_alerts, check_in = EXCLUDED.check_in,
 			low_battery = EXCLUDED.low_battery, completed_drives = EXCLUDED.completed_drives,
 			safety_incidents = EXCLUDED.safety_incidents, severe_weather = EXCLUDED.severe_weather, weekly_summary = EXCLUDED.weekly_summary,
+			show_names = EXCLUDED.show_names, units = EXCLUDED.units,
 			updated_at = now()`,
-		claims.UserID, p.PlaceAlerts, p.CheckIn, p.LowBattery, p.CompletedDrives, p.SafetyIncidents, p.SevereWeather, p.WeeklySummary)
+		claims.UserID, p.PlaceAlerts, p.CheckIn, p.LowBattery, p.CompletedDrives, p.SafetyIncidents, p.SevereWeather, p.WeeklySummary, p.ShowNames, p.Units)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to save notification settings")
 		return
