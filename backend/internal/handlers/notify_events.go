@@ -74,6 +74,12 @@ func (s *Server) sharingRecipients(ctx context.Context, subjectID string) (map[s
 // category is the recipient-level switch (notification_prefs); memberCat the
 // per-member category ("" for none).
 func (s *Server) notifySharers(ctx context.Context, subjectID, title, body, category, memberCat string) (sent, failed int) {
+	return s.notifySharersRender(ctx, subjectID, category, memberCat, fixedRender(title, body))
+}
+
+// notifySharersRender is notifySharers with the copy rendered per recipient, so
+// the subject's name only reaches recipients who opted in (or VERBOSE_PUSH).
+func (s *Server) notifySharersRender(ctx context.Context, subjectID, category, memberCat string, render pushRender) (sent, failed int) {
 	if s.Push == nil {
 		return 0, 0
 	}
@@ -94,7 +100,15 @@ func (s *Server) notifySharers(ctx context.Context, subjectID, title, body, cate
 	if len(only) == 0 {
 		return 0, 0
 	}
-	return s.pushFamilyAlertOnly(ctx, familyID, subjectID, "", title, body, category, only)
+	return s.pushFamilyAlertRender(ctx, familyID, subjectID, "", category, only, render)
+}
+
+// formatDistanceWhole is formatDistance rounded to whole units.
+func formatDistanceWhole(m float64, units string) string {
+	if units == "metric" {
+		return fmt.Sprintf("%.0f km", m/1000)
+	}
+	return fmt.Sprintf("%.0f mi", m/1609.344)
 }
 
 // ---- low battery ----------------------------------------------------------
@@ -157,15 +171,24 @@ func (s *Server) notifyLowBattery(ctx context.Context, ownerID string, pct float
 	}
 	var name string
 	_ = s.Pool.QueryRow(ctx, `SELECT name FROM users WHERE id = $1`, ownerID).Scan(&name)
-	who := s.pushName(name)
-	s.notifySharers(ctx, ownerID, who+"'s battery is low",
-		fmt.Sprintf("%s's phone is at %d%%.", who, int(pct)), "low_battery", notifLowBattery)
+	s.notifySharersRender(ctx, ownerID, "low_battery", notifLowBattery, func(rc pushRecipient) (string, string) {
+		who := nameIf(rc.Show, name)
+		return who + "'s battery is low", fmt.Sprintf("%s's phone is at %d%%.", who, int(pct))
+	})
 }
 
 // ---- completed drives -----------------------------------------------------
 
-func driveBody(distM, durS float64) string {
-	return fmt.Sprintf("%.1f mi (%.1f km), %d min", distM/1609.344, distM/1000, int((durS+30)/60))
+func driveBody(distM, durS float64, units string) string {
+	return fmt.Sprintf("%s, %d min", formatDistance(distM, units), int((durS+30)/60))
+}
+
+// formatDistance writes metres in the recipient's unit system with one decimal.
+func formatDistance(m float64, units string) string {
+	if units == "metric" {
+		return fmt.Sprintf("%.1f km", m/1000)
+	}
+	return fmt.Sprintf("%.1f mi", m/1609.344)
 }
 
 // RunDriveNotifier announces drives the trip worker has just finished.
@@ -216,8 +239,9 @@ func (s *Server) notifyCompletedDrives(ctx context.Context) {
 		if err != nil || tag.RowsAffected() != 1 {
 			continue
 		}
-		who := s.pushName(d.name)
-		s.notifySharers(ctx, d.user, who+" finished a drive", driveBody(d.distM, d.durS),
-			"completed_drives", notifDriving)
+		d := d
+		s.notifySharersRender(ctx, d.user, "completed_drives", notifDriving, func(rc pushRecipient) (string, string) {
+			return nameIf(rc.Show, d.name) + " completed a drive", driveBody(d.distM, d.durS, rc.Units)
+		})
 	}
 }

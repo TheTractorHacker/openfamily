@@ -11,6 +11,8 @@ import 'screens/sign_up_screen.dart';
 import 'screens/weekly_summary_screen.dart';
 import 'screens/welcome_screen.dart';
 import 'services/accent_preference.dart';
+import 'services/speed_units.dart';
+import 'services/units_sync.dart';
 import 'services/api_client.dart';
 import 'services/auth_service.dart';
 import 'services/background_credential_store.dart';
@@ -56,10 +58,12 @@ Future<void> main() async {
     () => Future.wait<void>(<Future<void>>[
       ThemePreferenceService.load(),
       AccentPreferenceService.load(),
+      UnitPreferenceService.ensureLoaded(),
       MapStylePreferenceService.load(),
       ServerConfig.instance.load(),
     ]),
   );
+  UnitsSync.install();
   runApp(const OpenFamilyApp());
 }
 
@@ -228,6 +232,7 @@ class _SessionGateState extends State<_SessionGate> {
     switch (session) {
       case SessionGateResult.valid:
       case SessionGateResult.unreachable:
+        unawaited(UnitsSync.pull());
         // Unreachable (offline/5xx): keep the session and open the map; the
         // individual API calls surface connectivity errors on their own.
         return _GateResult.hasSession;

@@ -2,6 +2,7 @@ import 'accent_preference.dart';
 import 'api_client.dart';
 import 'secure_url.dart';
 import 'server_features.dart';
+import 'speed_units.dart';
 
 /// Public OSM street tiles. Used until [GET /config] supplies an override.
 const String kDefaultStreetTileUrl =
@@ -47,6 +48,8 @@ class TileConfig {
       }
       ServerFeatures.instance.apply(cfg);
       AccentPreferenceService.applyServer(cfg);
+      UnitPreferenceService.applyInstanceDefault(
+          parseUnitSystem(cfg['default_units']));
     } catch (_) {
       // Keep whatever we already have (defaults or a previous successful fetch).
     }

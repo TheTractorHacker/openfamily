@@ -32,7 +32,7 @@ func TestBatteryTrackerCrossesOncePerDrop(t *testing.T) {
 }
 
 func TestDriveBody(t *testing.T) {
-	if got, want := driveBody(8690, 14*60), "5.4 mi (8.7 km), 14 min"; got != want {
+	if got, want := driveBody(8690, 14*60, "imperial"), "5.4 mi, 14 min"; got != want {
 		t.Fatalf("got %q want %q", got, want)
 	}
 }

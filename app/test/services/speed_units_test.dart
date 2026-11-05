@@ -42,4 +42,45 @@ void main() {
     await UnitPreferenceService.saveThreshold(25);
     expect(await UnitPreferenceService.loadThreshold(), 25);
   });
+
+  test('radius formatting follows the unit system', () {
+    expect(UnitSystem.imperial.formatRadius(152.4), '500 ft');
+    expect(UnitSystem.imperial.formatRadius(1609.344), '1 mi');
+    expect(UnitSystem.imperial.formatRadius(2414), '1.5 mi');
+    expect(UnitSystem.metric.formatRadius(150), '150 m');
+    expect(UnitSystem.metric.formatRadius(2000), '2 km');
+    expect(UnitSystem.metric.formatRadius(1500), '1.5 km');
+  });
+
+  test('miles by default; server choice and instance default layer correctly',
+      () async {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    UnitPreferenceService.resetForTest();
+    expect(await UnitPreferenceService.load(), UnitSystem.imperial);
+    // Operator default applies while the person has not chosen.
+    UnitPreferenceService.applyInstanceDefault(UnitSystem.metric);
+    expect(UnitPreferenceService.units.value, UnitSystem.metric);
+    // Their server-side choice beats the operator default.
+    UnitPreferenceService.applyServerChoice(UnitSystem.imperial);
+    expect(UnitPreferenceService.units.value, UnitSystem.imperial);
+    // A local choice beats both and is mirrored to the server.
+    UnitSystem? sent;
+    UnitPreferenceService.onUserChange = (UnitSystem u) async => sent = u;
+    await UnitPreferenceService.setUnits(UnitSystem.metric);
+    expect(sent, UnitSystem.metric);
+    UnitPreferenceService.applyServerChoice(UnitSystem.imperial);
+    UnitPreferenceService.applyInstanceDefault(UnitSystem.imperial);
+    expect(UnitPreferenceService.units.value, UnitSystem.metric);
+    // Reloading remembers the local choice.
+    UnitPreferenceService.units.value = UnitSystem.imperial;
+    expect(await UnitPreferenceService.load(), UnitSystem.metric);
+    UnitPreferenceService.resetForTest();
+  });
+
+  test('parseUnitSystem accepts only the wire values', () {
+    expect(parseUnitSystem('metric'), UnitSystem.metric);
+    expect(parseUnitSystem('imperial'), UnitSystem.imperial);
+    expect(parseUnitSystem(''), isNull);
+    expect(parseUnitSystem(null), isNull);
+  });
 }

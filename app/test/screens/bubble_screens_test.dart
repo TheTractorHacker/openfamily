@@ -7,6 +7,7 @@ import 'package:openfamily/screens/bubble_create_screen.dart';
 import 'package:openfamily/screens/bubbles_screen.dart';
 import 'package:openfamily/services/api_client.dart' show ApiException;
 import 'package:openfamily/services/bubble_service.dart';
+import 'package:openfamily/services/speed_units.dart';
 import 'package:openfamily/widgets/ds/ds.dart';
 
 class FakeBubbleService implements BubbleService {
@@ -91,8 +92,12 @@ void main() {
     });
 
     test('formatting and zoom', () {
-      expect(formatBubbleRadius(200), '200 m');
-      expect(formatBubbleRadius(1500), '1.5 km');
+      expect(formatBubbleRadius(200, UnitSystem.metric), '200 m');
+      expect(formatBubbleRadius(1500, UnitSystem.metric), '1.5 km');
+      expect(formatBubbleRadius(200, UnitSystem.imperial), '656 ft');
+      expect(formatBubbleRadius(3219, UnitSystem.imperial), '2 mi');
+      // Without an explicit unit it follows the (default miles) setting.
+      expect(formatBubbleRadius(200), '656 ft');
       expect(bubbleZoomFor(100, 51.5, 400), greaterThan(bubbleZoomFor(3000, 51.5, 400)));
     });
 
@@ -148,11 +153,11 @@ void main() {
       )));
       expect(find.text('Use the slider to adjust the size of your Bubble'), findsOneWidget);
       expect(find.byType(Slider), findsOneWidget);
-      expect(find.text('Radius: 200 m'), findsOneWidget);
+      expect(find.text('Radius: 656 ft'), findsOneWidget);
 
       await tester.drag(find.byType(Slider), const Offset(300, 0));
       await tester.pump();
-      expect(find.text('Radius: 200 m'), findsNothing);
+      expect(find.text('Radius: 656 ft'), findsNothing);
 
       await tester.tap(find.text('Continue'));
       await tester.pump();
@@ -217,7 +222,7 @@ void main() {
       await tester.pumpWidget(_wrap(BubblesScreen(service: svc, now: () => now)));
       await tester.pumpAndSettle();
       expect(find.text('Sam'), findsOneWidget);
-      expect(find.textContaining('300 m'), findsOneWidget);
+      expect(find.textContaining('984 ft'), findsOneWidget);
       expect(find.text('Ann has a Bubble around you'), findsOneWidget);
       // Only the creator's own Bubble can be cancelled.
       expect(find.text('Cancel'), findsOneWidget);

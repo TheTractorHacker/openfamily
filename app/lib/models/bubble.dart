@@ -2,6 +2,8 @@ import 'dart:math' as math;
 
 import 'package:latlong2/latlong.dart';
 
+import '../services/speed_units.dart';
+
 /// Bounds the backend enforces (docs/bubbles.md).
 const int kMinBubbleRadiusM = 50;
 const int kMaxBubbleRadiusM = 5000;
@@ -28,9 +30,11 @@ double bubbleSliderFromRadius(int meters) {
       math.log(kMaxBubbleRadiusM / kMinBubbleRadiusM);
 }
 
-/// "200 m", "1.2 km".
-String formatBubbleRadius(int meters) =>
-    meters >= 1000 ? '${(meters / 1000).toStringAsFixed(1)} km' : '$meters m';
+/// "650 ft", "1.2 mi" or, in metric, "200 m", "1.2 km". Follows the unit
+/// setting unless [units] is given.
+String formatBubbleRadius(int meters, [UnitSystem? units]) =>
+    (units ?? UnitPreferenceService.units.value)
+        .formatRadius(meters.toDouble());
 
 /// A zoom level at which a circle of [radiusM] metres spans about [fraction]
 /// of a map [widthPx] pixels wide, at [latitude].

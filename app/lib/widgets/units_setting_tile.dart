@@ -3,7 +3,8 @@ import 'package:flutter/material.dart';
 import '../services/speed_units.dart';
 import 'ds/ds.dart';
 
-/// Settings row choosing mph / km/h for trips and driving reports.
+/// The one units setting: miles and mph, or kilometers and km/h, everywhere
+/// the app shows a distance or speed. Defaults to miles.
 class UnitsSettingTile extends StatefulWidget {
   const UnitsSettingTile({super.key});
 
@@ -24,10 +25,10 @@ class _UnitsSettingTileState extends State<UnitsSettingTile> {
       valueListenable: UnitPreferenceService.units,
       builder: (BuildContext context, UnitSystem units, _) {
         return DsChoiceSetting<UnitSystem>(
-          title: 'Speed and distance units',
+          title: 'Distance & speed units',
           options: const <DsChoice<UnitSystem>>[
-            DsChoice<UnitSystem>(UnitSystem.imperial, 'mph / mi'),
-            DsChoice<UnitSystem>(UnitSystem.metric, 'km/h / km'),
+            DsChoice<UnitSystem>(UnitSystem.imperial, 'Miles'),
+            DsChoice<UnitSystem>(UnitSystem.metric, 'Kilometers'),
           ],
           selected: units,
           onChanged: UnitPreferenceService.setUnits,

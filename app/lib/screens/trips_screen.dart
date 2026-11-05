@@ -116,7 +116,6 @@ class _TripsScreenState extends State<TripsScreen> {
       appBar: AppBar(
         title: Text('${widget.member.name}\'s trips'),
         actions: <Widget>[
-          const UnitToggleButton(),
           if (_isSelf)
             IconButton(
               tooltip: 'Recalculate my trips',
@@ -283,27 +282,12 @@ class _StaleBanner extends StatelessWidget {
   }
 }
 
-/// App-bar action that flips between mph and km/h.
+/// Retired: units are one setting (Settings > Distance & speed units). Kept
+/// as an empty widget only so the driving screens that still list it compile;
+/// remove those usages together with this class.
 class UnitToggleButton extends StatelessWidget {
   const UnitToggleButton({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    return ValueListenableBuilder<UnitSystem>(
-      valueListenable: UnitPreferenceService.units,
-      builder: (BuildContext context, UnitSystem u, _) {
-        final UnitSystem next =
-            u == UnitSystem.imperial ? UnitSystem.metric : UnitSystem.imperial;
-        return TextButton(
-          style: TextButton.styleFrom(minimumSize: const Size(kMinTarget, kMinTarget)),
-          onPressed: () => UnitPreferenceService.setUnits(next),
-          child: Semantics(
-            label: 'Units: ${u.speedLabel}. Switch to ${next.speedLabel}',
-            excludeSemantics: true,
-            child: Text(u.speedLabel),
-          ),
-        );
-      },
-    );
-  }
+  Widget build(BuildContext context) => const SizedBox.shrink();
 }

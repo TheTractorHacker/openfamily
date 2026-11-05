@@ -22,6 +22,7 @@ import { ServerVersionCard } from './ServerVersionCard'
 import { TwilioSettingsCard } from './TwilioSettingsCard'
 import { DawarichSettingsCard } from './DawarichSettingsCard'
 import { ThemeAccentCard } from './ThemeAccentCard'
+import { UnitsDefaultCard } from './UnitsDefaultCard'
 import { DomainSettingsCard } from './DomainSettingsCard'
 import './pages.css'
 import './SettingsPage.css'
@@ -339,6 +340,7 @@ export function SettingsPage({ email, onLogout }: SettingsPageProps) {
               apps never expose it to regular users either. */}
           {isPlatformAdmin && <TwilioSettingsCard />}
           {isPlatformAdmin && <ThemeAccentCard />}
+          {isPlatformAdmin && <UnitsDefaultCard />}
           {isPlatformAdmin && <DawarichSettingsCard />}
 
           {/* Self-update lives here too: it restarts the server the panel is

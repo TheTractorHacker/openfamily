@@ -64,24 +64,24 @@ func TestWeeklyPushText(t *testing.T) {
 		{Name: "Alex", Current: weekStat{Drives: 3, DistanceM: 200_000}},
 		{Name: "Sam", Current: weekStat{Drives: 2, DistanceM: 141_000, Events: eventCounts{HardBrake: 3}}},
 	}
-	_, body, ok := weeklyPushText(ms, nm)
+	_, body, ok := weeklyPushText(ms, nm, "imperial")
 	if !ok || body != "Your family's week: 5 drives, 212 mi, Sam had 3 hard brakes" {
 		t.Errorf("%q %v", body, ok)
 	}
 	ms[1].Current.Events.HardBrake = 1
-	if _, body, _ = weeklyPushText(ms, nm); !strings.HasSuffix(body, "Sam had 1 hard brake") {
+	if _, body, _ = weeklyPushText(ms, nm, "imperial"); !strings.HasSuffix(body, "Sam had 1 hard brake") {
 		t.Errorf("%q", body)
 	}
 	ms[1].Current.Events.HardBrake = 0
-	if _, body, _ = weeklyPushText(ms, nm); strings.Contains(body, "had") {
+	if _, body, _ = weeklyPushText(ms, nm, "imperial"); strings.Contains(body, "had") {
 		t.Errorf("no brakes: %q", body)
 	}
-	if _, _, ok := weeklyPushText([]weekMember{{Name: "Z"}}, nm); ok {
+	if _, _, ok := weeklyPushText([]weekMember{{Name: "Z"}}, nm, "imperial"); ok {
 		t.Error("no drives should not push")
 	}
 	// Names go through the privacy mapper.
 	ms[1].Current.Events.HardBrake = 2
-	if _, body, _ = weeklyPushText(ms, func(string) string { return "A family member" }); !strings.Contains(body, "A family member had 2 hard brakes") {
+	if _, body, _ = weeklyPushText(ms, func(string) string { return "A family member" }, "imperial"); !strings.Contains(body, "A family member had 2 hard brakes") {
 		t.Errorf("%q", body)
 	}
 }

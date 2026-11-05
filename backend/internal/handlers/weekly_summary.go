@@ -152,7 +152,7 @@ type weeklyTotals struct {
 // weeklyPushText builds "Your family's week: 5 drives, 212 mi, Sam had 3 hard
 // brakes". ok is false when nobody drove. nameOf maps a member name to what the
 // push may reveal (the first name, or "A family member" without VERBOSE_PUSH).
-func weeklyPushText(members []weekMember, nameOf func(string) string) (title, body string, ok bool) {
+func weeklyPushText(members []weekMember, nameOf func(string) string, units string) (title, body string, ok bool) {
 	var drives int
 	var dist float64
 	worst, worstN := "", 0
@@ -174,7 +174,7 @@ func weeklyPushText(members []weekMember, nameOf func(string) string) (title, bo
 		}
 		return fmt.Sprintf("%d %s", n, many)
 	}
-	body = fmt.Sprintf("%s, %.0f mi", plural(drives, "drive", "drives"), dist/1609.344)
+	body = fmt.Sprintf("%s, %s", plural(drives, "drive", "drives"), formatDistanceWhole(dist, units))
 	if worstN > 0 {
 		body += fmt.Sprintf(", %s had %s", nameOf(worst), plural(worstN, "hard brake", "hard brakes"))
 	}
@@ -339,6 +339,7 @@ func (s *Server) pushWeeklySummary(ctx context.Context, fam string, ms []weekMem
 	}
 	sort.Strings(viewers)
 	pctx := withPushRoute(ctx, weeklyRouteKey)
+	dir := s.recipients(ctx)
 	for _, v := range viewers {
 		var sel []weekMember
 		for sub := range visible[v] {
@@ -346,7 +347,8 @@ func (s *Server) pushWeeklySummary(ctx context.Context, fam string, ms []weekMem
 				sel = append(sel, m)
 			}
 		}
-		_, body, ok := weeklyPushText(sel, s.pushName)
+		rc := dir.For(v)
+		_, body, ok := weeklyPushText(sel, func(n string) string { return nameIf(rc.Show, n) }, rc.Units)
 		if !ok {
 			continue
 		}

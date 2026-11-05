@@ -154,12 +154,15 @@ void main() {
     expect(t.takeException(), isNull);
   });
 
-  testWidgets('switching units re-renders in km/h', (t) async {
+  testWidgets('changing the one units setting re-renders in km/h', (t) async {
     final FakeTrips api = FakeTrips(trips: <Trip>[_trip('a', DateTime(2026, 10, 24, 17))]);
     await _pump(t, TripsScreen(member: _member, api: api));
-    await t.tap(find.text('mph').first);
+    // There is no per-screen toggle any more.
+    expect(find.text('mph'), findsNothing);
+    UnitPreferenceService.units.value = UnitSystem.metric;
     await t.pump();
     expect(find.text('97 km/h'), findsWidgets);
+    UnitPreferenceService.units.value = UnitSystem.imperial;
   });
 
   testWidgets('empty state says no trips yet', (t) async {

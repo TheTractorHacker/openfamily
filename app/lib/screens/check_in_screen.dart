@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../models/alert.dart';
+import '../services/speed_units.dart';
 import '../models/place.dart';
 import '../services/alert_service.dart';
 import '../services/api_client.dart';
@@ -204,8 +205,7 @@ class _CheckInScreenState extends State<CheckInScreen> {
 
   String _distanceLabel(double? m) {
     if (m == null) return '';
-    if (m < 1000) return '${m.round()} m away';
-    return '${(m / 1000).toStringAsFixed(1)} km away';
+    return '${UnitPreferenceService.units.value.formatDistance(m)} away';
   }
 
   Widget _buildForm() {
