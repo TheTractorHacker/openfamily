@@ -453,7 +453,7 @@ void main() {
       await pumpRich(t);
       expect(find.text('Distance per day (mi)'), findsOneWidget);
       // 20 km = 12.4 mi -> axis 20 mi, half 10, zero.
-      expect(find.text('20 mi'), findsOneWidget);
+      expect(find.text('20'), findsOneWidget);
       expect(find.text('10'), findsOneWidget);
       expect(find.text('Mon'), findsOneWidget);
       await t.tap(find.bySemanticsLabel(RegExp('^Fri Oct 23')));

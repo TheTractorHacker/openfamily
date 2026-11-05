@@ -571,20 +571,26 @@ class DrivingDaysChart extends StatelessWidget {
     );
     final int total = days.fold<int>(0, (int a, ReportDay d) => a + d.drives);
 
-    Widget gridLine(double frac, String label) => Positioned(
+    Widget gridLine(double frac) => Positioned(
           left: 0,
           right: 0,
           bottom: frac * plotHeight,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              Text(label, style: small),
-              Container(
-                height: 1,
-                color: cs.outlineVariant.withValues(alpha: 0.5),
-              ),
-            ],
+          child: Container(
+            height: 1,
+            color: cs.outlineVariant.withValues(alpha: 0.45),
+          ),
+        );
+
+    // Axis labels live in their own gutter so they never sit under a bar.
+    Widget axisLabel(double frac, String label) => Positioned(
+          left: 0,
+          right: 4,
+          bottom: frac * plotHeight - 7,
+          child: Text(
+            label,
+            maxLines: 1,
+            textAlign: TextAlign.right,
+            style: small,
           ),
         );
 
@@ -608,49 +614,68 @@ class DrivingDaysChart extends StatelessWidget {
             style: AppType.secondary.copyWith(color: cs.onSurfaceVariant),
           ),
           const SizedBox(height: AppSpace.xl),
-          Stack(
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
               SizedBox(
+                width: 34,
                 height: plotHeight,
                 child: Stack(
                   clipBehavior: Clip.none,
                   children: <Widget>[
-                    gridLine(1, '${_axisNumber(axis)} ${units.distanceLabel}'),
-                    gridLine(0.5, _axisNumber(axis / 2)),
-                    gridLine(0, '0'),
+                    axisLabel(1, _axisNumber(axis)),
+                    axisLabel(0.5, _axisNumber(axis / 2)),
+                    axisLabel(0, '0'),
                   ],
                 ),
               ),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  for (int i = 0; i < days.length; i++)
-                    Expanded(
-                      child: _Bar(
-                        day: days[i],
-                        value: vals[i],
-                        frac: (vals[i] / axis).clamp(0.0, 1.0),
-                        isToday: days[i].date == t0,
-                        isSelected: selected == days[i].date,
-                        label: month
-                            ? (days[i].date.day % 7 == 1 || days[i].date == t0
-                                ? '${days[i].date.day}'
-                                : '')
-                            : _weekdays[days[i].date.weekday - 1],
-                        units: units,
-                        showValue: !month || selected == days[i].date,
-                        fill: _barFill(
-                          brand.accentInk,
-                          isToday: days[i].date == t0,
-                          isSelected: selected == days[i].date,
-                          anySelected: selected != null,
-                        ),
-                        onTap: () => onSelect(
-                          selected == days[i].date ? null : days[i].date,
-                        ),
+              Expanded(
+                child: Stack(
+                  children: <Widget>[
+                    SizedBox(
+                      height: plotHeight,
+                      child: Stack(
+                        clipBehavior: Clip.none,
+                        children: <Widget>[
+                          gridLine(1),
+                          gridLine(0.5),
+                          gridLine(0),
+                        ],
                       ),
                     ),
-                ],
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      for (int i = 0; i < days.length; i++)
+                        Expanded(
+                          child: _Bar(
+                            day: days[i],
+                            value: vals[i],
+                            frac: (vals[i] / axis).clamp(0.0, 1.0),
+                            isToday: days[i].date == t0,
+                            isSelected: selected == days[i].date,
+                            label: month
+                                ? (days[i].date.day % 7 == 1 || days[i].date == t0
+                                    ? '${days[i].date.day}'
+                                    : '')
+                                : _weekdays[days[i].date.weekday - 1],
+                            units: units,
+                            showValue: !month || selected == days[i].date,
+                            fill: _barFill(
+                              brand.accentInk,
+                              isToday: days[i].date == t0,
+                              isSelected: selected == days[i].date,
+                              anySelected: selected != null,
+                            ),
+                            onTap: () => onSelect(
+                              selected == days[i].date ? null : days[i].date,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                  ],
+                ),
               ),
             ],
           ),

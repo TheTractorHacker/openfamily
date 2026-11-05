@@ -38,11 +38,12 @@ void main() {
         ),
       ),
     );
-    expect(find.text('100 mi'), findsOneWidget);
+    expect(find.text('100'), findsWidgets);
     expect(find.text('50'), findsWidgets);
     // Value labels above the drawn bars only.
     expect(find.byKey(ValueKey<String>('bar-value-${mon.toIso8601String()}')), findsOneWidget);
-    expect(find.text('100'), findsOneWidget);
+    // Axis label + the bar's own value label.
+    expect(find.text('100'), findsNWidgets(2));
     // Bar heights: the 50-mi bar is half the 100-mi bar (= plotHeight).
     final Iterable<RenderBox> boxes = t
         .renderObjectList<RenderBox>(find.byType(FractionallySizedBox))
