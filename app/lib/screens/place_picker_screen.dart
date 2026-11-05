@@ -11,6 +11,7 @@ import '../services/address_suggester.dart';
 import '../services/circle_service.dart';
 import '../services/geocoding_service.dart';
 import '../services/location_service.dart';
+import '../services/speed_units.dart';
 import '../theme/app_theme.dart';
 import '../widgets/address_suggestions.dart';
 import '../widgets/ds/ds.dart';
@@ -91,14 +92,27 @@ class _PlacePickerScreenState extends State<PlacePickerScreen> {
   /// manually typed address.
   String? _offeredAddress;
 
-  /// Radius presets in meters (250 ft, 500 ft, 1000 ft, 1 mi, 2 mi).
-  static const List<double> _radiusPresets = <double>[
+  /// Radius presets in meters: 250 ft, 500 ft, 1000 ft, 1 mi, 2 mi, or in
+  /// metric 100 m, 200 m, 300 m, 1 km, 2 km.
+  static const List<double> _imperialPresets = <double>[
     76.2,
     152.4,
     304.8,
     1609.344,
     3218.69,
   ];
+  static const List<double> _metricPresets = <double>[
+    100,
+    200,
+    300,
+    1000,
+    2000,
+  ];
+
+  List<double> get _radiusPresets =>
+      UnitPreferenceService.units.value == UnitSystem.imperial
+          ? _imperialPresets
+          : _metricPresets;
 
   @override
   void initState() {
@@ -270,16 +284,8 @@ class _PlacePickerScreenState extends State<PlacePickerScreen> {
         '${position.longitude.toStringAsFixed(5)}';
   }
 
-  String _formatRadius(double meters) {
-    if (meters >= 1609.344) {
-      final double miles = meters / 1609.344;
-      final String text = miles == miles.roundToDouble()
-          ? miles.round().toString()
-          : miles.toStringAsFixed(1);
-      return '$text mi';
-    }
-    return '${(meters * 3.28084).round()} ft';
-  }
+  String _formatRadius(double meters) =>
+      UnitPreferenceService.units.value.formatRadius(meters);
 
   void _save() {
     final String name = _name.text.trim();

@@ -39,10 +39,19 @@ const List<_Pref> _members = <_Pref>[
   _Pref('safety_incidents', Icons.warning_amber_rounded, 'Safety incidents',
       'Crashes and other incidents near your circle'),
   _Pref('weekly_summary', Icons.insights_outlined, 'Weekly driving summary',
-      'Sunday evening: your family\'s drives, miles and hard braking'),
+      'Sunday evening: your family\'s drives, distance and hard braking'),
   _Pref('severe_weather', Icons.thunderstorm_outlined, 'Severe weather alerts',
       'Severe weather in your area'),
 ];
+
+const _Pref _showNames = _Pref(
+    'show_names',
+    Icons.badge_outlined,
+    'Show names in notifications',
+    'Notifications say who arrived, left, drove or checked in, for example '
+        '"Henry arrived at Home". Names then pass through the push provider '
+        '(Google, Apple or your ntfy server). Leave this off for maximum '
+        'privacy: notifications say "A family member" instead.');
 
 class _NotificationSettingsScreenState
     extends State<NotificationSettingsScreen> {
@@ -67,6 +76,8 @@ class _NotificationSettingsScreenState
       setState(() => _prefs = <String, bool>{
             for (final _Pref p in <_Pref>[..._places, ..._members])
               p.key: (d as Map<String, dynamic>)[p.key] != false,
+            // Opt-in: off unless the server says it was switched on.
+            _showNames.key: (d as Map<String, dynamic>)['show_names'] == true,
           });
     } on SessionExpiredException {
       return;
@@ -100,7 +111,7 @@ class _NotificationSettingsScreenState
         icon: p.icon,
         title: p.title,
         subtitle: p.subtitle,
-        value: _prefs![p.key] ?? true,
+        value: _prefs![p.key] ?? (p.key != _showNames.key),
         onChanged: (bool v) => _set(p.key, v),
       );
 
@@ -119,6 +130,8 @@ class _NotificationSettingsScreenState
                   const QuietHoursSection(),
                   const DsSectionHeader('Member notifications'),
                   for (final _Pref p in _members) _row(p),
+                  const DsSectionHeader('Privacy'),
+                  _row(_showNames),
                   const Padding(
                     padding: EdgeInsets.all(16),
                     child: Text(

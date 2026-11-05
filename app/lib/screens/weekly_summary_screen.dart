@@ -5,7 +5,6 @@ import '../services/trips_service.dart';
 import '../services/weekly_summary_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/ds/ds.dart';
-import 'trips_screen.dart' show UnitToggleButton;
 
 /// "Weekly summary": this week against last week for each member, with simple
 /// bars. Distances and speeds follow the mph / km preference.
@@ -60,7 +59,6 @@ class _WeeklySummaryScreenState extends State<WeeklySummaryScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Weekly summary'),
-        actions: const <Widget>[UnitToggleButton()],
       ),
       body: SafeArea(
         child: ValueListenableBuilder<UnitSystem>(

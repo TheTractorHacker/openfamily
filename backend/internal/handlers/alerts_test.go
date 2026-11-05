@@ -75,14 +75,14 @@ func TestAlertSMSBodyNeverHasCoordinatesOrEmergencyClaims(t *testing.T) {
 func TestAlertPushPayloadHidesSenderAndCoordinates(t *testing.T) {
 	note := "at 51.50735, -0.12776 help"
 	off := &Server{}
-	title, body := off.alertPushCopy(alertSOS, "Sam Doe", note)
+	title, body := off.alertPushCopy(false, alertSOS, "Sam Doe", note)
 	for _, v := range []string{title, body} {
 		if strings.Contains(v, "Sam") || strings.Contains(v, "51.5") || strings.Contains(v, "help") {
 			t.Fatalf("non-verbose push leaks: %q", v)
 		}
 	}
 	on := &Server{VerbosePush: true}
-	title, _ = on.alertPushCopy(alertSOS, "Sam Doe", "")
+	title, _ = on.alertPushCopy(false, alertSOS, "Sam Doe", "")
 	if title != "Sam sent SOS" {
 		t.Fatalf("verbose title %q", title)
 	}
@@ -90,7 +90,7 @@ func TestAlertPushPayloadHidesSenderAndCoordinates(t *testing.T) {
 	// unless the sender typed it into the note (verbose only).
 	for _, s := range []*Server{off, on} {
 		for _, typ := range []string{alertCheckIn, alertHelp, alertSOS} {
-			ti, bo := s.alertPushCopy(typ, "Sam Doe", "")
+			ti, bo := s.alertPushCopy(false, typ, "Sam Doe", "")
 			if regexp.MustCompile(`\d+\.\d{3,}`).MatchString(ti + bo) {
 				t.Fatalf("coords in push: %q %q", ti, bo)
 			}

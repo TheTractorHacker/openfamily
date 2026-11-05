@@ -247,12 +247,12 @@ func (s *Server) fanOutAlert(a alertRow, includeContacts bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	title, body := s.alertPushCopy(a.Type, a.SenderName, a.Note)
 	s.broadcastAlert(ctx, a)
 
 	var pushSent, pushFailed int
 	if s.Push != nil && a.FamilyID != "" {
-		pushSent, pushFailed = s.pushFamilyAlertFor(ctx, a.FamilyID, a.UserID, a.ID, title, body, alertMuteCategory(a.Type))
+		pushSent, pushFailed = s.pushFamilyAlertRender(ctx, a.FamilyID, a.UserID, a.ID, alertMuteCategory(a.Type), nil,
+			func(rc pushRecipient) (string, string) { return s.alertPushCopy(rc.Show, a.Type, a.SenderName, a.Note) })
 	}
 
 	var smsSent, smsFailed int
@@ -287,8 +287,10 @@ func (s *Server) fanOutResolved(a alertRow) {
 		}
 	}
 	if s.Push != nil && a.FamilyID != "" {
-		title := s.pushName(a.SenderName) + " is safe"
-		s.pushFamilyAlert(ctx, a.FamilyID, a.UserID, "", title, title)
+		s.pushFamilyAlertRender(ctx, a.FamilyID, a.UserID, "", "", nil, func(rc pushRecipient) (string, string) {
+			t := nameIf(rc.Show, a.SenderName) + " is safe"
+			return t, t
+		})
 	}
 	// Only contacts who actually received the original SMS hear the follow-up.
 	s.smsResolvedContacts(ctx, a.ID, name+" marked themselves safe.")
@@ -412,22 +414,21 @@ func alertCopy(typ, name, note string) (title, body string) {
 	return title, body
 }
 
-// pushName is the sender name allowed in a push payload: the push provider
-// (ntfy/APNs) only learns who it was when VERBOSE_PUSH is on (BSEC-022).
+// pushName is the sender name allowed in a push payload when the recipient
+// is not known to have opted in: the push provider (ntfy/APNs) only learns who
+// it was when VERBOSE_PUSH is on (BSEC-022). Per-recipient code uses nameIf.
 func (s *Server) pushName(senderName string) string {
-	if s.VerbosePush {
-		return firstName(senderName)
-	}
-	return "A family member"
+	return nameIf(s.VerbosePush, senderName)
 }
 
-// alertPushCopy builds the push title/body. Without VERBOSE_PUSH it carries
-// neither the sender name nor the free-text note. It never carries coordinates.
-func (s *Server) alertPushCopy(typ, senderName, note string) (title, body string) {
-	if !s.VerbosePush {
+// alertPushCopy builds the push title/body for one recipient. Unless show is
+// true (recipient opt-in or VERBOSE_PUSH) it carries neither the sender name
+// nor the free-text note. It never carries coordinates.
+func (s *Server) alertPushCopy(show bool, typ, senderName, note string) (title, body string) {
+	if !show && !s.VerbosePush {
 		note = ""
 	}
-	return alertCopy(typ, s.pushName(senderName), note)
+	return alertCopy(typ, nameIf(show || s.VerbosePush, senderName), note)
 }
 
 // alertSMSBody is the text sent to an emergency contact. It never contains raw

@@ -695,7 +695,7 @@ func (s *Server) redispatchFailedPushes(ctx context.Context) {
 			slog.Error("geofence: increment push attempts", "event_id", eventID, "device_id", deviceID, "err", err)
 			continue
 		}
-		n, ok := s.buildNotification(ctx, userID, placeName, eventType, platform, pushToken, unifiedPushEndpoint)
+		n, ok := s.buildNotification(ctx, userID, recipientID, placeName, eventType, platform, pushToken, unifiedPushEndpoint)
 		n, ok = s.withDirectTransport(n, ok, transport, deviceID, recipientID, eventID)
 		if !ok {
 			continue
@@ -748,7 +748,7 @@ func (s *Server) dispatchGeofencePush(eventID, trackedUserID, placeName, eventTy
 				continue
 			}
 
-			n, ok := s.buildNotification(ctx, trackedUserID, placeName, eventType, platform, pushToken, unifiedPushEndpoint)
+			n, ok := s.buildNotification(ctx, trackedUserID, recipientID, placeName, eventType, platform, pushToken, unifiedPushEndpoint)
 			n, ok = s.withDirectTransport(n, ok, transport, deviceID, recipientID, eventID)
 			if !ok {
 				continue
@@ -833,7 +833,7 @@ func (s *Server) createEventDeviceRows(ctx context.Context, tx pgx.Tx, eventID, 
 // when the device has no usable push target (no token/endpoint). On a verbose
 // name-lookup failure it falls back to the non-verbose message rather than
 // dropping the alert.
-func (s *Server) buildNotification(ctx context.Context, trackedUserID, placeName, eventType, platform string, pushToken, unifiedPushEndpoint *string) (push.Notification, bool) {
+func (s *Server) buildNotification(ctx context.Context, trackedUserID, recipientID, placeName, eventType, platform string, pushToken, unifiedPushEndpoint *string) (push.Notification, bool) {
 	action := "arrived at"
 	if eventType == "exit" {
 		action = "left"
@@ -844,7 +844,7 @@ func (s *Server) buildNotification(ctx context.Context, trackedUserID, placeName
 		placeName = "a place"
 	}
 	title := fmt.Sprintf("A family member %s %s", action, placeName)
-	if s.VerbosePush {
+	if s.recipients(ctx).For(recipientID).Show {
 		var userName string
 		if err := s.Pool.QueryRow(ctx, `SELECT name FROM users WHERE id = $1`, trackedUserID).Scan(&userName); err != nil {
 			// Fall back to the non-verbose message rather than dropping the alert.

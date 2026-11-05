@@ -167,6 +167,14 @@ func (s *Server) pushFamilyAlertFor(ctx context.Context, familyID, senderID, ale
 // (nil means the whole family), for alerts that carry one person's data and
 // so may reach only the people that person shares with.
 func (s *Server) pushFamilyAlertOnly(ctx context.Context, familyID, senderID, alertID, title, body, category string, only map[string]bool) (sent, failed int) {
+	return s.pushFamilyAlertRender(ctx, familyID, senderID, alertID, category, only, fixedRender(title, body))
+}
+
+// pushFamilyAlertRender is pushFamilyAlertOnly with the copy rendered per
+// recipient: render is called with whether that recipient opted in to names
+// (or VERBOSE_PUSH is on), so a name or note never reaches anyone who did not.
+func (s *Server) pushFamilyAlertRender(ctx context.Context, familyID, senderID, alertID, category string, only map[string]bool, render pushRender) (sent, failed int) {
+	dir := s.recipients(ctx)
 	// category is "" for alerts that always get through (SOS, help); otherwise
 	// people who muted it are skipped.
 	muted := s.usersMuted(ctx, category)
@@ -219,6 +227,7 @@ func (s *Server) pushFamilyAlertOnly(ctx context.Context, familyID, senderID, al
 		if alertID != "" {
 			s.recordDelivery(ctx, alertID, uid, "", t.name, chanPush, stQueued, "")
 		}
+		title, body := render(dir.For(uid))
 		ok, code := false, errCodeProvider
 		// directOnly stays true while every accepted delivery is a direct
 		// enqueue: that is "queued" until the device streams it (sent) and acks

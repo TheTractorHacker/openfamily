@@ -209,8 +209,7 @@ class MemberProfileScreen extends StatelessWidget {
     if (member.position == null) return '—';
     final double? acc = member.accuracyMeters;
     if (acc == null || acc <= 0) return 'Unknown';
-    final int metres = acc < 1 ? 1 : acc.round();
-    return '± $metres m';
+    return '± ${UnitPreferenceService.units.value.formatRadius(acc < 1 ? 1 : acc)}';
   }
 }
 
