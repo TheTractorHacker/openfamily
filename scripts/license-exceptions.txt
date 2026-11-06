@@ -1,0 +1,4 @@
+# npm packages whose license is outside the allow-list in scripts/license-check.sh.
+# Each entry needs a tracked decision in docs/LICENSE_COMPLIANCE.md.
+react-leaflet            # Hippocratic-2.1: open finding, replacement recommended
+@react-leaflet/core      # Hippocratic-2.1: open finding, replacement recommended

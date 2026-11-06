@@ -1,0 +1,22 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly }
+  - package-ecosystem: gomod
+    directory: /backend
+    schedule: { interval: weekly }
+  - package-ecosystem: npm
+    directory: /web
+    schedule: { interval: weekly }
+  - package-ecosystem: pub
+    directory: /app
+    schedule: { interval: weekly }
+  # Dockerfile base images (tag + digest).
+  - package-ecosystem: docker
+    directory: /backend
+    schedule: { interval: weekly }
+  # docker-compose.yml images (timescaledb, caddy, ntfy), tag + digest.
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule: { interval: weekly }

@@ -12,3 +12,20 @@ app/pubspec.lock and app/packages/background_locator_2/LICENSE).
 
 If you run a modified version as a network service, the AGPL requires you to
 offer its source to the users of that service.
+
+Vendored third-party code
+  app/packages/background_locator_2 is a modified fork of background_locator_2
+  (MIT; Copyright 2020 REKAB, Copyright 2022 Yukams). Its LICENSE file is kept
+  in that directory and must be preserved in all copies.
+
+Complete inventory
+  docs/THIRD_PARTY_LICENSES.md lists every Go, npm and Dart dependency and its
+  license; docs/LICENSE_COMPLIANCE.md records the audit and open findings.
+
+Source offer (AGPL-3.0 section 13)
+  Users who interact with a running instance over a network are entitled to
+  the Corresponding Source of the version that instance runs: the public
+  repository https://github.com/TheTractorHacker/openfamily at the tag or commit
+  the instance reports. Operators who modify the code must publish their
+  modified source and offer it to their users. See docs/LICENSE_COMPLIANCE.md
+  for the status of an in-product source link.
