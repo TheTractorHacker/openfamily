@@ -76,6 +76,11 @@ func main() {
 	}
 	srv.VerbosePush = cfg.VerbosePush
 	srv.AdminLocationAccess = cfg.AdminLocationAccess
+	if wa, err := handlers.WebAuthnFromPublicURL(cfg.PublicBaseURL, os.Getenv("WEBAUTHN_RP_ID"), os.Getenv("WEBAUTHN_ORIGINS")); err != nil {
+		slog.Warn("passkeys disabled: invalid WebAuthn configuration", "reason", err.Error())
+	} else if wa != nil {
+		srv.WebAuthn = wa
+	}
 	srv.NtfyBaseURL = cfg.NtfyBaseURL
 	srv.TileURL = cfg.TileURL
 	srv.SatelliteTileURL = cfg.SatelliteTileURL
@@ -200,6 +205,8 @@ func main() {
 	r.Post("/auth/register", srv.Register)
 	r.Post("/auth/login", srv.Login)
 	r.Post("/auth/refresh", srv.Refresh)
+	r.Post("/auth/passkeys/login/begin", srv.PasskeyLoginBegin)
+	r.Post("/auth/passkeys/login/finish", srv.PasskeyLoginFinish)
 	r.Post("/auth/password/reset", srv.ResetPassword)
 
 	// WebSocket stream (authenticates via Bearer header or Sec-WebSocket-Protocol subprotocol).
@@ -229,6 +236,10 @@ func main() {
 		r.Post("/auth/totp/setup", srv.TOTPSetup)
 		r.Post("/auth/totp/enable", srv.TOTPEnable)
 		r.Post("/auth/totp/disable", srv.TOTPDisable)
+		r.Post("/auth/passkeys/register/begin", srv.PasskeyRegisterBegin)
+		r.Post("/auth/passkeys/register/finish", srv.PasskeyRegisterFinish)
+		r.Get("/auth/passkeys", srv.ListPasskeys)
+		r.Delete("/auth/passkeys/{id}", srv.DeletePasskey)
 		r.Get("/auth/sessions", srv.ListSessions)
 		r.Delete("/auth/sessions/{id}", srv.RevokeSession)
 		r.Get("/me/export", srv.ExportMe)

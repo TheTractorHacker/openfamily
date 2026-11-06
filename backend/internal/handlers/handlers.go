@@ -4,6 +4,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"github.com/go-webauthn/webauthn/webauthn"
 	"net/http"
 	"sync"
 
@@ -19,6 +20,9 @@ type Server struct {
 	Pool *pgxpool.Pool
 	TM   *auth.TokenManager
 	Push push.Dispatcher
+
+	// WebAuthn is the passkey relying party (nil = passkeys disabled).
+	WebAuthn *webauthn.WebAuthn
 
 	// VerbosePush controls whether push notifications include the tracked
 	// user's name. When false (default), pushes name the place but omit the
