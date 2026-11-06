@@ -63,3 +63,12 @@
 @media (max-width: 860px) {
   .wb-dashboard { padding: var(--space-4); }
 }
+/* Phones: three compact stat tiles in one row, status pill under them, taller map. */
+@media (max-width: 520px) {
+  .wb-dashboard { padding: var(--space-3); gap: var(--space-3); }
+  .wb-dashboard-strip { flex-wrap: wrap; align-items: flex-start; gap: var(--space-2); }
+  .wb-dashboard-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-2); flex: 1 1 100%; }
+  .wb-dashboard-stat { padding: var(--space-3); }
+  .wb-dashboard-stat .wb-stat-hint { display: none; }
+  .wb-dashboard-map { min-height: 520px; }
+}

@@ -55,8 +55,9 @@
 }
 
 .wb-user-table {
-  min-width: 980px;
+  min-width: 880px;
 }
+.wb-user-table td:nth-child(4) { white-space: nowrap; }
 
 .wb-inline-select {
   min-width: 140px;
@@ -102,10 +103,13 @@
   color: var(--text);
 }
 
-.wb-member-name .wb-badge {
-  margin-left: var(--space-2);
-  vertical-align: middle;
+.wb-member-name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px var(--space-2);
 }
+.wb-member-name .wb-badge { margin: 0; }
 
 .wb-member-email {
   font-size: var(--font-xs);

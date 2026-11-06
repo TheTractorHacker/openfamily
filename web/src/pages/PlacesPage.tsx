@@ -16,6 +16,7 @@ import {
 } from '../lib/api'
 import { isAccessDenied, useAsync } from '../lib/useAsync'
 import { AccessDenied, Badge, Button, EmptyState, ErrorState, Spinner } from '../components/primitives'
+import { PageHeader } from '../components/patterns'
 import { BaseMapLayer } from '../map/BaseMapLayer'
 import type { AdminPlace } from '../lib/types'
 import './pages.css'
@@ -227,13 +228,11 @@ export function PlacesPage() {
 
   return (
     <div className="wb-places">
-      <div className="wb-places-toolbar">
-        <div>
-          <h1 className="wb-page-title">Places</h1>
-          <p className="wb-page-subtitle">
-            Add, move, resize and remove places for any family.
-          </p>
-        </div>
+      <PageHeader
+        title="Places"
+        subtitle="Add, move, resize and remove places for any family."
+        actions={
+          <>
         <label className="wb-field" htmlFor="places-family">
           <span className="wb-label">Family</span>
           <select
@@ -253,7 +252,9 @@ export function PlacesPage() {
         <Button variant={adding ? 'secondary' : 'primary'} onClick={adding ? () => setAdding(false) : startAdd}>
           {adding ? 'Cancel' : 'Add place'}
         </Button>
-      </div>
+          </>
+        }
+      />
 
       <div className="wb-places-body">
         <div className="wb-places-map" aria-label="Places map">

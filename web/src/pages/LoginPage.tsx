@@ -63,6 +63,12 @@ export function LoginPage({ onLoggedIn }: LoginPageProps) {
 
       <main className="wb-login-main">
         <div className="wb-login-card">
+          <div className="wb-login-mobile-brand" aria-hidden="true">
+            <span className="wb-login-mark">
+              <img className="wb-login-logo" src="/admin/brand/openfamily-icon-on-accent.svg" alt="" />
+            </span>
+            <span className="wb-login-wordmark">OpenFamily</span>
+          </div>
           <h1 className="wb-login-h1">Sign in</h1>
           <p className="wb-login-sub">Use your OpenFamily account to continue.</p>
 

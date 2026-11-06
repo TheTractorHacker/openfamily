@@ -32,3 +32,7 @@
 .wb-activity-sub { font-size: var(--font-xs); color: var(--text-muted); }
 .wb-activity-time { flex: 0 0 auto; font-size: var(--font-xs); color: var(--text-faint); white-space: nowrap; }
 .wb-activity-more { display: flex; justify-content: center; margin-top: var(--space-4); }
+
+@media (max-width: 520px) {
+  .wb-activity-filters .wb-field { margin-left: 0; min-width: 0; flex: 1 1 100%; }
+}

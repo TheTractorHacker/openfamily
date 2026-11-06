@@ -10,5 +10,6 @@
 .wb-audit-user { font-weight: 600; }
 .wb-audit-sub { font-size: var(--font-xs); color: var(--text-muted); }
 .wb-audit-nowrap { white-space: nowrap; }
-.wb-audit-detail { max-width: 420px; overflow-wrap: anywhere; color: var(--text-muted); }
+.wb-audit-detail { min-width: 220px; max-width: 420px; overflow-wrap: anywhere; color: var(--text-muted); }
+.wb-audit-tablewrap .wb-table { min-width: 720px; }
 .wb-audit-more { display: flex; justify-content: center; }
