@@ -70,10 +70,9 @@ type Server struct {
 	// (tests) disables the check.
 	LocationLimit *sms.Limiter
 
-	// TileURL and SatelliteTileURL are raster templates advertised on GET /config.
+	TileURL          string
 	SatelliteTileURL string
 	MapStyleURL      string
-	SatelliteTileURL string
 	// OnMapStyleChange, when set, is called with the effective style URL after
 	// an admin changes it, so the admin panel CSP can allow its origin.
 	OnMapStyleChange func(styleURL string)

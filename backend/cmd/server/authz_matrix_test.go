@@ -164,24 +164,26 @@ func parseMainRoutes(t *testing.T) []parsedRoute {
 // publicRoutes are the routes deliberately reachable without a session. Adding
 // a route outside the authenticated groups requires adding it here.
 var publicRoutes = map[string]string{
-	"GET /healthz":              "liveness",
-	"GET /config":               "public server config",
-	"GET /alerts/share/{token}": "unguessable SOS share token",
-	"GET /join/{code}":          "static invite landing page",
-	"GET /app.apk":              "signed APK for invitees",
-	"GET /s/{token}":            "share-link viewer (hash lookup)",
-	"GET /s/{token}/data":       "share-link viewer",
-	"GET /s/{token}/photo":      "share-link viewer",
-	"POST /auth/register":       "credentials",
-	"POST /auth/login":          "credentials",
-	"POST /auth/refresh":        "refresh token in body",
-	"POST /auth/password/reset": "reset code in body",
-	"GET /ws/stream":            "self-authenticating (TestAuthzMatrixWebSocket)",
-	"GET /api/admin/ws":         "self-authenticating (TestAuthzMatrixWebSocket)",
-	"GET /":                     "redirect",
-	"GET /admin":                "static SPA",
-	"GET /admin/":               "static SPA",
-	"GET /admin/*":              "static SPA",
+	"GET /healthz":                     "liveness",
+	"GET /config":                      "public server config",
+	"GET /alerts/share/{token}":        "unguessable SOS share token",
+	"GET /join/{code}":                 "static invite landing page",
+	"GET /app.apk":                     "signed APK for invitees",
+	"GET /s/{token}":                   "share-link viewer (hash lookup)",
+	"GET /s/{token}/data":              "share-link viewer",
+	"GET /s/{token}/photo":             "share-link viewer",
+	"POST /auth/register":              "credentials",
+	"POST /auth/login":                 "credentials",
+	"POST /auth/refresh":               "refresh token in body",
+	"POST /auth/password/reset":        "reset code in body",
+	"POST /auth/passkeys/login/begin":  "passkey ceremony (challenge is single-use)",
+	"POST /auth/passkeys/login/finish": "passkey assertion verified against stored key",
+	"GET /ws/stream":                   "self-authenticating (TestAuthzMatrixWebSocket)",
+	"GET /api/admin/ws":                "self-authenticating (TestAuthzMatrixWebSocket)",
+	"GET /":                            "redirect",
+	"GET /admin":                       "static SPA",
+	"GET /admin/":                      "static SPA",
+	"GET /admin/*":                     "static SPA",
 }
 
 // selfDestructive routes take no resource id; they act on the caller's own
@@ -312,6 +314,8 @@ func newAuthzFixture(t *testing.T, routes []parsedRoute) *authzFixture {
 		VALUES ($1,'hard_brake', now()-interval '90 minutes', now()-interval '89 minutes', 5) RETURNING id`, f.bMember.id)
 	f.ids["session"] = one(`INSERT INTO refresh_sessions (user_id, family_id, jti, expires_at)
 		VALUES ($1,$2,$3, now()+interval '1 day') RETURNING jti`, f.bMember.id, f.famB, "jti-"+tag)
+	f.ids["passkey"] = one(`INSERT INTO passkey_credentials (user_id, credential_id, credential, name)
+		VALUES ($1, decode(md5($2),'hex'), '{}'::jsonb, 'BSECRETPASSKEY') RETURNING id`, f.bMember.id, "pk-"+tag)
 	f.ids["contact"] = one(`INSERT INTO emergency_contacts (user_id, name, phone, phone_digits)
 		VALUES ($1,'BSECRETCONTACT','+15555550123','15555550123') RETURNING id`, f.bMember.id)
 	f.ids["circle"] = f.famB
@@ -366,6 +370,9 @@ func (f *authzFixture) buildRouter(t *testing.T, routes []parsedRoute) http.Hand
 				mws = append(mws, mid.RequireTokenVersion(f.pool))
 			case "RequirePlatformAdmin":
 				mws = append(mws, mid.RequirePlatformAdmin(f.pool))
+			case "RequireAdminMFA":
+				// Flag off here (pass-through); the MFA gate has its own tests.
+				mws = append(mws, mid.RequireAdminMFA(f.pool, false))
 			case "RequireAuthOrDeviceIngestKey":
 				mws = append(mws, mid.RequireAuthOrDeviceIngestKey(f.tm, f.pool))
 			default:
@@ -395,6 +402,7 @@ func (f *authzFixture) victimID(t *testing.T, rt parsedRoute, param string) stri
 	case "id":
 		for prefix, name := range map[string]string{
 			"/auth/sessions/":                     "session",
+			"/auth/passkeys/":                     "passkey",
 			"/family/members/":                    "member",
 			"/members/":                           "member",
 			"/api/admin/members/":                 "member",

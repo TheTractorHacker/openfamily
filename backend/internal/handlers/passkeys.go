@@ -382,7 +382,7 @@ func (s *Server) PasskeyLoginFinish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.tagSession(r, jti)
-	s.issueTokens(w, user, jti)
+	s.issueTokens(w, user, jti, "") // no amr: admin MFA still needs a TOTP session
 }
 
 // ListPasskeys returns the caller's passkeys (never key material).

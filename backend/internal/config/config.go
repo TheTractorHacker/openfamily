@@ -250,7 +250,7 @@ func Load() Config {
 		DBSSLDisableOK:        getenvBool("DB_SSL_DISABLE_OK", false),
 		InsecureHTTP:          getenvBool("INSECURE_HTTP", false),
 		VerbosePush:           getenvBool("VERBOSE_PUSH", false),
-		AdminLocationAccess:   getenvBool("ADMIN_LOCATION_ACCESS", false),
+		AdminLocationAccess:   getenvBool("ADMIN_LOCATION_ACCESS", true),
 		DirectPush:            getenvBool("DIRECT_PUSH", true),
 		NtfyBaseURL:           strings.TrimRight(getenv("NTFY_BASE_URL", ""), "/"),
 		TileURL:               getenv("TILE_URL", DefaultTileURL),

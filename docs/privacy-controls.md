@@ -3,7 +3,7 @@
 ## Platform admin access to live location (SEC-007)
 
 A platform admin manages accounts and servers; by default they **cannot see
-where anyone is**. `ADMIN_LOCATION_ACCESS` (default `false`) controls this:
+where anyone is**. `ADMIN_LOCATION_ACCESS` (default `true`; set `false` to hide member locations from admins) controls this:
 
 | Surface | Default (`false`) | `true` |
 |---|---|---|

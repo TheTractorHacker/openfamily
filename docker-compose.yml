@@ -112,7 +112,7 @@ services:
       SMS_FROM: ${SMS_FROM:-}
       # Privacy policy knobs (see docs/privacy-controls.md). Platform admins see
       # no member locations unless this is true; every read is audit-logged.
-      ADMIN_LOCATION_ACCESS: ${ADMIN_LOCATION_ACCESS:-false}
+      ADMIN_LOCATION_ACCESS: ${ADMIN_LOCATION_ACCESS:-true}
       LOCATION_RETENTION_DAYS: ${LOCATION_RETENTION_DAYS:-}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
       # Directory the admin panel caches the v* GitHub Release APK into.

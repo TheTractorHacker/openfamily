@@ -168,7 +168,11 @@ func (s *Server) AdminActivityFeed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer rows.Close()
-	redact := s.adminLocationDenied(r.Context(), middleware.ClaimsFromContext(r.Context()).UserID, "", "read activity feed coordinates", clientIP(r))
+	adminID := middleware.ClaimsFromContext(r.Context()).UserID
+	redact := s.adminLocationDenied(r.Context(), adminID, "", "read activity feed coordinates", clientIP(r))
+	if !redact {
+		s.auditAdminView(r.Context(), adminID, "", "read activity feed coordinates", clientIP(r))
+	}
 	out := []activityOut{}
 	for rows.Next() {
 		var a activityOut
@@ -179,6 +183,10 @@ func (s *Server) AdminActivityFeed(w http.ResponseWriter, r *http.Request) {
 		}
 		if redact {
 			a.Lat, a.Lon = nil, nil
+			// Arrival/departure details are place names: location-derived too.
+			if a.Kind == "arrival" || a.Kind == "departure" {
+				a.Detail = ""
+			}
 		}
 		out = append(out, a)
 	}

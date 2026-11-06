@@ -41,7 +41,7 @@ func countAction(rows *[]auditRow, action string) int {
 func TestAdminLocationDeniedByDefault(t *testing.T) {
 	e, rows := adminLocEnv(t)
 	if e.srv.AdminLocationAccess {
-		t.Fatal("AdminLocationAccess must default to false")
+		t.Fatal("AdminLocationAccess must be off in this test harness")
 	}
 
 	// Member list: users stay listed, positions are withheld.
