@@ -37,6 +37,12 @@ class MainActivity : FlutterFragmentActivity() {
         }
         linkChannel = channel
 
+        // Keystore-backed wrapping key + FLAG_SECURE for the end-to-end encryption
+        // secrets (see KeystoreChannel.kt).
+        val keystore = KeystoreChannel(this)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "app.openfamily/keystore")
+            .setMethodCallHandler { call, result -> keystore.handle(call, result) }
+
         // Home-screen widget snapshot store. Never throws into Dart.
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "app.openfamily/widget")
             .setMethodCallHandler { call, result ->

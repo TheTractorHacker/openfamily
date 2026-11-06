@@ -29,8 +29,14 @@ class InviteService {
 
   /// The shareable invite link (`https://<server>/join/<code>`), which is
   /// also the QR payload. Null when no valid server URL is configured.
-  static String? inviteLink(String code) =>
-      InviteLink.build(ServerConfig.instance.apiBaseUrl, code);
+  static String? inviteLink(String code) => InviteLink.build(
+      ServerConfig.instance.apiBaseUrl, code,
+      fingerprint: inviterFingerprint);
+
+  /// This phone's end-to-end key fingerprint (64 hex), appended to links and QR
+  /// codes in the URL fragment so the joiner can verify the inviter's keys
+  /// without trusting the server. Null until the phone has registered a key.
+  static String? inviterFingerprint;
 
   /// The share-sheet body: the tap-to-join link plus the manual fallback
   /// (server URL and code) for people who cannot open the link.

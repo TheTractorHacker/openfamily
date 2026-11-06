@@ -13,6 +13,7 @@ export type RouteKey =
   | 'activity'
   | 'bubbles'
   | 'audit'
+  | 'e2ee'
   | 'alerts'
   | 'system'
   | 'builds'
@@ -164,6 +165,21 @@ export const ROUTES: RouteDef[] = [
     icon: icon(
       <path
         d="M9.5 15a5.5 5.5 0 1 0 0-11 5.5 5.5 0 0 0 0 11Zm7 5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    ),
+  },
+  {
+    key: 'e2ee',
+    label: 'Encryption keys',
+    hash: '#/e2ee',
+    adminOnly: true,
+    icon: icon(
+      <path
+        d="M8 11V8a4 4 0 1 1 8 0v3M6 11h12v9H6v-9Zm6 3v3"
         stroke="currentColor"
         strokeWidth="1.6"
         strokeLinecap="round"

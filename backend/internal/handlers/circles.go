@@ -674,6 +674,7 @@ func (s *Server) RemoveCircleMember(w http.ResponseWriter, r *http.Request) {
 		action = "circle.left"
 	}
 	s.auditCircle(r.Context(), uid, circleID, action, "user "+target, clientIP(r))
+	s.auditRekeyIfNeeded(r.Context(), uid, circleID, clientIP(r))
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 

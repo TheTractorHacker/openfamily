@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:share_plus/share_plus.dart';
 
+import '../services/e2ee/e2ee_app.dart';
 import '../services/invite_service.dart';
 import '../services/server_config.dart';
 import '../theme/app_theme.dart';
@@ -59,6 +60,10 @@ class _InviteScreenState extends State<InviteScreen> {
     try {
       final String code =
           await (widget.createCode ?? InviteService.createCode)();
+      // Production path only: carry my key fingerprint in the link/QR.
+      if (widget.createCode == null) {
+        InviteService.inviterFingerprint = await InviteAnchor.myFingerprint();
+      }
       if (!mounted) return;
       setState(() {
         _creating = false;

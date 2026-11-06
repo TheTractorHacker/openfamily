@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../services/api_client.dart';
 import '../services/join_service.dart';
+import '../services/e2ee/e2ee_app.dart';
 import '../services/pending_invite.dart';
 import '../theme/app_theme.dart';
 import '../widgets/ds/ds.dart';
@@ -70,7 +71,10 @@ class _JoinCircleScreenState extends State<JoinCircleScreen> {
     try {
       final bool ok = await JoinService.join(code);
       if (!mounted) return;
-      if (ok) PendingInvite.clear();
+      if (ok) {
+        await InviteAnchor.save(PendingInvite.current.value?.fingerprint);
+        PendingInvite.clear();
+      }
       setState(() {
         _submitting = false;
         if (ok) {

@@ -11,6 +11,7 @@ import '../theme/app_theme.dart';
 import '../widgets/ds/ds.dart';
 import 'change_password_screen.dart';
 import 'delete_account_screen.dart';
+import 'encryption_keys_screen.dart';
 import 'issue_reset_code_screen.dart';
 import 'security_widgets.dart';
 import 'sessions_screen.dart';
@@ -160,6 +161,13 @@ class _SecurityScreenState extends State<SecurityScreen> {
                         api: widget.api,
                       )),
                     ),
+                  _tile(
+                    icon: Icons.key,
+                    title: 'Encryption keys',
+                    subtitle: 'Your device key, the server\'s record of it, '
+                        'safety numbers and the recovery phrase.',
+                    onTap: () => _push(const EncryptionKeysScreen()),
+                  ),
                   const Divider(height: AppSpace.xxl),
                   _tile(
                     icon: Icons.download_outlined,

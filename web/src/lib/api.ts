@@ -748,3 +748,35 @@ export function testMapStyle(mapStyleUrl: string): Promise<{ status: string }> {
     body: { map_style_url: mapStyleUrl },
   })
 }
+
+// ---- End-to-end encryption keys (platform admin; public data only) ----
+
+export interface E2eeAdminDevice {
+  user_id: string
+  user_name: string
+  email: string
+  device_id: string
+  fingerprint: string
+  digits: string
+  short: string
+  kind: 'device' | 'recovery'
+  label: string
+  created_at: string
+  revoked_at: string | null
+  revoked_reason?: string
+}
+
+export interface E2eeAdminCircle {
+  id: string
+  name: string
+  mode: 'off' | 'private'
+  epoch: number
+  rekey_required: boolean
+  updated_at: string | null
+  members: number
+  wrapped_keys: number
+}
+
+export function listE2eeKeys(): Promise<{ devices: E2eeAdminDevice[]; circles: E2eeAdminCircle[] }> {
+  return request<{ devices: E2eeAdminDevice[]; circles: E2eeAdminCircle[] }>('/api/admin/e2ee/keys')
+}

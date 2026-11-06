@@ -4,6 +4,9 @@ import 'package:share_plus/share_plus.dart';
 
 import '../models/circle.dart';
 import '../services/circle_service.dart';
+import '../services/e2ee/e2ee_app.dart';
+import '../services/e2ee/e2ee_models.dart';
+import '../services/e2ee/e2ee_service.dart';
 import '../services/server_config.dart';
 import '../theme/app_theme.dart';
 import '../widgets/ds/ds.dart';
@@ -40,10 +43,92 @@ class _CircleDetailScreenState extends State<CircleDetailScreen> {
 
   CircleService get _service => widget.service ?? CircleService.instance;
 
+  // Private circle (end-to-end encryption, phase 1). Only loaded in the real
+  // app (widget.service == null); tests and previews never touch it.
+  E2eeService? get _e2ee => widget.service == null ? E2eeApp.service : null;
+  CircleE2eeState? _e2eeState;
+  bool _e2eeBusy = false;
+
+  Future<void> _loadE2ee() async {
+    final E2eeService? svc = _e2ee;
+    if (svc == null) return;
+    try {
+      final CircleE2eeState st = await svc.api.circleState(_circle.id);
+      if (mounted) setState(() => _e2eeState = st);
+    } catch (_) {
+      // Older server without the endpoints: the toggle simply stays hidden.
+    }
+  }
+
+  Future<void> _togglePrivate(bool on) async {
+    final E2eeService? svc = _e2ee;
+    if (svc == null || _e2eeBusy) return;
+    final bool ok = await showDsConfirm(
+      context,
+      title: on ? 'Make this a private circle?' : 'Turn off private mode?',
+      message: on
+          ? 'This sets up end-to-end encryption KEYS for the circle: a key made on your phone '
+              'and sealed to each member\'s phone. In this version your locations are still shared '
+              'the normal way; nothing is encrypted yet.\n\n'
+              'Once location data moves into the encrypted channel, features that need the server to '
+              'read positions will not be available for private circles: trips, driving reports, the '
+              'weekly summary, Dawarich export, the admin map and server place names. If every phone and '
+              'the recovery phrase are lost, encrypted data cannot be recovered. Members need the latest app.'
+          : 'The circle goes back to normal mode and its stored key copies are deleted from the server. '
+              'Keys already on phones stay there.',
+      confirmLabel: on ? 'Turn on' : 'Turn off',
+      destructive: !on,
+    );
+    if (!ok || !mounted) return;
+    setState(() => _e2eeBusy = true);
+    try {
+      if (on) {
+        final LocalIdentity? id = await svc.identity();
+        if (id == null) await svc.registerThisDevice(label: 'This phone');
+        await svc.enableCircle(_circle.id);
+      } else {
+        await svc.disableCircle(_circle.id);
+      }
+      await _loadE2ee();
+    } on NeedsCrossSignatureException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(describeCircleError(e).message)));
+      }
+    } finally {
+      if (mounted) setState(() => _e2eeBusy = false);
+    }
+  }
+
+  Widget _privateCard() {
+    final CircleE2eeState? st = _e2eeState;
+    if (st == null || !_circle.isAdmin) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(top: AppSpace.md),
+      child: DsRowGroup(
+        children: <Widget>[
+          DsToggleRow(
+            icon: st.isPrivate ? Icons.lock : Icons.lock_open,
+            title: 'Private circle (end-to-end encrypted)',
+            subtitle: st.isPrivate
+                ? 'On: keys are set up (epoch ${st.epoch}). Locations are not encrypted yet in this version.'
+                : 'Off. Sets up encryption keys only; location data is not moved yet. Some server features will not work in private circles later.',
+            value: st.isPrivate,
+            onChanged: _e2eeBusy ? null : _togglePrivate,
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   void initState() {
     super.initState();
     _load();
+    _loadE2ee();
   }
 
   Future<void> _load() async {
@@ -395,6 +480,7 @@ class _CircleDetailScreenState extends State<CircleDetailScreen> {
             children: <Widget>[
               if (_circle.expiresAt != null) _lifetimeCard(),
               _sharingCard(),
+              _privateCard(),
               _sectionTitle('Members (${_members.length})'),
               if (_members.isEmpty)
                 const DsEmptyState(

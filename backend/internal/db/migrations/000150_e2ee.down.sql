@@ -1,0 +1,16 @@
+DROP TRIGGER IF EXISTS trg_e2ee_device_revoked ON device_keys;
+DROP TRIGGER IF EXISTS trg_e2ee_member_removed ON circle_members;
+DROP FUNCTION IF EXISTS e2ee_device_revoked();
+DROP FUNCTION IF EXISTS e2ee_member_removed();
+DROP TABLE IF EXISTS circle_key_wraps;
+DROP TRIGGER IF EXISTS trg_e2ee_log_immutable ON e2ee_log;
+DROP TABLE IF EXISTS e2ee_log;
+DROP FUNCTION IF EXISTS e2ee_log_immutable();
+DROP TABLE IF EXISTS device_approvals;
+ALTER TABLE circles DROP CONSTRAINT IF EXISTS circles_e2ee_mode_chk;
+ALTER TABLE circles DROP CONSTRAINT IF EXISTS circles_e2ee_epoch_chk;
+ALTER TABLE circles DROP COLUMN IF EXISTS e2ee_updated_at;
+ALTER TABLE circles DROP COLUMN IF EXISTS e2ee_rekey_required;
+ALTER TABLE circles DROP COLUMN IF EXISTS e2ee_epoch;
+ALTER TABLE circles DROP COLUMN IF EXISTS e2ee_mode;
+DROP TABLE IF EXISTS device_keys;

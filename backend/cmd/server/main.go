@@ -37,6 +37,10 @@ func main() {
 		os.Exit(runValidateConfig(os.Stdout, cfg))
 	}
 
+	if len(os.Args) > 1 && (os.Args[1] == "e2ee-fingerprints" || os.Args[1] == "e2ee-log-head") {
+		os.Exit(runE2EEFingerprints(cfg, os.Args[1], os.Args[2:]))
+	}
+
 	logger := slog.New(errlog.Wrap(slog.NewTextHandler(os.Stdout, nil), nil))
 	slog.SetDefault(logger)
 
@@ -296,6 +300,23 @@ func main() {
 		r.Get("/circles/{id}/chat/{msgId}/photo", srv.GetChatPhoto)
 		r.Get("/chat/unread", srv.ChatUnread)
 
+		// End-to-end encryption foundation (docs/design/E2EE.md): public device
+		// keys and ciphertext wraps only; the server never holds a private key.
+		r.Post("/e2ee/devices", srv.E2EERegisterDevice)
+		r.Get("/e2ee/me", srv.E2EEMyDevices)
+		r.Post("/e2ee/devices/{id}/rotate", srv.E2EERotateDevice)
+		r.Delete("/e2ee/devices/{id}", srv.E2EERevokeDevice)
+		r.Get("/e2ee/users/{user_id}/devices", srv.E2EEUserDevices)
+		r.Get("/circles/{id}/e2ee", srv.E2EECircleState)
+		r.Get("/circles/{id}/e2ee/wraps", srv.E2EEMyWraps)
+		r.Get("/circles/{id}/e2ee/pending", srv.E2EEPending)
+		r.Post("/circles/{id}/e2ee/enable", srv.E2EEEnable)
+		r.Post("/circles/{id}/e2ee/wraps", srv.E2EESubmitWraps)
+		r.Post("/circles/{id}/e2ee/epoch", srv.E2EEBumpEpoch)
+		r.Post("/circles/{id}/e2ee/disable", srv.E2EEDisable)
+		r.Post("/circles/{id}/e2ee/approvals", srv.E2EEApproveDevice)
+		r.Get("/e2ee/log", srv.E2EELog)
+
 		r.Post("/families", srv.CreateFamily)
 		r.Get("/family", srv.GetFamily)
 		r.Patch("/family", srv.RenameFamily)
@@ -433,6 +454,7 @@ func main() {
 		r.Post("/api/admin/places", srv.AdminCreatePlace)
 		r.Put("/api/admin/places/{id}", srv.AdminUpdatePlace)
 		r.Delete("/api/admin/places/{id}", srv.AdminDeletePlace)
+		r.Get("/api/admin/e2ee/keys", srv.AdminE2EEKeys)
 		r.Get("/api/admin/audit", srv.AdminListAudit)
 		r.Get("/api/admin/audit/actions", srv.AdminListAuditActions)
 		r.Get("/api/admin/audit/export", srv.AdminExportAudit)

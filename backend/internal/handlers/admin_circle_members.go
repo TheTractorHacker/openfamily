@@ -120,5 +120,6 @@ func (s *Server) AdminRemoveCircleMember(w http.ResponseWriter, r *http.Request)
 		s.hub.unsubscribeUser(target, circleID)
 	}
 	s.auditCircle(r.Context(), claims.UserID, circleID, "admin.circle.member_removed", "removed user "+target, clientIP(r))
+	s.auditRekeyIfNeeded(r.Context(), claims.UserID, circleID, clientIP(r))
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }

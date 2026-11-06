@@ -65,6 +65,14 @@ dependencies:
   # detection (SensorManager on Android; no Google Play Services). Sampled only
   # while the GPS says the user is driving; raw samples never leave the phone.
   sensors_plus: ^7.1.1
+  # End-to-end encryption (docs/design/E2EE.md): pure-Dart Ed25519, X25519,
+  # XChaCha20-Poly1305, HKDF-SHA256 and Argon2id. No native code, so it works on
+  # every platform; cryptography_flutter can be added later for hardware speed-ups
+  # without changing any call site.
+  cryptography: ^2.7.0
+  # BIP39 wordlist, entropy <-> 24-word mnemonic and checksum validation for the
+  # recovery phrase.
+  bip39: ^1.0.6
   # Android screen on/off/unlock broadcasts (optional "screen activity while
   # moving" estimate). Local plugin, no permissions.
   driving_native:

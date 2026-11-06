@@ -22,6 +22,7 @@ import { SystemPage } from './pages/SystemPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { CirclesPage } from './pages/CirclesPage'
 import { ShareLinksPage } from './pages/ShareLinksPage'
+import { EncryptionKeysPage } from './pages/EncryptionKeysPage'
 import { ROUTES, DEFAULT_ROUTE, routeFromHash, type RouteKey } from './lib/routes'
 import { clearTokens, getEmail, isAuthenticated, subscribeAuth } from './lib/auth'
 import { useMe } from './lib/me'
@@ -154,6 +155,8 @@ function renderPage(
       return <ActivityPage />
     case 'bubbles':
       return <BubblesPage />
+    case 'e2ee':
+      return <EncryptionKeysPage />
     case 'audit':
       return <AuditPage />
     case 'alerts':

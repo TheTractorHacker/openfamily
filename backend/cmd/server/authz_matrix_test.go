@@ -318,6 +318,12 @@ func newAuthzFixture(t *testing.T, routes []parsedRoute) *authzFixture {
 		VALUES ($1, decode(md5($2),'hex'), '{}'::jsonb, 'BSECRETPASSKEY') RETURNING id`, f.bMember.id, "pk-"+tag)
 	f.ids["contact"] = one(`INSERT INTO emergency_contacts (user_id, name, phone, phone_digits)
 		VALUES ($1,'BSECRETCONTACT','+15555550123','15555550123') RETURNING id`, f.bMember.id)
+	f.ids["e2ee_device"] = one(`INSERT INTO device_keys (device_id, user_id, ed25519_pub, x25519_pub, fingerprint, signature,
+		registered_by_device_id, registered_by_pub, registration_action, registration_signature, initial)
+		VALUES (gen_random_uuid(), $1, decode(md5($2),'hex') || decode(md5($2 || 'x'),'hex'), decode(md5($2 || 'y'),'hex') || decode(md5($2 || 'z'),'hex'),
+		        encode(sha256($2::bytea),'hex'), decode(md5($2),'hex') || decode(md5($2),'hex') || decode(md5($2),'hex') || decode(md5($2),'hex'), gen_random_uuid(),
+		        decode(md5($2),'hex') || decode(md5($2),'hex'), 1, decode(md5($2),'hex') || decode(md5($2),'hex') || decode(md5($2),'hex') || decode(md5($2),'hex'), true)
+		RETURNING device_id`, f.bMember.id, "e2ee-"+tag)
 	f.ids["circle"] = f.famB
 	f.ids["crash"] = "00000000-0000-4000-8000-0000000000c1"
 	f.ids["family"] = f.famB
@@ -413,6 +419,7 @@ func (f *authzFixture) victimID(t *testing.T, rt parsedRoute, param string) stri
 			"/family/places/":                     "place",
 			"/api/admin/places/":                  "place",
 			"/devices/":                           "device",
+			"/e2ee/devices/":                      "e2ee_device",
 			"/me/contacts/":                       "contact",
 			"/alerts/":                            "alert",
 			"/crashes/":                           "crash",
@@ -501,6 +508,8 @@ func (f *authzFixture) snapshot(t *testing.T) string {
 	  (SELECT coalesce(string_agg(p::text, ',' ORDER BY p.id), '') FROM places p WHERE p.family_id = $1),
 	  (SELECT coalesce(string_agg(g::text, ',' ORDER BY g.id), '') FROM geofences g WHERE g.family_id = $1),
 	  (SELECT coalesce(string_agg(d::text, ',' ORDER BY d.id), '') FROM devices d WHERE d.user_id = ANY($2::uuid[])),
+	  (SELECT coalesce(string_agg(dk::text, ',' ORDER BY dk.device_id), '') FROM device_keys dk WHERE dk.user_id = ANY($2::uuid[])),
+	  (SELECT coalesce(string_agg(kw::text, ',' ORDER BY kw.recipient_device_id), '') FROM circle_key_wraps kw WHERE kw.circle_id = $1),
 	  (SELECT coalesce(string_agg(a::text, ',' ORDER BY a.id), '') FROM alerts a WHERE a.family_id = $1),
 	  (SELECT coalesce(string_agg(c::text, ',' ORDER BY c.id), '') FROM chat_messages c WHERE c.circle_id = $1),
 	  (SELECT coalesce(string_agg(i::text, ',' ORDER BY i.id), '') FROM invite_codes i WHERE i.family_id = $1 OR i.circle_id = $1),

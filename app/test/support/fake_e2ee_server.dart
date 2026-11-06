@@ -1,0 +1,290 @@
+import 'dart:typed_data';
+
+import 'package:openfamily/services/e2ee/e2ee_api.dart';
+import 'package:openfamily/services/e2ee/e2ee_crypto.dart';
+import 'package:openfamily/services/e2ee/e2ee_models.dart';
+
+/// An in-memory stand-in for the Go server's E2EE endpoints. It keeps the same
+/// rules that matter to the client (signatures are checked, wraps only to
+/// approved keys, epochs strictly increasing, a real hash-chained log) so the
+/// service can be tested end to end without HTTP.
+class FakeE2eeServer {
+  final Map<String, List<DeviceKey>> keys = <String, List<DeviceKey>>{};
+  final Map<String, FakeCircle> circles = <String, FakeCircle>{};
+  final Map<String, String> names = <String, String>{};
+  final List<Map<String, dynamic>> log = <Map<String, dynamic>>[];
+
+  /// When set, the next /e2ee/log call returns this instead (to simulate a
+  /// malicious server).
+  ({List<LogEntry> entries, LogHead head})? logOverride;
+
+  FakeE2eeClient client(String userId) => FakeE2eeClient(this, userId);
+
+  FakeCircle circle(String id, {required List<String> members, required String admin}) =>
+      circles[id] = FakeCircle(id, members, admin);
+
+  Future<void> appendLog(int action, String userId, String actor, Uint8List actorPub,
+      {String? circleId, String? subjectId, int epoch = 0, Uint8List? ref, required Uint8List sig}) async {
+    final Uint8List msg = E2ee.logActionMessage(action, userId, actor,
+        circleId: circleId, subjectId: subjectId, epoch: epoch, ref: ref);
+    final Uint8List prev = log.isEmpty ? E2ee.genesisHash : log.last['entry_hash'] as Uint8List;
+    final int seq = log.length + 1;
+    log.add(<String, dynamic>{
+      'seq': seq, 'prev': prev, 'entry_hash': await E2ee.logEntryHash(prev, seq, msg, sig),
+      'action': action, 'user': userId, 'actor': actor, 'pub': actorPub, 'circle': circleId,
+      'subject': subjectId, 'epoch': epoch, 'ref': ref ?? Uint8List(32), 'sig': sig,
+    });
+  }
+
+  List<DeviceKey> activeOf(String user) => (keys[user] ?? <DeviceKey>[]).where((DeviceKey k) => k.isActive).toList();
+
+  bool approved(DeviceKey d, String circleId) =>
+      d.initial || !d.isRoot || circles[circleId]!.approvals.contains(d.deviceId);
+
+  DeviceKey? findActive(String deviceId) {
+    for (final List<DeviceKey> l in keys.values) {
+      for (final DeviceKey k in l) {
+        if (k.deviceId == deviceId && k.isActive) return k;
+      }
+    }
+    return null;
+  }
+}
+
+class FakeCircle {
+  FakeCircle(this.id, this.members, this.admin);
+  final String id;
+  final List<String> members;
+  final String admin;
+  String mode = 'off';
+  int epoch = 0;
+  bool rekey = false;
+  final Set<String> approvals = <String>{};
+  final Map<String, WrapRecord> wraps = <String, WrapRecord>{}; // "epoch/recipient"
+}
+
+class FakeE2eeClient implements E2eeApi {
+  FakeE2eeClient(this.s, this.uid);
+  final FakeE2eeServer s;
+  final String uid;
+
+  DeviceKey _mk(Map<String, dynamic> b, int action, Uint8List actorPub, bool initial, Uint8List fp) => DeviceKey(
+        deviceId: b['device_id'] as String,
+        userId: uid,
+        kind: b['kind'] as String,
+        edPub: E2ee.unb64(b['ed25519_pub']),
+        xPub: E2ee.unb64(b['x25519_pub']),
+        fingerprint: E2ee.hex(fp),
+        digits: '',
+        short: E2ee.shortFingerprint(fp),
+        registeredByDeviceId: b['actor_device_id'] as String,
+        registeredByPub: actorPub,
+        registrationAction: action,
+        registrationSignature: E2ee.unb64(b['log_signature']),
+        initial: initial,
+        label: '',
+        createdAt: DateTime.now().toUtc(),
+      );
+
+  @override
+  Future<DeviceKey> register(Map<String, dynamic> b) async {
+    final List<DeviceKey> mine = s.keys.putIfAbsent(uid, () => <DeviceKey>[]);
+    final Uint8List ed = E2ee.unb64(b['ed25519_pub']), x = E2ee.unb64(b['x25519_pub']);
+    final String did = b['device_id'] as String;
+    if (!await E2ee.verify(ed, E2ee.bindingMessage(uid, did, ed, x), E2ee.unb64(b['signature']))) {
+      throw StateError('bad binding');
+    }
+    final Uint8List fp = await E2ee.fingerprint(ed, x);
+    final String actor = (b['actor_device_id'] as String?) ?? did;
+    final bool root = actor == did;
+    final Uint8List signerPub = root ? ed : mine.firstWhere((DeviceKey k) => k.deviceId == actor && k.isActive).edPub;
+    final bool anyActive = mine.any((DeviceKey k) => k.isActive);
+    int action;
+    bool initial = false;
+    if (root) {
+      if (mine.isEmpty) {
+        action = E2ee.actRegister;
+        initial = true;
+      } else if (anyActive && b['reset'] != true) {
+        throw StateError('cross_signature_required');
+      } else {
+        action = E2ee.actReset;
+      }
+    } else {
+      action = b['kind'] == 'recovery' ? E2ee.actRecovery : E2ee.actRegister;
+    }
+    if (!await E2ee.verify(signerPub, E2ee.logActionMessage(action, uid, actor, subjectId: did, ref: fp), E2ee.unb64(b['log_signature']))) {
+      throw StateError('bad log signature');
+    }
+    if (root && action == E2ee.actReset) {
+      for (int i = 0; i < mine.length; i++) {
+        if (mine[i].isActive) mine[i] = _revoked(mine[i]);
+      }
+    }
+    final DeviceKey d = _mk(b, action, signerPub, initial, fp);
+    mine.add(d);
+    await s.appendLog(action, uid, actor, signerPub, subjectId: did, ref: fp, sig: E2ee.unb64(b['log_signature']));
+    return d;
+  }
+
+  DeviceKey _revoked(DeviceKey k) => DeviceKey(
+        deviceId: k.deviceId, userId: k.userId, kind: k.kind, edPub: k.edPub, xPub: k.xPub,
+        fingerprint: k.fingerprint, digits: k.digits, short: k.short,
+        registeredByDeviceId: k.registeredByDeviceId, registeredByPub: k.registeredByPub,
+        registrationAction: k.registrationAction, registrationSignature: k.registrationSignature,
+        initial: k.initial, label: k.label, createdAt: k.createdAt, revokedAt: DateTime.now().toUtc(), revokedReason: 'revoked');
+
+  @override
+  Future<List<DeviceKey>> myKeys() async => List<DeviceKey>.of(s.keys[uid] ?? <DeviceKey>[]);
+
+  @override
+  Future<void> revoke(String deviceId, Map<String, dynamic> a) async {
+    final List<DeviceKey> l = s.keys[uid]!;
+    final int i = l.indexWhere((DeviceKey k) => k.deviceId == deviceId && k.isActive);
+    if (i < 0) throw StateError('not found');
+    l[i] = _revoked(l[i]);
+    for (final FakeCircle c in s.circles.values) {
+      c.wraps.removeWhere((String _, WrapRecord w) => w.recipientDeviceId == deviceId);
+      if (c.mode == 'private') c.rekey = true;
+    }
+  }
+
+  @override
+  Future<List<DeviceKey>> userKeys(String userId) async => s.activeOf(userId);
+
+  @override
+  Future<CircleE2eeState> circleState(String circleId) async {
+    final FakeCircle c = s.circles[circleId]!;
+    if (!c.members.contains(uid)) throw StateError('404');
+    return CircleE2eeState(
+      circleId: circleId, mode: c.mode, epoch: c.epoch, rekeyRequired: c.rekey,
+      members: <CircleE2eeMember>[
+        for (final String m in c.members)
+          CircleE2eeMember(userId: m, name: s.names[m] ?? m, role: m == c.admin ? 'admin' : 'member', devices: <DeviceKey>[
+            for (final DeviceKey d in s.activeOf(m)) _withApproval(d, s.approved(d, circleId), s.names[m])
+          ])
+      ],
+    );
+  }
+
+  DeviceKey _withApproval(DeviceKey d, bool ok, String? name) => DeviceKey(
+        deviceId: d.deviceId, userId: d.userId, kind: d.kind, edPub: d.edPub, xPub: d.xPub,
+        fingerprint: d.fingerprint, digits: d.digits, short: d.short, registeredByDeviceId: d.registeredByDeviceId,
+        registeredByPub: d.registeredByPub, registrationAction: d.registrationAction,
+        registrationSignature: d.registrationSignature, initial: d.initial, label: d.label,
+        createdAt: d.createdAt, approved: ok, userName: name);
+
+  @override
+  Future<List<WrapRecord>> myWraps(String circleId, String deviceId) async {
+    final FakeCircle c = s.circles[circleId]!;
+    final DeviceKey? d = s.findActive(deviceId);
+    if (d == null || d.userId != uid) return <WrapRecord>[];
+    return c.wraps.values.where((WrapRecord w) => w.recipientDeviceId == deviceId).toList();
+  }
+
+  @override
+  Future<List<DeviceKey>> pending(String circleId) async {
+    final FakeCircle c = s.circles[circleId]!;
+    return <DeviceKey>[
+      for (final String m in c.members)
+        for (final DeviceKey d in s.activeOf(m))
+          if (!c.wraps.containsKey('${c.epoch}/${d.deviceId}')) _withApproval(d, s.approved(d, circleId), s.names[m])
+    ];
+  }
+
+  Future<void> _store(FakeCircle c, int epoch, List<Map<String, dynamic>> wraps) async {
+    for (final Map<String, dynamic> w in wraps) {
+      final DeviceKey r = s.findActive(w['recipient_device_id'] as String)!;
+      if (!c.members.contains(r.userId)) throw StateError('recipient not a member');
+      if (!s.approved(r, c.id)) throw StateError('waiting for approval');
+      final DeviceKey wr = s.findActive(w['wrapper_device_id'] as String)!;
+      if (wr.userId != uid) throw StateError('wrapper not mine');
+      final Uint8List blob = E2ee.unb64(w['wrapped_key']);
+      final Uint8List sm = E2ee.wrapSigMessage(c.id, epoch, r.deviceId, wr.deviceId, blob);
+      if (!await E2ee.verify(wr.edPub, sm, E2ee.unb64(w['signature']))) throw StateError('bad wrap sig');
+      c.wraps.putIfAbsent('$epoch/${r.deviceId}', () => WrapRecord(
+          epoch: epoch, recipientDeviceId: r.deviceId, wrapperDeviceId: wr.deviceId,
+          wrapperEdPub: wr.edPub, blob: blob, signature: E2ee.unb64(w['signature'])));
+    }
+  }
+
+  Future<void> _epoch(String circleId, Map<String, dynamic> body, int action, {required bool enabling}) async {
+    final FakeCircle c = s.circles[circleId]!;
+    if (c.admin != uid) throw StateError('403');
+    final int epoch = body['epoch'] as int;
+    if (epoch != c.epoch + 1) throw StateError('409 epoch');
+    if (enabling != (c.mode == 'off')) throw StateError('409 mode');
+    final List<Map<String, dynamic>> wraps = (body['wraps'] as List<dynamic>).cast<Map<String, dynamic>>();
+    await _store(c, epoch, wraps);
+    final String actor = body['actor_device_id'] as String;
+    final DeviceKey a = s.findActive(actor)!;
+    final Uint8List digest = await E2ee.wrapsDigest(
+        wraps.map((Map<String, dynamic> w) => w['recipient_device_id'] as String).toList(),
+        wraps.map((Map<String, dynamic> w) => E2ee.unb64(w['wrapped_key'])).toList());
+    final Uint8List sig = E2ee.unb64(body['log_signature']);
+    if (!await E2ee.verify(a.edPub, E2ee.logActionMessage(action, uid, actor, circleId: circleId, epoch: epoch, ref: digest), sig)) {
+      throw StateError('bad log signature');
+    }
+    await s.appendLog(action, uid, actor, a.edPub, circleId: circleId, epoch: epoch, ref: digest, sig: sig);
+    c.mode = 'private';
+    c.epoch = epoch;
+    c.rekey = false;
+  }
+
+  @override
+  Future<void> enable(String circleId, Map<String, dynamic> body) => _epoch(circleId, body, E2ee.actEnable, enabling: true);
+
+  @override
+  Future<void> bumpEpoch(String circleId, Map<String, dynamic> body) => _epoch(circleId, body, E2ee.actEpoch, enabling: false);
+
+  @override
+  Future<void> disable(String circleId, Map<String, dynamic> a) async {
+    final FakeCircle c = s.circles[circleId]!;
+    if (c.admin != uid) throw StateError('403');
+    c.mode = 'off';
+    c.wraps.clear();
+  }
+
+  @override
+  Future<int> submitWraps(String circleId, int epoch, List<Map<String, dynamic>> wraps) async {
+    final FakeCircle c = s.circles[circleId]!;
+    if (!c.members.contains(uid)) throw StateError('404');
+    if (epoch < 1 || epoch > c.epoch) throw StateError('409');
+    final int before = c.wraps.length;
+    await _store(c, epoch, wraps);
+    return c.wraps.length - before;
+  }
+
+  @override
+  Future<void> approve(String circleId, Map<String, dynamic> body) async {
+    final FakeCircle c = s.circles[circleId]!;
+    if (c.admin != uid) throw StateError('403');
+    final DeviceKey d = s.findActive(body['device_id'] as String)!;
+    if (d.userId == uid) throw StateError('403 self');
+    final DeviceKey a = s.findActive(body['actor_device_id'] as String)!;
+    final Uint8List sig = E2ee.unb64(body['log_signature']);
+    final Uint8List fp = E2ee.unhex(d.fingerprint);
+    if (!await E2ee.verify(a.edPub, E2ee.logActionMessage(E2ee.actApprove, uid, a.deviceId, circleId: circleId, subjectId: d.deviceId, ref: fp), sig)) {
+      throw StateError('bad approval signature');
+    }
+    await s.appendLog(E2ee.actApprove, uid, a.deviceId, a.edPub, circleId: circleId, subjectId: d.deviceId, ref: fp, sig: sig);
+    c.approvals.add(d.deviceId);
+  }
+
+  @override
+  Future<({List<LogEntry> entries, LogHead head})> log(int after) async {
+    if (s.logOverride != null) return s.logOverride!;
+    final List<Map<String, dynamic>> rows = s.log.where((Map<String, dynamic> e) => (e['seq'] as int) > after).toList();
+    return (
+      entries: <LogEntry>[
+        for (final Map<String, dynamic> e in rows)
+          LogEntry(
+            seq: e['seq'] as int, prevHash: e['prev'] as Uint8List, entryHash: e['entry_hash'] as Uint8List, redacted: false,
+            action: e['action'] as int, userId: e['user'] as String, actorDeviceId: e['actor'] as String,
+            actorPub: e['pub'] as Uint8List, circleId: e['circle'] as String?, subjectId: e['subject'] as String?,
+            epoch: e['epoch'] as int, ref: e['ref'] as Uint8List, signature: e['sig'] as Uint8List),
+      ],
+      head: s.log.isEmpty ? LogHead(0, Uint8List(32)) : LogHead(s.log.length, s.log.last['entry_hash'] as Uint8List),
+    );
+  }
+}

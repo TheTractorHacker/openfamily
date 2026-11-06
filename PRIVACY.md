@@ -72,6 +72,17 @@ They set no cookies and ship no analytics or tracking code.
 - **Biometric unlock** covers the UI; it does not encrypt background
   credentials used to report location.
 
+## Private circles (end-to-end encryption)
+
+Circles can opt in to end-to-end encryption ("Private circle"). Today this only
+sets up keys: the server stores public keys, an append-only key log and
+ciphertext it cannot read, and locations are still sent the normal way. Once
+location data moves into the encrypted channel (see `docs/design/E2EE.md`) the
+operator can no longer read positions of Private circles, but still sees
+metadata: who is in which circle, when a phone is online and how often and how
+much it uploads, and client IP addresses. Losing every phone and the recovery
+phrase makes the encrypted data unrecoverable.
+
 ## Operator duties
 
 Encrypt the disk (or Postgres) at rest, keep backups private, set

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../services/e2ee/e2ee_app.dart';
 import '../services/pending_invite.dart';
 import '../services/api_client.dart';
 import '../services/auth_service.dart';
@@ -106,6 +107,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
       return;
     }
 
+    await InviteAnchor.save(PendingInvite.current.value?.fingerprint);
     PendingInvite.clear();
 
     // Auth succeeded; register the device (best-effort, non-blocking).
