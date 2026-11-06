@@ -74,6 +74,11 @@ MAP_STYLE_URL=https://maps.example.com/styles/liberty.json
 TILE_URL=https://tiles.example.com/{z}/{x}/{y}{r}.png
 ```
 
+You can also set the style from the admin panel (Settings, Map style). That
+value overrides `MAP_STYLE_URL`, must be an https URL to a public host, can be
+checked with the Test button, and takes effect on the next map load with no
+restart. Clearing it falls back to `MAP_STYLE_URL` (or OpenFreeMap).
+
 ## Address search and automatic address detection
 
 Creating or editing a place offers (a) an address filled in automatically when

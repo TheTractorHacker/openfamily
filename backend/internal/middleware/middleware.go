@@ -112,3 +112,39 @@ func RequirePlatformAdmin(pool *pgxpool.Pool) func(http.Handler) http.Handler {
 		})
 	}
 }
+
+// AdminMFARequiredMessage is returned (with HTTP 403) to a platform admin who
+// has not enabled two-factor authentication while REQUIRE_ADMIN_MFA is on.
+const AdminMFARequiredMessage = "two-factor authentication is required for administrators: turn it on in the OpenFamily app (Settings, Security), then sign in again"
+
+// RequireAdminMFA, when enabled, refuses admin API access to a platform admin
+// whose account has no TOTP configured. It must run after RequireAuth and
+// RequirePlatformAdmin. The flag is re-read from the database on every request
+// so enabling TOTP takes effect at once. Disabled, it is a pass-through.
+func RequireAdminMFA(pool *pgxpool.Pool, enabled bool) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		if !enabled {
+			return next
+		}
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			claims := ClaimsFromContext(r.Context())
+			if claims == nil {
+				http.Error(w, `{"error":"unauthenticated"}`, http.StatusUnauthorized)
+				return
+			}
+			var totp bool
+			if err := pool.QueryRow(r.Context(),
+				`SELECT totp_enabled FROM users WHERE id = $1`, claims.UserID).Scan(&totp); err != nil {
+				http.Error(w, `{"error":"failed to verify two-factor status"}`, http.StatusInternalServerError)
+				return
+			}
+			if !totp {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write([]byte(`{"error":"` + AdminMFARequiredMessage + `","code":"admin_mfa_required"}`))
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}

@@ -25,7 +25,7 @@ func (s *Server) GetConfig(w http.ResponseWriter, r *http.Request) {
 		"sms_configured":     s.SMSEnabled(),
 		"tile_url":           tileURL,
 		"satellite_tile_url": satelliteURL,
-		"map_style_url":      s.MapStyleURL,
+		"map_style_url":      s.effectiveMapStyleURL(r.Context()),
 		// Operator's default accent ("#RRGGBB"), empty for the built-in green.
 		"default_accent": s.defaultAccent(r.Context()),
 		"default_units":  s.defaultUnits(r.Context()),

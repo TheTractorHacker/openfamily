@@ -4,6 +4,7 @@
 import React from 'react'
 import {
   ApiError,
+  exportAuditCsv,
   listAdminSessions,
   listAudit,
   listAuditActions,
@@ -81,6 +82,8 @@ export function AuditPage() {
   const [entries, setEntries] = React.useState<AuditEntry[]>([])
   const [next, setNext] = React.useState<number | null>(null)
   const [loading, setLoading] = React.useState(true)
+  const [exporting, setExporting] = React.useState(false)
+  const [exportMsg, setExportMsg] = React.useState<string | null>(null)
   const [loadingMore, setLoadingMore] = React.useState(false)
   const [error, setError] = React.useState<{ status: number; message: string } | null>(null)
 
@@ -114,6 +117,26 @@ export function AuditPage() {
         <AccessDenied />
       </div>
     )
+  }
+
+  const exportCsv = async () => {
+    setExporting(true)
+    setExportMsg(null)
+    try {
+      const blob = await exportAuditCsv(applied)
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `audit-${new Date().toISOString().slice(0, 10)}.csv`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      setTimeout(() => URL.revokeObjectURL(url), 1000)
+    } catch (e) {
+      setExportMsg(e instanceof Error ? e.message : 'Export failed.')
+    } finally {
+      setExporting(false)
+    }
   }
 
   const revoke = async (id: string, who: string) => {
@@ -319,7 +342,15 @@ export function AuditPage() {
           >
             Clear
           </Button>
+          <Button type="button" variant="secondary" loading={exporting} onClick={() => void exportCsv()}>
+            Export CSV
+          </Button>
         </form>
+        {exportMsg && (
+          <p className="wb-error-text" role="status">
+            {exportMsg}
+          </p>
+        )}
 
         {loading && entries.length === 0 ? (
           <div className="wb-page-loading">

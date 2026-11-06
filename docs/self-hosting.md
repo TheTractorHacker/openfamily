@@ -73,6 +73,18 @@ covered in [custom-domain.md](custom-domain.md). The admin panel's
 **Settings → Custom domain** card runs live DNS and HTTPS checks against your
 setup.
 
+## Admin panel hardening and health
+
+- `REQUIRE_ADMIN_MFA=true` in `.env` refuses the admin panel and `/api/admin/*`
+  to any platform admin who has not turned on two-factor (TOTP). The admin
+  enables it in the app (Settings, Security) and signs in again; no restart is
+  needed. Signing in itself is unchanged. Sign-ins can be listed and revoked
+  on the panel's Audit & sessions page.
+- The System health page shows the release, database migration version and
+  size, recent server warnings and errors, and the last backup. `./scripts/backup.sh`
+  records each successful backup in the database; the page flags a backup that is
+  missing or older than 48 hours, so schedule it (for example a daily cron job).
+
 ## Android push (ntfy)
 
 Do **not** publish ntfy on `0.0.0.0:2586`. Compose binds loopback only, and the service only exists with the `push` profile.

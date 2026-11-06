@@ -24,7 +24,11 @@ func (s *Server) EnsureThemeSchema(ctx context.Context) error {
 		return err
 	}
 	// Instance default for distance/speed units (people can override it).
-	_, err = s.Pool.Exec(ctx, `ALTER TABLE app_theme_settings ADD COLUMN IF NOT EXISTS default_units TEXT NOT NULL DEFAULT 'imperial'`)
+	if _, err = s.Pool.Exec(ctx, `ALTER TABLE app_theme_settings ADD COLUMN IF NOT EXISTS default_units TEXT NOT NULL DEFAULT 'imperial'`); err != nil {
+		return err
+	}
+	// Admin-set vector map style URL (overrides MAP_STYLE_URL; see admin_mapstyle.go).
+	_, err = s.Pool.Exec(ctx, `ALTER TABLE app_theme_settings ADD COLUMN IF NOT EXISTS map_style_url TEXT NOT NULL DEFAULT ''`)
 	return err
 }
 

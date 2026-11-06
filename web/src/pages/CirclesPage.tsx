@@ -4,15 +4,17 @@
 import React from 'react'
 import {
   ApiError,
+  listAdminCircleMembers,
   listAdminCircles,
   listInvites,
+  removeAdminCircleMember,
   revokeAdminInvite,
   updateAdminCircle,
 } from '../lib/api'
 import { isAccessDenied, useAsync } from '../lib/useAsync'
 import { AccessDenied, Badge, Button, Card, EmptyState, ErrorState, Mono, Spinner } from '../components/primitives'
 import { formatTimeLeft } from '../lib/format'
-import type { AdminCircle, AdminInvite } from '../lib/types'
+import type { AdminCircle, AdminCircleMember, AdminInvite } from '../lib/types'
 import './pages.css'
 import './AuditPage.css'
 
@@ -28,12 +30,93 @@ function errorText(e: unknown): string {
   return e instanceof ApiError || e instanceof Error ? e.message : 'Request failed'
 }
 
+
+/** Members of one circle with role and sharing state; no locations are loaded. */
+function CircleMembers({ circle, onChanged }: { circle: AdminCircle; onChanged: () => void }) {
+  const q = useAsync(() => listAdminCircleMembers(circle.id), [circle.id])
+  const [busy, setBusy] = React.useState<string | null>(null)
+  const [err, setErr] = React.useState<string | null>(null)
+
+  const remove = async (m: AdminCircleMember) => {
+    if (!window.confirm(`Remove ${m.name} from “${circle.name}”? They stop sharing with this circle at once.`)) return
+    setBusy(m.user_id)
+    setErr(null)
+    try {
+      await removeAdminCircleMember(circle.id, m.user_id)
+      q.refetch()
+      onChanged()
+    } catch (e) {
+      setErr(errorText(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  if (q.loading && !q.data) {
+    return (
+      <div className="wb-page-loading">
+        <Spinner /> Loading members…
+      </div>
+    )
+  }
+  if (q.error) return <p className="wb-error-text">{q.error.message}</p>
+  return (
+    <div>
+      {err && (
+        <p className="wb-error-text" role="status">
+          {err}
+        </p>
+      )}
+      <table className="wb-table" aria-label={`Members of ${circle.name}`}>
+        <thead>
+          <tr>
+            <th>Member</th>
+            <th>Role</th>
+            <th>Sharing</th>
+            <th>Joined</th>
+            <th aria-label="Actions" />
+          </tr>
+        </thead>
+        <tbody>
+          {(q.data ?? []).map((m) => (
+            <tr key={m.user_id}>
+              <td>
+                <div className="wb-audit-user">{m.name}</div>
+                <div className="wb-audit-sub">{m.email}</div>
+              </td>
+              <td>
+                <Badge tone={m.role === 'admin' ? 'purple' : 'grey'}>{m.role}</Badge>
+              </td>
+              <td>
+                <Badge tone={m.sharing_enabled ? 'green' : 'grey'}>{m.sharing_enabled ? 'sharing' : 'paused'}</Badge>
+              </td>
+              <td>{whenText(m.joined_at)}</td>
+              <td>
+                <Button
+                  variant="danger"
+                  size="sm"
+                  loading={busy === m.user_id}
+                  disabled={busy !== null}
+                  onClick={() => void remove(m)}
+                >
+                  Remove
+                </Button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 export function CirclesPage() {
   const circlesQ = useAsync(listAdminCircles, [])
   const invitesQ = useAsync(listInvites, [])
   const [busy, setBusy] = React.useState<string | null>(null)
   const [message, setMessage] = React.useState<{ tone: 'success' | 'error'; text: string } | null>(null)
   const [onlyTemp, setOnlyTemp] = React.useState(false)
+  const [openId, setOpenId] = React.useState<string | null>(null)
 
   if (isAccessDenied(circlesQ.error)) {
     return (
@@ -144,7 +227,8 @@ export function CirclesPage() {
                     const canExtend = temp && c.status !== 'ended'
                     const canEnd = temp && c.status === 'active'
                     return (
-                      <tr key={c.id}>
+                      <React.Fragment key={c.id}>
+                      <tr>
                         <td>
                           <div className="wb-audit-user">
                             {c.icon ? `${c.icon} ` : ''}
@@ -166,6 +250,14 @@ export function CirclesPage() {
                         </td>
                         <td>
                           <div className="wb-row">
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              aria-expanded={openId === c.id}
+                              onClick={() => setOpenId(openId === c.id ? null : c.id)}
+                            >
+                              {openId === c.id ? 'Hide members' : 'Members'}
+                            </Button>
                             {canExtend && (
                               <>
                                 <Button
@@ -195,6 +287,14 @@ export function CirclesPage() {
                           </div>
                         </td>
                       </tr>
+                      {openId === c.id && (
+                        <tr>
+                          <td colSpan={6}>
+                            <CircleMembers circle={c} onChanged={circlesQ.refetch} />
+                          </td>
+                        </tr>
+                      )}
+                      </React.Fragment>
                     )
                   })}
                 </tbody>

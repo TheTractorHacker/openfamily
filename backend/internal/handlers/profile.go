@@ -57,6 +57,9 @@ func normalizeProfileName(name string) (string, error) {
 type meOut struct {
 	models.User
 	PlatformAdmin bool `json:"platform_admin"`
+	// AdminMFARequired is true when this platform admin is locked out of the
+	// admin panel until they enable two-factor authentication.
+	AdminMFARequired bool `json:"admin_mfa_required"`
 }
 
 // GetMe returns the authenticated user's editable account profile, including
@@ -79,7 +82,10 @@ func (s *Server) GetMe(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to load role")
 		return
 	}
-	writeJSON(w, http.StatusOK, meOut{User: user, PlatformAdmin: platformAdmin})
+	writeJSON(w, http.StatusOK, meOut{
+		User: user, PlatformAdmin: platformAdmin,
+		AdminMFARequired: s.RequireAdminMFA && platformAdmin && !user.TOTPEnabled,
+	})
 }
 
 // UpdateMe changes the authenticated user's display name and/or phone.

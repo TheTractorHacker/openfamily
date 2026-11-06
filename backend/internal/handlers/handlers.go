@@ -65,6 +65,13 @@ type Server struct {
 	TileURL          string
 	SatelliteTileURL string
 	MapStyleURL string
+	// OnMapStyleChange, when set, is called with the effective style URL after
+	// an admin changes it, so the admin panel CSP can allow its origin.
+	OnMapStyleChange func(styleURL string)
+
+	// RequireAdminMFA mirrors config.RequireAdminMFA: platform admins without
+	// TOTP are refused by the admin API. The /me response tells the web panel.
+	RequireAdminMFA bool
 
 	// Geocoder is the optional address search/reverse proxy (nil = disabled,
 	// GET /geocode/* answer 503). See internal/geocode.

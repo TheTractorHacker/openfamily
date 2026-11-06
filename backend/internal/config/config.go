@@ -103,6 +103,10 @@ type Config struct {
 	// advertised on GET /config. Empty = the app uses its built-in OpenFreeMap.
 	MapStyleURL string
 
+	// RequireAdminMFA (REQUIRE_ADMIN_MFA) refuses admin panel/API access to
+	// platform admins who have not enabled TOTP.
+	RequireAdminMFA bool
+
 	// GeocoderURL (GEOCODER_URL) is the base URL of a Photon- or
 	// Nominatim-compatible geocoder. Unset = the public Photon
 	// (https://photon.komoot.io); explicitly empty disables address search and
@@ -238,6 +242,7 @@ func Load() Config {
 		TileURL:               getenv("TILE_URL", DefaultTileURL),
 		SatelliteTileURL:      getenv("SATELLITE_TILE_URL", DefaultSatelliteTileURL),
 		MapStyleURL:           getenv("MAP_STYLE_URL", ""),
+		RequireAdminMFA:       getenvBool("REQUIRE_ADMIN_MFA", false),
 		GeocoderURL:           strings.TrimSpace(getenvPresent("GEOCODER_URL", DefaultGeocoderURL)),
 		GeocoderType:          strings.ToLower(strings.TrimSpace(getenv("GEOCODER_TYPE", "photon"))),
 		GeocoderLang:          strings.TrimSpace(getenv("GEOCODER_LANG", "")),

@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -21,6 +22,7 @@ import (
 	"github.com/TheTractorHacker/openfamily/backend/internal/config"
 	"github.com/TheTractorHacker/openfamily/backend/internal/geocode"
 	"github.com/TheTractorHacker/openfamily/backend/internal/db"
+	"github.com/TheTractorHacker/openfamily/backend/internal/errlog"
 	handlers "github.com/TheTractorHacker/openfamily/backend/internal/handlers"
 	mid "github.com/TheTractorHacker/openfamily/backend/internal/middleware"
 	"github.com/TheTractorHacker/openfamily/backend/internal/push"
@@ -32,7 +34,7 @@ import (
 func main() {
 	cfg := config.Load()
 
-	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	logger := slog.New(errlog.Wrap(slog.NewTextHandler(os.Stdout, nil), nil))
 	slog.SetDefault(logger)
 
 	// Fail fast on insecure configuration (missing/insecure JWT secret, and
@@ -79,6 +81,7 @@ func main() {
 	srv.TileURL = cfg.TileURL
 	srv.SatelliteTileURL = cfg.SatelliteTileURL
 	srv.MapStyleURL = cfg.MapStyleURL
+	srv.RequireAdminMFA = cfg.RequireAdminMFA
 	srv.APNsConfigured = cfg.APNsKeyFile != ""
 	if geo, err := geocode.New(geocode.Settings{
 		URL: cfg.GeocoderURL, Type: cfg.GeocoderType, Lang: cfg.GeocoderLang,
@@ -167,6 +170,10 @@ func main() {
 		slog.Error("invalid TRUSTED_PROXIES", "err", err)
 		os.Exit(1)
 	}
+	// The map style can be changed from the admin panel; keep the admin CSP in
+	// step with the effective value, now and after every change.
+	srv.OnMapStyleChange = setAdminCSPStyle
+	setAdminCSPStyle(srv.EffectiveMapStyleURL(ctx))
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -382,6 +389,7 @@ func main() {
 		r.Use(mid.RequireAuth(tm))
 		r.Use(mid.RequireTokenVersion(pool))
 		r.Use(mid.RequirePlatformAdmin(pool))
+		r.Use(mid.RequireAdminMFA(pool, cfg.RequireAdminMFA))
 
 		r.Get("/api/admin/families", srv.AdminListFamilies)
 		r.Post("/api/admin/families", srv.AdminCreateFamily)
@@ -406,6 +414,7 @@ func main() {
 		r.Delete("/api/admin/places/{id}", srv.AdminDeletePlace)
 		r.Get("/api/admin/audit", srv.AdminListAudit)
 		r.Get("/api/admin/audit/actions", srv.AdminListAuditActions)
+		r.Get("/api/admin/audit/export", srv.AdminExportAudit)
 		r.Get("/api/admin/sessions", srv.AdminListSessions)
 		r.Delete("/api/admin/sessions/{id}", srv.AdminRevokeSession)
 		r.Get("/api/admin/activity", srv.AdminActivityFeed)
@@ -417,6 +426,12 @@ func main() {
 		r.Delete("/api/admin/share-links/{id}", srv.AdminRevokeShareLink)
 		r.Get("/api/admin/circles", srv.AdminListCircles)
 		r.Patch("/api/admin/circles/{id}", srv.AdminUpdateCircle)
+		r.Get("/api/admin/circles/{id}/members", srv.AdminListCircleMembers)
+		r.Delete("/api/admin/circles/{id}/members/{user_id}", srv.AdminRemoveCircleMember)
+		r.Get("/api/admin/alerts", srv.AdminListAlerts)
+		r.Get("/api/admin/settings/map-style", srv.AdminGetMapStyle)
+		r.Put("/api/admin/settings/map-style", srv.AdminPutMapStyle)
+		r.Post("/api/admin/settings/map-style/test", srv.AdminTestMapStyle)
 
 		r.Get("/api/admin/apk", srv.AdminDownloadAPK)
 		r.Post("/api/admin/apk/build", srv.AdminBuildAPK)
@@ -442,6 +457,7 @@ func main() {
 
 		// Read-only running version. Upgrades happen on the host (scripts/upgrade.sh).
 		r.Get("/api/admin/version", srv.AdminVersion)
+		r.Get("/api/admin/health", srv.AdminHealth)
 	})
 
 	// Admin web panel (embedded static SPA) at /admin/*, served public. The page
@@ -576,6 +592,23 @@ const defaultMapStyleOrigin = "https://tiles.openfreemap.org"
 // adminSPACSP is built once at startup; see buildAdminCSP.
 var adminSPACSP = buildAdminCSP(os.Getenv("MAP_STYLE_URL"))
 
+// adminCSPOverride, when set, replaces adminSPACSP. It is rebuilt whenever an
+// admin changes the map style URL in the panel (no restart needed).
+var adminCSPOverride atomic.Pointer[string]
+
+// setAdminCSPStyle rebuilds the CSP for the effective map style URL.
+func setAdminCSPStyle(styleURL string) {
+	csp := buildAdminCSP(styleURL)
+	adminCSPOverride.Store(&csp)
+}
+
+func currentAdminCSP() string {
+	if p := adminCSPOverride.Load(); p != nil {
+		return *p
+	}
+	return adminSPACSP
+}
+
 // buildAdminCSP returns the admin CSP. styleURL is the optional operator
 // MAP_STYLE_URL; its https origin is added to connect-src.
 func buildAdminCSP(styleURL string) string {
@@ -600,7 +633,7 @@ func buildAdminCSP(styleURL string) string {
 
 // setAdminSPAHeaders applies the headers shared by every admin panel response.
 func setAdminSPAHeaders(w http.ResponseWriter) {
-	w.Header().Set("Content-Security-Policy", adminSPACSP)
+	w.Header().Set("Content-Security-Policy", currentAdminCSP())
 	w.Header().Set("X-Frame-Options", "DENY")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 }
