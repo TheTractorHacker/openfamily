@@ -1,0 +1,39 @@
+# Example: run the Dawarich bridge. Put this on a machine that is NOT the
+# OpenFamily server (whoever runs it can read the Private circles it joins).
+#
+# One-time enrolment (interactive, the password is read from stdin, never argv):
+#   docker compose run --rm -T bridge enroll --server https://family.example.org --email you@example.org < password.txt
+#   (paste the REQUEST CODE into the phone: Encryption keys > Approve a viewer or bridge)
+#   docker compose run --rm bridge enroll --approval <APPROVAL CODE>
+# Then open the circle's encryption screen on the phone once, so it wraps the keys.
+#   docker compose up -d
+#
+# Build context is the repository root:
+services:
+  bridge:
+    build:
+      context: ../..
+      dockerfile: deploy/e2ee-bridge/Dockerfile
+    image: e2ee-bridge:local
+    restart: unless-stopped
+    environment:
+      E2EE_BRIDGE_STATE: /state
+      # Seal the identity, circle keys and login with a passphrase (recommended):
+      E2EE_BRIDGE_PASSPHRASE_FILE: /run/secrets/bridge_passphrase
+      # Optional: main Dawarich key from the environment instead of the config file.
+      # E2EE_BRIDGE_DAWARICH_KEY: ${DAWARICH_API_KEY}
+    secrets:
+      - bridge_passphrase
+    volumes:
+      - bridge-state:/state
+      - ./config.json:/config/config.json:ro
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+
+secrets:
+  bridge_passphrase:
+    file: ./passphrase.txt
+
+volumes:
+  bridge-state:

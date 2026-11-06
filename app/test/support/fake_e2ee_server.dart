@@ -102,7 +102,7 @@ class FakeE2eeClient implements E2eeApi {
         registrationAction: action,
         registrationSignature: E2ee.unb64(b['log_signature']),
         initial: initial,
-        label: '',
+        label: (b['label'] as String?) ?? '',
         createdAt: DateTime.now().toUtc(),
       );
 

@@ -238,7 +238,28 @@ class E2eeService {
       throw const E2eeAuthException('the request is corrupted or forged');
     }
     final Uint8List fp = await E2ee.fingerprint(ed, x);
-    return LinkRequestInfo(did, fp, E2ee.shortFingerprint(fp), await E2ee.digitGroups(fp));
+    // Optional device-member fields (phase 3): kind 'web' | 'service' and a name.
+    final Object? k = m['k'], n = m['n'];
+    return LinkRequestInfo(did, fp, E2ee.shortFingerprint(fp), await E2ee.digitGroups(fp),
+        kind: k is String ? k : null, name: n is String ? cleanDeviceName(n) : null);
+  }
+
+  /// Removes control characters and caps a viewer-supplied name at 40 chars.
+  static String cleanDeviceName(String s) {
+    final String t = s.replaceAll(RegExp(r'[\u0000-\u001f\u007f]'), ' ').trim();
+    return t.runes.length <= 40 ? t : String.fromCharCodes(t.runes.take(40));
+  }
+
+  /// Phone: like [inspectLinkRequest], but only accepts the request of a browser
+  /// viewer (kind 'web') or a bridge ('service'); a phone request (kind absent or
+  /// 'device') is refused and the user is pointed to "Link another phone".
+  Future<LinkRequestInfo> inspectViewerRequest(String code) async {
+    final LinkRequestInfo i = await inspectLinkRequest(code);
+    if (!i.isViewer) {
+      throw const E2eeFormatException(
+          'This is the request of a phone, not of a viewer or bridge. Use "Link another phone" in Encryption keys to approve a phone.');
+    }
+    return i;
   }
 
   /// Existing phone: signs the new phone's registration. Returns the approval
@@ -722,8 +743,13 @@ class LinkApproval {
 }
 
 class LinkRequestInfo {
-  const LinkRequestInfo(this.deviceId, this.fingerprint, this.short, this.digits);
+  const LinkRequestInfo(this.deviceId, this.fingerprint, this.short, this.digits, {this.kind, this.name});
   final String deviceId;
+
+  /// 'web', 'service', 'device' or null (old request without the field = phone).
+  final String? kind;
+  final String? name;
+  bool get isViewer => kind == 'web' || kind == 'service';
   final Uint8List fingerprint;
   final String short;
   final String digits;

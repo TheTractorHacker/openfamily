@@ -1,0 +1,11 @@
+.wb-pc-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.wb-pc-list { margin: 8px 0 12px 18px; display: grid; gap: 6px; }
+.wb-pc-pre { font-size: 11px; white-space: pre-wrap; word-break: break-all; margin: 8px 0; }
+.wb-pc-modes { border: 0; padding: 0; margin: 8px 0; display: grid; gap: 8px; }
+.wb-pc-modes label { display: flex; gap: 8px; align-items: flex-start; }
+.wb-pc-code { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 8px 0; }
+.wb-pc-map { height: 420px; margin: 12px 0; border-radius: 10px; overflow: hidden; position: relative; }
+.wb-pc-trail { width: 100%; max-width: 520px; color: var(--wb-accent, #0a84ff); background: rgba(127,127,127,.08); border-radius: 8px; }
+.wb-error { color: #d33; margin: 8px 0; }
+.wb-hint { opacity: .75; font-size: 12px; margin: 6px 0; }
+.wb-sec-title { margin: 0 0 8px; font-size: 16px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }

@@ -18,6 +18,22 @@ that family's admins see it in `GET /audit`. Repeated identical reads inside a
 minute collapse into one row. Tests: `handlers/admin_location_policy_test.go`,
 `handlers/audit_view_test.go`.
 
+## Private (end-to-end encrypted) circles and admin access
+
+For a Private circle the server holds ciphertext only, so `ADMIN_LOCATION_ACCESS`
+neither grants nor needs to deny anything there: the admin endpoints have no
+plaintext to return, and nothing was changed in that policy. A platform admin can
+read a Private circle only as a **member**: their own account must be in the
+circle, and a browser (admin web "Private circles" page) or bridge key of theirs
+must have been approved by their own phone and given the circle key by a member's
+phone. The server cannot grant or fake this (it holds no key and cannot produce
+the required phone signatures). Approved viewers and bridges are listed per
+account on the admin "Encryption keys" page (kind, fingerprint, created) and are
+entries in the key transparency log. A browser viewer decrypts with JavaScript
+served by this server, so an operator who modifies the web app could read what a
+logged-in member's viewer shows; see `docs/design/E2EE.md` ("Threat model of the
+web viewer"). Use the phone app if that matters.
+
 ## Location history retention
 
 `LOCATION_RETENTION_DAYS` (default 90, in `docker-compose.yml` / `.env`) sets

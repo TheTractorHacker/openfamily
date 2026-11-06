@@ -12,6 +12,13 @@ import { AccessDenied, Badge, Button, Card, EmptyState, ErrorState, Spinner } fr
 import './pages.css'
 import './AuditPage.css'
 
+const KIND_LABEL: Record<string, string> = {
+  recovery: 'Recovery phrase',
+  web: 'Web viewer (reads decrypted positions)',
+  service: 'Bridge (reads decrypted positions, e.g. Dawarich)',
+  device: 'Phone',
+}
+
 function whenText(iso: string | null): string {
   if (!iso) return '—'
   const d = new Date(iso)
@@ -138,7 +145,7 @@ export function EncryptionKeysPage() {
                       <div className="wb-audit-user">{d.user_name}</div>
                       <div className="wb-audit-sub">{d.email}</div>
                     </td>
-                    <td>{d.kind === 'recovery' ? 'Recovery phrase' : 'Device'}</td>
+                    <td>{KIND_LABEL[d.kind] ?? 'Device'}</td>
                     <td>
                       <code>{d.short}</code>
                     </td>

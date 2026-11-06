@@ -38,6 +38,9 @@ const DashboardPage = React.lazy(() =>
 const PlacesPage = React.lazy(() =>
   import('./pages/PlacesPage').then((m) => ({ default: m.PlacesPage })),
 )
+const PrivateCirclesPage = React.lazy(() =>
+  import('./pages/PrivateCirclesPage').then((m) => ({ default: m.PrivateCirclesPage })),
+)
 const HistoryPage = React.lazy(() =>
   import('./pages/HistoryPage').then((m) => ({ default: m.HistoryPage })),
 )
@@ -155,6 +158,8 @@ function renderPage(
       return <ActivityPage />
     case 'bubbles':
       return <BubblesPage />
+    case 'private':
+      return <PrivateCirclesPage />
     case 'e2ee':
       return <EncryptionKeysPage />
     case 'audit':

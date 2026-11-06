@@ -11,6 +11,7 @@ import '../widgets/ds/ds.dart';
 import 'encryption_widgets.dart';
 import 'member_safety_screen.dart';
 import 'security_widgets.dart';
+import 'viewer_approval_screen.dart';
 
 /// One circle's encryption: status, new-key duty, requests from new/replacement
 /// keys ("Waiting for approval"), and every member's verification state.
@@ -201,6 +202,22 @@ class _EncryptionCircleScreenState extends State<EncryptionCircleScreen> {
                 ),
             ]),
           ],
+          if (st.isPrivate)
+            DsRowGroup(children: <Widget>[
+              DsListRow(
+                leading: DsListRow.iconTile(context, Icons.devices_other),
+                title: 'Approve a viewer or bridge',
+                subtitle: 'Read-only web viewer or Dawarich bridge',
+                chevron: true,
+                onTap: _busy
+                    ? null
+                    : () async {
+                        await Navigator.of(context).push<void>(MaterialPageRoute<void>(
+                            builder: (_) => ViewerApprovalScreen(circle: widget.circle, service: _svc)));
+                        if (mounted) _load();
+                      },
+              ),
+            ]),
           const DsSectionHeader('Members', padding: EdgeInsets.fromLTRB(0, AppSpace.xl, 0, AppSpace.xs)),
           DsRowGroup(children: <Widget>[
             for (final CircleE2eeMember m in st.members)

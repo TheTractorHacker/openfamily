@@ -14,6 +14,7 @@ export type RouteKey =
   | 'bubbles'
   | 'audit'
   | 'e2ee'
+  | 'private'
   | 'alerts'
   | 'system'
   | 'builds'
@@ -165,6 +166,20 @@ export const ROUTES: RouteDef[] = [
     icon: icon(
       <path
         d="M9.5 15a5.5 5.5 0 1 0 0-11 5.5 5.5 0 0 0 0 11Zm7 5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    ),
+  },
+  {
+    key: 'private',
+    label: 'Private circles',
+    hash: '#/private',
+    icon: icon(
+      <path
+        d="M12 3 5 6v5c0 4.5 3 8 7 10 4-2 7-5.5 7-10V6l-7-3Zm-2 9 2 2 3-4"
         stroke="currentColor"
         strokeWidth="1.6"
         strokeLinecap="round"

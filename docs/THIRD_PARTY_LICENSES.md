@@ -50,6 +50,9 @@ license gate rather than listed here.
 
 | Package | Version | License |
 |---|---|---|
+| @noble/ciphers | 2.4.0 | MIT |
+| @noble/curves | 2.4.0 | MIT |
+| @noble/hashes | 2.4.0 | MIT |
 | @mapbox/jsonlint-lines-primitives | 2.0.3 | MIT |
 | @mapbox/point-geometry | 1.1.0 | ISC |
 | @mapbox/tiny-sdf | 2.3.0 | BSD-2-Clause |

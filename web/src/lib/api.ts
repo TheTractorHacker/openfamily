@@ -82,6 +82,8 @@ function isRootApiPath(path: string): boolean {
     path.startsWith('/api') ||
     path.startsWith('/auth') ||
     path.startsWith('/me') ||
+    path.startsWith('/circles') ||
+    path.startsWith('/e2ee') ||
     path.startsWith('/family') ||
     path.startsWith('/ws') ||
     path.startsWith('/devices') ||
@@ -779,4 +781,12 @@ export interface E2eeAdminCircle {
 
 export function listE2eeKeys(): Promise<{ devices: E2eeAdminDevice[]; circles: E2eeAdminCircle[] }> {
   return request<{ devices: E2eeAdminDevice[]; circles: E2eeAdminCircle[] }>('/api/admin/e2ee/keys')
+}
+
+// ---- Private (end-to-end encrypted) circles: raw seam used by src/e2ee ----
+// These calls carry only public keys, wrapped (encrypted) keys and ciphertext.
+export const e2eeHttp = {
+  get: <T,>(path: string): Promise<T> => request<T>(path),
+  post: <T,>(path: string, body: unknown): Promise<T> => request<T>(path, { method: 'POST', body }),
+  del: <T,>(path: string, body?: unknown): Promise<T> => request<T>(path, { method: 'DELETE', body }),
 }

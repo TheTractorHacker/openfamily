@@ -547,9 +547,14 @@ For a fully private map, host your own tiles. The simplest option is
   isolate can refresh tokens. Biometric unlock covers the interactive UI; it
   does not encrypt those credentials or stop opted-in background reporting.
   `android:allowBackup="false"` keeps them off cloud backup.
-- **No end-to-end encryption of location.** The server must read coordinates
-  to evaluate geofences, build history, and fan out the live map. That is a
-  deliberate tradeoff, not an oversight.
+- **End-to-end encryption of location is opt-in per circle** ("Private
+circle", see `docs/design/E2EE.md`). In a normal circle the server must read
+  coordinates to evaluate geofences, build history, and fan out the live map;
+  that is a deliberate tradeoff. For Private circles the admin web has a
+  "Private circles" page that decrypts in your browser after one of your phones
+  approves it, and `backend/cmd/e2ee-bridge` (run it off the server host, see
+  its README) forwards Private-circle points to your own Dawarich. Whoever runs
+  a viewer or bridge can read those circles.
 
 ## API reference
 

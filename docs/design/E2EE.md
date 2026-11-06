@@ -1,7 +1,7 @@
 # ADR: End-to-end encryption ("Private circle")
 
 Status: **ACCEPTED** (supersedes the earlier "Proposed" text of this file, which recommended against E2EE).
-Issue: #34. Phase 1 (keys and verification) and phase 2 (the encrypted channel, this release) are implemented. Phase 3 is specified at the end of the phase-2 section.
+Issue: #34. Phase 1 (keys and verification) and phase 2 (the encrypted channel) are implemented. Phase 3 (web viewer and Dawarich bridge as approved read-only device members) is implemented; see "Phase 3" below. Chat, media and phone-side trips are still future.
 
 ## Decision
 
@@ -12,7 +12,8 @@ It is delivered in **phases and opt-in per circle** ("Private circle"):
 |---|---|---|
 | 1 | Cryptographic foundation and verification UX: device identity keys, circle key epochs, wrapped keys, key transparency log, recovery, safety numbers, server-record check, admin/CLI tooling. **No location data moves.** | implemented |
 | 2 | Live fixes, history, places, arrival/departure events and SOS positions move into the encrypted channel; place evaluation runs on the phones. Server-side trips, driving report and weekly summary are unavailable in a Private circle. | implemented; phone background behaviour not yet verified on devices (see phase-2 section) |
-| 3 | Web viewer and Dawarich bridge as approved read-only *device members*; media (chat photos); encrypted chat; phone-side trips. | future (API contract below) |
+| 3 | Web viewer and Dawarich bridge as approved read-only *device members* (API contract below). | implemented (browser viewer, `e2ee-bridge`, phone approval screen); not yet exercised against a live Dawarich or on a physical phone |
+| 4 | Media (chat photos); encrypted chat; phone-side trips. | future |
 
 Existing circles keep working exactly as today. A circle switched to Private mode only gets keys in phase 1. The toggle is OFF by default,
 admin-only, and the UI says honestly what changes now and what will be unavailable later.
@@ -41,7 +42,7 @@ the user's session reads the same data the user can), traffic analysis by the ne
 | Trips, driving reports, crash scoring, weekly summary | server segments and aggregates fixes | **Computed on-device** and shared as encrypted summaries, or documented as unavailable. Server-side trips/driving/weekly summary are **unavailable** for Private circles |
 | SOS with position | server pushes last position | Position travels in the encrypted payload. The server (and so the SMS/Twilio fallback) **cannot know the position**; SOS in a Private circle must say so in the UI. The wake-up push has no position |
 | Admin map and device last-known positions | operator reads positions | **Unavailable** for Private circles (by design). Admin panel still lists accounts, devices, keys |
-| Dawarich export | server forwards points | **Unavailable** for Private circles (could be a phone-side export later) |
+| Dawarich export | server forwards points | **Server-side sync skips Private circles** (it reads only the plaintext table). Use the `e2ee-bridge` (phase 3), a `service` device member that you run off the server host |
 | Server geocoded place names and address search | server reverse-geocodes | Geocoding moves to the phone (or an on-device lookup); the server never learns an address |
 | Push text naming a place or person | server composes the text | Server sends a content-free wake-up; the app decrypts and raises a LOCAL notification |
 
@@ -281,8 +282,8 @@ So a private circle's data is never written in plaintext, but a person who also 
 | Check-in, help, SOS | yes; position travels sealed; the server and SMS contacts do not learn it |
 | Chat | works as before, NOT end-to-end encrypted yet (shown in the migration dialog) |
 | Trips, driving report, weekly summary | NOT available (explicit placeholder) |
-| Admin map, device last-known positions | NOT available (the server holds none) |
-| Dawarich export | NOT available until phase 3 |
+| Admin map, device last-known positions | NOT available from the server (it holds none). A member (including a platform admin who is a member) can read them in the browser viewer after one of their own phones approved that browser |
+| Dawarich export | Through the `e2ee-bridge` only (phase 3); the built-in server export skips Private circles |
 | Server place names / geocoding, crash scoring, live-share links, "request location" | NOT available (the server cannot read positions) |
 | Bubbles | NOT available |
 
@@ -306,7 +307,62 @@ Both are *device members*, not special server roles.
 5. A read-only viewer never uploads (the server answers 403 `device_read_only`). A bridge that exports to Dawarich decrypts `fix` and `history` locally; the plaintext leaves the bridge only toward the user's own Dawarich.
 6. Erasing: `DELETE /circles/{id}/e2ee/items` as above; revoking a key (`DELETE /e2ee/devices/{id}`) removes its wraps and flags the circle for a new epoch (an admin phone rotates).
 
-Open points for phase 3: a browser needs the key log verification in JavaScript (the formats are frozen and have vectors), and where a web viewer keeps its private key (non-extractable WebCrypto Ed25519/X25519 where available, otherwise memory only).
+## Phase 3: web viewer and Dawarich bridge (implemented)
+
+Goal: let the admin web panel keep showing a Private circle and let Dawarich keep receiving points, **without the server ever seeing a plaintext**.
+Both are device members under exactly the phase-2 rules (see the API contract above); the server needed no new routes. What changed:
+
+| Part | Where |
+|---|---|
+| Browser viewer (JS crypto, key log verification, decrypt, map) | `web/src/e2ee/{core,verify,keystore,viewer,controller}.ts`, page `web/src/pages/PrivateCirclesPage.tsx` ("Private circles" in the sidebar), tests `web/test/*.test.mjs` |
+| Dawarich bridge | `backend/cmd/e2ee-bridge/` (README there), `backend/internal/e2ee/verify.go`, `deploy/e2ee-bridge/` |
+| Phone approval and revoke | `app/lib/screens/viewer_approval_screen.dart` (Private circle settings, "Approve a viewer or bridge") |
+| Server | admin "Encryption keys" page labels web viewers and bridges; tests in `handlers/e2ee_phase3_db_test.go`. No new route, so no new authz-matrix entry |
+
+### Pairing (QR/paste, no camera scanner)
+
+1. The viewer/bridge creates its keys and shows a **request code**: padded base64url of JSON `{u, d, e, x, b, k, n}` (account id, device id, Ed25519 and X25519 public keys, binding signature, kind `web`|`service`, name). This is the "link another phone" request plus `k` and `n`.
+2. On a phone of the same account: Private circle, **Approve a viewer or bridge**, paste the code. The phone shows name, kind, short fingerprint and the 12x5 digits; the user compares them with the viewer's screen and approves. The phone returns an **approval code** `{a: phone device id, s: Ed25519 signature}` (the existing cross-signature over the register log action).
+3. The viewer pastes the approval code and registers its PUBLIC keys (`POST /e2ee/devices`, `kind:"web"|"service"`, `can_upload:false`). The kind is not part of the signed log action (frozen format), so the phone and the viewer both display it, but it is not cryptographically bound; a web key cannot upload anyway unless registered with `can_upload`.
+4. The phone's existing pending-queue logic wraps every held circle key to the new key automatically (it is cross-signed by the user's own phone), on the next time that phone opens the circle encryption screen. The viewer then unwraps with its X25519 key. **An approved viewer therefore receives all Private circles of that account**, current and previous epochs held by that phone. The approval screen says so.
+5. Revoking: from the phone ("Connected viewers", then Revoke, then an admin phone rotates the epoch automatically) or from the viewer itself ("Revoke this viewer", self-signed). Revocation removes its wraps and flags the circle; **a new epoch is needed before it stops being able to read new data**, and data it already received stays readable by it.
+
+Note (documented, unchanged phase-1 behaviour): the circle's publisher phone wraps to **another member's** cross-signed web/service key automatically, the same as for that member's second phone. Admins can see all members' viewers in the circle screen.
+
+### Web viewer: keys and custody
+
+Library: **`@noble/curves`, `@noble/ciphers`, `@noble/hashes`** (MIT, no dependencies, audited, widely deployed, pure JS so it runs in any browser and in Node for the tests). Alternatives: libsodium.js (ISC, WASM, larger, an extra supply-chain surface and a CSP `wasm-unsafe-eval` for no benefit at 300-byte payloads) and WebCrypto alone (has no XChaCha20-Poly1305, no Argon2). WebCrypto is used where it can add protection: Ed25519 and X25519 private keys. License check: MIT is AGPL-compatible (`docs/THIRD_PARTY_LICENSES.md`). Not yet covered by an external review of this integration.
+
+| Mode | Private key | Circle keys at rest | Trade-off |
+|---|---|---|---|
+| `device` (default when the browser supports WebCrypto Ed25519/X25519) | generated as **non-extractable** `CryptoKey`s, stored as such in IndexedDB; script can sign/agree but cannot read the bytes | AES-GCM with a non-extractable `CryptoKey` | someone with access to the browser profile on disk may be able to copy the opaque key store; script running in the page can still *use* the key while the page is open |
+| `passphrase` | 32-byte seed (same derivation as phones) sealed with XChaCha20-Poly1305 under a key from **Argon2id** (64 MiB, 3 passes, p=1) of the passphrase | same, with a second key from the same Argon2 output | unlocked keys are extractable by script while the page is unlocked; strength depends on the passphrase |
+| `session` | memory only | memory only | disposable viewer, nothing persists; revoke it afterwards |
+
+Never: private keys or circle keys in `localStorage`/`sessionStorage`, in a URL, or sent to the server. Decrypted positions are held in page memory only (nothing decrypted is written to storage); the retention windows (`fix` 48 h, `history` per personal retention) bound what a fresh page load can pull back. The admin panel CSP (`script-src 'self'`, no inline/eval) applies to the viewer.
+
+### What the browser verifies
+
+`core.ts`/`verify.ts` are line-by-line ports of the Go reference and of `e2ee_trust.dart`, tested against the **same** `testdata/vectors.json` (identities, fingerprints, digits, binding, wrap blob and signature, commitment, sealed payload, padding, log action and entry hash, item payload) plus negative tests. The recovery-phrase vectors are not ported (a browser viewer has no recovery identity), and the safety-number vector is not used (a viewer does not compare people). Per sync the viewer: verifies the whole transparency log from a pinned head (hash chain, genesis, signatures, redacted entries, rollback/fork/gap; the head is pinned in IndexedDB and a failure stops the viewer with a loud error), verifies each wrap (wrapper signature, signed epoch record, AAD, key commitment) and each item (AEAD, relayed seq equals signed seq, approved non-recovery sender whose registration chain verifies, Ed25519 signature, signed time not 10 minutes in the future, per-device duplicate window, epoch rollback). Items whose key or sender is not known yet are deferred and retried after the next sync.
+
+### Dawarich bridge
+
+A `service` device member run **off the server host** (`backend/cmd/e2ee-bridge/README.md`): `enroll` prints name + fingerprint and a request code, the user approves on the phone, `enroll --approval` registers, `run` pulls ciphertext (`as_device`), verifies and decrypts like a phone and POSTs to Dawarich with the same GeoJSON mapping and per-user key semantics as the server-side export. It keeps its own cursors and de-duplication (per-device last sent point and a startup query of Dawarich's newest point), stops cleanly (exit 3) when its key is revoked or no longer approved, and never logs coordinates. **Whoever can read the bridge's key file or memory can read the circle**: the bridge host is inside the trust boundary.
+
+### Threat model of the web viewer (honest)
+
+* **Defends against:** a stolen or breached database, a curious operator who does not modify the web app, a network observer, and the server inventing viewers (a viewer needs a phone's cross-signature and a wrap from a member's phone; the server cannot produce either).
+* **Does not defend against a malicious or compromised origin.** The viewer is JavaScript delivered by the same server whose database it is meant to distrust. An operator (or anyone who can alter the files in `backend/web/dist`, the TLS terminator, a CDN or a compromised update path) can ship a viewer that exfiltrates keys or plaintext. The same holds for XSS in the admin panel, a malicious browser extension, and malware in the browser. This is the fundamental limitation of browser E2EE; the phone app's code is signed and installed, the web app's is fetched every time.
+* **Mitigations present:** strict CSP without inline or eval scripts; keys non-extractable in `device` mode; passphrase and session modes; the page shows SHA-256 hashes of the scripts and styles it is running so a careful user can compare them with `sha256sum` of a release they obtained elsewhere (this is computed by the page itself, so it is only a check if the comparison value comes from outside the server); the viewer is a visible, revocable entry in the key list on every phone and in the admin "Encryption keys" page, and is in the key log. Not present: subresource-integrity pinning of the entry document, a reproducible-build attestation, a separately hosted viewer origin. If your threat model includes a hostile operator, **use the phone app only and do not approve a browser viewer**; a self-hosting operator who is also the only user is the case where the viewer's trust is reasonable.
+* **ADMIN_LOCATION_ACCESS is unchanged.** A platform admin sees no location of a Private circle unless THEIR OWN account is a member and THEIR OWN browser key was approved by THEIR OWN phone; the server cannot grant that. The server-side admin map and history endpoints still return nothing for private circles (the server holds nothing).
+* **Bridge host:** see above; additionally the bridge holds an OpenFamily refresh token for the account, which gives API access with the account's rights (not the circle key).
+
+### Phase-3 limits and unverified items
+
+* Items from a phone key that was revoked before a viewer/bridge first looked cannot be verified (the circle state lists active keys only) and are dropped.
+* The viewer is a snapshot-and-stream tool: it does not persist decrypted history, and `history` chunks are limited by the sender's retention.
+* Not exercised: a real Dawarich instance, a physical phone, the browser pages in several real browsers (Node 22 and the bundle build were exercised; the UI was not click-tested), and WebCrypto Ed25519/X25519 in Safari/Firefox ESR. Browsers without them fall back to the passphrase mode.
+* The viewer cannot upload; a read-only web key cannot send positions. No chat or media is decrypted (still plaintext).
 
 ## Security review (phase 2)
 

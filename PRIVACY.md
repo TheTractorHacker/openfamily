@@ -83,8 +83,16 @@ when the circle is switched back to normal. The operator can no longer read
 positions of Private circles, but still sees metadata: who is in which circle,
 when (to the minute) a phone is online and how often and how much it uploads,
 and client IP addresses. Chat messages are not end-to-end encrypted yet.
-Trips, driving reports, the weekly summary, the admin map and Dawarich export
-are not available for Private circles. If you are also in a normal circle, your
+Trips, driving reports and the weekly summary are not available for Private
+circles, and the server-side admin map and the server's own Dawarich export
+cannot see them. Instead you can approve **read-only viewers** yourself:
+a browser viewer in the admin web app, and an `e2ee-bridge` program that
+forwards to your own Dawarich. Each is a key you approve on your phone; it then
+reads (decrypts) every Private circle you are in, and whoever controls that
+browser (and the web app code it runs) or that bridge host can read those
+circles, so approve only devices and hosts you trust. The server does not see
+the positions either way. You can revoke a viewer at any time; it keeps what it
+already received. If you are also in a normal circle, your
 position is still sent in the normal way to that circle. The key log is append
 only by design, so it keeps ids, hashes and signatures (no names or positions)
 even after an account is deleted. Losing every phone and the recovery phrase
