@@ -6,6 +6,7 @@ import React from 'react'
 import { ApiError, listAdminShareLinks, revokeAdminShareLink } from '../lib/api'
 import { isAccessDenied, useAsync } from '../lib/useAsync'
 import { AccessDenied, Badge, Button, Card, EmptyState, ErrorState, Spinner } from '../components/primitives'
+import { PageHeader } from '../components/patterns'
 import { formatTimeLeft } from '../lib/format'
 import type { AdminShareLink } from '../lib/types'
 import './pages.css'
@@ -69,13 +70,11 @@ export function ShareLinksPage() {
 
   return (
     <div className="wb-page">
-      <div className="wb-audit-sectionhead">
-        <div style={{ marginRight: 'auto' }}>
-          <h1 className="wb-page-title">Share links</h1>
-          <p className="wb-page-subtitle">
-            Temporary public links members created to share their live location. Revoking stops a link at once.
-          </p>
-        </div>
+      <PageHeader
+        title="Share links"
+        subtitle="Temporary public links members created to share their live location. Revoking stops a link at once."
+        actions={
+          <>
         <label className="wb-field" htmlFor="links-filter">
           <span className="wb-label">Show</span>
           <select
@@ -91,7 +90,9 @@ export function ShareLinksPage() {
         <Button variant="secondary" size="sm" onClick={() => linksQ.refetch()}>
           Refresh
         </Button>
-      </div>
+          </>
+        }
+      />
       {message && (
         <p className={message.tone === 'error' ? 'wb-error-text' : 'wb-help'} role="status">
           {message.text}

@@ -13,6 +13,7 @@ import {
 } from '../lib/api'
 import { isAccessDenied, useAsync } from '../lib/useAsync'
 import { AccessDenied, Badge, Button, Card, EmptyState, ErrorState, Mono, Spinner } from '../components/primitives'
+import { PageHeader } from '../components/patterns'
 import { formatTimeLeft } from '../lib/format'
 import type { AdminCircle, AdminCircleMember, AdminInvite } from '../lib/types'
 import './pages.css'
@@ -183,23 +184,22 @@ export function CirclesPage() {
   return (
     <div className="wb-page">
       <section className="wb-audit-section" aria-labelledby="circles-h">
-        <div className="wb-audit-sectionhead">
-          <div style={{ marginRight: 'auto' }}>
-            <h1 id="circles-h" className="wb-page-title">
-              Circles
-            </h1>
-            <p className="wb-page-subtitle">
-              Temporary circles stop sharing at their expiry and are deleted a week later. Extend or end them here.
-            </p>
-          </div>
-          <label className="wb-field" style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
-            <input type="checkbox" checked={onlyTemp} onChange={(e) => setOnlyTemp(e.target.checked)} />
-            <span className="wb-label">Temporary only</span>
-          </label>
-          <Button variant="secondary" size="sm" onClick={() => circlesQ.refetch()}>
-            Refresh
-          </Button>
-        </div>
+        <PageHeader
+          title="Circles"
+          titleId="circles-h"
+          subtitle="Temporary circles stop sharing at their expiry and are deleted a week later. Extend or end them here."
+          actions={
+            <>
+              <label className="wb-check">
+                <input type="checkbox" checked={onlyTemp} onChange={(e) => setOnlyTemp(e.target.checked)} />
+                <span>Temporary only</span>
+              </label>
+              <Button variant="secondary" size="sm" onClick={() => circlesQ.refetch()}>
+                Refresh
+              </Button>
+            </>
+          }
+        />
         {message && (
           <p className={message.tone === 'error' ? 'wb-error-text' : 'wb-help'} role="status">
             {message.text}
