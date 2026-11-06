@@ -65,11 +65,16 @@ void main() {
     expect(find.byKey(const Key('server-disabled')), findsOneWidget);
     expect(find.byKey(const Key('server-allow')), findsNothing);
     expect(find.byKey(const Key('server-warning')), findsOneWidget);
+    expect(find.text('Off'), findsOneWidget);
+    expect(find.textContaining('E2EE_SERVER_INGEST_TOKEN'), findsWidgets);
+    expect(find.byTooltip('Copy enroll command'), findsOneWidget);
   });
 
   testWidgets('no pinned key yet: tells how to enroll', (t) async {
     await setup(t, withKey: false);
     expect(find.byKey(const Key('server-no-key')), findsOneWidget);
+    expect(find.text('Waiting for enrolment'), findsOneWidget);
+    expect(find.byTooltip('Copy enroll command'), findsOneWidget);
     expect(find.byKey(const Key('server-allow')), findsNothing);
   });
 
@@ -77,6 +82,14 @@ void main() {
     await setup(t);
     expect(find.byKey(const Key('server-name')), findsOneWidget);
     expect(find.byKey(const Key('server-short')), findsOneWidget);
+    expect(find.textContaining('can read every member'), findsOneWidget);
+    expect(find.textContaining('no longer end-to-end encryption'), findsOneWidget);
+    expect(find.text('Waiting for 2 members'), findsOneWidget);
+    expect(find.text('0 of 2 members have allowed it'), findsOneWidget);
+    // The full wording is behind the expander.
+    expect(find.textContaining('can READ the location of every member'), findsNothing);
+    await t.tap(find.byKey(const Key('server-details')));
+    await settle(t);
     expect(find.textContaining('can READ the location of every member'), findsOneWidget);
     expect(find.textContaining('NOT end-to-end encryption against the server'), findsOneWidget);
     expect(find.text('The server cannot read this circle yet'), findsOneWidget);
@@ -99,6 +112,8 @@ void main() {
     expect(find.byKey(const Key('server-withdraw')), findsOneWidget);
     expect(find.byKey(const Key('server-share')), findsNothing);
     expect(find.text('Has not allowed it'), findsOneWidget);
+    expect(find.text('Waiting for 1 member'), findsOneWidget);
+    expect(find.text('1 of 2 members have allowed it'), findsOneWidget);
   });
 
   testWidgets('once everyone allowed it the admin can hand over the key; withdraw is one tap away', (t) async {

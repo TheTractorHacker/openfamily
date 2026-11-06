@@ -11,7 +11,7 @@ import { e2eeHttp, getProfile } from '../lib/api'
 import { getAccessToken } from '../lib/auth'
 import { useMe } from '../lib/me'
 import { useAsync } from '../lib/useAsync'
-import { Badge, Button, Card, CopyButton, EmptyState, Mono, Spinner } from '../components/primitives'
+import { Badge, Button, Card, CopyButton, EmptyState, ErrorState, Spinner } from '../components/primitives'
 import MapView from '../map/MapView'
 import { deriveMember } from '../map/status'
 import type { Group, Member } from '../map/types'
@@ -78,9 +78,9 @@ export function PrivateCirclesPage() {
 
   if (!ctl) {
     return (
-      <div className="wb-page">
+      <div className="wb-page wb-pc-page">
         <div className="wb-page-loading">
-          <Spinner /> Loading…
+          <Spinner /> Loading private circles…
         </div>
       </div>
     )
@@ -88,23 +88,30 @@ export function PrivateCirclesPage() {
   const priv = (circles.data ?? []).filter((c) => c.e2ee_mode === 'private')
 
   return (
-    <div className="wb-page">
-      <div style={{ marginRight: 'auto' }}>
-        <h1 className="wb-page-title">Private circles</h1>
-        <p className="wb-page-subtitle">
-          End-to-end encrypted circles. The server holds only ciphertext; this browser decrypts it with a key that was
-          approved by one of your phones.
-        </p>
+    <div className="wb-page wb-pc-page">
+      <div className="wb-page-header">
+        <div style={{ marginRight: 'auto' }}>
+          <h1 className="wb-page-title">Private circles</h1>
+          <p className="wb-page-subtitle">
+            End-to-end encrypted circles. The server holds only ciphertext; this browser decrypts it with a key that was
+            approved by one of your phones.
+          </p>
+        </div>
       </div>
-      <TrustCard isPlatformAdmin={isPlatformAdmin} />
+      <TrustCard isPlatformAdmin={isPlatformAdmin} defaultOpen={!ctl.meta} />
       <ViewerSetup ctl={ctl} />
       {ctl.unlocked && ctl.meta?.registered ? (
         <>
           {circles.loading ? (
-            <Spinner />
+            <div className="wb-page-loading">
+              <Spinner /> Loading circles…
+            </div>
+          ) : circles.error ? (
+            <ErrorState title="Couldn’t load circles" description={circles.error.message} onRetry={circles.refetch} />
           ) : priv.length === 0 ? (
             <Card>
               <EmptyState
+                icon={<LockIcon />}
                 title="You are not in a Private circle"
                 description={
                   isPlatformAdmin
@@ -114,31 +121,105 @@ export function PrivateCirclesPage() {
               />
             </Card>
           ) : (
-            <Card>
-              <h2 className="wb-sec-title">Circles</h2>
-              <div className="wb-pc-row">
+            <section className="wb-pc-section" aria-labelledby="wb-pc-circles">
+              <h2 id="wb-pc-circles" className="wb-pc-h2">Your private circles</h2>
+              <div className="wb-pc-circles">
                 {priv.map((c) => {
                   const conn = ctl.conns.get(c.id)
                   return (
-                    <Button
+                    <button
                       key={c.id}
-                      variant={selected === c.id ? 'primary' : 'secondary'}
+                      type="button"
+                      className={`wb-pc-circle${selected === c.id ? ' is-selected' : ''}`}
+                      aria-pressed={selected === c.id}
                       onClick={() => {
                         setSelected(c.id)
                         if (!conn) void ctl.connect(c.id, c.name)
                       }}
                     >
-                      {c.name} {conn ? `· ${phaseLabel(conn)}` : ''}
-                    </Button>
+                      <span className="wb-pc-circle-icon"><LockIcon /></span>
+                      <span className="wb-pc-circle-name">{c.name}</span>
+                      <span className="wb-pc-circle-phase">{conn ? phaseLabel(conn) : 'tap to open'}</span>
+                    </button>
                   )
                 })}
               </div>
-            </Card>
+            </section>
           )}
           {selected && ctl.conns.get(selected) && <CircleView ctl={ctl} conn={ctl.conns.get(selected)!} />}
         </>
       ) : null}
     </div>
+  )
+}
+
+function LockIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="4" y="11" width="16" height="10" rx="2" />
+      <path d="M8 11V8a4 4 0 0 1 8 0v3" />
+    </svg>
+  )
+}
+function BrowserIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 9h18" />
+    </svg>
+  )
+}
+function KeyIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="8" cy="15" r="4" /><path d="M11 12l9-9M16 7l3 3" />
+    </svg>
+  )
+}
+function ClockIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" />
+    </svg>
+  )
+}
+function CheckIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M5 12l5 5 9-10" />
+    </svg>
+  )
+}
+
+/** Fingerprint shown as a short code plus grouped monospace digits, with copy. */
+function FingerprintBox({ fp }: { fp: Uint8Array }) {
+  return (
+    <div className="wb-pc-fp">
+      <div className="wb-pc-fp-head">
+        <span className="wb-pc-fp-label">Fingerprint</span>
+        <strong className="wb-pc-fp-short">{shortFingerprint(fp)}</strong>
+        <CopyButton value={digitGroups(fp)} label="Copy fingerprint" />
+      </div>
+      <code className="wb-pc-fp-digits">{digitGroups(fp)}</code>
+    </div>
+  )
+}
+
+const STEPS = ['Create key', 'Send request code', 'Paste approval', 'Connected']
+
+function Stepper({ current }: { current: number }) {
+  return (
+    <ol className="wb-pc-steps" aria-label="Pairing progress">
+      {STEPS.map((label, i) => {
+        const n = i + 1
+        const state = n < current ? 'done' : n === current ? 'current' : 'todo'
+        return (
+          <li key={label} className={`wb-pc-step is-${state}`} aria-current={state === 'current' ? 'step' : undefined}>
+            <span className="wb-pc-step-dot">{state === 'done' ? <CheckIcon /> : n}</span>
+            <span className="wb-pc-step-label">{label}</span>
+          </li>
+        )
+      })}
+    </ol>
   )
 }
 
@@ -159,56 +240,66 @@ function phaseLabel(c: CircleConn): string {
   }
 }
 
-function TrustCard({ isPlatformAdmin }: { isPlatformAdmin: boolean }) {
+function TrustCard({ isPlatformAdmin, defaultOpen }: { isPlatformAdmin: boolean; defaultOpen: boolean }) {
   const [fp, setFp] = React.useState<string | null>(null)
   const [busy, setBusy] = React.useState(false)
   return (
-    <Card>
-      <h2 className="wb-sec-title">What you are trusting</h2>
-      <ul className="wb-pc-list">
-        <li>
-          The private key is created in this browser and is never sent anywhere. The server cannot decrypt anything and cannot
-          approve this viewer.
-        </li>
-        <li>
-          <strong>The page code itself decides what happens to the decrypted data.</strong> Whoever can change the JavaScript this
-          server sends you (the operator, or an attacker who controls the server or its TLS) could ship a version that reads your
-          positions. End-to-end encryption protects against a stolen database and a curious operator who does not tamper with the
-          web app; it does not protect against a malicious web app. For the strongest guarantee use the phone app.
-        </li>
-        <li>
-          A browser extension or a script injected into this page can also read what is shown. Use a clean browser profile; do not
-          use this on a shared computer unless you choose the passphrase or session mode.
-        </li>
-        {isPlatformAdmin && (
+    <details className="wb-card wb-pc-trust" open={defaultOpen}>
+      <summary>
+        <span className="wb-pc-trust-icon"><LockIcon /></span>
+        <span className="wb-pc-trust-title">What you are trusting</span>
+        <span className="wb-pc-trust-hint">Read once before you create a key</span>
+        <span className="wb-pc-chevron" aria-hidden="true" />
+      </summary>
+      <div className="wb-pc-trust-body">
+        <div className="wb-pc-warn" role="note">
+          <strong>The page code itself decides what happens to the decrypted data.</strong> Whoever can change the JavaScript
+          this server sends you (the operator, or an attacker who controls the server or its TLS) could ship a version that
+          reads your positions. End-to-end encryption protects against a stolen database and a curious operator who does not
+          tamper with the web app; it does not protect against a malicious web app. For the strongest guarantee use the phone
+          app.
+        </div>
+        <ul className="wb-pc-bullets">
           <li>
-            Platform admin: the admin location rules are unchanged. You see a Private circle only if your own account is a member
-            and your own browser key was approved by your own phone. The server cannot grant it.
+            <strong>Key stays here.</strong> The private key is created in this browser and is never sent anywhere. The server
+            cannot decrypt anything and cannot approve this viewer.
           </li>
+          <li>
+            <strong>Extensions and injected scripts</strong> can also read what is shown. Use a clean browser profile; do not
+            use this on a shared computer unless you choose the passphrase or session mode.
+          </li>
+          {isPlatformAdmin && (
+            <li>
+              <strong>Platform admin:</strong> the admin location rules are unchanged. You see a Private circle only if your own
+              account is a member and your own browser key was approved by your own phone. The server cannot grant it.
+            </li>
+          )}
+        </ul>
+        <div>
+          <Button
+            size="sm"
+            variant="secondary"
+            loading={busy}
+            onClick={async () => {
+              setBusy(true)
+              setFp(await bundleFingerprint())
+              setBusy(false)
+            }}
+          >
+            Show hashes of the code running here
+          </Button>
+        </div>
+        {fp && (
+          <>
+            <pre className="wb-pc-pre">{fp}</pre>
+            <p className="wb-hint">
+              Compare with <code>sha256sum</code> of the same files from the release you trust. These hashes are computed by
+              this same page, so they only help if you check them against a source the server does not control.
+            </p>
+          </>
         )}
-      </ul>
-      <Button
-        size="sm"
-        variant="secondary"
-        loading={busy}
-        onClick={async () => {
-          setBusy(true)
-          setFp(await bundleFingerprint())
-          setBusy(false)
-        }}
-      >
-        Show hashes of the code running here
-      </Button>
-      {fp && (
-        <>
-          <pre className="wb-pc-pre">{fp}</pre>
-          <p className="wb-hint">
-            Compare with <code>sha256sum</code> of the same files from the release you trust. These hashes are computed by this
-            same page, so they only help if you check them against a source the server does not control.
-          </p>
-        </>
-      )}
-    </Card>
+      </div>
+    </details>
   )
 }
 
@@ -235,64 +326,92 @@ function ViewerSetup({ ctl }: { ctl: ViewerController }) {
   }
 
   if (!meta) {
+    const deviceOk = ViewerController.supportsDeviceMode()
+    const options: { id: CustodyMode; icon: React.ReactNode; title: string; badge?: string; body: string; trade: string }[] = [
+      {
+        id: 'device',
+        icon: <BrowserIcon />,
+        title: 'This browser',
+        badge: 'Recommended',
+        body: 'Non-extractable key, kept in this browser profile. Needs a recent browser.',
+        trade: 'Anyone with access to your computer account can use it.',
+      },
+      {
+        id: 'passphrase',
+        icon: <KeyIcon />,
+        title: 'Passphrase',
+        body: 'The key is stored encrypted (Argon2id) and you type the passphrase once per visit.',
+        trade: 'Safer on shared computers, a little more typing.',
+      },
+      {
+        id: 'session',
+        icon: <ClockIcon />,
+        title: 'This visit only',
+        body: 'Nothing is stored; the viewer disappears when you close the tab.',
+        trade: 'Remember to revoke it afterwards.',
+      },
+    ]
     return (
-      <Card>
-        <h2 className="wb-sec-title">1. Create a viewer key in this browser</h2>
-        <label className="wb-field">
-          Name shown on your phone
-          <input value={name} maxLength={40} onChange={(e) => setName(e.target.value)} />
+      <Card className="wb-pc-card">
+        <Stepper current={1} />
+        <h2 className="wb-pc-h2">Create a viewer key in this browser</h2>
+        <label className="wb-field" htmlFor="wb-pc-name">
+          <span className="wb-label">Name shown on your phone</span>
+          <input id="wb-pc-name" className="wb-input" value={name} maxLength={40} onChange={(e) => setName(e.target.value)} />
         </label>
         <fieldset className="wb-pc-modes">
-          <label>
-            <input type="radio" checked={mode === 'device'} disabled={!ViewerController.supportsDeviceMode()} onChange={() => setMode('device')} />
-            <span>
-              <strong>This browser (recommended)</strong>: non-extractable key, kept in this browser profile. Needs a recent
-              browser. Anyone with access to your computer account can use it.
-            </span>
-          </label>
-          <label>
-            <input type="radio" checked={mode === 'passphrase'} onChange={() => setMode('passphrase')} />
-            <span>
-              <strong>Passphrase</strong>: the key is stored encrypted (Argon2id) and you type the passphrase once per visit.
-            </span>
-          </label>
-          <label>
-            <input type="radio" checked={mode === 'session'} onChange={() => setMode('session')} />
-            <span>
-              <strong>This visit only</strong>: nothing is stored; the viewer disappears when you close the tab. Remember to
-              revoke it afterwards.
-            </span>
-          </label>
+          <legend className="wb-label">Where should the key live?</legend>
+          <div className="wb-pc-mode-grid">
+            {options.map((o) => {
+              const disabled = o.id === 'device' && !deviceOk
+              return (
+                <label key={o.id} className={`wb-pc-mode${mode === o.id ? ' is-selected' : ''}${disabled ? ' is-disabled' : ''}`}>
+                  <input type="radio" name="wb-pc-mode" checked={mode === o.id} disabled={disabled} onChange={() => setMode(o.id)} />
+                  <span className="wb-pc-mode-icon">{o.icon}</span>
+                  <span className="wb-pc-mode-title">
+                    {o.title} {o.badge && <Badge tone="green">{o.badge}</Badge>}
+                  </span>
+                  <span className="wb-pc-mode-body">{o.body}</span>
+                  <span className="wb-pc-mode-trade">{disabled ? 'Not supported by this browser.' : o.trade}</span>
+                </label>
+              )
+            })}
+          </div>
         </fieldset>
         {mode === 'passphrase' && (
-          <label className="wb-field">
-            Passphrase (8+ characters)
-            <input type="password" autoComplete="new-password" value={pass} onChange={(e) => setPass(e.target.value)} />
+          <label className="wb-field" htmlFor="wb-pc-pass">
+            <span className="wb-label">Passphrase (8+ characters)</span>
+            <input id="wb-pc-pass" className="wb-input" type="password" autoComplete="new-password" value={pass} onChange={(e) => setPass(e.target.value)} />
           </label>
         )}
-        <Button loading={busy} onClick={() => run(async () => setRequest(await ctl.create(name.trim() || 'Browser', mode, pass)))}>
-          Create key
-        </Button>
-        {err && <p className="wb-error">{err}</p>}
+        {err && <p className="wb-error" role="alert">{err}</p>}
+        <div className="wb-pc-actions">
+          <Button loading={busy} onClick={() => run(async () => setRequest(await ctl.create(name.trim() || 'Browser', mode, pass)))}>
+            Create key
+          </Button>
+        </div>
       </Card>
     )
   }
 
   if (ctl.needsPassphrase()) {
     return (
-      <Card>
-        <h2 className="wb-sec-title">Unlock the viewer key</h2>
-        <label className="wb-field">
-          Passphrase
-          <input type="password" autoComplete="current-password" value={pass} onChange={(e) => setPass(e.target.value)} />
+      <Card className="wb-pc-card">
+        <h2 className="wb-pc-h2">Unlock the viewer key</h2>
+        <p className="wb-hint">This viewer key is passphrase protected. Enter it to read your private circles.</p>
+        <label className="wb-field" htmlFor="wb-pc-unlock">
+          <span className="wb-label">Passphrase</span>
+          <input id="wb-pc-unlock" className="wb-input" type="password" autoComplete="current-password" value={pass} onChange={(e) => setPass(e.target.value)} />
         </label>
-        <Button loading={busy} onClick={() => run(() => ctl.unlock(pass))}>
-          Unlock
-        </Button>
-        <Button variant="danger" size="sm" onClick={() => run(() => ctl.forget())}>
-          Forget this key
-        </Button>
-        {err && <p className="wb-error">{err}</p>}
+        {err && <p className="wb-error" role="alert">{err}</p>}
+        <div className="wb-pc-actions">
+          <Button loading={busy} onClick={() => run(() => ctl.unlock(pass))}>
+            Unlock
+          </Button>
+          <Button variant="danger" size="sm" onClick={() => run(() => ctl.forget())}>
+            Forget this key
+          </Button>
+        </div>
       </Card>
     )
   }
@@ -301,53 +420,59 @@ function ViewerSetup({ ctl }: { ctl: ViewerController }) {
     const u = ctl.unlocked
     const fp = u ? fingerprint(u.ops.edPub, u.ops.xPub) : null
     return (
-      <Card>
-        <h2 className="wb-sec-title">2. Approve this browser on your phone</h2>
+      <Card className="wb-pc-card">
+        <Stepper current={approval.trim() ? 3 : 2} />
+        <h2 className="wb-pc-h2">Approve this browser on your phone</h2>
         {!u ? (
           <>
-            <p>This browser has a viewer key but it is not unlocked (session keys are lost on reload).</p>
-            <Button variant="danger" size="sm" onClick={() => run(() => ctl.forget())}>
-              Start over
-            </Button>
+            <p className="wb-hint">This browser has a viewer key but it is not unlocked (session keys are lost on reload).</p>
+            <div className="wb-pc-actions">
+              <Button variant="danger" size="sm" onClick={() => run(() => ctl.forget())}>
+                Start over
+              </Button>
+            </div>
           </>
         ) : (
           <>
-            <ol className="wb-pc-list">
-              <li>
+            <div className="wb-pc-phase">
+              <h3 className="wb-pc-h3"><span className="wb-pc-num">2</span> Send the request code to your phone</h3>
+              <p className="wb-hint">
                 On your phone open the Private circle, <em>Approve a viewer or bridge</em>, and paste this request code.
-              </li>
-              <li>Compare the number below with the one the phone shows, then approve.</li>
-              <li>Paste the approval code the phone gives you here.</li>
-            </ol>
-            <div className="wb-pc-code">
-              <Mono truncate="end" max={64}>{request ?? '…'}</Mono>
-              <CopyButton value={request ?? ''} label="Copy request code" />
-              {!request && (
-                <Button size="sm" variant="secondary" onClick={() => run(async () => setRequest(await ctl.requestCode()))}>
-                  Show request code
-                </Button>
-              )}
-            </div>
-            {fp && (
-              <p>
-                Fingerprint <strong>{shortFingerprint(fp)}</strong>
-                <br />
-                <code>{digitGroups(fp)}</code>
+                Compare the number below with the one the phone shows, then approve.
               </p>
-            )}
-            <label className="wb-field">
-              Approval code from the phone
-              <textarea rows={3} value={approval} onChange={(e) => setApproval(e.target.value)} />
-            </label>
-            <Button loading={busy} disabled={!approval.trim()} onClick={() => run(() => ctl.register(approval))}>
-              Register viewer
-            </Button>
-            <Button variant="danger" size="sm" onClick={() => run(() => ctl.forget())}>
-              Cancel and delete key
-            </Button>
+              <div className="wb-pc-code">
+                <code className="wb-pc-code-text">{request ?? 'Request code not shown yet'}</code>
+                <div className="wb-pc-code-actions">
+                  {request ? (
+                    <CopyButton value={request} label="Copy request code" />
+                  ) : (
+                    <Button size="sm" variant="secondary" onClick={() => run(async () => setRequest(await ctl.requestCode()))}>
+                      Show request code
+                    </Button>
+                  )}
+                </div>
+              </div>
+              {fp && <FingerprintBox fp={fp} />}
+            </div>
+            <div className="wb-pc-phase">
+              <h3 className="wb-pc-h3"><span className="wb-pc-num">3</span> Paste the approval from the phone</h3>
+              <label className="wb-field" htmlFor="wb-pc-approval">
+                <span className="wb-label">Approval code from the phone</span>
+                <textarea id="wb-pc-approval" className="wb-input wb-pc-textarea" rows={3} value={approval} onChange={(e) => setApproval(e.target.value)} />
+              </label>
+            </div>
+            {err && <p className="wb-error" role="alert">{err}</p>}
+            <div className="wb-pc-actions">
+              <Button loading={busy} disabled={!approval.trim()} onClick={() => run(() => ctl.register(approval))}>
+                Register viewer
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => run(() => ctl.forget())}>
+                Cancel and delete key
+              </Button>
+            </div>
           </>
         )}
-        {err && <p className="wb-error">{err}</p>}
+        {!u && err && <p className="wb-error" role="alert">{err}</p>}
       </Card>
     )
   }
@@ -355,31 +480,32 @@ function ViewerSetup({ ctl }: { ctl: ViewerController }) {
   const u = ctl.unlocked
   const fp = u ? fingerprint(u.ops.edPub, u.ops.xPub) : null
   return (
-    <Card>
-      <h2 className="wb-sec-title">
-        This viewer <Badge tone="green">approved by your phone</Badge>
-      </h2>
-      <p>
-        {meta.name} · key kept: {meta.mode === 'device' ? 'in this browser (non-extractable)' : meta.mode === 'passphrase' ? 'passphrase protected' : 'this visit only'}
-      </p>
-      {fp && (
-        <p>
-          Fingerprint <strong>{shortFingerprint(fp)}</strong> · <code>{digitGroups(fp)}</code>
-        </p>
-      )}
-      <Button
-        variant="danger"
-        size="sm"
-        loading={busy}
-        onClick={() => {
-          if (window.confirm('Revoke this viewer? It stops receiving new data after the next key rotation on your phone, and the key is deleted from this browser.')) {
-            void run(() => ctl.revoke())
-          }
-        }}
-      >
-        Revoke this viewer
-      </Button>
-      {err && <p className="wb-error">{err}</p>}
+    <Card className="wb-pc-card">
+      <Stepper current={5} />
+      <div className="wb-pc-connected">
+        <div>
+          <h2 className="wb-pc-h2">
+            This viewer <Badge tone="green" dot>Approved by your phone</Badge>
+          </h2>
+          <p className="wb-hint">
+            {meta.name} · key kept: {meta.mode === 'device' ? 'in this browser (non-extractable)' : meta.mode === 'passphrase' ? 'passphrase protected' : 'this visit only'}
+          </p>
+        </div>
+        <Button
+          variant="danger"
+          size="sm"
+          loading={busy}
+          onClick={() => {
+            if (window.confirm('Revoke this viewer? It stops receiving new data after the next key rotation on your phone, and the key is deleted from this browser.')) {
+              void run(() => ctl.revoke())
+            }
+          }}
+        >
+          Revoke this viewer
+        </Button>
+      </div>
+      {fp && <FingerprintBox fp={fp} />}
+      {err && <p className="wb-error" role="alert">{err}</p>}
     </Card>
   )
 }
@@ -416,18 +542,22 @@ function CircleView({ ctl, conn }: { ctl: ViewerController; conn: CircleConn }) 
   const groups: Group[] = [{ id: conn.circleId, name: conn.name }]
 
   return (
-    <Card>
-      <h2 className="wb-sec-title">
-        {conn.name} <Badge tone="green">Decrypted in your browser</Badge> <Badge tone="neutral">{phaseLabel(conn)}</Badge>
-      </h2>
+    <Card className="wb-pc-card">
+      <div className="wb-pc-viewhead">
+        <h2 className="wb-pc-h2">{conn.name}</h2>
+        <Badge tone="green">Decrypted in your browser</Badge>
+        <Badge tone={conn.phase === 'live' ? 'green' : conn.phase === 'error' || conn.phase === 'revoked' ? 'red' : 'orange'} dot>
+          {phaseLabel(conn)}
+        </Badge>
+      </div>
       {conn.error && <p className="wb-error">{conn.error}</p>}
       {conn.phase === 'waiting-for-key' && (
-        <p>
+        <p className="wb-pc-notice">
           Waiting for one of your phones to share this circle’s key with this viewer. Open the circle on your phone
           (Settings, Security, Encryption keys); this page keeps checking.
         </p>
       )}
-      {conn.phase === 'revoked' && <p>This viewer is no longer approved for the circle. Revoke it and set up a new one if needed.</p>}
+      {conn.phase === 'revoked' && <p className="wb-pc-notice">This viewer is no longer approved for the circle. Revoke it and set up a new one if needed.</p>}
       <p className="wb-hint">
         Epoch {conn.state?.epoch ?? '?'} · keys held for epochs {conn.report?.heldEpochs.join(', ') || 'none'} · {conn.counts.opened}{' '}
         items opened, {conn.counts.dropped} rejected, {conn.counts.deferred} waiting. Positions exist only in this page’s memory.
@@ -446,8 +576,8 @@ function CircleView({ ctl, conn }: { ctl: ViewerController; conn: CircleConn }) 
           <MapView groups={groups} members={members} initialZoom={12} />
         </div>
       )}
-      <h3 className="wb-sec-title">Members</h3>
-      <table className="wb-table">
+      <h3 className="wb-pc-h3">Members</h3>
+      <div className="wb-table-wrap wb-pc-tablewrap"><table className="wb-table">
         <thead>
           <tr>
             <th>Member</th>
@@ -461,8 +591,8 @@ function CircleView({ ctl, conn }: { ctl: ViewerController; conn: CircleConn }) 
             const p = conn.book.last.get(m.user_id)
             return (
               <tr key={m.user_id}>
-                <td>{m.name}</td>
-                <td>{p ? `${new Date(p.ts).toLocaleString()} · ${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}` : 'nothing decrypted yet'}</td>
+                <td><strong>{m.name}</strong></td>
+                <td className="wb-muted">{p ? `${new Date(p.ts).toLocaleString()} · ${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}` : 'nothing decrypted yet'}</td>
                 <td>{p?.bat != null ? `${Math.round(p.bat)}%` : '—'}</td>
                 <td>
                   <Button size="sm" variant="secondary" disabled={!p} onClick={() => setWho(who === m.user_id ? null : m.user_id)}>
@@ -473,12 +603,12 @@ function CircleView({ ctl, conn }: { ctl: ViewerController; conn: CircleConn }) 
             )
           })}
         </tbody>
-      </table>
+      </table></div>
       {who && <Trail points={conn.book.trail(who)} />}
       {conn.book.events.length > 0 && (
         <>
-          <h3 className="wb-sec-title">Recent events</h3>
-          <ul className="wb-pc-list">
+          <h3 className="wb-pc-h3">Recent events</h3>
+          <ul className="wb-pc-events">
             {conn.book.events
               .slice(-10)
               .reverse()
@@ -490,9 +620,11 @@ function CircleView({ ctl, conn }: { ctl: ViewerController; conn: CircleConn }) 
           </ul>
         </>
       )}
-      <Button size="sm" variant="secondary" onClick={() => void ctl.connect(conn.circleId, conn.name)}>
-        Refresh now
-      </Button>
+      <div className="wb-pc-actions">
+        <Button size="sm" variant="secondary" onClick={() => void ctl.connect(conn.circleId, conn.name)}>
+          Refresh now
+        </Button>
+      </div>
     </Card>
   )
 }

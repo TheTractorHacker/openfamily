@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../models/circle.dart';
 import '../services/api_client.dart';
@@ -149,6 +150,11 @@ class _TrustedServerScreenState extends State<TrustedServerScreen> {
     );
   }
 
+  Future<void> _copy(String text, String what) async {
+    await Clipboard.setData(ClipboardData(text: text));
+    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$what copied')));
+  }
+
   Widget _body() {
     final CircleE2eeState st = _state!;
     final bool admin = widget.circle.isAdmin;
@@ -157,6 +163,9 @@ class _TrustedServerScreenState extends State<TrustedServerScreen> {
     final bool mine = _ok.contains(_me);
     final bool reads = _ss.serverMember && allOk;
     final DeviceKey? key = _key;
+    final int allowed = need.where(_ok.contains).length;
+    final bool ready = st.isPrivate && _ss.enabled && key != null;
+    final ColorScheme cs = Theme.of(context).colorScheme;
     return RefreshIndicator(
       onRefresh: _load,
       child: ListView(
@@ -165,51 +174,57 @@ class _TrustedServerScreenState extends State<TrustedServerScreen> {
         children: <Widget>[
           const Text('OpenFamily server as a circle member', style: AppType.headline),
           const SizedBox(height: AppSpace.xs),
-          const Text(
+          Text(
             'Optional, off by default. It makes this circle readable by your own server again so the admin map, history, '
-            'Dawarich sync and place alerts work. Every member must allow it.',
-            style: AppType.secondary,
+            'Dawarich sync and place alerts work.',
+            style: AppType.secondary.copyWith(color: cs.onSurfaceVariant),
           ),
-          const SizedBox(height: AppSpace.md),
-          Container(
-            key: const Key('server-warning'),
-            padding: const EdgeInsets.all(AppSpace.md),
-            decoration: BoxDecoration(border: Border.all(color: AppColors.sosRed), borderRadius: BorderRadius.circular(12)),
-            child: const Text(kTrustedServerWarning),
-          ),
-          const SizedBox(height: AppSpace.md),
+          const SizedBox(height: AppSpace.lg),
+          _statusCard(st, key, need, allowed, reads),
+          const SizedBox(height: AppSpace.lg),
+          _meaning(),
+          const SizedBox(height: AppSpace.lg),
           if (!st.isPrivate)
             const Text('This circle is not a Private circle.', key: Key('server-not-private'), style: AppType.secondary)
           else if (!_ss.enabled)
-            const Text(
-              'This server is not set up to be a circle member (the default). The server owner can enable it; see the docs "Trusted-server mode".',
-              key: Key('server-disabled'),
-              style: AppType.secondary,
+            _enrollSteps(
+              const Key('server-disabled'),
+              'This server is not set up to be a circle member (the default). If you own the server you can enable it:',
+              showToken: true,
             )
           else if (key == null)
-            const Text(
-              'No approved server key yet. On the server, run the enroll command, then approve its request code under '
-              '"Approve a viewer or bridge". It will appear here with its fingerprint.',
-              key: Key('server-no-key'),
-              style: AppType.secondary,
+            _enrollSteps(
+              const Key('server-no-key'),
+              'No approved server key yet. If you own the server, enroll it and approve it from this phone:',
+              showToken: false,
             )
           else ...<Widget>[
+            const DsSectionHeader('Server key', padding: EdgeInsets.fromLTRB(0, 0, 0, AppSpace.xs)),
             Text(key.label.isEmpty ? 'OpenFamily server' : key.label, key: const Key('server-name'), style: AppType.headline),
+            const SizedBox(height: AppSpace.xxs),
             Text('Key: ${key.short}', key: const Key('server-short'), style: AppType.body.copyWith(fontWeight: FontWeight.w800)),
-            DigitBlock(digits: key.digits, label: 'Server key digits'),
-            const Text(
+            const SizedBox(height: AppSpace.sm),
+            DigitBlock(digits: key.digits, label: 'Server key digits', copyLabel: 'Copy fingerprint'),
+            const SizedBox(height: AppSpace.xs),
+            Text(
               'Compare this key with the one printed on the server by the enroll command (or "status"). '
               'If it differs, do not allow it.',
-              key: Key('server-compare'),
-              style: AppType.secondary,
+              key: const Key('server-compare'),
+              style: AppType.secondary.copyWith(color: cs.onSurfaceVariant),
+            ),
+            const SizedBox(height: AppSpace.xl),
+            Text('$allowed of ${need.length} ${need.length == 1 ? 'member has' : 'members have'} allowed it',
+                key: const Key('server-consent-count'), style: AppType.body.copyWith(fontWeight: FontWeight.w800)),
+            const SizedBox(height: AppSpace.sm),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(AppRadius.pill),
+              child: LinearProgressIndicator(
+                key: const Key('server-progress'),
+                minHeight: 6,
+                value: need.isEmpty ? 0 : allowed / need.length,
+              ),
             ),
             const SizedBox(height: AppSpace.sm),
-            Text(
-              reads ? 'Server can read this circle' : 'The server cannot read this circle yet',
-              key: const Key('server-state'),
-              style: AppType.body.copyWith(fontWeight: FontWeight.w800, color: reads ? AppColors.sosRed : null),
-            ),
-            const DsSectionHeader('Members who allowed it', padding: EdgeInsets.fromLTRB(0, AppSpace.lg, 0, AppSpace.xs)),
             DsRowGroup(children: <Widget>[
               for (final CircleE2eeMember m in st.members)
                 if (need.contains(m.userId))
@@ -220,11 +235,12 @@ class _TrustedServerScreenState extends State<TrustedServerScreen> {
                     subtitle: _ok.contains(m.userId) ? 'Allowed (signature checked on this phone)' : 'Has not allowed it',
                   ),
             ]),
-            const SizedBox(height: AppSpace.md),
+            const SizedBox(height: AppSpace.lg),
             if (!mine)
               DsPillButton(key: const Key('server-allow'), label: 'Allow the server to read this circle', icon: Icons.lock_open, onPressed: _busy ? null : _allow)
             else
-              DsPillButton(key: const Key('server-withdraw'), label: 'Withdraw my consent', style: DsPillStyle.tonal, icon: Icons.lock, onPressed: _busy ? null : _withdraw),
+              const Text('You allowed it. The server reads this circle only once every member has.',
+                  key: Key('server-you-allowed'), style: AppType.secondary),
             if (allOk && !_ss.wrapped) ...<Widget>[
               const SizedBox(height: AppSpace.sm),
               DsPillButton(
@@ -233,22 +249,167 @@ class _TrustedServerScreenState extends State<TrustedServerScreen> {
                 icon: Icons.vpn_key,
                 onPressed: _busy ? null : () => _run(() => _svc.shareKeyWithServer(widget.circle.id), 'Key shared with the server'),
               ),
-              const Text('Everyone allowed it. The server can read the circle once the key reaches it.', style: AppType.secondary),
+              const SizedBox(height: AppSpace.xs),
+              Text('Everyone allowed it. The server can read the circle once the key reaches it.',
+                  style: AppType.secondary.copyWith(color: cs.onSurfaceVariant)),
             ],
           ],
-          if (st.isPrivate && _ss.enabled) ...<Widget>[
-            const DsSectionHeader('Copies on the server', padding: EdgeInsets.fromLTRB(0, AppSpace.xl, 0, AppSpace.xs)),
-            const Text(
-              'While the server reads this circle it stores plaintext positions. Delete them here at any time, for example after withdrawing consent or revoking the server key.',
-              style: AppType.secondary,
+          if (ready) ...<Widget>[
+            const DsSectionHeader('Withdraw or delete', padding: EdgeInsets.fromLTRB(0, AppSpace.xxl, 0, AppSpace.xs)),
+            Text(
+              'Withdrawing stops the server reading this circle at once. While it reads, the server stores plaintext '
+              'positions; delete them here at any time, for example after withdrawing or revoking the server key. '
+              'Each action asks you to confirm.',
+              style: AppType.secondary.copyWith(color: cs.onSurfaceVariant),
             ),
-            const SizedBox(height: AppSpace.sm),
-            OutlinedButton(key: const Key('server-purge-mine'), onPressed: _busy ? null : () => _purge(whole: false), child: const Text('Delete my copies')),
-            if (admin)
-              OutlinedButton(key: const Key('server-purge-all'), onPressed: _busy ? null : () => _purge(whole: true), child: const Text('Delete all copies of this circle')),
+            const SizedBox(height: AppSpace.md),
+            if (mine)
+              DsPillButton(key: const Key('server-withdraw'), label: 'Withdraw my consent', style: DsPillStyle.outlined, icon: Icons.lock, onPressed: _busy ? null : _withdraw),
+            if (mine) const SizedBox(height: AppSpace.sm),
+            DsPillButton(
+              key: const Key('server-purge-mine'),
+              label: 'Delete my copies',
+              style: DsPillStyle.outlined,
+              icon: Icons.delete_outline,
+              onPressed: _busy ? null : () => _purge(whole: false),
+            ),
+            if (admin) ...<Widget>[
+              const SizedBox(height: AppSpace.sm),
+              DsPillButton(
+                key: const Key('server-purge-all'),
+                label: 'Delete all copies of this circle',
+                style: DsPillStyle.danger,
+                icon: Icons.delete_forever_outlined,
+                onPressed: _busy ? null : () => _purge(whole: true),
+              ),
+            ],
           ],
         ],
       ),
+    );
+  }
+
+  Widget _statusCard(CircleE2eeState st, DeviceKey? key, List<String> need, int allowed, bool reads) {
+    final ColorScheme cs = Theme.of(context).colorScheme;
+    final (IconData icon, Color color, String title, String sub) = !st.isPrivate || !_ss.enabled
+        ? (Icons.power_settings_new, AppColors.statusGrey, 'Off', 'The server cannot read this circle')
+        : key == null
+            ? (Icons.hourglass_top, AppColors.statusOrange, 'Waiting for enrolment', 'The server has no approved key yet')
+            : reads
+                ? (Icons.visibility, AppColors.sosRed, 'Active', 'Server can read this circle')
+                : (
+                    Icons.how_to_vote_outlined,
+                    AppColors.statusOrange,
+                    need.length - allowed == 1 ? 'Waiting for 1 member' : 'Waiting for ${need.length - allowed} members',
+                    'The server cannot read this circle yet'
+                  );
+    final bool dark = Theme.of(context).brightness == Brightness.dark;
+    final Color fg = dark ? Color.lerp(color, Colors.white, 0.45)! : Color.lerp(color, Colors.black, 0.35)!;
+    return Semantics(
+      container: true,
+      label: 'Status: $title. $sub',
+      child: Container(
+        key: const Key('server-status-card'),
+        padding: const EdgeInsets.all(AppSpace.lg),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: dark ? 0.18 : 0.10),
+          borderRadius: BorderRadius.circular(AppRadius.lg),
+          border: Border.all(color: color.withValues(alpha: 0.55)),
+        ),
+        child: Row(children: <Widget>[
+          CircleAvatar(radius: 22, backgroundColor: color.withValues(alpha: 0.25), child: Icon(icon, color: fg)),
+          const SizedBox(width: AppSpace.md),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[
+              Text(title, style: AppType.headline.copyWith(color: fg)),
+              Text(sub, key: const Key('server-state'), style: AppType.secondary.copyWith(color: cs.onSurface)),
+            ]),
+          ),
+        ]),
+      ),
+    );
+  }
+
+  Widget _meaning() {
+    final ColorScheme cs = Theme.of(context).colorScheme;
+    Widget bullet(IconData i, Widget t) => Padding(
+          padding: const EdgeInsets.only(top: AppSpace.sm),
+          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[
+            Icon(i, size: 18, color: cs.onSurfaceVariant),
+            const SizedBox(width: AppSpace.sm),
+            Expanded(child: t),
+          ]),
+        );
+    return Material(
+      key: const Key('server-warning'),
+      color: cs.surfaceContainerHighest.withValues(alpha: 0.4),
+      shape: RoundedRectangleBorder(
+        side: BorderSide(color: cs.outlineVariant),
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+      ),
+      child: Padding(
+      padding: const EdgeInsets.fromLTRB(AppSpace.lg, AppSpace.md, AppSpace.lg, AppSpace.xs),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[
+        Text('WHAT THIS MEANS', style: AppType.label.copyWith(color: cs.onSurfaceVariant)),
+        bullet(
+          Icons.visibility,
+          Text('The server can read every member\'s location.', style: AppType.body.copyWith(fontWeight: FontWeight.w800, color: AppColors.sosRed)),
+        ),
+        bullet(Icons.storage, Text('It keeps a plaintext copy in its database.', style: AppType.body.copyWith(fontWeight: FontWeight.w400))),
+        bullet(Icons.lock_open, Text('This is no longer end-to-end encryption against the server.', style: AppType.body.copyWith(fontWeight: FontWeight.w400))),
+        bullet(Icons.groups_outlined, Text('It reads a circle only while every member has allowed it.', style: AppType.body.copyWith(fontWeight: FontWeight.w400))),
+        bullet(Icons.undo, Text('You can withdraw and delete the copies at any time.', style: AppType.body.copyWith(fontWeight: FontWeight.w400))),
+        Theme(
+          data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+          child: const ExpansionTile(
+            key: Key('server-details'),
+            tilePadding: EdgeInsets.zero,
+            childrenPadding: EdgeInsets.only(bottom: AppSpace.md),
+            title: Text('Read details', style: TextStyle(fontWeight: FontWeight.w700)),
+            expandedCrossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[Text(kTrustedServerWarning, style: AppType.secondary)],
+          ),
+        ),
+      ]),
+    ));
+  }
+
+  Widget _enrollSteps(Key key, String intro, {required bool showToken}) {
+    final ColorScheme cs = Theme.of(context).colorScheme;
+    const String tokenCmd = 'export E2EE_SERVER_INGEST_TOKEN=\$(openssl rand -hex 32)   # put it in .env';
+    const String enrollCmd = 'docker compose --profile e2ee-server run --rm -T e2ee-server-device enroll --kind server '
+        '--server http://api:8080 --email you@example.org < password.txt';
+    Widget cmd(String c, String what) => Container(
+          margin: const EdgeInsets.only(top: AppSpace.xs),
+          padding: const EdgeInsets.only(left: AppSpace.md),
+          decoration: BoxDecoration(
+            color: cs.surfaceContainerHighest.withValues(alpha: 0.5),
+            borderRadius: BorderRadius.circular(AppRadius.md),
+            border: Border.all(color: cs.outlineVariant),
+          ),
+          child: Row(children: <Widget>[
+            Expanded(child: Padding(padding: const EdgeInsets.symmetric(vertical: AppSpace.sm), child: SelectableText(c, style: kMono.copyWith(fontSize: 12, color: cs.onSurface)))),
+            IconButton(tooltip: 'Copy $what', icon: const Icon(Icons.copy, size: 18), onPressed: () => _copy(c, what)),
+          ]),
+        );
+    Widget step(int n, String t, {Widget? extra}) => Padding(
+          padding: const EdgeInsets.only(top: AppSpace.md),
+          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[
+            CircleAvatar(radius: 12, backgroundColor: cs.primaryContainer, child: Text('$n', style: AppType.label.copyWith(color: cs.onPrimaryContainer))),
+            const SizedBox(width: AppSpace.md),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[Text(t, style: AppType.body.copyWith(fontWeight: FontWeight.w400)), if (extra != null) extra])),
+          ]),
+        );
+    return Container(
+      padding: const EdgeInsets.all(AppSpace.lg),
+      decoration: BoxDecoration(border: Border.all(color: cs.outlineVariant), borderRadius: BorderRadius.circular(AppRadius.lg)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[
+        Text(intro, key: key, style: AppType.secondary.copyWith(color: cs.onSurfaceVariant)),
+        if (showToken) step(1, 'Set E2EE_SERVER_INGEST_TOKEN on the server (at least 32 characters).', extra: cmd(tokenCmd, 'token command')),
+        step(showToken ? 2 : 1, 'Run the enroll command. It prints the server key name, fingerprint and a request code.', extra: cmd(enrollCmd, 'enroll command')),
+        step(showToken ? 3 : 2, 'Approve the request code on this phone under "Approve a viewer or bridge", then run enroll with --approval.'),
+        step(showToken ? 4 : 3, 'Come back here and compare the fingerprint with the one the command printed.'),
+      ]),
     );
   }
 }
