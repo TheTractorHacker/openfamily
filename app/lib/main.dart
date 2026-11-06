@@ -8,6 +8,7 @@ import 'screens/app_shell.dart';
 import 'screens/join_circle_screen.dart';
 import 'screens/server_config_screen.dart';
 import 'screens/sign_up_screen.dart';
+import 'screens/diagnostics_screen.dart';
 import 'screens/weekly_summary_screen.dart';
 import 'screens/welcome_screen.dart';
 import 'services/accent_preference.dart';
@@ -87,10 +88,13 @@ class _OpenFamilyAppState extends State<OpenFamilyApp> {
 
   /// A tap on a push that names a screen (see direct_push_service.dart).
   Future<void> _handleNotificationRoute(String route) async {
-    if (route != 'weekly_summary') return;
-    navigatorKey.currentState?.push(MaterialPageRoute<void>(
-      builder: (_) => const WeeklySummaryScreen(),
-    ));
+    final Widget? screen = switch (route) {
+      'weekly_summary' => const WeeklySummaryScreen(),
+      'diagnostics' => const DiagnosticsScreen(),
+      _ => null,
+    };
+    if (screen == null) return;
+    navigatorKey.currentState?.push(MaterialPageRoute<void>(builder: (_) => screen));
   }
 
   /// An invite link opened while the app is running.

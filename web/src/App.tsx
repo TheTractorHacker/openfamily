@@ -19,6 +19,7 @@ import { BubblesPage } from './pages/BubblesPage'
 import { AuditPage } from './pages/AuditPage'
 import { AlertsPage } from './pages/AlertsPage'
 import { SystemPage } from './pages/SystemPage'
+import { FleetPage } from './pages/FleetPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { CirclesPage } from './pages/CirclesPage'
 import { ShareLinksPage } from './pages/ShareLinksPage'
@@ -166,6 +167,8 @@ function renderPage(
       return <AuditPage />
     case 'alerts':
       return <AlertsPage />
+    case 'fleet':
+      return <FleetPage />
     case 'system':
       return <SystemPage />
     case 'builds':

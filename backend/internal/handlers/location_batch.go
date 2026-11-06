@@ -219,6 +219,7 @@ func (s *Server) IngestLocationBatch(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if stored+skipped > 0 {
+			s.noteReport(r.Context(), ownerID, time.Now())
 			// The device is demonstrably alive when it syncs its backlog, so
 			// refresh liveness once (server receipt time, matching the
 			// presence rationale). Purely-invalid batches don't count.

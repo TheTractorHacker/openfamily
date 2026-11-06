@@ -43,6 +43,12 @@ class MainActivity : FlutterFragmentActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "app.openfamily/keystore")
             .setMethodCallHandler { call, result -> keystore.handle(call, result) }
 
+        // Read-only phone health facts and OEM settings deep links for the
+        // Diagnostics screen (see DiagnosticsChannel.kt).
+        val diagnostics = DiagnosticsChannel(applicationContext)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "app.openfamily/diagnostics")
+            .setMethodCallHandler { call, result -> diagnostics.handle(call, result) }
+
         // Home-screen widget snapshot store. Never throws into Dart.
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "app.openfamily/widget")
             .setMethodCallHandler { call, result ->

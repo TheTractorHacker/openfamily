@@ -34,6 +34,7 @@ import type {
   AdminShareLink,
   AdminSession,
   AuditPage,
+  FleetResponse,
 } from './types'
 
 const API_BASE = '/api'
@@ -826,4 +827,10 @@ export function revokeHaToken(id: string): Promise<void> {
 
 export function testHaWebhook(id: string): Promise<{ ok: boolean; status_code: number; error: string }> {
   return request(`/integrations/ha/tokens/${encodeURIComponent(id)}/test`, { method: 'POST' })
+}
+
+// ---- Fleet health (platform admin) ----
+
+export function getFleetHealth(): Promise<FleetResponse> {
+  return request<FleetResponse>('/api/admin/fleet')
 }

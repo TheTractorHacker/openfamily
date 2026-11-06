@@ -22,6 +22,7 @@ import '../widgets/ds/ds.dart';
 import '../widgets/units_setting_tile.dart';
 import 'profile_screen.dart';
 import 'circles_screen.dart';
+import 'diagnostics_screen.dart';
 import 'driving_detection_screen.dart';
 import 'families_screen.dart';
 import 'server_config_screen.dart';
@@ -576,6 +577,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
               subtitle: 'Place alerts, check-ins, drives, battery and more',
               chevron: true,
               onTap: () => push(const NotificationSettingsScreen()),
+            ),
+            const DsSectionHeader('Help'),
+            DsListRow(
+              leading: DsListRow.iconTile(context, Icons.health_and_safety_outlined),
+              title: 'Diagnostics',
+              subtitle: "Why isn't my phone reporting? Checks and one-tap fixes",
+              chevron: true,
+              onTap: () => push(const DiagnosticsScreen()),
             ),
             const DsSectionHeader('About'),
             DsListRow(

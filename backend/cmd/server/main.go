@@ -177,6 +177,9 @@ func main() {
 		slog.Error("notification prefs schema", "err", err)
 		os.Exit(1)
 	}
+	// Needs notification_prefs.phone_silent, so it starts after the schema.
+	go srv.RunSilenceAlerts(ctx)
+	go srv.RunArrivalWatch(ctx)
 	if err := srv.EnsureThemeSchema(ctx); err != nil {
 		slog.Warn("theme schema", "err", err)
 	}
@@ -287,6 +290,14 @@ func main() {
 		r.Get("/me/notifications", srv.GetNotificationPrefs)
 		r.Put("/me/notifications", srv.PutNotificationPrefs)
 		r.Get("/me/quiet-hours", srv.GetQuietHours)
+		r.Get("/me/diagnostics", srv.GetMyDiagnostics)
+		r.Post("/me/diagnostics/test-push", srv.SendTestPush)
+		r.Put("/devices/{id}/diagnostics", srv.ReportDeviceDiagnostics)
+		r.Get("/me/arrival-watch", srv.GetArrivalWatch)
+		r.Put("/me/arrival-watch", srv.PutArrivalWatch)
+		r.Get("/circles/{id}/silence-alerts", srv.GetSilenceAlerts)
+		r.Put("/circles/{id}/silence-alerts", srv.PutSilenceAlerts)
+		r.Put("/circles/{id}/silence-alerts/me", srv.PutMySilencePrefs)
 		r.Put("/me/quiet-hours", srv.PutQuietHours)
 		r.Get("/members/{id}/place-alert-rules", srv.ListPlaceAlertRules)
 		r.Get("/members/{id}/place-alerts", srv.GetMemberPlaceAlerts)
@@ -482,6 +493,7 @@ func main() {
 		r.Delete("/api/admin/families/{id}", srv.AdminDeleteFamily)
 		r.Get("/api/admin/families/{id}/members", srv.AdminListFamilyMembers)
 		r.Get("/api/admin/members", srv.AdminListMembers)
+		r.Get("/api/admin/fleet", srv.AdminFleetHealth)
 		r.Get("/api/admin/members/{id}/avatar", srv.GetAdminMemberAvatar)
 		r.Get("/api/admin/members/{id}/history", srv.AdminGetMemberHistory)
 		r.Get("/api/admin/members/{id}/history/export", srv.AdminExportMemberHistory)

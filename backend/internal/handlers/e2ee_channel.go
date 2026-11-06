@@ -346,6 +346,7 @@ func (s *Server) E2EEPostBatch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if len(stored) > 0 {
+		s.noteReport(ctx, uid, time.Now())
 		circleID, sender := m.CircleID, uid
 		postCommitRunner.Submit(func() { s.fanOutE2EEItems(circleID, sender, stored, wake) })
 	}

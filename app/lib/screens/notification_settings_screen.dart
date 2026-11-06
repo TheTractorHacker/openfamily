@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../services/api_client.dart';
 import '../services/security_format.dart';
 import '../widgets/ds/ds.dart';
+import '../widgets/reliability_alert_sections.dart';
 import 'place_alert_rules_screen.dart';
 import 'security_widgets.dart';
 
@@ -42,6 +43,8 @@ const List<_Pref> _members = <_Pref>[
       'Sunday evening: your family\'s drives, distance and hard braking'),
   _Pref('severe_weather', Icons.thunderstorm_outlined, 'Severe weather alerts',
       'Severe weather in your area'),
+  _Pref('phone_silent', Icons.phonelink_erase_outlined, 'Silent phone alerts',
+      'When a circle member\'s phone stops reporting for a long time'),
 ];
 
 const _Pref _showNames = _Pref(
@@ -130,6 +133,8 @@ class _NotificationSettingsScreenState
                   const QuietHoursSection(),
                   const DsSectionHeader('Member notifications'),
                   for (final _Pref p in _members) _row(p),
+                  const SilenceAlertsSection(),
+                  const ArrivalWatchSection(),
                   const DsSectionHeader('Privacy'),
                   _row(_showNames),
                   const Padding(

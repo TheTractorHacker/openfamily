@@ -52,6 +52,7 @@ import 'join_circle_screen.dart';
 import 'circle_detail_screen.dart';
 import 'circles_screen.dart';
 import 'places_screen.dart';
+import '../services/diagnostics/diagnostics_reporter.dart';
 import 'settings_screen.dart';
 import 'sos_screen.dart';
 
@@ -633,6 +634,7 @@ class _MapScreenState extends State<MapScreen>
     // needs it.
     await _familyService.refreshMembers();
     await _refreshServerFeatures();
+    unawaited(DiagnosticsAutoReport.maybeReport());
   }
 
   Future<void> _initLocationSharing() async {

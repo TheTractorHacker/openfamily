@@ -246,6 +246,7 @@ func (s *Server) pushFamilyAlertRender(ctx context.Context, familyID, senderID, 
 				}
 			}
 			err := s.dispatchBest(ctx, n)
+			s.notePushResult(ctx, d.id, err == nil)
 			if err == nil {
 				ok = true
 				if !d.direct || (d.endpoint != "" && !s.Direct.IsConnected(d.id)) {
