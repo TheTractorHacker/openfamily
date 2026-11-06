@@ -677,3 +677,100 @@ func TestHAAddrClassification(t *testing.T) {
 		}
 	}
 }
+
+// Security-review negatives: deleted places, paused sharing on alarms, owner role and credential events.
+func TestHAHardeningNegatives(t *testing.T) {
+	haLoopbackForTests.Store(true)
+	t.Cleanup(func() { haLoopbackForTests.Store(false) })
+	e := newHAEnv(t)
+	ctx := context.Background()
+	c1 := e.createCircle("A", "HAhard", "B")
+	c2 := e.createCircle("C", "HAhard2", "B") // A is not in c2
+	tokA, idA := e.mint("A", []string{c1}, "events", "presence", "location")
+	_, m, _ := e.get(tokA, "/integrations/ha/v1/events")
+	after := strconv.FormatInt(int64(m["next_after"].(float64)), 10)
+	ins := func(circle any, name string) {
+		if _, err := e.pool.Exec(ctx, `INSERT INTO ha_events (kind, user_id, source_key, place_id, place_name, place_circle_id, occurred_at)
+			VALUES ('arrival', $1, $2, gen_random_uuid(), $3, $4, now())`, e.ids["B"], "hard-"+name+strconv.FormatInt(time.Now().UnixNano(), 36), name, circle); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// 1. Deleted place: hidden unless its recorded circle is one the token reads through.
+	ins(nil, "GhostNoCircle")
+	ins(c2, "GhostOtherCircle")
+	ins(c1, "GhostRecorded")
+	_, _, raw := e.get(tokA, "/integrations/ha/v1/events?after="+after)
+	if strings.Contains(raw, "GhostNoCircle") || strings.Contains(raw, "GhostOtherCircle") || !strings.Contains(raw, "GhostRecorded") {
+		t.Fatalf("deleted-place events: %s", raw)
+	}
+
+	// 2. Paused sharing: an SOS carries no position (reason sharing_off).
+	var fam string
+	if err := e.pool.QueryRow(ctx, `INSERT INTO families (name) VALUES ('HAhardfam-' || gen_random_uuid()::text) RETURNING id`).Scan(&fam); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		bg := context.Background()
+		_, _ = e.pool.Exec(bg, `DELETE FROM alerts WHERE family_id = $1`, fam)
+		_, _ = e.pool.Exec(bg, `UPDATE users SET family_id = NULL WHERE family_id = $1`, fam)
+		_, _ = e.pool.Exec(bg, `DELETE FROM sharing_pauses WHERE user_id = $1`, e.ids["B"])
+		_, _ = e.pool.Exec(bg, `DELETE FROM circles WHERE id = $1`, fam)
+		_, _ = e.pool.Exec(bg, `DELETE FROM families WHERE id = $1`, fam)
+	})
+	for _, u := range []string{"D", "E"} {
+		_, _ = e.pool.Exec(ctx, `UPDATE users SET family_id = $2 WHERE id = $1`, e.ids[u], fam)
+	}
+	tokD, _ := e.mint("D", []string{fam}, "events", "presence", "location")
+	e.srv.haScan(ctx)
+	time.Sleep(20 * time.Millisecond)
+	_, _ = e.pool.Exec(ctx, `INSERT INTO sharing_pauses (user_id, paused_until) VALUES ($1, now() + interval '1 hour')`, e.ids["E"])
+	if _, err := e.pool.Exec(ctx, `INSERT INTO alerts (user_id, family_id, type, lat, lon, share_token) VALUES ($1,$2,'sos',44.4444,5.5555,$3)`,
+		e.ids["E"], fam, "hard-"+strconv.FormatInt(time.Now().UnixNano(), 36)); err != nil {
+		t.Fatal(err)
+	}
+	e.srv.haScan(ctx)
+	_, _, raw = e.get(tokD, "/integrations/ha/v1/events?after=0")
+	if !strings.Contains(raw, `"sos"`) || strings.Contains(raw, "44.4444") || !strings.Contains(raw, haStateSharingOff) {
+		t.Fatalf("paused-sharing SOS: %s", raw)
+	}
+
+	// 3+4. Credential event and child downgrade end the token; delivery stops too.
+	recvHits := 0
+	var mu sync.Mutex
+	recv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { mu.Lock(); recvHits++; mu.Unlock() }))
+	defer recv.Close()
+	_, _ = e.pool.Exec(ctx, `UPDATE users SET platform_admin = true WHERE id = $1`, e.ids["A"])
+	var head int64
+	_ = e.pool.QueryRow(ctx, `SELECT COALESCE(max(id),0) FROM ha_events`).Scan(&head)
+	_, _ = e.pool.Exec(ctx, `UPDATE ha_integrations SET webhook_url = $2, webhook_secret = 's', webhook_allow_private = true, webhook_cursor = $3 WHERE id = $1`, idA, recv.URL, head)
+	lowbat := func(k string) {
+		_, _ = e.pool.Exec(ctx, `INSERT INTO ha_events (kind, user_id, source_key, occurred_at) VALUES ('low_battery', $1, $2, now())`, e.ids["B"], "hard-lb-"+k)
+	}
+	lowbat("1")
+	e.srv.haDeliverAll(ctx)
+	mu.Lock()
+	if recvHits != 1 {
+		t.Fatalf("positive control: %d deliveries", recvHits)
+	}
+	mu.Unlock()
+	lowbat("2")
+	_, _ = e.pool.Exec(ctx, `UPDATE users SET token_version = token_version + 1 WHERE id = $1`, e.ids["A"])
+	e.srv.haDeliverAll(ctx)
+	if c, _, _ := e.get(tokA, "/integrations/ha/v1/members"); c != 401 {
+		t.Fatalf("token survived a credential event: %d", c)
+	}
+	mu.Lock()
+	if recvHits != 1 {
+		t.Fatalf("delivered after a credential event: %d", recvHits)
+	}
+	mu.Unlock()
+	// a token minted after the event works until the owner becomes a child account
+	tokA2, _ := e.mint("A", []string{c1}, "presence")
+	if c, _, _ := e.get(tokA2, "/integrations/ha/v1/members"); c != 200 {
+		t.Fatalf("fresh token: %d", c)
+	}
+	_, _ = e.pool.Exec(ctx, `UPDATE users SET role = 'child' WHERE id = $1`, e.ids["A"])
+	if c, _, _ := e.get(tokA2, "/integrations/ha/v1/members"); c != 401 {
+		t.Fatalf("child-account token: %d", c)
+	}
+}

@@ -30,6 +30,7 @@ Without the custom component the API is plain JSON, so a REST sensor works too (
 * **Circle scope**: a non-empty list of the owner's circles. A token only sees a circle while its owner is still a live member.
 * **Authority**: a token never exceeds what its owner sees as a circle member. It does not use platform-admin powers, so
   `ADMIN_LOCATION_ACCESS` is neither needed nor bypassed: a platform admin's token sees the same circles an ordinary member would.
+* **Bound to the owner's credentials**: a token stops working (401, webhook stops) when its owner changes or resets their password, uses "log out everywhere", changes two-factor settings, or becomes a child account. Create a new token afterwards. (Migration `000171`: `owner_token_version`.)
 * Revocation is immediate (`DELETE /integrations/ha/tokens/{id}`), clears the webhook URL and secret, and the next API call is 401.
 * `last_used_at` is updated at most once a minute. Audit log (`GET /audit`, family admins): `integration.ha.token_created`,
   `token_revoked`, `webhook_updated` (host and last 4 characters of the path only), `webhook_secret_rotated`, `webhook_test`,
@@ -46,6 +47,8 @@ Without the custom component the API is plain JSON, so a REST sensor works too (
 | Private circle in **trusted-server mode** (server holds plaintext) | behaves like a normal circle |
 | Member in both a readable and a Private circle of the token | located through the readable circle only |
 | SOS / crash in a Private circle | the event and the `sos_active` flag exist (the server knows an alert was raised), with `location: {available: false, reason: "unavailable_private_circle"}` and no position |
+| SOS / crash while the member paused sharing (or sharing is off in the alert's circle) | event delivered, `location: {available: false, reason: "sharing_off"}`; a position needs a readable circle **and** active sharing in it |
+| Arrival / departure at a place that was deleted later | shown only if the circle recorded when the event was queued is one the token reads through; otherwise hidden |
 | SOS without the `location` scope | `location: {available: false, reason: "scope"}` |
 
 The readability test is the same SQL used elsewhere: `NOT e2ee_plaintext_blocked(circle)` plus `sharing_enabled` and no active sharing pause.
@@ -118,7 +121,7 @@ Reviewed against the code as shipped. "Fixed" means a change made during this re
 | Webhook replay | Can a captured delivery be replayed to HA? | The signature covers the timestamp; HA rejects anything more than 5 minutes old or from the future, and de-duplicates by signed event id and by delivery header (the header is unsigned, so the body id is what counts). Memory-only caches: a replay after an HA restart inside the 5 minute window is possible and would at worst re-fire one event. |
 | Signature timing | Constant-time compare? | The HA verifier uses `hmac.compare_digest`; it hashes nothing before checking the timestamp window and fails closed on a missing secret. The server never verifies incoming signatures. |
 | Amplification / DoS | Can a token burn server resources? | Per-token and per-address limits, `GET /events` scans at most 100 outbox rows per call, deliveries are limited to 25 events per target per 5 s tick, 8 targets in parallel, 10 s timeout, outbox pruned after 7 days. A permanently failing target delays its own queue only (about 15 minutes per dropped event). Rate limiters are in memory and reset on restart. |
-| Elevation | Do tokens grant admin power? | No: owner-level read of the chosen circles; `ADMIN_LOCATION_ACCESS` is untouched. Account deletion cascades to tokens; a password change or "log out everywhere" does **not** revoke tokens (revoke them in the card). |
+| Elevation | Do tokens grant admin power? | No: owner-level read of the chosen circles; `ADMIN_LOCATION_ACCESS` is untouched. Account deletion cascades to tokens; password changes/resets, "log out everywhere", two-factor changes and a downgrade to a child account invalidate the owner's tokens (found in the second review round and fixed: tokens are bound to `users.token_version` and the adult-role check is repeated on every request and delivery). |
 
 ## Operations
 

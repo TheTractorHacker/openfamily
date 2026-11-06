@@ -1,0 +1,62 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to OpenFamily",
+        "description": "Create a token in the OpenFamily admin panel (Settings, Integrations) and paste it here.",
+        "data": {
+          "url": "Server URL",
+          "token": "Access token"
+        },
+        "data_description": {
+          "url": "For example https://family.example.com",
+          "token": "Starts with ofha_. Read only, limited to the circles you chose."
+        }
+      },
+      "reauth_confirm": {
+        "title": "Token rejected",
+        "description": "The OpenFamily token was revoked or expired. Enter a new one.",
+        "data": {
+          "token": "Access token"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Cannot reach the server. Check the URL and that Home Assistant can connect to it.",
+      "invalid_auth": "The token was rejected. It may be revoked.",
+      "invalid_url": "Enter an http:// or https:// address.",
+      "invalid_token_format": "That does not look like an OpenFamily token (ofha_...).",
+      "unknown": "Unexpected error."
+    },
+    "abort": {
+      "already_configured": "This server and token are already configured.",
+      "reauth_successful": "The new token was saved."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "OpenFamily options",
+        "description": "Paste this webhook URL into the token's Webhook setting in OpenFamily: {webhook_url}\nThen enter the signing secret OpenFamily showed you to accept pushed events. Without it, events are still received by polling.",
+        "data": {
+          "scan_interval": "Update interval",
+          "webhook_secret": "Webhook signing secret"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "battery": { "name": "Battery" },
+      "speed": { "name": "Speed" },
+      "place": { "name": "Place" },
+      "last_seen": { "name": "Last seen" },
+      "drives_24h": { "name": "Drives (24 h)" },
+      "driving_distance_24h": { "name": "Driving distance (24 h)" }
+    },
+    "binary_sensor": {
+      "sos": { "name": "SOS" },
+      "crash": { "name": "Possible crash" }
+    }
+  }
+}

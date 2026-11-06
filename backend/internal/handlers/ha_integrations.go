@@ -67,6 +67,12 @@ var haEventKinds = []string{"arrival", "departure", "sos", "crash", "trip_start"
 
 var haTokenRe = regexp.MustCompile(`^ofha_[A-Za-z0-9_-]{43}$`)
 
+// haOwnerOKSQL: the token's owner must still be an adult account (not a child)
+// and must not have had a credential event since the token was minted
+// (password change/reset, logout everywhere, TOTP change bump token_version).
+const haOwnerOKSQL = `EXISTS (SELECT 1 FROM users ou WHERE ou.id = ha_integrations.user_id
+	AND ou.role IN ('admin', 'member') AND ou.token_version = ha_integrations.owner_token_version)`
+
 func haHashToken(token string) []byte {
 	sum := sha256.Sum256([]byte(token))
 	return sum[:]
@@ -252,8 +258,8 @@ func (s *Server) CreateHAToken(w http.ResponseWriter, r *http.Request) {
 	}
 	hint := "…" + token[len(token)-4:]
 	row := s.Pool.QueryRow(r.Context(), `
-		INSERT INTO ha_integrations (user_id, name, token_hash, token_hint, scopes, circle_ids, webhook_secret)
-		SELECT $1, $2, $3, $4, $5, $6::uuid[], $7
+		INSERT INTO ha_integrations (user_id, name, token_hash, token_hint, scopes, circle_ids, webhook_secret, owner_token_version)
+		SELECT $1, $2, $3, $4, $5, $6::uuid[], $7, (SELECT token_version FROM users WHERE id = $1)
 		WHERE (SELECT count(*) FROM ha_integrations WHERE user_id = $1 AND revoked_at IS NULL) < $8
 		RETURNING `+haCols,
 		claims.UserID, name, haHashToken(token), hint, scopes, ids, secret, haMaxActiveTokens)
@@ -639,7 +645,7 @@ func (s *Server) haAuth(w http.ResponseWriter, r *http.Request, scope string) (*
 		return miss()
 	}
 	row := s.Pool.QueryRow(r.Context(), `SELECT `+haCols+` FROM ha_integrations
-		WHERE token_hash = $1 AND revoked_at IS NULL`, haHashToken(token))
+		WHERE token_hash = $1 AND revoked_at IS NULL AND `+haOwnerOKSQL, haHashToken(token))
 	integ, err := scanHA(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return miss()

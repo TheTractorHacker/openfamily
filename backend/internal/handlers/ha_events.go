@@ -28,19 +28,20 @@ const (
 )
 
 type haEvent struct {
-	ID         int64
-	Kind       string
-	UserID     string
-	RefID      string
-	PlaceID    string
-	PlaceName  string
-	OccurredAt time.Time
-	Data       map[string]any
+	ID          int64
+	Kind        string
+	UserID      string
+	RefID       string
+	PlaceID     string
+	PlaceName   string
+	PlaceCircle string
+	OccurredAt  time.Time
+	Data        map[string]any
 }
 
 func (s *Server) haLoadEvents(ctx context.Context, after int64, limit int) ([]haEvent, error) {
 	rows, err := s.Pool.Query(ctx, `
-		SELECT id, kind, user_id::text, COALESCE(ref_id::text, ''), COALESCE(place_id::text, ''), place_name, occurred_at, data
+		SELECT id, kind, user_id::text, COALESCE(ref_id::text, ''), COALESCE(place_id::text, ''), place_name, COALESCE(place_circle_id::text, ''), occurred_at, data
 		FROM ha_events WHERE id > $1 ORDER BY id LIMIT $2`, after, limit)
 	if err != nil {
 		return nil, err
@@ -50,7 +51,7 @@ func (s *Server) haLoadEvents(ctx context.Context, after int64, limit int) ([]ha
 	for rows.Next() {
 		var e haEvent
 		var raw []byte
-		if err := rows.Scan(&e.ID, &e.Kind, &e.UserID, &e.RefID, &e.PlaceID, &e.PlaceName, &e.OccurredAt, &raw); err != nil {
+		if err := rows.Scan(&e.ID, &e.Kind, &e.UserID, &e.RefID, &e.PlaceID, &e.PlaceName, &e.PlaceCircle, &e.OccurredAt, &raw); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal(raw, &e.Data)
@@ -78,7 +79,7 @@ func (s *Server) haEventPayload(ctx context.Context, integ *haIntegration, ev ha
 		return nil, false, err
 	}
 	var name string
-	visible, coords := false, false
+	visible, anyReadable := false, false
 	shareCircles := map[string]bool{}
 	readableIn := map[string]bool{}
 	for rows.Next() {
@@ -96,8 +97,8 @@ func (s *Server) haEventPayload(ctx context.Context, integ *haIntegration, ev ha
 		if (alarm) || (readable && sharing) {
 			visible = true
 		}
-		if readable && (alarm || sharing) {
-			coords = true
+		if readable {
+			anyReadable = true
 		}
 	}
 	rows.Close()
@@ -113,16 +114,20 @@ func (s *Server) haEventPayload(ctx context.Context, integ *haIntegration, ev ha
 	}
 	switch ev.Kind {
 	case "arrival", "departure":
-		var typ, cid string
-		err := s.Pool.QueryRow(ctx, `SELECT p.type, COALESCE(p.circle_id, p.family_id)::text FROM places p WHERE p.id::text = $1`, ev.PlaceID).Scan(&typ, &cid)
-		if errors.Is(err, pgx.ErrNoRows) {
-			// The place was deleted since: the name in the outbox is all there is, and
-			// it is only shown when the event is visible through some shared circle.
-			typ = ""
-		} else if err != nil {
+		// Fail closed: the circle recorded at enqueue time (or, for older rows, the
+		// place's current circle) must be one this token reads through. A deleted
+		// place with no recorded circle is hidden.
+		var typ, cur string
+		err := s.Pool.QueryRow(ctx, `SELECT p.type, COALESCE(p.circle_id, p.family_id)::text FROM places p WHERE p.id::text = $1`, ev.PlaceID).Scan(&typ, &cur)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return nil, false, err
-		} else if !shareCircles[cid] {
-			return nil, false, nil // a place of a circle this token cannot read through
+		}
+		cid := ev.PlaceCircle
+		if cid == "" {
+			cid = cur
+		}
+		if cid == "" || !shareCircles[cid] {
+			return nil, false, nil
 		}
 		out["place"] = haPlaceRef{ID: ev.PlaceID, Name: ev.PlaceName, IsHome: typ == "home"}
 	case "low_battery", "trip_end", "trip_start":
@@ -130,8 +135,10 @@ func (s *Server) haEventPayload(ctx context.Context, integ *haIntegration, ev ha
 			out["data"] = ev.Data
 		}
 	case "sos", "crash":
+		// Position needs: the circle readable by the server AND the member sharing in it
+		// (SOS: the circle the alert was raised in; crash: any circle). Fail closed.
+		coords, readable := len(shareCircles) > 0, anyReadable
 		if ev.Kind == "sos" {
-			// An SOS belongs to the circle it was raised in; it must be one this token reads.
 			var fam *string
 			if err := s.Pool.QueryRow(ctx, `SELECT family_id::text FROM alerts WHERE id::text = $1`, ev.RefID).Scan(&fam); err != nil || fam == nil {
 				return nil, false, nil
@@ -140,10 +147,12 @@ func (s *Server) haEventPayload(ctx context.Context, integ *haIntegration, ev ha
 			if !ok {
 				return nil, false, nil
 			}
-			coords = rd
+			coords, readable = shareCircles[*fam], rd
 		}
 		loc := map[string]any{"available": false}
 		switch {
+		case !coords && readable:
+			loc["reason"] = haStateSharingOff
 		case !coords:
 			loc["reason"] = haStateUnavailablePrivate
 		case !integ.has(haScopeLocation):
@@ -208,8 +217,8 @@ func (s *Server) haInsertEvent(ctx context.Context, kind, userID, sourceKey, ref
 	}
 	raw, _ := json.Marshal(data)
 	if _, err := s.Pool.Exec(ctx, `
-		INSERT INTO ha_events (kind, user_id, source_key, ref_id, place_id, place_name, occurred_at, data)
-		VALUES ($1, $2, $3, $4::uuid, $5::uuid, $6, $7, $8)
+		INSERT INTO ha_events (kind, user_id, source_key, ref_id, place_id, place_name, place_circle_id, occurred_at, data)
+		VALUES ($1, $2, $3, $4::uuid, $5::uuid, $6, (SELECT COALESCE(circle_id, family_id) FROM places WHERE id = $5::uuid), $7, $8)
 		ON CONFLICT (source_key) DO NOTHING`,
 		kind, userID, sourceKey, nullStr(refID), nullStr(placeID), placeName, at, raw); err != nil {
 		haLogErr("enqueue "+kind, err)
@@ -426,6 +435,7 @@ func haBackoff(failures int) time.Duration {
 func (s *Server) haDeliverAll(ctx context.Context) {
 	rows, err := s.Pool.Query(ctx, `SELECT `+haCols+` FROM ha_integrations
 		WHERE revoked_at IS NULL AND webhook_url <> '' AND 'events' = ANY(scopes)
+		  AND `+haOwnerOKSQL+`
 		  AND (webhook_next_attempt IS NULL OR webhook_next_attempt <= now())
 		  AND webhook_cursor < COALESCE((SELECT max(id) FROM ha_events), 0)`)
 	if err != nil {
@@ -468,6 +478,10 @@ func (s *Server) haWantsKind(i *haIntegration, kind string) bool {
 // event and schedules a retry with exponential backoff (30 s .. 15 min); after
 // haMaxAttempts consecutive failures that one event is dropped and recorded.
 func (s *Server) haDeliverPending(ctx context.Context, integ *haIntegration) {
+	var ok bool
+	if err := s.Pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM ha_integrations WHERE id = $1 AND revoked_at IS NULL AND `+haOwnerOKSQL+`)`, integ.ID).Scan(&ok); err != nil || !ok {
+		return
+	}
 	evs, err := s.haLoadEvents(ctx, integ.WebhookCursor, haBatchPerTarget)
 	if err != nil {
 		haLogErr("load events", err)
