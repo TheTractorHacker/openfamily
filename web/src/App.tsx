@@ -124,7 +124,7 @@ function renderPage(
   if (adminOnly && isPlatformAdmin && adminMfaRequired) {
     return (
       <div className="wb-page">
-        <AccessDenied message="This server requires two-factor authentication for administrators. Turn it on in the OpenFamily app (Settings, Security), then sign in again to use the admin panel." />
+        <AccessDenied message="This server requires two-factor authentication for administrators. Turn it on in the OpenFamily app (Settings, Security), then sign out and sign in again with your two-factor code to use the admin panel." />
       </div>
     )
   }

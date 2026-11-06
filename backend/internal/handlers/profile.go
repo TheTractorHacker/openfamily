@@ -84,7 +84,7 @@ func (s *Server) GetMe(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, meOut{
 		User: user, PlatformAdmin: platformAdmin,
-		AdminMFARequired: s.RequireAdminMFA && platformAdmin && !user.TOTPEnabled,
+		AdminMFARequired: s.RequireAdminMFA && platformAdmin && !middleware.AdminMFASatisfied(user.TOTPEnabled, claims),
 	})
 }
 

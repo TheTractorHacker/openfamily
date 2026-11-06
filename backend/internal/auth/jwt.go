@@ -16,12 +16,20 @@ const (
 	RefreshToken TokenType = "refresh"
 )
 
+// AMRTOTP marks a session that passed a second-factor challenge.
+const AMRTOTP = "totp"
+
 // Claims is the JWT payload for both access and refresh tokens.
 type Claims struct {
 	UserID       string    `json:"uid"`
 	FamilyID     string    `json:"fid,omitempty"`
 	TokenType    TokenType `json:"typ"`
 	TokenVersion int       `json:"ver"`
+	// AMR is the authentication method of the session that minted the token:
+	// AMRTOTP once a TOTP (or recovery code) challenge was passed. It is
+	// copied from refresh token to refresh token, so it survives rotation but
+	// can never be acquired without a challenge. Absent on older tokens.
+	AMR string `json:"amr,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -46,6 +54,11 @@ func (m *TokenManager) IssueAccess(userID, familyID string, tokenVersion int) (s
 	return m.issue(userID, familyID, tokenVersion, AccessToken, m.accessTTL)
 }
 
+// IssueAccessAMR is IssueAccess for a session with authentication method amr.
+func (m *TokenManager) IssueAccessAMR(userID, familyID string, tokenVersion int, amr string) (string, error) {
+	return m.issueWithID(userID, familyID, tokenVersion, AccessToken, m.accessTTL, "", amr)
+}
+
 // AccessTTL returns the configured access-token lifetime, for reporting the
 // token's expires_in to clients.
 func (m *TokenManager) AccessTTL() time.Duration {
@@ -62,23 +75,30 @@ func (m *TokenManager) IssueRefresh(userID, familyID string, tokenVersion int) (
 // from IssueRefresh carry no jti and are treated as legacy by the refresh
 // endpoint.
 func (m *TokenManager) IssueRefreshWithID(userID, familyID string, tokenVersion int, jti string) (string, error) {
-	return m.issueWithID(userID, familyID, tokenVersion, RefreshToken, m.refreshTTL, jti)
+	return m.issueWithID(userID, familyID, tokenVersion, RefreshToken, m.refreshTTL, jti, "")
+}
+
+// IssueRefreshWithIDAMR is IssueRefreshWithID for a session with
+// authentication method amr.
+func (m *TokenManager) IssueRefreshWithIDAMR(userID, familyID string, tokenVersion int, jti, amr string) (string, error) {
+	return m.issueWithID(userID, familyID, tokenVersion, RefreshToken, m.refreshTTL, jti, amr)
 }
 
 // RefreshTTL returns the configured refresh-token lifetime.
 func (m *TokenManager) RefreshTTL() time.Duration { return m.refreshTTL }
 
 func (m *TokenManager) issue(userID, familyID string, tokenVersion int, typ TokenType, ttl time.Duration) (string, error) {
-	return m.issueWithID(userID, familyID, tokenVersion, typ, ttl, "")
+	return m.issueWithID(userID, familyID, tokenVersion, typ, ttl, "", "")
 }
 
-func (m *TokenManager) issueWithID(userID, familyID string, tokenVersion int, typ TokenType, ttl time.Duration, jti string) (string, error) {
+func (m *TokenManager) issueWithID(userID, familyID string, tokenVersion int, typ TokenType, ttl time.Duration, jti, amr string) (string, error) {
 	now := time.Now()
 	claims := Claims{
 		UserID:       userID,
 		FamilyID:     familyID,
 		TokenType:    typ,
 		TokenVersion: tokenVersion,
+		AMR:          amr,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    "openfamily",
 			Subject:   userID,

@@ -223,7 +223,7 @@ func TestAdminAuditExportCSV(t *testing.T) {
 		}
 	}
 	var exports int
-	_ = e.pool.QueryRow(ctx, `SELECT count(*) FROM audit_log WHERE action = 'admin.audit_export' AND user_id = $1`, e.ids["A"]).Scan(&exports)
+	_ = e.pool.QueryRow(ctx, `SELECT count(*) FROM audit_log WHERE action = 'admin.audit_export' AND user_id = $1 AND detail LIKE '%cap=50000%'`, e.ids["A"]).Scan(&exports)
 	if exports < 1 {
 		t.Fatal("the export itself must be audited")
 	}
@@ -386,26 +386,37 @@ func TestRequireAdminMFAMiddleware(t *testing.T) {
 		t.Fatal(err)
 	}
 	ok := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(204) })
-	call := func(enabled bool, user string) (int, string) {
+	call := func(enabled bool, user, amr string) (int, string) {
 		h := middleware.RequirePlatformAdmin(e.pool)(middleware.RequireAdminMFA(e.pool, enabled)(ok))
 		req := httptest.NewRequest("GET", "/api/admin/x", nil)
-		req = req.WithContext(middleware.ContextWithClaims(req.Context(), &auth.Claims{UserID: e.ids[user]}))
+		req = req.WithContext(middleware.ContextWithClaims(req.Context(), &auth.Claims{UserID: e.ids[user], AMR: amr}))
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, req)
 		return rec.Code, rec.Body.String()
 	}
-	if code, _ := call(false, "A"); code != 204 {
+	if code, _ := call(false, "A", ""); code != 204 {
 		t.Fatalf("setting off must not block: %d", code)
 	}
-	code, body := call(true, "A")
-	if code != 403 || !strings.Contains(body, "admin_mfa_required") {
-		t.Fatalf("admin without TOTP must be refused: %d %s", code, body)
-	}
-	if code, _ := call(true, "B"); code != 204 {
-		t.Fatalf("admin with TOTP must pass: %d", code)
+	for _, tc := range []struct {
+		name, user, amr string
+		want            int
+	}{
+		{"no TOTP on the account", "A", "", 403},
+		{"no TOTP on the account, forged-looking claim", "A", auth.AMRTOTP, 403},
+		{"TOTP enabled but the token predates it (no amr)", "B", "", 403},
+		{"token with an unknown method", "B", "pwd", 403},
+		{"TOTP enabled and challenge passed", "B", auth.AMRTOTP, 204},
+	} {
+		code, body := call(true, tc.user, tc.amr)
+		if code != tc.want {
+			t.Errorf("%s: got %d want %d (%s)", tc.name, code, tc.want, body)
+		}
+		if tc.want == 403 && !strings.Contains(body, "admin_mfa_required") {
+			t.Errorf("%s: body %s", tc.name, body)
+		}
 	}
 	// Non-admins stay refused by the platform-admin gate, not the MFA one.
-	if code, body := call(true, "C"); code != 403 || strings.Contains(body, "admin_mfa_required") {
+	if code, body := call(true, "C", auth.AMRTOTP); code != 403 || strings.Contains(body, "admin_mfa_required") {
 		t.Fatalf("non-admin: %d %s", code, body)
 	}
 }
@@ -413,18 +424,109 @@ func TestRequireAdminMFAMiddleware(t *testing.T) {
 func TestMeReportsAdminMFARequired(t *testing.T) {
 	e := newCircleEnv(t)
 	ctx := context.Background()
-	if _, err := e.pool.Exec(ctx, `UPDATE users SET platform_admin = TRUE WHERE id = $1`, e.ids["A"]); err != nil {
+	if _, err := e.pool.Exec(ctx, `UPDATE users SET platform_admin = TRUE WHERE id = ANY($1)`, []string{e.ids["A"], e.ids["B"]}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.pool.Exec(ctx, `UPDATE users SET totp_enabled = TRUE, totp_secret = 'x' WHERE id = $1`, e.ids["B"]); err != nil {
 		t.Fatal(err)
 	}
 	e.rt.Get("/me", e.srv.GetMe)
+	me := func(user, amr string) bool {
+		req := httptest.NewRequest("GET", "/me", nil)
+		req.Header.Set("X-Test-User", e.ids[user])
+		req.Header.Set("X-Test-AMR", amr)
+		rec := httptest.NewRecorder()
+		e.rt.ServeHTTP(rec, req)
+		var m map[string]any
+		_ = json.Unmarshal(rec.Body.Bytes(), &m)
+		got, _ := m["admin_mfa_required"].(bool)
+		return got
+	}
+	e.srv.RequireAdminMFA = false
+	if me("A", "") {
+		t.Fatal("flag off must never report")
+	}
+	e.srv.RequireAdminMFA = true
 	for _, tc := range []struct {
-		on, want bool
-		user     string
-	}{{false, false, "A"}, {true, true, "A"}, {true, false, "B"}} {
-		e.srv.RequireAdminMFA = tc.on
-		_, m, raw := e.do(tc.user, "GET", "/me", nil)
-		if got, _ := m["admin_mfa_required"].(bool); got != tc.want {
-			t.Fatalf("on=%v user=%s: %s", tc.on, tc.user, raw)
+		user, amr string
+		want      bool
+	}{{"A", "", true}, {"B", "", true}, {"B", auth.AMRTOTP, false}, {"C", "", false}} {
+		if got := me(tc.user, tc.amr); got != tc.want {
+			t.Errorf("user=%s amr=%q: got %v want %v", tc.user, tc.amr, got, tc.want)
 		}
+	}
+}
+
+func TestEnablingTOTPRekeysAdminSessions(t *testing.T) {
+	e := newCircleEnv(t)
+	ctx := context.Background()
+	e.srv.TM = auth.NewTokenManager("test-secret-test-secret-test-secret!", 15*time.Minute, time.Hour)
+	var oldVer int
+	if err := e.pool.QueryRow(ctx, `SELECT token_version FROM users WHERE id = $1`, e.ids["A"]).Scan(&oldVer); err != nil {
+		t.Fatal(err)
+	}
+	// A pre-existing refresh session that must die.
+	if err := e.srv.refreshSessions().Create(ctx, e.ids["A"], "old-jti", time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	pair, ok := e.srv.rekeyAdminSession(rec, httptest.NewRequest("POST", "/auth/totp/enable", nil), e.ids["A"])
+	if !ok {
+		t.Fatalf("rekey failed: %d %s", rec.Code, rec.Body.String())
+	}
+	acc, err := e.srv.TM.Parse(pair.AccessToken, auth.AccessToken)
+	if err != nil || acc.AMR != auth.AMRTOTP || acc.TokenVersion != oldVer+1 {
+		t.Fatalf("new access claims: %+v err=%v", acc, err)
+	}
+	ref, err := e.srv.TM.Parse(pair.RefreshToken, auth.RefreshToken)
+	if err != nil || ref.AMR != auth.AMRTOTP {
+		t.Fatalf("new refresh claims: %+v err=%v", ref, err)
+	}
+	var live int
+	_ = e.pool.QueryRow(ctx, `SELECT count(*) FROM refresh_sessions WHERE user_id = $1 AND revoked_at IS NULL AND used_at IS NULL`, e.ids["A"]).Scan(&live)
+	if live != 1 {
+		t.Fatalf("only the new session may stay live, got %d", live)
+	}
+	// An access token minted before the bump no longer matches the user's version.
+	if !e.srv.tokenVersionMatches(ctx, e.ids["A"], oldVer+1) || e.srv.tokenVersionMatches(ctx, e.ids["A"], oldVer) {
+		t.Fatal("old token version must be rejected")
+	}
+}
+
+func TestAdminAuditExportIsAuditedBeforeStreamingEvenIfClientLeaves(t *testing.T) {
+	e := adminOpsEnv(t)
+	ctx := context.Background()
+	count := func() int {
+		var n int
+		_ = e.pool.QueryRow(ctx, `SELECT count(*) FROM audit_log WHERE action = 'admin.audit_export' AND user_id = $1 AND detail LIKE '%action=zz.cancelled%'`, e.ids["A"]).Scan(&n)
+		return n
+	}
+	// A client whose context is already cancelled (disconnected): the audit row
+	// must still be written, with the filters in its detail.
+	cctx, cancel := context.WithCancel(ctx)
+	cancel()
+	req := httptest.NewRequest("GET", "/api/admin/audit/export?action=zz.cancelled", nil).WithContext(cctx)
+	req.Header.Set("X-Test-User", e.ids["A"])
+	e.rt.ServeHTTP(httptest.NewRecorder(), req)
+	if count() != 1 {
+		t.Fatalf("cancelled export was not audited: %d", count())
+	}
+	t.Cleanup(func() { _, _ = e.pool.Exec(ctx, `DELETE FROM audit_log WHERE detail LIKE '%zz.cancelled%'`) })
+}
+
+func TestAdminAuditExportFailsClosedWhenAuditCannotBeWritten(t *testing.T) {
+	e := adminOpsEnv(t)
+	// A caller id that has no users row makes the audit insert violate its
+	// foreign key: the export must refuse and stream nothing.
+	req := httptest.NewRequest("GET", "/api/admin/audit/export", nil)
+	req.Header.Set("X-Test-User", "00000000-0000-4000-8000-000000000000")
+	e.ids["ghost"] = "00000000-0000-4000-8000-000000000000"
+	rec := httptest.NewRecorder()
+	e.rt.ServeHTTP(rec, req)
+	if rec.Code != 500 {
+		t.Fatalf("want 500 got %d: %s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "id,time") || strings.HasPrefix(rec.Header().Get("Content-Type"), "text/csv") {
+		t.Fatalf("nothing may be streamed: %s", rec.Body.String())
 	}
 }

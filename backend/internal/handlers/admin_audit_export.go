@@ -1,8 +1,10 @@
 package handlers
 
 import (
+	"context"
 	"encoding/csv"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -43,6 +45,18 @@ func (s *Server) AdminExportAudit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	where, args := f.where()
+
+	// Record the export BEFORE any data leaves the server, on a context a
+	// disconnecting client cannot cancel. If the record cannot be written,
+	// nothing is streamed.
+	actx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 10*time.Second)
+	defer cancel()
+	if err := s.auditStrict(actx, claims.UserID, "admin.audit_export", f.describe(), clientIP(r)); err != nil {
+		slog.Error("audit export: could not record the export", "err", err)
+		writeError(w, http.StatusInternalServerError, "failed to record the export; nothing was exported")
+		return
+	}
+
 	args = append(args, auditExportMax)
 	rows, err := s.Pool.Query(r.Context(), `
 		SELECT a.id, a.created_at, COALESCE(a.user_id::text, ''), COALESCE(u.name, ''), COALESCE(u.email, ''),
@@ -68,7 +82,10 @@ func (s *Server) AdminExportAudit(w http.ResponseWriter, r *http.Request) {
 		var at time.Time
 		var uid, uname, uemail, fid, fname, action, detail, ip string
 		if err := rows.Scan(&id, &at, &uid, &uname, &uemail, &fid, &fname, &action, &detail, &ip); err != nil {
-			break // headers are sent; end the stream rather than corrupt it
+			// Headers are already sent: never end a partial file as if it were
+			// complete. Abort the connection so the client sees a failed download.
+			slog.Error("audit export: row scan failed, aborting response", "err", err)
+			panic(http.ErrAbortHandler)
 		}
 		_ = cw.Write([]string{
 			strconv.FormatInt(id, 10), at.UTC().Format(time.RFC3339), uid, csvSafe(uname), csvSafe(uemail),
@@ -76,7 +93,47 @@ func (s *Server) AdminExportAudit(w http.ResponseWriter, r *http.Request) {
 		})
 		n++
 	}
+	if rows.Err() != nil {
+		slog.Error("audit export: query failed mid-stream, aborting response", "err", rows.Err())
+		panic(http.ErrAbortHandler)
+	}
 	cw.Flush()
-	s.logAudit(r.Context(), claims.UserID, "", "admin.audit_export",
-		fmt.Sprintf("exported %d audit rows", n), clientIP(r))
+	// Final row count, on an uncancellable context.
+	cctx, ccancel := context.WithTimeout(context.WithoutCancel(r.Context()), 10*time.Second)
+	defer ccancel()
+	s.logAudit(cctx, claims.UserID, "", "admin.audit_export_done", fmt.Sprintf("exported %d audit rows", n), clientIP(r))
+}
+
+// describe summarises the filters and the row cap for the audit record.
+func (f auditFilter) describe() string {
+	parts := []string{fmt.Sprintf("cap=%d", auditExportMax)}
+	if f.UserID != "" {
+		parts = append(parts, "user_id="+f.UserID)
+	}
+	if f.Action != "" {
+		parts = append(parts, "action="+f.Action)
+	}
+	if f.Text != "" {
+		parts = append(parts, "q="+f.Text)
+	}
+	if f.From != nil {
+		parts = append(parts, "from="+f.From.UTC().Format(time.RFC3339))
+	}
+	if f.To != nil {
+		parts = append(parts, "to="+f.To.UTC().Format(time.RFC3339))
+	}
+	return "started audit CSV export: " + strings.Join(parts, " ")
+}
+
+// auditStrict writes an audit row and reports failure, for records that must
+// exist before a sensitive action proceeds (logAudit is best effort).
+func (s *Server) auditStrict(ctx context.Context, userID, action, detail, ip string) error {
+	if s.auditHook != nil {
+		s.auditHook(userID, "", action, detail)
+		return nil
+	}
+	_, err := s.Pool.Exec(ctx, `
+		INSERT INTO audit_log (user_id, action, detail, ip_address) VALUES ($1, $2, $3, $4)`,
+		userID, action, detail, ip)
+	return err
 }

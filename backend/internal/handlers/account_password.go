@@ -94,7 +94,7 @@ func (s *Server) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.tagSession(r, jti)
-	s.issueTokens(w, user, jti)
+	s.issueTokens(w, user, jti, claims.AMR)
 }
 
 type resetCodeResponse struct {

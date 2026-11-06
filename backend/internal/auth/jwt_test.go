@@ -31,3 +31,19 @@ func TestIssueAndParseTokenVersion(t *testing.T) {
 		t.Fatalf("refresh ver=%d", refreshClaims.TokenVersion)
 	}
 }
+
+func TestAMRClaimRoundTripsAndDefaultsEmpty(t *testing.T) {
+	m := NewTokenManager("secret-secret-secret-secret-secret", time.Minute, time.Hour)
+	plain, _ := m.IssueAccess("u", "", 1)
+	if c, err := m.Parse(plain, AccessToken); err != nil || c.AMR != "" {
+		t.Fatalf("plain token must carry no amr: %+v %v", c, err)
+	}
+	a, _ := m.IssueAccessAMR("u", "", 1, AMRTOTP)
+	if c, err := m.Parse(a, AccessToken); err != nil || c.AMR != AMRTOTP {
+		t.Fatalf("access amr: %+v %v", c, err)
+	}
+	r, _ := m.IssueRefreshWithIDAMR("u", "", 1, "jti", AMRTOTP)
+	if c, err := m.Parse(r, RefreshToken); err != nil || c.AMR != AMRTOTP || c.ID != "jti" {
+		t.Fatalf("refresh amr: %+v %v", c, err)
+	}
+}
