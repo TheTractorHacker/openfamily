@@ -31,6 +31,9 @@ import (
 
 func main() {
 	cfg := config.Load()
+	if len(os.Args) > 1 && os.Args[1] == "validate-config" {
+		os.Exit(runValidateConfig(os.Stdout, cfg))
+	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	slog.SetDefault(logger)

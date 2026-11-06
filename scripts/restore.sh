@@ -2,7 +2,8 @@
 # Restore the OpenFamily database from a backup made by scripts/backup.sh.
 # DESTRUCTIVE: the current database is dropped and recreated.
 #
-# Usage: ./scripts/restore.sh backups/openfamily-<timestamp>.dump [--yes]
+# Usage: ./scripts/restore.sh backups/openfamily-<timestamp>.dump[.enc] [--yes]
+# Env:   BACKUP_PASSPHRASE_FILE=path  required for .enc backups
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -12,6 +13,17 @@ if [ -z "$file" ] || [ ! -f "$file" ]; then
   echo "usage: $0 <backup.dump> [--yes]" >&2
   exit 2
 fi
+
+case "$file" in
+  *.enc)
+    [ -r "${BACKUP_PASSPHRASE_FILE:-}" ] || { echo "error: set BACKUP_PASSPHRASE_FILE to restore an encrypted backup" >&2; exit 2; }
+    plain="$(mktemp)"; chmod 600 "$plain"
+    trap 'rm -f "$plain"' EXIT
+    openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -pass "file:$BACKUP_PASSPHRASE_FILE" -in "$file" -out "$plain" \
+      || { echo "error: decryption failed (wrong passphrase?)" >&2; exit 1; }
+    src="$plain" ;;
+  *) src="$file" ;;
+esac
 
 if [ "${2:-}" != "--yes" ]; then
   echo "This will REPLACE the current OpenFamily database with: $file"
@@ -41,7 +53,7 @@ SQL
 # explicit post_restore below still runs, and the exit status is shown.
 rc=0
 docker compose exec -T postgres sh -c \
-  'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner --exit-on-error' <"$file" || rc=$?
+  'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner --exit-on-error' <"$src" || rc=$?
 docker compose exec -T postgres sh -c \
   'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT timescaledb_post_restore();"'
 

@@ -129,7 +129,7 @@ services:
     <<: *hardening
     # Pinned for reproducible installs. Bump deliberately (and take a backup
     # first: ./scripts/backup.sh) rather than tracking a moving tag.
-    image: timescale/timescaledb-ha:pg16.15-ts2.31.0
+    image: timescale/timescaledb-ha:pg16.15-ts2.31.0@sha256:98f88217cb7be56655f842d9920f90d0b4893b67b3463f93084548b433ed5c93
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-openfamily}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is not set - run ./scripts/setup.sh to generate .env}
@@ -150,7 +150,7 @@ services:
   caddy:
     <<: *hardening
     profiles: ["proxy"]
-    image: caddy:2.10.2-alpine
+    image: caddy:2.10.2-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d
     # Caddy needs to bind 80/443 inside its container; everything else is dropped.
     cap_add:
       - NET_BIND_SERVICE
@@ -182,7 +182,7 @@ services:
   ntfy:
     <<: *hardening
     profiles: ["push"]
-    image: binwiederhier/ntfy:v2.11.0
+    image: binwiederhier/ntfy:v2.11.0@sha256:4a7d0f0adc6d5d9fc36e64ab55ef676e76e124a2bdd50ce115b6d9c1c7430294
     command: serve
     environment:
       # Public base URL the app uses to reach ntfy. Production must be https://

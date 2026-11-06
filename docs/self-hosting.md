@@ -57,6 +57,7 @@ is published, set `DATABASE_URL=...?sslmode=verify-full`, leave
 ```bash
 ./scripts/backup.sh                      # ./backups/openfamily-<UTC time>.dump (BACKUP_KEEP=N prunes)
 ./scripts/restore.sh backups/<file>.dump # DESTRUCTIVE; asks you to type RESTORE
+./scripts/verify-backup.sh backups/<file>.dump # restore into a throwaway container and compare row counts
 ./scripts/upgrade.sh                     # backup, pull, rebuild, wait for /healthz, roll back on failure
 ```
 
@@ -66,7 +67,13 @@ is published, set `DATABASE_URL=...?sslmode=verify-full`, leave
 checks out the previous git ref, rebuilds, and prints the `restore.sh` command
 for the pre-upgrade dump, since migrations that already ran are not undone by a
 code rollback. There is no in-app updater and no Docker socket access. Schedule
-`backup.sh` from cron and copy `backups/` off the host.
+`backup.sh` from cron and copy `backups/` off the host. Encrypt copies with
+`BACKUP_PASSPHRASE_FILE`; RPO/RTO, volume snapshots and the restore drill are in
+[backup-restore.md](backup-restore.md).
+
+Validate your configuration before starting (non-zero exit on errors; secret
+values are never printed):
+`docker compose run --rm api validate-config`.
 
 Step 5 in detail — DNS records, certificate behavior, and troubleshooting — is
 covered in [custom-domain.md](custom-domain.md). The admin panel's

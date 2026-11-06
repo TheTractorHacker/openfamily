@@ -1,0 +1,29 @@
+name: Backup restore test
+
+# Restores a freshly taken backup (plain and encrypted) into a scratch
+# TimescaleDB container and compares row counts. See docs/backup-restore.md.
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/backup.sh'
+      - 'scripts/restore.sh'
+      - 'scripts/verify-backup.sh'
+      - 'scripts/backup-restore.test.sh'
+      - 'backend/internal/db/migrations/**'
+      - 'docker-compose.yml'
+      - '.github/workflows/backup-restore.yml'
+  schedule:
+    - cron: '41 3 * * 0'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - run: scripts/backup-restore.test.sh

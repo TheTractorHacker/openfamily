@@ -39,6 +39,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: SBOM (SPDX) for this release (taken before any build output or signing material exists)
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
+        with:
+          path: .
+          format: spdx-json
+          output-file: sbom.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
       - name: Derive version
         id: ver
         run: |
@@ -128,9 +137,10 @@ jobs:
           set -euo pipefail
           V='${{ steps.ver.outputs.name }}'
           mkdir -p dist
+          cp sbom.spdx.json "dist/openfamily-$V.spdx.json"
           cp app/build/app/outputs/flutter-apk/app-release.apk "dist/openfamily-$V.apk"
           cp app/build/app/outputs/bundle/release/app-release.aab "dist/openfamily-$V.aab"
-          (cd dist && sha256sum "openfamily-$V.apk" "openfamily-$V.aab" > SHA256SUMS.txt && cat SHA256SUMS.txt)
+          (cd dist && sha256sum "openfamily-$V.apk" "openfamily-$V.aab" "openfamily-$V.spdx.json" > SHA256SUMS.txt && cat SHA256SUMS.txt)
           BT="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)"
           "$BT/apksigner" verify --print-certs "dist/openfamily-$V.apk" | grep -i 'SHA-256'
 
