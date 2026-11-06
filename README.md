@@ -498,6 +498,9 @@ For a fully private map, host your own tiles. The simplest option is
 | `APNS_KEY_ID` / `APNS_TEAM_ID` / `APNS_TOPIC` | *(empty)* | APNs identifiers |
 | `APNS_PRODUCTION` | `false` | Use the APNs production endpoint |
 | `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` / `TWILIO_FROM` | *(empty)* | Optional SMS; empty keeps alerts in-app |
+| `SMS_PROVIDER` / `SMS_REGION` | `twilio` | SMS backend: twilio, telnyx, plivo or sns (see `docs/sms.md`) |
+| `ADMIN_LOCATION_ACCESS` | `false` | Platform admins see member locations only when true; reads are audit-logged (`docs/privacy-controls.md`) |
+| `LOCATION_RETENTION_DAYS` | `90` | Location history kept; users may choose shorter and erase their own |
 | `PUBLIC_BASE_URL` | *(empty)* | HTTPS origin for SMS share links |
 | `APK_DIR` | `/data/apk` | Directory that caches the GitHub Release APK |
 | `APK_GITHUB_REPO` | *(empty)* | GitHub `owner/name` whose latest v* semver Release holds the APK |

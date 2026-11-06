@@ -17,13 +17,33 @@ jobs:
     defaults:
       run:
         working-directory: backend
+    # A real Postgres/TimescaleDB so the DB-backed suites run instead of
+    # skipping: the cross-tenant authorization matrix (cmd/server), circles,
+    # alerts, admin location policy, retention. A failure here blocks the PR.
+    services:
+      postgres:
+        image: timescale/timescaledb-ha:pg16.15-ts2.31.0
+        env:
+          POSTGRES_PASSWORD: t
+          POSTGRES_DB: t
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgres://postgres:t@localhost:5432/t?sslmode=disable
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version: '1.27.3'
+      - name: Migrate test database
+        run: go run ./cmd/migrate
       - name: Test
-        run: go test ./...
+        run: go test -p 1 -count=1 ./...
 
   flutter:
     runs-on: ubuntu-latest

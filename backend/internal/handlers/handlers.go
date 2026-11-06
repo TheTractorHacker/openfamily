@@ -7,11 +7,11 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/TheTractorHacker/openfamily/backend/internal/auth"
 	"github.com/TheTractorHacker/openfamily/backend/internal/geocode"
 	"github.com/TheTractorHacker/openfamily/backend/internal/push"
 	"github.com/TheTractorHacker/openfamily/backend/internal/sms"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // Server holds shared dependencies for all handlers.
@@ -25,6 +25,11 @@ type Server struct {
 	// user ("A family member arrived at School"); when true, they also include
 	// the user's name ("Mom arrived at School").
 	VerbosePush bool
+
+	// AdminLocationAccess permits platform admins to read member locations
+	// (SEC-007). False by default: admin endpoints then redact positions or
+	// return 403, and the denial is audit-logged.
+	AdminLocationAccess bool
 
 	// Direct is the built-in direct push channel (nil = disabled, see
 	// docs/push.md).
@@ -64,7 +69,7 @@ type Server struct {
 	// TileURL and SatelliteTileURL are raster templates advertised on GET /config.
 	TileURL          string
 	SatelliteTileURL string
-	MapStyleURL string
+	MapStyleURL      string
 
 	// Geocoder is the optional address search/reverse proxy (nil = disabled,
 	// GET /geocode/* answer 503). See internal/geocode.

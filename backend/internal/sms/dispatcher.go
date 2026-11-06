@@ -16,17 +16,26 @@ type Dispatcher interface {
 	Send(ctx context.Context, to, body string) error
 }
 
-// Config is the Twilio REST credentials. Empty SID/token/from disables SMS.
+// Config is the SMS provider selection and credentials. Provider "" means
+// Twilio. Missing credentials for the chosen provider disable SMS (Noop); see
+// providers.go for how the fields map per provider. The app works fully
+// without SMS.
 type Config struct {
+	Provider   string
 	AccountSID string
 	AuthToken  string
 	From       string
+	Region     string // sns only
 }
 
-// New returns a Twilio dispatcher, or Noop when credentials are missing.
+// New returns the dispatcher for cfg.Provider, or Noop when the provider is
+// unknown or its credentials are missing.
 func New(cfg Config) Dispatcher {
-	if strings.TrimSpace(cfg.AccountSID) == "" || strings.TrimSpace(cfg.AuthToken) == "" || strings.TrimSpace(cfg.From) == "" {
+	if !providerEnabled(cfg) {
 		return Noop{}
+	}
+	if p, _ := NormalizeProvider(cfg.Provider); p != ProviderTwilio {
+		return newProvider(cfg)
 	}
 	return &twilio{
 		accountSID: strings.TrimSpace(cfg.AccountSID),

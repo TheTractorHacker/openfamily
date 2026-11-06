@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/TheTractorHacker/openfamily/backend/internal/config"
 	"github.com/TheTractorHacker/openfamily/backend/internal/middleware"
+	"github.com/go-chi/chi/v5"
 )
 
 const (
@@ -69,6 +69,10 @@ func (s *Server) AdminExportMemberHistory(w http.ResponseWriter, r *http.Request
 	}
 	if !found {
 		writeError(w, http.StatusNotFound, "member not found")
+		return
+	}
+	if s.adminLocationDenied(r.Context(), claims.UserID, familyID, "denied location export of member "+memberID, clientIP(r)) {
+		writeError(w, http.StatusForbidden, "admin location access is disabled on this server")
 		return
 	}
 	var name string

@@ -10,6 +10,10 @@ import (
 // Environment values are the fallback; a saved admin row overrides any
 // field that is non-empty.
 type Settings struct {
+	// Provider (SMS_PROVIDER) and Region (SMS_REGION, sns only) are
+	// deployment settings: the admin screen edits credentials, not these.
+	Provider      string
+	Region        string
 	AccountSID    string
 	AuthToken     string
 	From          string
@@ -25,7 +29,7 @@ func Merge(env Settings, stored Settings, storedPresent bool) Settings {
 	if !storedPresent {
 		return env
 	}
-	out := env
+	out := env // Provider and Region always come from the environment
 	if strings.TrimSpace(stored.AccountSID) != "" {
 		out.AccountSID = stored.AccountSID
 	}
@@ -41,16 +45,14 @@ func Merge(env Settings, stored Settings, storedPresent bool) Settings {
 	return out
 }
 
-// Enabled is true when SID, token, and from are all set.
-func (s Settings) Enabled() bool {
-	return strings.TrimSpace(s.AccountSID) != "" &&
-		strings.TrimSpace(s.AuthToken) != "" &&
-		strings.TrimSpace(s.From) != ""
-}
+// Enabled is true when the selected provider has all the credentials it needs.
+func (s Settings) Enabled() bool { return providerEnabled(s.Config()) }
 
 // Config returns the dispatcher credentials.
 func (s Settings) Config() Config {
 	return Config{
+		Provider:   s.Provider,
+		Region:     s.Region,
 		AccountSID: s.AccountSID,
 		AuthToken:  s.AuthToken,
 		From:       s.From,

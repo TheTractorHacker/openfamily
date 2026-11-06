@@ -15,18 +15,18 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
 	"github.com/TheTractorHacker/openfamily/backend/internal/auth"
 	"github.com/TheTractorHacker/openfamily/backend/internal/config"
-	"github.com/TheTractorHacker/openfamily/backend/internal/geocode"
 	"github.com/TheTractorHacker/openfamily/backend/internal/db"
+	"github.com/TheTractorHacker/openfamily/backend/internal/geocode"
 	handlers "github.com/TheTractorHacker/openfamily/backend/internal/handlers"
 	mid "github.com/TheTractorHacker/openfamily/backend/internal/middleware"
 	"github.com/TheTractorHacker/openfamily/backend/internal/push"
 	"github.com/TheTractorHacker/openfamily/backend/internal/sms"
 	"github.com/TheTractorHacker/openfamily/backend/internal/trips"
 	web "github.com/TheTractorHacker/openfamily/backend/web"
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 )
 
 func main() {
@@ -75,6 +75,7 @@ func main() {
 		go srv.RunPushJanitor(ctx)
 	}
 	srv.VerbosePush = cfg.VerbosePush
+	srv.AdminLocationAccess = cfg.AdminLocationAccess
 	srv.NtfyBaseURL = cfg.NtfyBaseURL
 	srv.TileURL = cfg.TileURL
 	srv.SatelliteTileURL = cfg.SatelliteTileURL
@@ -101,6 +102,8 @@ func main() {
 		}
 	}
 	srv.SMSEnv = sms.Settings{
+		Provider:      cfg.SMSProvider,
+		Region:        cfg.SMSRegion,
 		AccountSID:    cfg.TwilioAccountSID,
 		AuthToken:     cfg.TwilioAuthToken,
 		From:          cfg.TwilioFrom,
@@ -135,6 +138,7 @@ func main() {
 	// or was interrupted during ingest.
 	go srv.ReconcileGeofences(ctx)
 	go srv.RunCirclePurge(ctx)
+	go srv.RunUserRetention(ctx)
 	if err := srv.EnsureCrashSchema(ctx); err != nil {
 		slog.Error("crash schema", "err", err)
 		os.Exit(1)
@@ -228,6 +232,9 @@ func main() {
 		r.Get("/auth/sessions", srv.ListSessions)
 		r.Delete("/auth/sessions/{id}", srv.RevokeSession)
 		r.Get("/me/export", srv.ExportMe)
+		r.Get("/me/location-retention", srv.GetLocationRetention)
+		r.Put("/me/location-retention", srv.PutLocationRetention)
+		r.Delete("/me/locations", srv.DeleteMyLocations)
 		r.Post("/family/members/{id}/reset-code", srv.FamilyIssueResetCode)
 		r.Get("/me/contacts", srv.ListContacts)
 		r.Post("/me/contacts", srv.CreateContact)

@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/coder/websocket"
-	"github.com/jackc/pgx/v5"
 	"github.com/TheTractorHacker/openfamily/backend/internal/auth"
 	"github.com/TheTractorHacker/openfamily/backend/internal/circles"
 	"github.com/TheTractorHacker/openfamily/backend/internal/models"
+	"github.com/coder/websocket"
+	"github.com/jackc/pgx/v5"
 )
 
 // wsMember is a family member in the members snapshot, joined to their latest
@@ -527,7 +527,7 @@ func (s *Server) broadcastAvatarUpdate(familyID *string, userID string, hasAvata
 	if familyID != nil && *familyID != "" {
 		s.hub.broadcast(*familyID, msg)
 	}
-	s.hub.broadcastAdmin(msg)
+	s.hub.broadcastAdminSafe(msg)
 }
 
 // wsOriginPatterns returns the WebSocket origin allow-list. When no origin is

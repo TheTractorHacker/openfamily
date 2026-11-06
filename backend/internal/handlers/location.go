@@ -8,9 +8,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/TheTractorHacker/openfamily/backend/internal/middleware"
 	"github.com/TheTractorHacker/openfamily/backend/internal/models"
+	"github.com/jackc/pgx/v5"
 )
 
 // maxTSSkew is the maximum allowed client clock skew into the future.
@@ -184,7 +184,7 @@ func (s *Server) IngestLocation(w http.ResponseWriter, r *http.Request) {
 		postCommitRunner.Submit(func() {
 			evalCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
-			s.evaluateGeofences(evalCtx, ownerID, req.Lon, req.Lat, ts)
+			s.evaluateGeofences(evalCtx, ownerID, req.Lon, req.Lat, ts, req.AccuracyMeters)
 		})
 		// Presence is liveness, so use server receipt time rather than the GPS
 		// fix timestamp. A delayed fix must never move "last seen" backwards.
@@ -278,7 +278,7 @@ func (s *Server) IngestLocation(w http.ResponseWriter, r *http.Request) {
 	postCommitRunner.Submit(func() {
 		evalCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		s.evaluateGeofences(evalCtx, ownerID, req.Lon, req.Lat, ts)
+		s.evaluateGeofences(evalCtx, ownerID, req.Lon, req.Lat, ts, req.AccuracyMeters)
 	})
 	s.noteBattery(ownerID, req.BatteryPct)
 

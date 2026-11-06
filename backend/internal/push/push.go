@@ -22,6 +22,7 @@ import (
 	"net/netip"
 	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"sync"
 	"time"
@@ -261,8 +262,30 @@ func NewDispatcher(cfg APNsConfig) *DispatcherImpl {
 	return d
 }
 
+// coordPair matches a latitude/longitude pair written as decimals with at
+// least three fractional digits ("40.71280, -74.0060", "40.7128;-74.0060").
+var coordPair = regexp.MustCompile(`-?\d{1,3}\.\d{3,}\s*[,;/]\s*-?\d{1,3}\.\d{3,}`)
+
+// RedactCoordinates replaces any coordinate pair in s with "[location]".
+func RedactCoordinates(s string) string { return coordPair.ReplaceAllString(s, "[location]") }
+
+// sanitized returns n with coordinates stripped from the human-readable text.
+// Push providers (ntfy, APNs) can read message text, so a position must never
+// travel in it, whatever a caller interpolated (a place named after its
+// coordinates, a free-text note). Silent messages carry a machine command in
+// Body and are left untouched.
+func (n Notification) sanitized() Notification {
+	if n.Silent {
+		return n
+	}
+	n.Title = RedactCoordinates(n.Title)
+	n.Body = RedactCoordinates(n.Body)
+	return n
+}
+
 // Dispatch routes a notification to the correct transport based on platform.
 func (d *DispatcherImpl) Dispatch(ctx context.Context, n Notification) error {
+	n = n.sanitized()
 	if n.Direct {
 		if d.direct == nil {
 			return &PermanentError{Err: errors.New("push: direct channel disabled")}

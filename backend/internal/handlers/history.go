@@ -9,10 +9,11 @@ import (
 	"sort"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5"
+	"github.com/TheTractorHacker/openfamily/backend/internal/circles"
 	"github.com/TheTractorHacker/openfamily/backend/internal/config"
 	"github.com/TheTractorHacker/openfamily/backend/internal/middleware"
+	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 )
 
 const (
@@ -124,11 +125,32 @@ func (s *Server) GetMemberHistory(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to load member")
 		return
 	}
-	status, msg, allowed := familyHistoryAccess(callerFamily, targetFamily, found)
-	if !allowed {
-		writeError(w, status, msg)
+	if !found {
+		writeError(w, http.StatusNotFound, "member not found")
 		return
 	}
+	// History follows circle permissions (the same rule as the live map): the
+	// caller sees a member's trail only through a live circle both belong to in
+	// which the member currently shares their location. A member who turned
+	// sharing off (or paused it) is no longer readable by the circle, whatever
+	// their legacy family says. A user always sees their own history.
+	shared, err := circles.New(s.Pool).SharedWith(r.Context(), claims.UserID, memberID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to check sharing")
+		return
+	}
+	if len(shared) == 0 {
+		writeError(w, http.StatusForbidden, "member is not sharing with you")
+		return
+	}
+	// Place names resolve only for the legacy family both sides belong to; a
+	// viewer reaching the member through another circle must not learn the
+	// member's family places.
+	placesFamily := ""
+	if callerFamily != "" && callerFamily == targetFamily {
+		placesFamily = targetFamily
+	}
+	targetFamily = placesFamily
 
 	out, err := s.buildMemberHistory(r.Context(), memberID, targetFamily, from, to)
 	if err != nil {
@@ -164,6 +186,10 @@ func (s *Server) AdminGetMemberHistory(w http.ResponseWriter, r *http.Request) {
 	}
 	if !found {
 		writeError(w, http.StatusNotFound, "member not found")
+		return
+	}
+	if s.adminLocationDenied(r.Context(), claims.UserID, targetFamily, "denied location history of member "+memberID, clientIP(r)) {
+		writeError(w, http.StatusForbidden, "admin location access is disabled on this server")
 		return
 	}
 
