@@ -95,6 +95,7 @@ type fakeItem struct {
 type tmember struct {
 	user, name string
 	devs       []*tdev
+	admin      bool
 }
 
 type fakeOF struct {
@@ -211,7 +212,11 @@ func (f *fakeOF) serve(w http.ResponseWriter, r *http.Request) {
 	case path == "/circles/"+f.circle+"/e2ee":
 		out := circleState{CircleID: f.circle, Mode: f.mode, Epoch: f.epoch, Epochs: append([]e2ee.EpochRecord{}, f.records...)}
 		for _, m := range f.members {
-			mo := memberOut{UserID: m.user, Name: m.name, Role: "member", Devices: []e2ee.DeviceRecord{}}
+			role := "member"
+			if m.admin {
+				role = "admin"
+			}
+			mo := memberOut{UserID: m.user, Name: m.name, Role: role, Devices: []e2ee.DeviceRecord{}}
 			for _, d := range m.devs {
 				mo.Devices = append(mo.Devices, d.record())
 			}
@@ -364,6 +369,12 @@ func (f *fakeOF) appendLog(action byte, actor *tdev, user, circle, subject strin
 	}
 	f.logEntries = append(f.logEntries, e)
 	f.logHashes = append(f.logHashes, h)
+}
+
+// logReg appends the registration of d (vouched by actor) to the log.
+func (f *fakeOF) logReg(d, actor *tdev) {
+	fp, _ := hex.DecodeString(d.rec.Fingerprint)
+	f.appendLog(e2ee.ActRegister, actor, d.user, "", d.id, 0, fp, false)
 }
 
 // publishEpoch: `publisher` publishes epoch n with `key`, wraps it for `recips`.
@@ -576,12 +587,14 @@ func newWorld(t *testing.T) *world {
 	w.phone = newTDev(t, aliceID, "device", nil)
 	w.bob = newTDev(t, bobID, "device", nil)
 	w.bridge = finishTDev(t, aliceID, "service", w.id.f.DeviceID, w.id, w.phone)
-	w.of.members = []*tmember{{user: aliceID, name: "Alice", devs: []*tdev{w.phone, w.bridge}}, {user: bobID, name: "Bob", devs: []*tdev{w.bob}}}
+	w.of.members = []*tmember{{user: aliceID, name: "Alice", admin: true, devs: []*tdev{w.phone, w.bridge}}, {user: bobID, name: "Bob", devs: []*tdev{w.bob}}}
 	// A redacted entry of another tenant, then the registrations, then epoch 1.
 	other := newTDev(t, newUUIDv4(), "device", nil)
 	w.of.appendLog(e2ee.ActRegister, other, other.user, "", other.id, 0, make([]byte, 32), true)
 	fpPhone, _ := hex.DecodeString(w.phone.rec.Fingerprint)
 	w.of.appendLog(e2ee.ActRegister, w.phone, aliceID, "", w.phone.id, 0, fpPhone, false)
+	w.of.logReg(w.bob, w.bob)
+	w.of.logReg(w.bridge, w.phone)
 	w.key1 = randSeed(t)
 	w.of.publishEpoch(w.phone, 1, w.key1, w.bridge)
 	st0 := tokenPair{}

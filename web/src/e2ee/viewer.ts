@@ -21,14 +21,18 @@ import {
 } from './core.ts'
 import type { IdentityMeta, KeyOps, Vault } from './keystore.ts'
 import {
+  type CircleMember,
   type DeviceRecord,
   type EpochRecord,
   type LogEntry,
   type LogHead,
+  type LogIndex,
   type WrapRecord,
+  authorizeSender,
+  authorizeWrap,
+  findDevice,
   openWrap,
-  syncLog,
-  verifyRegistration,
+  syncLogFull,
 } from './verify.ts'
 
 /** Thin HTTP seam (the real one adds auth and refresh; tests pass a fake). */
@@ -112,12 +116,7 @@ export async function revokeSelf(http: Http, meta: IdentityMeta, ops: KeyOps): P
 
 // ------------------------------------------------------------------ state
 
-export interface CircleMember {
-  user_id: string
-  name: string
-  role: string
-  devices: DeviceRecord[]
-}
+export type { CircleMember }
 
 export interface CircleState {
   circle_id: string
@@ -143,6 +142,7 @@ export interface SyncReport {
   /** This viewer's own record in the circle (undefined if revoked or not registered). */
   self?: DeviceRecord
   logHead?: LogHead
+  logIndex?: LogIndex
 }
 
 export class LogProblemError extends E2eeError {
@@ -161,21 +161,21 @@ export interface SessionDeps {
   setPin(h: LogHead): Promise<void>
 }
 
-/** Verifies the transparency log from the pinned head and pins the new head. */
-export async function verifyAndPinLog(d: Pick<SessionDeps, 'http' | 'getPin' | 'setPin'>): Promise<LogHead> {
+/** Verifies the whole transparency log (from entry 1, honouring the pinned head), pins the new head and returns the index. */
+export async function verifyAndPinLog(d: Pick<SessionDeps, 'http' | 'getPin' | 'setPin'>): Promise<{ head: LogHead; index: LogIndex }> {
   const pinned = await d.getPin()
-  const c = await syncLog(pinned, async (after) => {
+  const { check: c, index } = await syncLogFull(pinned, async (after) => {
     const r = await d.http.get<{ entries: LogEntry[]; head: LogHead }>(`/e2ee/log?after=${after}`)
     return { entries: r.entries ?? [], head: { seq: r.head.seq, hash: r.head.hash ?? '' } }
   })
-  if (!c.ok) throw new LogProblemError(c.problem ?? 'unknown', c.detail ?? '')
+  if (!c.ok || !index) throw new LogProblemError(c.problem ?? 'unknown', c.detail ?? '')
   await d.setPin(c.newHead!)
-  return c.newHead!
+  return { head: c.newHead!, index }
 }
 
 /** Fetches circle state, verifies the log, and stores every circle key the wraps legitimately carry. */
 export async function syncCircle(d: SessionDeps, circleId: string): Promise<SyncReport> {
-  const logHead = await verifyAndPinLog(d)
+  const { head: logHead, index: logIndex } = await verifyAndPinLog(d)
   const state = await d.http.get<CircleState>(`/circles/${circleId}/e2ee`)
   const self = state.members.flatMap((m) => m.devices).find((x) => x.device_id === d.meta.deviceId)
   let newKeys = 0
@@ -184,6 +184,11 @@ export async function syncCircle(d: SessionDeps, circleId: string): Promise<Sync
     const wr = await d.http.get<{ wraps: WrapRecord[] }>(`/circles/${circleId}/e2ee/wraps?device_id=${d.meta.deviceId}`)
     for (const w of wr.wraps ?? []) {
       if (await d.vault.getCircleKey(circleId, w.epoch)) continue
+      const why = authorizeWrap(logIndex, state.members, circleId, d.meta.userId, w, state.epochs.find((e) => e.epoch === w.epoch))
+      if (why) {
+        rejected++
+        continue
+      }
       try {
         const key = await openWrap(
           circleId,
@@ -200,7 +205,7 @@ export async function syncCircle(d: SessionDeps, circleId: string): Promise<Sync
       }
     }
   }
-  return { state, newKeys, rejectedWraps: rejected, heldEpochs: await d.vault.heldEpochs(circleId), self, logHead }
+  return { state, newKeys, rejectedWraps: rejected, heldEpochs: await d.vault.heldEpochs(circleId), self, logHead, logIndex }
 }
 
 // ------------------------------------------------------------------ items
@@ -265,7 +270,6 @@ function validLatLon(lat: unknown, lon: unknown): boolean {
 export class Receiver {
   private seen = new Map<string, Set<number>>()
   private topEpoch = new Map<string, number>()
-  private regOk = new Map<string, boolean>()
   dropped = 0
   deferredCount = 0
 
@@ -274,14 +278,11 @@ export class Receiver {
     private getKey: (epoch: number) => Promise<Uint8Array | null>,
     private state: () => CircleState,
     private now: () => number = () => Date.now(),
+    private logIndex: () => LogIndex | null = () => null,
   ) {}
 
   private senderOf(deviceId: string): { dev: DeviceRecord; member: CircleMember } | null {
-    for (const m of this.state().members) {
-      const dev = m.devices.find((d) => d.device_id === deviceId)
-      if (dev) return { dev, member: m }
-    }
-    return null
+    return findDevice(this.state().members, deviceId)
   }
 
   async handle(it: RelayedItem): Promise<ItemResult> {
@@ -310,13 +311,15 @@ export class Receiver {
       return { type: 'deferred', reason: 'sender not known' }
     }
     const { dev, member } = sender
-    if (dev.approved !== true || dev.kind === 'recovery') return drop('sender not approved')
-    let ok = this.regOk.get(dev.device_id + dev.registration_signature)
-    if (ok === undefined) {
-      ok = verifyRegistration(dev)
-      this.regOk.set(dev.device_id + dev.registration_signature, ok)
+    const idx = this.logIndex()
+    const why = authorizeSender(idx, sender)
+    if (why) {
+      if (idx && why.includes('not in the verified log')) {
+        this.deferredCount++
+        return { type: 'deferred', reason: why } // may appear after the next log verification
+      }
+      return drop(why)
     }
-    if (!ok) return drop('sender registration does not verify')
     let opened
     try {
       opened = openItem(key, this.circleId, it.device_id, unb64(dev.ed25519_pub), it.purpose, it.seq, payload)
@@ -332,17 +335,17 @@ export class Receiver {
     win.add(opened.seq)
     if (win.size > DEDUPE_WINDOW) win.delete(win.values().next().value as number)
     this.topEpoch.set(it.device_id, Math.max(top, epoch))
-    return this.interpret(it.purpose, opened.tsMs, opened.body, member, it.device_id)
+    return this.interpret(it.purpose, opened.tsMs, opened.body, dev, member, it.device_id)
   }
 
-  private interpret(purpose: string, ts: number, body: Uint8Array, member: CircleMember, deviceId: string): ItemResult {
+  private interpret(purpose: string, ts: number, body: Uint8Array, dev: DeviceRecord, member: CircleMember, deviceId: string): ItemResult {
     let j: Record<string, unknown>
     try {
       j = JSON.parse(fromUtf8(body)) as Record<string, unknown>
     } catch {
       return { type: 'dropped', reason: 'bad body' }
     }
-    const base = { userId: member.user_id, name: member.name, deviceId }
+    const base = { userId: dev.user_id, name: member.name, deviceId }
     if (purpose === 'fix') {
       if (!validLatLon(j.lat, j.lon)) return { type: 'dropped', reason: 'bad coordinates' }
       return {

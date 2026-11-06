@@ -272,3 +272,173 @@ export async function syncLog(pinned: LogHead | null, fetchPage: LogFetcher): Pr
   }
   return bad('gap', 'the log is too long to verify')
 }
+
+// ------------------------------------------------- authorization against the log
+//
+// The circle state is served by the adversary. A key is accepted only if the state
+// lists it with the same public key, its registration signatures verify, the
+// VERIFIED transparency log contains that registration (and its voucher chain),
+// it is approved and neither revoked in the state nor in the log. Everything here
+// fails closed. Mirrors backend/internal/e2ee/verify.go (AuthorizeWrap/Sender).
+
+export interface CircleMember {
+  user_id: string
+  name: string
+  role: string
+  devices: DeviceRecord[]
+}
+
+export class LogIndex {
+  hashes = new Map<number, string>()
+  regs = new Map<string, LogEntry>()
+  epochs = new Map<string, LogEntry>()
+  revoked = new Set<string>()
+
+  add(e: LogEntry): void {
+    this.hashes.set(e.seq, e.entry_hash)
+    if (e.redacted || e.action === undefined) return
+    if (e.action === ACT.enable || e.action === ACT.epoch) {
+      if (e.circle_id && e.epoch !== undefined) this.epochs.set(`${e.circle_id}|${e.epoch}`, e)
+    } else if (e.action === ACT.register || e.action === ACT.rotate || e.action === ACT.recovery || e.action === ACT.reset) {
+      if (e.subject_id) this.regs.set(e.subject_id, e)
+    } else if (e.action === ACT.revoke) {
+      if (e.subject_id) this.revoked.add(e.subject_id)
+    }
+  }
+
+  registrationLogged(d: DeviceRecord): boolean {
+    const e = this.regs.get(d.device_id)
+    return (
+      !!e &&
+      e.action === d.registration_action &&
+      e.user_id === d.user_id &&
+      e.actor_device_id === d.registered_by_device_id &&
+      e.ref === d.fingerprint &&
+      e.signature === d.registration_signature &&
+      e.actor_ed25519_pub === d.registered_by_ed25519_pub
+    )
+  }
+
+  chainLogged(d: DeviceRecord): boolean {
+    let cur = d
+    for (let depth = 0; depth < 16; depth++) {
+      if (!this.registrationLogged(cur)) return false
+      if (cur.registered_by_device_id === cur.device_id) return true
+      const e = this.regs.get(cur.registered_by_device_id)
+      if (!e || e.user_id !== d.user_id) return false
+      cur = {
+        device_id: e.subject_id!,
+        user_id: e.user_id!,
+        kind: '',
+        ed25519_pub: '',
+        x25519_pub: '',
+        signature: '',
+        fingerprint: e.ref!,
+        registered_by_device_id: e.actor_device_id!,
+        registered_by_ed25519_pub: e.actor_ed25519_pub!,
+        registration_action: e.action!,
+        registration_signature: e.signature!,
+      }
+    }
+    return false
+  }
+
+  epochLogged(circleId: string, r: EpochRecord): boolean {
+    const e = this.epochs.get(`${circleId}|${r.epoch}`)
+    if (!e) return false
+    let commitHex: string
+    try {
+      commitHex = hexOf(unb64(r.key_commitment))
+    } catch {
+      return false
+    }
+    return (
+      e.action === r.action &&
+      e.user_id === r.publisher_user_id &&
+      e.actor_device_id === r.publisher_device_id &&
+      e.actor_ed25519_pub === r.publisher_ed25519_pub &&
+      e.ref === commitHex &&
+      e.signature === r.signature
+    )
+  }
+}
+
+function hexOf(b: Uint8Array): string {
+  let s = ''
+  for (const x of b) s += x.toString(16).padStart(2, '0')
+  return s
+}
+
+/** Verifies the whole log from entry 1 and indexes it; the pinned head still applies (rollback/fork). */
+export async function syncLogFull(pinned: LogHead | null, fetchPage: LogFetcher): Promise<{ check: LogCheck; index?: LogIndex }> {
+  const all: LogEntry[] = []
+  const c = await syncLog(null, async (after) => {
+    const r = await fetchPage(after)
+    all.push(...r.entries)
+    return r
+  })
+  if (!c.ok) return { check: c }
+  const index = new LogIndex()
+  for (const e of all) index.add(e)
+  if (pinned) {
+    if (c.newHead!.seq < pinned.seq) return { check: bad('rollback', `the server log is shorter (${c.newHead!.seq}) than the one pinned (${pinned.seq})`) }
+    const h = index.hashes.get(pinned.seq)
+    if (h === undefined || h !== pinned.hash) return { check: bad('fork', `entry ${pinned.seq} is not the one pinned`) }
+  }
+  return { check: c, index }
+}
+
+export function findDevice(members: CircleMember[], deviceId: string): { dev: DeviceRecord; member: CircleMember } | null {
+  for (const m of members) {
+    const dev = m.devices.find((d) => d.device_id === deviceId)
+    if (dev) return { dev, member: m }
+  }
+  return null
+}
+
+function usable(idx: LogIndex | null, d: DeviceRecord): string | null {
+  if (!idx) return 'no verified log'
+  if (d.revoked_at || idx.revoked.has(d.device_id)) return 'device is revoked'
+  if (d.kind === 'recovery') return 'recovery keys do not act in a circle'
+  if (d.approved !== true) return 'device is not approved'
+  if (!verifyRegistration(d)) return 'device registration does not verify'
+  if (!idx.chainLogged(d)) return 'device registration is not in the verified log'
+  return null
+}
+
+/** Returns null when the sender may speak for the member, else the reason (fail closed). */
+export function authorizeSender(idx: LogIndex | null, found: { dev: DeviceRecord; member: CircleMember } | null): string | null {
+  if (!found) return 'sender is not in the circle state'
+  if (found.dev.user_id !== found.member.user_id) return 'device belongs to another user than the member it is listed under'
+  return usable(idx, found.dev)
+}
+
+/** Returns null when a wrap addressed to us may be opened, else the reason (fail closed). */
+export function authorizeWrap(
+  idx: LogIndex | null,
+  members: CircleMember[],
+  circleId: string,
+  recipientUserId: string,
+  w: WrapRecord,
+  rec: EpochRecord | undefined,
+): string | null {
+  if (!idx || !rec) return 'no verified log or epoch record'
+  if (!idx.epochLogged(circleId, rec)) return 'epoch record is not in the verified log'
+  const pub = findDevice(members, rec.publisher_device_id)
+  if (!pub) return 'epoch publisher is not in the circle state'
+  if (pub.dev.ed25519_pub !== rec.publisher_ed25519_pub || pub.dev.user_id !== rec.publisher_user_id || pub.member.user_id !== rec.publisher_user_id) {
+    return 'epoch publisher key differs from the registered key'
+  }
+  if (pub.member.role !== 'admin') return 'epoch publisher is not a circle admin'
+  const pr = usable(idx, pub.dev)
+  if (pr) return `epoch publisher: ${pr}`
+  const wr = findDevice(members, w.wrapper_device_id)
+  if (!wr) return 'wrapper is not in the circle state'
+  if (wr.dev.ed25519_pub !== w.wrapper_ed25519_pub || wr.dev.user_id !== wr.member.user_id) return 'wrapper key differs from the registered key'
+  const wu = usable(idx, wr.dev)
+  if (wu) return `wrapper: ${wu}`
+  if (wr.dev.user_id !== rec.publisher_user_id && wr.dev.user_id !== recipientUserId) {
+    return "wrapper is neither the epoch publisher nor the recipient's own device"
+  }
+  return null
+}

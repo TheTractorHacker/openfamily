@@ -60,12 +60,7 @@ type circleOut struct {
 	E2EEEpoch int    `json:"e2ee_epoch"`
 }
 
-type memberOut struct {
-	UserID  string              `json:"user_id"`
-	Name    string              `json:"name"`
-	Role    string              `json:"role"`
-	Devices []e2ee.DeviceRecord `json:"devices"`
-}
+type memberOut = e2ee.CircleMember
 
 type circleState struct {
 	CircleID string             `json:"circle_id"`
@@ -101,11 +96,15 @@ func (s *circleState) registrationOK(d *e2ee.DeviceRecord) bool {
 	if s.regOK == nil {
 		s.regOK = map[string]bool{}
 	}
-	if v, ok := s.regOK[d.DeviceID]; ok {
+	// Keyed by every field the verification covers, so a record that differs in
+	// any of them can never reuse an earlier verdict.
+	k := strings.Join([]string{d.DeviceID, d.UserID, d.Kind, d.Ed25519Pub, d.X25519Pub, d.Fingerprint, d.Signature,
+		d.RegisteredByDeviceID, d.RegisteredByPub, strconv.Itoa(d.RegistrationAction), d.RegistrationSignature}, "\x00")
+	if v, ok := s.regOK[k]; ok {
 		return v
 	}
 	v := e2ee.VerifyRegistration(*d)
-	s.regOK[d.DeviceID] = v
+	s.regOK[k] = v
 	return v
 }
 
@@ -144,9 +143,10 @@ type bridge struct {
 
 	cur      map[string]*circleState // newest state per circle
 	keyRetry map[string]*keyRetry
-	pending  []point    // points collected while handling a page
-	resynced bool       // state already refreshed for this page
-	snap     *recvState // receiver state before the current page
+	pending  []point        // points collected while handling a page
+	resynced bool           // state already refreshed for this page
+	snap     *recvState     // receiver state before the current page
+	logIdx   *e2ee.LogIndex // fully verified log; nil until the first verification (everything is then refused)
 }
 
 func newBridge(st *store, id *identity, api *apiClient, cfg *config, log *slog.Logger) (*bridge, error) {
@@ -250,13 +250,14 @@ func (b *bridge) verifyLog(ctx context.Context) error {
 		}
 		return resp.Entries, e2ee.LogHead{Seq: resp.Head.Seq, Hash: h}, nil
 	}
-	c, err := e2ee.SyncLog(pinned, fetch)
+	c, idx, err := e2ee.SyncLogFull(pinned, fetch)
 	if err != nil {
 		return err
 	}
 	if !c.OK() {
 		return &logError{c.Problem, c.Detail}
 	}
+	b.logIdx = idx
 	if c.NewHead != nil && c.NewHead.Seq > b.rs.LogSeq {
 		b.rs.LogSeq, b.rs.LogHash = c.NewHead.Seq, c.NewHead.HashHex()
 		return b.save()
@@ -324,18 +325,14 @@ func (b *bridge) syncKeys(ctx context.Context, circle string, st *circleState, f
 	return nil
 }
 
-// acceptWrap is the phone's syncCircleKeys policy plus two server-independent
-// cross checks: when the wrapper or the epoch's publisher is a key the circle
-// state lists, the public key the wrap/record carries must be that key.
+// acceptWrap is the phone's syncCircleKeys policy plus server-independent
+// authorization, failing closed: the epoch publisher and the wrapper must be
+// listed, active, approved devices with the keys the wrap/record carry, their
+// registrations must be in the verified log, and so must the epoch record.
 func (b *bridge) acceptWrap(circle string, st *circleState, w e2ee.WrapRecord) ([]byte, error) {
 	rec := st.record(w.Epoch)
-	if rec != nil {
-		if d, _ := st.device(rec.PublisherDev); d != nil && (d.Ed25519Pub != rec.PublisherPub || !st.registrationOK(d)) {
-			return nil, errors.New("epoch publisher key differs from the registered key")
-		}
-	}
-	if d, _ := st.device(w.WrapperDeviceID); d != nil && d.Ed25519Pub != w.WrapperEd25519Pub {
-		return nil, errors.New("wrapper key differs from the registered key")
+	if err := e2ee.AuthorizeWrap(b.logIdx, st.Members, circle, b.id.f.UserID, w, rec); err != nil {
+		return nil, err
 	}
 	return e2ee.OpenWrap(circle, b.id.f.DeviceID, b.id.xSecret, b.id.xPub, w, rec)
 }
@@ -545,11 +542,14 @@ func (b *bridge) process(ctx context.Context, circle string, it wireItem) reason
 		}
 		return rUnknownSender
 	}
-	if dev.Kind == "recovery" || dev.Approved == nil || !*dev.Approved || dev.RevokedAt != nil {
+	if err := e2ee.AuthorizeSender(b.logIdx, dev, mem); err != nil {
+		switch {
+		case errors.Is(err, e2ee.ErrNotInLog):
+			return rUnknownSender // may appear after the next log verification
+		case dev.UserID == mem.UserID && dev.Approved != nil && *dev.Approved && dev.RevokedAt == nil && dev.Kind != "recovery":
+			return rBadReg
+		}
 		return rNotMember
-	}
-	if !st.registrationOK(dev) {
-		return rBadReg
 	}
 	edPub, err := base64.StdEncoding.DecodeString(dev.Ed25519Pub)
 	if err != nil {
@@ -602,7 +602,7 @@ func (b *bridge) process(ctx context.Context, circle string, it wireItem) reason
 	}
 	b.rs.Recv.Dev[dk] = ds
 
-	if !b.collect(it.Purpose, mem, it.DeviceID, int64(tsMs), body) {
+	if !b.collect(it.Purpose, dev.UserID, mem.Name, it.DeviceID, int64(tsMs), body) {
 		return rBadBody
 	}
 	return rOK
@@ -634,9 +634,9 @@ func okNum(p *float64) *float64 {
 // collect turns a verified body into points for the member's Dawarich account.
 // It returns false for an unusable body. A person without a mapping is skipped
 // (counted as a drop), not an error.
-func (b *bridge) collect(purpose string, mem *memberOut, device string, tsMs int64, body []byte) bool {
-	tgt, mapped := b.cfg.targetFor(mem.UserID)
-	name := mem.Name
+func (b *bridge) collect(purpose, userID, memberName, device string, tsMs int64, body []byte) bool {
+	tgt, mapped := b.cfg.targetFor(userID)
+	name := memberName
 	if name == "" {
 		name = "OpenFamily"
 	}

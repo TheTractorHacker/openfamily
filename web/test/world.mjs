@@ -112,7 +112,7 @@ export class World {
     const byUser = (u, name) => ({ user_id: u, name, role: 'admin', devices: this.devices.filter((d) => d.user_id === u).map(strip) })
     return {
       circle_id: CIRCLE, mode: this.mode, epoch: this.epoch, rekey_required: false,
-      members: [byUser(USER_A, 'Alex'), byUser(USER_B, 'Bea')], epochs: this.epochs,
+      members: [byUser(USER_A, 'Alex'), { ...byUser(USER_B, 'Bea'), role: 'member' }], epochs: this.epochs,
     }
   }
 

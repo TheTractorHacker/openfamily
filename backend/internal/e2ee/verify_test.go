@@ -343,3 +343,21 @@ func TestOpenWrap(t *testing.T) {
 	}
 	_ = fmt.Sprint
 }
+
+func TestAuthorizeFailsClosedWithoutIndexOrDevice(t *testing.T) {
+	if err := AuthorizeSender(nil, nil, nil); err == nil {
+		t.Fatal("nil sender accepted")
+	}
+	d := &DeviceRecord{DeviceID: "x", UserID: "u1"}
+	if err := AuthorizeSender(nil, d, &CircleMember{UserID: "u2"}); err == nil {
+		t.Fatal("user mismatch accepted")
+	}
+	ap := true
+	d2 := &DeviceRecord{DeviceID: "x", UserID: "u1", Approved: &ap}
+	if err := AuthorizeSender(nil, d2, &CircleMember{UserID: "u1"}); err == nil {
+		t.Fatal("accepted without a verified log")
+	}
+	if err := AuthorizeWrap(nil, nil, "c", "u", WrapRecord{}, &EpochRecord{}); err == nil {
+		t.Fatal("wrap accepted without a log index")
+	}
+}

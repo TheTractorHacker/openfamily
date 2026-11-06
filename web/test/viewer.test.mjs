@@ -4,10 +4,11 @@ import { ed25519 } from '@noble/curves/ed25519.js'
 import * as c from '../src/e2ee/core.ts'
 import * as vw from '../src/e2ee/viewer.ts'
 import * as ks from '../src/e2ee/keystore.ts'
-import { verifyLogSlice, verifyRegistration, syncLog } from '../src/e2ee/verify.ts'
+import { verifyLogSlice, verifyRegistration, syncLog, syncLogFull, authorizeWrap, authorizeSender, findDevice } from '../src/e2ee/verify.ts'
 import { World, CIRCLE, USER_A, deviceRecord, phone } from './world.mjs'
 
 const NOW = 1_700_000_100_000
+const USER_B = '22222222-2222-4222-8222-222222222222'
 
 /** Phones A (admin, root) and B (member, root) exist; the viewer is a web key cross-signed by A. */
 async function setup({ mode = 'session' } = {}) {
@@ -76,7 +77,7 @@ test('end to end: sync keys, pull, decrypt positions of a member', async () => {
   s.w.seal(s.w.B, 1, 'fix', 2, NOW - 1000, { lat: 52.51, lon: 13.41 })
   s.w.seal(s.w.B, 1, 'history', 3, NOW - 900, { pts: [[NOW - 5000, 52.5, 13.4, 8], [NOW - 8000, 52.49, 13.39]] })
   s.w.seal(s.w.B, 1, 'event', 4, NOW - 800, { k: 'place', a: 'enter', name: 'Home' })
-  const rx = new vw.Receiver(CIRCLE, (e) => d.vault.getCircleKey(CIRCLE, e), () => rep.state, () => NOW)
+  const rx = new vw.Receiver(CIRCLE, (e) => d.vault.getCircleKey(CIRCLE, e), () => rep.state, () => NOW, () => rep.logIndex)
   const book = new vw.PositionBook()
   const r = await vw.pullItems(d.http, s.sub.deviceId, CIRCLE, rx, book)
   assert.equal(r.handled, 4)
@@ -94,7 +95,7 @@ test('duplicates are ignored; forged, unapproved and renumbered items are droppe
   await pair(s)
   const d = deps(s)
   const rep = await vw.syncCircle(d, CIRCLE)
-  const rx = new vw.Receiver(CIRCLE, (e) => d.vault.getCircleKey(CIRCLE, e), () => rep.state, () => NOW)
+  const rx = new vw.Receiver(CIRCLE, (e) => d.vault.getCircleKey(CIRCLE, e), () => rep.state, () => NOW, () => rep.logIndex)
   const it = s.w.seal(s.w.B, 1, 'fix', 1, NOW - 1000, { lat: 1, lon: 2 })
   assert.equal((await rx.handle(it)).type, 'points')
   assert.equal((await rx.handle(it)).type, 'ignored')
@@ -113,7 +114,7 @@ test('duplicates are ignored; forged, unapproved and renumbered items are droppe
   // Sender whose key is not approved in this circle.
   s.w.devices.find((x) => x.device_id === s.w.B.deviceId).approved = false
   const rep2 = await vw.syncCircle(d, CIRCLE)
-  const rx2 = new vw.Receiver(CIRCLE, (e) => d.vault.getCircleKey(CIRCLE, e), () => rep2.state, () => NOW)
+  const rx2 = new vw.Receiver(CIRCLE, (e) => d.vault.getCircleKey(CIRCLE, e), () => rep2.state, () => NOW, () => rep2.logIndex)
   assert.equal((await rx2.handle(s.w.seal(s.w.B, 1, 'fix', 6, NOW - 500, { lat: 1, lon: 1 }))).type, 'dropped')
   // Unknown sender is deferred, not trusted.
   const stranger = phone(7, '33333333-3333-4333-8333-333333333333', 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee')
@@ -128,7 +129,7 @@ test('epoch rotation: items of a new epoch are deferred until the wrap arrives; 
   s.w.publishEpoch(2)
   const it2 = s.w.seal(s.w.B, 2, 'fix', 1, NOW - 1000, { lat: 5, lon: 6 })
   let state = rep.state
-  const rx = new vw.Receiver(CIRCLE, (e) => d.vault.getCircleKey(CIRCLE, e), () => state, () => NOW)
+  const rx = new vw.Receiver(CIRCLE, (e) => d.vault.getCircleKey(CIRCLE, e), () => state, () => NOW, () => rep.logIndex)
   assert.equal((await rx.handle(it2)).type, 'deferred')
   s.w.wrapTo(2, s.sub)
   rep = await vw.syncCircle(d, CIRCLE)
@@ -171,7 +172,7 @@ test('transparency log: tamper, rollback, fork and gap are detected; pin advance
   await pair(s)
   const d = deps(s)
   const ok = await vw.verifyAndPinLog(d)
-  assert.equal(ok.seq, s.w.log.length)
+  assert.equal(ok.head.seq, s.w.log.length)
   // Rollback: server shows a shorter log than the pin.
   const short = { ...s.w, log: s.w.log.slice(0, 2) }
   const dShort = { ...d, http: { get: async (p) => {
@@ -223,7 +224,7 @@ test('revoked viewer: pull stops with DeviceRevokedError', async () => {
   const d = deps(s)
   const rep = await vw.syncCircle(d, CIRCLE)
   s.w.revoked = true
-  const rx = new vw.Receiver(CIRCLE, (e) => d.vault.getCircleKey(CIRCLE, e), () => rep.state, () => NOW)
+  const rx = new vw.Receiver(CIRCLE, (e) => d.vault.getCircleKey(CIRCLE, e), () => rep.state, () => NOW, () => rep.logIndex)
   await assert.rejects(vw.pullItems(d.http, s.sub.deviceId, CIRCLE, rx, new vw.PositionBook()), vw.DeviceRevokedError)
 })
 
@@ -282,4 +283,146 @@ test('keystore: session mode stores nothing', async () => {
   await id.vault.putCircleKey(CIRCLE, 1, new Uint8Array(32).fill(1))
   assert.equal(kv.m.size, 0)
   assert.deepEqual(await id.vault.getCircleKey(CIRCLE, 1), new Uint8Array(32).fill(1))
+})
+
+// ---------------------------------------------------------------- fail-closed authorization
+
+async function synced() {
+  const s = await setup()
+  await pair(s)
+  const d = deps(s)
+  const rep = await vw.syncCircle(d, CIRCLE)
+  assert.equal(rep.newKeys, 1)
+  return { s, d, rep }
+}
+
+const wrapFor = (s) => s.w.wraps.find((x) => x.recipient_device_id === s.sub.deviceId)
+
+test('authorizeWrap baseline accepts the honest wrap', async () => {
+  const { s, rep } = await synced()
+  assert.equal(authorizeWrap(rep.logIndex, rep.state.members, CIRCLE, USER_A, wrapFor(s), rep.state.epochs[0]), null)
+})
+
+test('authorizeWrap fails closed', async () => {
+  const { s, rep } = await synced()
+  const clone = () => structuredClone(rep.state)
+  const w0 = wrapFor(s)
+  const rec0 = rep.state.epochs[0]
+  const cases = {
+    'no log index': () => authorizeWrap(null, rep.state.members, CIRCLE, USER_A, w0, rec0),
+    'no epoch record': () => authorizeWrap(rep.logIndex, rep.state.members, CIRCLE, USER_A, w0, undefined),
+    'publisher missing from state': () => {
+      const st = clone()
+      for (const m of st.members) m.devices = m.devices.filter((d) => d.device_id !== s.w.A.deviceId)
+      return authorizeWrap(rep.logIndex, st.members, CIRCLE, USER_A, w0, rec0)
+    },
+    'publisher key differs': () => authorizeWrap(rep.logIndex, rep.state.members, CIRCLE, USER_A, w0, { ...rec0, publisher_ed25519_pub: c.b64(s.w.B.ed) }),
+    'publisher revoked in state': () => {
+      const st = clone(); findDevice(st.members, s.w.A.deviceId).dev.revoked_at = '2026-01-01T00:00:00Z'
+      return authorizeWrap(rep.logIndex, st.members, CIRCLE, USER_A, w0, rec0)
+    },
+    'publisher not approved': () => {
+      const st = clone(); findDevice(st.members, s.w.A.deviceId).dev.approved = false
+      return authorizeWrap(rep.logIndex, st.members, CIRCLE, USER_A, w0, rec0)
+    },
+    'publisher not admin': () => {
+      const st = clone(); findDevice(st.members, s.w.A.deviceId).member.role = 'member'
+      return authorizeWrap(rep.logIndex, st.members, CIRCLE, USER_A, w0, rec0)
+    },
+    'epoch record not in log': () => authorizeWrap(rep.logIndex, rep.state.members, CIRCLE, USER_A, w0, { ...rec0, key_commitment: c.b64(new Uint8Array(32)) }),
+    'wrapper missing': () => authorizeWrap(rep.logIndex, rep.state.members, CIRCLE, USER_A, { ...w0, wrapper_device_id: 'ffffffff-ffff-4fff-8fff-ffffffffffff' }, rec0),
+    'wrapper wrong key': () => authorizeWrap(rep.logIndex, rep.state.members, CIRCLE, USER_A, { ...w0, wrapper_ed25519_pub: c.b64(s.w.B.ed) }, rec0),
+    'wrapper is another member': () => authorizeWrap(rep.logIndex, rep.state.members, CIRCLE, USER_A, { ...w0, wrapper_device_id: s.w.B.deviceId, wrapper_ed25519_pub: c.b64(s.w.B.ed) }, rec0),
+    'wrapper registration forged': () => {
+      const st = clone(); findDevice(st.members, s.w.A.deviceId).dev.registration_signature = c.b64(new Uint8Array(64))
+      return authorizeWrap(rep.logIndex, st.members, CIRCLE, USER_A, w0, rec0)
+    },
+  }
+  for (const [name, f] of Object.entries(cases)) assert.notEqual(f(), null, name)
+})
+
+test('a wrapper that is not in the verified log is refused; revoked in the log too', async () => {
+  const { s, d, rep } = await synced()
+  const phone2 = phone(5, USER_A, '55555555-5555-4555-8555-555555555555')
+  const rec = deviceRecord(phone2, { actor: s.w.A }) // validly vouched but never logged
+  s.w.devices.push(rec)
+  s.w.keys.get(1)
+  const aad = c.wrapAad(CIRCLE, 1, s.sub.deviceId, phone2.deviceId)
+  const blob = c.wrapWithRandomness(s.w.keys.get(1), s.sub.x, aad, c.randomBytes(32), c.randomBytes(24))
+  const sig = ed25519.sign(c.wrapSigMessage(CIRCLE, 1, s.sub.deviceId, phone2.deviceId, blob), phone2.edSeed)
+  const w2 = { epoch: 1, recipient_device_id: s.sub.deviceId, wrapper_device_id: phone2.deviceId, wrapper_ed25519_pub: c.b64(phone2.ed), wrapped_key: c.b64(blob), signature: c.b64(sig) }
+  const rep2 = await vw.syncCircle(d, CIRCLE)
+  assert.match(authorizeWrap(rep2.logIndex, rep2.state.members, CIRCLE, USER_A, w2, rep2.state.epochs[0]), /not in the verified log/)
+  // The log revokes the publisher although the state still lists it.
+  s.w.appendLog(3, USER_A, s.w.A, { subject: s.w.A.deviceId, ref: c.fingerprint(s.w.A.ed, s.w.A.x), sig: ed25519.sign(c.logActionMessage(3, USER_A, s.w.A.deviceId, { subjectId: s.w.A.deviceId, ref: c.fingerprint(s.w.A.ed, s.w.A.x) }), s.w.A.edSeed), msg: c.logActionMessage(3, USER_A, s.w.A.deviceId, { subjectId: s.w.A.deviceId, ref: c.fingerprint(s.w.A.ed, s.w.A.x) }) })
+  const rep3 = await vw.syncCircle(d, CIRCLE)
+  assert.match(authorizeWrap(rep3.logIndex, rep3.state.members, CIRCLE, USER_A, wrapFor(s), rep3.state.epochs[0]), /revoked/)
+  void rep
+})
+
+test('syncCircle never stores a key whose wrapper or publisher is missing from the state', async () => {
+  const s = await setup()
+  await pair(s)
+  for (const m of [s.w]) m.devices = m.devices.filter((x) => x.device_id !== s.w.A.deviceId) // publisher vanishes from the served state
+  const rep = await vw.syncCircle(deps(s), CIRCLE)
+  assert.equal(rep.newKeys, 0)
+  assert.equal(rep.rejectedWraps, 1)
+  assert.deepEqual(rep.heldEpochs, [])
+})
+
+test('item from a device listed under another user is dropped; userId comes from the device', async () => {
+  const { s, d, rep } = await synced()
+  const st = structuredClone(rep.state)
+  // The server files Bob's phone under Alex.
+  const bobDev = findDevice(st.members, s.w.B.deviceId)
+  bobDev.member.devices = bobDev.member.devices.filter((x) => x !== bobDev.dev)
+  st.members[0].devices.push(bobDev.dev)
+  const rx = new vw.Receiver(CIRCLE, (e) => d.vault.getCircleKey(CIRCLE, e), () => st, () => NOW, () => rep.logIndex)
+  const res = await rx.handle(s.w.seal(s.w.B, 1, 'fix', 1, NOW - 1000, { lat: 1, lon: 2 }))
+  assert.equal(res.type, 'dropped')
+  assert.match(res.reason, /another user/)
+  // Honest placement: the point is attributed to the device's own (signed) user.
+  const rx2 = new vw.Receiver(CIRCLE, (e) => d.vault.getCircleKey(CIRCLE, e), () => rep.state, () => NOW, () => rep.logIndex)
+  const ok = await rx2.handle(s.w.seal(s.w.B, 1, 'fix', 2, NOW - 900, { lat: 1, lon: 2 }))
+  assert.equal(ok.points[0].userId, USER_B)
+})
+
+test('sender not in the verified log is deferred, never accepted; revoked sender dropped', async () => {
+  const { s, d, rep } = await synced()
+  const ghost = phone(6, USER_B, '66666666-6666-4666-8666-666666666666')
+  s.w.devices.push(deviceRecord(ghost, { actor: s.w.B })) // valid vouching, but no log entry
+  const rep2 = await vw.syncCircle(d, CIRCLE)
+  const rx = new vw.Receiver(CIRCLE, (e) => d.vault.getCircleKey(CIRCLE, e), () => rep2.state, () => NOW, () => rep2.logIndex)
+  assert.equal((await rx.handle(s.w.seal(ghost, 1, 'fix', 1, NOW - 500, { lat: 1, lon: 1 }))).type, 'deferred')
+  // No log index at all: fail closed.
+  const rx0 = new vw.Receiver(CIRCLE, (e) => d.vault.getCircleKey(CIRCLE, e), () => rep2.state, () => NOW)
+  assert.equal((await rx0.handle(s.w.seal(s.w.B, 1, 'fix', 5, NOW - 500, { lat: 1, lon: 1 }))).type, 'dropped')
+  // revoked_at set in the state
+  const st = structuredClone(rep.state)
+  findDevice(st.members, s.w.B.deviceId).dev.revoked_at = '2026-01-01T00:00:00Z'
+  const rx1 = new vw.Receiver(CIRCLE, (e) => d.vault.getCircleKey(CIRCLE, e), () => st, () => NOW, () => rep.logIndex)
+  assert.equal((await rx1.handle(s.w.seal(s.w.B, 1, 'fix', 6, NOW - 500, { lat: 1, lon: 1 }))).type, 'dropped')
+})
+
+test('registration verdicts cannot be poisoned: same device_id and signature, different covered field', async () => {
+  const { s, rep } = await synced()
+  const good = findDevice(rep.state.members, s.w.B.deviceId).dev
+  assert.equal(authorizeSender(rep.logIndex, findDevice(rep.state.members, s.w.B.deviceId)), null)
+  const forged = structuredClone(rep.state.members)
+  const f = findDevice(forged, s.w.B.deviceId)
+  f.dev.x25519_pub = c.b64(s.w.A.x) // same device_id + registration_signature, another covered field
+  assert.notEqual(authorizeSender(rep.logIndex, f), null)
+  assert.equal(verifyRegistration(good), true)
+  assert.equal(verifyRegistration(f.dev), false)
+  // Order independence.
+  assert.notEqual(authorizeSender(rep.logIndex, f), null)
+  assert.equal(authorizeSender(rep.logIndex, findDevice(rep.state.members, s.w.B.deviceId)), null)
+})
+
+test('full-log sync keeps the pin rules: fork and rollback with a pinned head', async () => {
+  const { s } = await synced()
+  const fetchPage = async (after) => ({ entries: s.w.log.filter((e) => e.seq > after).slice(0, 2), head: { seq: s.w.log.length, hash: s.w.log.at(-1).entry_hash } })
+  assert.ok((await syncLogFull(null, fetchPage)).check.ok)
+  assert.equal((await syncLogFull({ seq: 2, hash: '11'.repeat(32) }, fetchPage)).check.problem, 'fork')
+  assert.equal((await syncLogFull({ seq: 99, hash: '11'.repeat(32) }, fetchPage)).check.problem, 'rollback')
 })

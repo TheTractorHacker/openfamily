@@ -177,7 +177,13 @@ export class ViewerController {
       if (!rep.self) throw new DeviceRevokedError()
       let rx = this.rx.get(circleId)
       if (!rx) {
-        rx = new Receiver(circleId, (e) => u.vault.getCircleKey(circleId, e), () => this.conns.get(circleId)!.state!)
+        rx = new Receiver(
+          circleId,
+          (e) => u.vault.getCircleKey(circleId, e),
+          () => this.conns.get(circleId)!.state!,
+          undefined,
+          () => this.conns.get(circleId)?.report?.logIndex ?? null,
+        )
         this.rx.set(circleId, rx)
       }
       if (rep.heldEpochs.length === 0) {

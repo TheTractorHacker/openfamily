@@ -387,3 +387,230 @@ func SyncLog(pinned *LogHead, fetch LogFetcher) (LogCheck, error) {
 	}
 	return LogCheck{Problem: LogGap, Detail: "the log is too long to verify"}, nil
 }
+
+// ------------------------------------------------------- authorization against the log
+//
+// The circle state (GET /circles/{id}/e2ee) is served by the adversary. The
+// functions below accept a key only when (a) the state lists it with the same
+// public key, (b) its registration signatures verify, (c) the verified
+// transparency log really contains that registration (so the server cannot
+// invent a device out of thin air), (d) it is approved and not revoked. They
+// FAIL CLOSED: a missing device, a missing log index, or any mismatch rejects.
+
+// CircleMember is one member of the circle state with their active device keys.
+type CircleMember struct {
+	UserID  string         `json:"user_id"`
+	Name    string         `json:"name"`
+	Role    string         `json:"role"`
+	Devices []DeviceRecord `json:"devices"`
+}
+
+// FindDevice returns the listed device and its member, or nils.
+func FindDevice(members []CircleMember, deviceID string) (*DeviceRecord, *CircleMember) {
+	for i := range members {
+		for j := range members[i].Devices {
+			if members[i].Devices[j].DeviceID == deviceID {
+				return &members[i].Devices[j], &members[i]
+			}
+		}
+	}
+	return nil, nil
+}
+
+// LogIndex indexes a fully verified log (every page from entry 1).
+type LogIndex struct {
+	hashes  map[int64][]byte
+	regs    map[string]LogEntry // subject device -> its registration entry
+	epochs  map[string]LogEntry // circle|epoch -> enable/epoch entry
+	revoked map[string]bool
+}
+
+// ErrNotInLog marks a key the verified log does not contain (yet).
+var ErrNotInLog = errors.New("e2ee: not in the verified log")
+
+func newLogIndex() *LogIndex {
+	return &LogIndex{hashes: map[int64][]byte{}, regs: map[string]LogEntry{}, epochs: map[string]LogEntry{}, revoked: map[string]bool{}}
+}
+
+func (x *LogIndex) add(e LogEntry) {
+	if h, err := hex.DecodeString(e.EntryHash); err == nil {
+		x.hashes[e.Seq] = h
+	}
+	if e.Redacted || e.Action == nil {
+		return
+	}
+	switch byte(*e.Action) {
+	case ActEnable, ActEpoch:
+		if e.CircleID != nil && e.Epoch != nil {
+			x.epochs[fmt.Sprintf("%s|%d", *e.CircleID, *e.Epoch)] = e
+		}
+	case ActRegister, ActRotate, ActRecovery, ActReset:
+		if e.SubjectID != nil {
+			x.regs[*e.SubjectID] = e
+		}
+	case ActRevoke:
+		if e.SubjectID != nil {
+			x.revoked[*e.SubjectID] = true
+		}
+	}
+}
+
+// SyncLogFull verifies the whole log from entry 1 (page by page) and indexes it.
+// The pinned head still applies: a shorter log is a rollback, and a different
+// hash at the pinned sequence number is a fork.
+func SyncLogFull(pinned *LogHead, fetch LogFetcher) (LogCheck, *LogIndex, error) {
+	idx := newLogIndex()
+	var all []LogEntry
+	capture := func(after int64) ([]LogEntry, LogHead, error) {
+		es, h, err := fetch(after)
+		all = append(all, es...)
+		return es, h, err
+	}
+	c, err := SyncLog(nil, capture)
+	if err != nil || !c.OK() {
+		return c, nil, err
+	}
+	for _, e := range all {
+		idx.add(e)
+	}
+	if pinned != nil {
+		if c.NewHead.Seq < pinned.Seq {
+			return LogCheck{Problem: LogRollback, Detail: fmt.Sprintf("the server log is shorter (%d) than the one pinned (%d)", c.NewHead.Seq, pinned.Seq)}, nil, nil
+		}
+		if h, ok := idx.hashes[pinned.Seq]; !ok || !ConstEq(h, pinned.Hash) {
+			return LogCheck{Problem: LogFork, Detail: fmt.Sprintf("entry %d is not the one pinned", pinned.Seq)}, nil, nil
+		}
+	}
+	return c, idx, nil
+}
+
+// Revoked reports whether the log revokes the device.
+func (x *LogIndex) Revoked(deviceID string) bool { return x != nil && x.revoked[deviceID] }
+
+// RegistrationLogged requires a log entry that matches every field of the
+// device's registration (user, actor, action, fingerprint, signature, actor key).
+func (x *LogIndex) RegistrationLogged(d DeviceRecord) bool {
+	if x == nil {
+		return false
+	}
+	e, ok := x.regs[d.DeviceID]
+	if !ok || e.Action == nil || e.UserID == nil || e.ActorDeviceID == nil || e.Ref == nil || e.Signature == nil || e.ActorPub == nil {
+		return false
+	}
+	return *e.Action == d.RegistrationAction && *e.UserID == d.UserID && *e.ActorDeviceID == d.RegisteredByDeviceID &&
+		*e.Ref == d.Fingerprint && *e.Signature == d.RegistrationSignature && *e.ActorPub == d.RegisteredByPub
+}
+
+// ChainLogged follows the registration chain (voucher after voucher) up to a
+// self-registered root; every hop must be in the log.
+func (x *LogIndex) ChainLogged(d DeviceRecord) bool {
+	cur := d
+	for depth := 0; depth < 16; depth++ {
+		if !x.RegistrationLogged(cur) {
+			return false
+		}
+		if cur.RegisteredByDeviceID == cur.DeviceID {
+			return true
+		}
+		e := x.regs[cur.RegisteredByDeviceID]
+		if e.Action == nil || e.SubjectID == nil || e.UserID == nil || e.ActorDeviceID == nil || e.Ref == nil || e.Signature == nil || e.ActorPub == nil {
+			return false
+		}
+		// The voucher may no longer be active; its log entry is what counts.
+		cur = DeviceRecord{DeviceID: *e.SubjectID, UserID: *e.UserID, RegisteredByDeviceID: *e.ActorDeviceID,
+			RegistrationAction: *e.Action, Fingerprint: *e.Ref, RegistrationSignature: *e.Signature, RegisteredByPub: *e.ActorPub}
+		if cur.UserID != d.UserID {
+			return false
+		}
+	}
+	return false
+}
+
+// EpochLogged requires an enable/epoch log entry that matches the served record.
+func (x *LogIndex) EpochLogged(circleID string, r EpochRecord) bool {
+	if x == nil {
+		return false
+	}
+	e, ok := x.epochs[fmt.Sprintf("%s|%d", circleID, r.Epoch)]
+	if !ok || e.Action == nil || e.UserID == nil || e.ActorDeviceID == nil || e.ActorPub == nil || e.Ref == nil || e.Signature == nil {
+		return false
+	}
+	commit, err := b64(r.KeyCommitment)
+	if err != nil {
+		return false
+	}
+	return *e.Action == r.Action && *e.UserID == r.PublisherUser && *e.ActorDeviceID == r.PublisherDev &&
+		*e.ActorPub == r.PublisherPub && *e.Ref == hex.EncodeToString(commit) && *e.Signature == r.Signature
+}
+
+// usable: listed, active, approved, registration verifies and is chained in the log.
+func usable(idx *LogIndex, d *DeviceRecord) error {
+	switch {
+	case d == nil:
+		return errors.New("device is not in the circle state")
+	case d.RevokedAt != nil || idx.Revoked(d.DeviceID):
+		return errors.New("device is revoked")
+	case d.Kind == "recovery":
+		return errors.New("recovery keys do not act in a circle")
+	case d.Approved == nil || !*d.Approved:
+		return errors.New("device is not approved")
+	case !VerifyRegistration(*d):
+		return errors.New("device registration does not verify")
+	case !idx.ChainLogged(*d):
+		return fmt.Errorf("device registration: %w", ErrNotInLog)
+	}
+	return nil
+}
+
+// AuthorizeSender checks that an item's sender device may speak for its member:
+// listed, owned by that member (the signed user id equals the member's), usable.
+func AuthorizeSender(idx *LogIndex, d *DeviceRecord, m *CircleMember) error {
+	if d == nil || m == nil {
+		return errors.New("sender is not in the circle state")
+	}
+	if d.UserID != m.UserID {
+		return errors.New("device belongs to another user than the member it is listed under")
+	}
+	return usable(idx, d)
+}
+
+// AuthorizeWrap decides whether a wrap addressed to the caller may be opened:
+// the epoch record is in the log and published by an active, approved circle
+// admin whose key matches the record; the wrapper is an active, approved listed
+// device whose key matches; and the wrapper is either the publisher's user or
+// the recipient's own user (the server enforces the same rule).
+func AuthorizeWrap(idx *LogIndex, members []CircleMember, circleID, recipientUserID string, w WrapRecord, rec *EpochRecord) error {
+	if idx == nil || rec == nil {
+		return errors.New("no verified log or epoch record")
+	}
+	if !idx.EpochLogged(circleID, *rec) {
+		return fmt.Errorf("epoch record: %w", ErrNotInLog)
+	}
+	pd, pm := FindDevice(members, rec.PublisherDev)
+	if pd == nil || pm == nil {
+		return errors.New("epoch publisher is not in the circle state")
+	}
+	if pd.Ed25519Pub != rec.PublisherPub || pd.UserID != rec.PublisherUser || pm.UserID != rec.PublisherUser {
+		return errors.New("epoch publisher key differs from the registered key")
+	}
+	if pm.Role != "admin" {
+		return errors.New("epoch publisher is not a circle admin")
+	}
+	if err := usable(idx, pd); err != nil {
+		return fmt.Errorf("epoch publisher: %w", err)
+	}
+	wd, wm := FindDevice(members, w.WrapperDeviceID)
+	if wd == nil || wm == nil {
+		return errors.New("wrapper is not in the circle state")
+	}
+	if wd.Ed25519Pub != w.WrapperEd25519Pub || wd.UserID != wm.UserID {
+		return errors.New("wrapper key differs from the registered key")
+	}
+	if err := usable(idx, wd); err != nil {
+		return fmt.Errorf("wrapper: %w", err)
+	}
+	if wd.UserID != rec.PublisherUser && wd.UserID != recipientUserID {
+		return errors.New("wrapper is neither the epoch publisher nor the recipient's own device")
+	}
+	return nil
+}
