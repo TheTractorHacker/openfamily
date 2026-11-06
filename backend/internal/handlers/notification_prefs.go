@@ -19,7 +19,7 @@ import (
 // starts sending those pushes.
 var notificationCategories = []string{
 	"place_alerts", "check_in", "low_battery",
-	"completed_drives", "safety_incidents", "severe_weather", "weekly_summary",
+	"completed_drives", "safety_incidents", "severe_weather", "weekly_summary", "phone_silent",
 }
 
 // NotificationPrefs is the wire shape of GET/PUT /me/notifications.
@@ -31,6 +31,8 @@ type NotificationPrefs struct {
 	SafetyIncidents bool `json:"safety_incidents"`
 	SevereWeather   bool `json:"severe_weather"`
 	WeeklySummary   bool `json:"weekly_summary"`
+	// PhoneSilent is the switch for "a phone went silent" alerts (silence.go).
+	PhoneSilent bool `json:"phone_silent"`
 	// ShowNames puts first names (and check-in notes) in pushes sent to this
 	// person. Off by default: the push provider then never learns who.
 	ShowNames bool `json:"show_names"`
@@ -41,7 +43,7 @@ type NotificationPrefs struct {
 
 func defaultNotificationPrefs() NotificationPrefs {
 	return NotificationPrefs{PlaceAlerts: true, CheckIn: true, LowBattery: true, CompletedDrives: true,
-		SafetyIncidents: true, SevereWeather: true, WeeklySummary: true}
+		SafetyIncidents: true, SevereWeather: true, WeeklySummary: true, PhoneSilent: true}
 }
 
 // EnsureNotificationSchema creates the preferences table. Idempotent; it is
@@ -69,7 +71,11 @@ func (s *Server) EnsureNotificationSchema(ctx context.Context) error {
 	if _, err = s.Pool.Exec(ctx, `ALTER TABLE notification_prefs ADD COLUMN IF NOT EXISTS show_names BOOLEAN NOT NULL DEFAULT FALSE`); err != nil {
 		return err
 	}
-	_, err = s.Pool.Exec(ctx, `ALTER TABLE notification_prefs ADD COLUMN IF NOT EXISTS units TEXT NOT NULL DEFAULT ''`)
+	if _, err = s.Pool.Exec(ctx, `ALTER TABLE notification_prefs ADD COLUMN IF NOT EXISTS units TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
+	// "Your phone went silent" / "a family member's phone went silent" alerts.
+	_, err = s.Pool.Exec(ctx, `ALTER TABLE notification_prefs ADD COLUMN IF NOT EXISTS phone_silent BOOLEAN NOT NULL DEFAULT TRUE`)
 	return err
 }
 
@@ -146,9 +152,9 @@ func nameIf(show bool, fullName string) string {
 func (s *Server) loadNotificationPrefs(ctx context.Context, userID string) (NotificationPrefs, error) {
 	p := defaultNotificationPrefs()
 	err := s.Pool.QueryRow(ctx, `
-		SELECT place_alerts, check_in, low_battery, completed_drives, safety_incidents, severe_weather, weekly_summary, show_names, units
+		SELECT place_alerts, check_in, low_battery, completed_drives, safety_incidents, severe_weather, weekly_summary, phone_silent, show_names, units
 		FROM notification_prefs WHERE user_id = $1`, userID).
-		Scan(&p.PlaceAlerts, &p.CheckIn, &p.LowBattery, &p.CompletedDrives, &p.SafetyIncidents, &p.SevereWeather, &p.WeeklySummary, &p.ShowNames, &p.Units)
+		Scan(&p.PlaceAlerts, &p.CheckIn, &p.LowBattery, &p.CompletedDrives, &p.SafetyIncidents, &p.SevereWeather, &p.WeeklySummary, &p.PhoneSilent, &p.ShowNames, &p.Units)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return defaultNotificationPrefs(), nil
@@ -189,6 +195,7 @@ func (s *Server) PutNotificationPrefs(w http.ResponseWriter, r *http.Request) {
 		SafetyIncidents *bool `json:"safety_incidents"`
 		SevereWeather   *bool `json:"severe_weather"`
 		WeeklySummary   *bool `json:"weekly_summary"`
+		PhoneSilent     *bool `json:"phone_silent"`
 		ShowNames       *bool `json:"show_names"`
 		Units           *string `json:"units"`
 	}
@@ -213,6 +220,7 @@ func (s *Server) PutNotificationPrefs(w http.ResponseWriter, r *http.Request) {
 	apply(&p.SafetyIncidents, in.SafetyIncidents)
 	apply(&p.SevereWeather, in.SevereWeather)
 	apply(&p.WeeklySummary, in.WeeklySummary)
+	apply(&p.PhoneSilent, in.PhoneSilent)
 	apply(&p.ShowNames, in.ShowNames)
 	if in.Units != nil {
 		if !validUnits(*in.Units) {
@@ -223,15 +231,15 @@ func (s *Server) PutNotificationPrefs(w http.ResponseWriter, r *http.Request) {
 	}
 	_, err = s.Pool.Exec(r.Context(), `
 		INSERT INTO notification_prefs
-			(user_id, place_alerts, check_in, low_battery, completed_drives, safety_incidents, severe_weather, weekly_summary, show_names, units, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, now())
+			(user_id, place_alerts, check_in, low_battery, completed_drives, safety_incidents, severe_weather, weekly_summary, phone_silent, show_names, units, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, now())
 		ON CONFLICT (user_id) DO UPDATE SET
 			place_alerts = EXCLUDED.place_alerts, check_in = EXCLUDED.check_in,
 			low_battery = EXCLUDED.low_battery, completed_drives = EXCLUDED.completed_drives,
-			safety_incidents = EXCLUDED.safety_incidents, severe_weather = EXCLUDED.severe_weather, weekly_summary = EXCLUDED.weekly_summary,
+			safety_incidents = EXCLUDED.safety_incidents, severe_weather = EXCLUDED.severe_weather, weekly_summary = EXCLUDED.weekly_summary, phone_silent = EXCLUDED.phone_silent,
 			show_names = EXCLUDED.show_names, units = EXCLUDED.units,
 			updated_at = now()`,
-		claims.UserID, p.PlaceAlerts, p.CheckIn, p.LowBattery, p.CompletedDrives, p.SafetyIncidents, p.SevereWeather, p.WeeklySummary, p.ShowNames, p.Units)
+		claims.UserID, p.PlaceAlerts, p.CheckIn, p.LowBattery, p.CompletedDrives, p.SafetyIncidents, p.SevereWeather, p.WeeklySummary, p.PhoneSilent, p.ShowNames, p.Units)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to save notification settings")
 		return

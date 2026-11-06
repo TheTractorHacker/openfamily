@@ -176,6 +176,7 @@ func (s *Server) Stream(w http.ResponseWriter, r *http.Request) {
 		done: make(chan struct{}),
 	}
 	s.hub.registerCircles(circleIDs, claims.UserID, c)
+	s.noteWS(ctx, claims.UserID)
 	if aware {
 		s.hub.setSubscription(c, filter)
 	}

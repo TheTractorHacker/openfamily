@@ -33,6 +33,7 @@ import type {
   AdminShareLink,
   AdminSession,
   AuditPage,
+  FleetResponse,
 } from './types'
 
 const API_BASE = '/api'
@@ -789,4 +790,10 @@ export const e2eeHttp = {
   get: <T,>(path: string): Promise<T> => request<T>(path),
   post: <T,>(path: string, body: unknown): Promise<T> => request<T>(path, { method: 'POST', body }),
   del: <T,>(path: string, body?: unknown): Promise<T> => request<T>(path, { method: 'DELETE', body }),
+}
+
+// ---- Fleet health (platform admin) ----
+
+export function getFleetHealth(): Promise<FleetResponse> {
+  return request<FleetResponse>('/api/admin/fleet')
 }

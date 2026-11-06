@@ -135,6 +135,9 @@ type Server struct {
 	// detection. Nil means the Postgres-backed store over Pool.
 	RefreshStore refreshStore
 
+	// reports throttles liveness bookkeeping (see report_state.go).
+	reports reportTracker
+
 	// hub fans out live location updates to connected WebSocket clients.
 	hub *hub
 

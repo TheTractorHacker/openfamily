@@ -104,6 +104,7 @@ func (s *Server) IngestLocation(w http.ResponseWriter, r *http.Request) {
 	// read-then-insert of the last timestamp cannot race; the check spans all
 	// of the user's devices (geofence state is per-user, not per-device).
 	ownerID := claims.UserID
+	defer s.noteReport(r.Context(), ownerID, time.Now())
 	if s.refusePrivateOnlyPlaintext(w, r, ownerID) {
 		return
 	}

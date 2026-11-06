@@ -238,7 +238,7 @@ type notifQuerier interface {
 func notifSuppressed(ctx context.Context, q notifQuerier, subjectID, category string, now time.Time) map[string]bool {
 	out := map[string]bool{}
 	switch category {
-	case notifArrivals, notifDepartures, notifLowBattery, notifDriving:
+	case notifArrivals, notifDepartures, notifLowBattery, notifDriving, notifSilent:
 	default:
 		return out
 	}
@@ -258,7 +258,7 @@ func notifSuppressed(ctx context.Context, q notifQuerier, subjectID, category st
 			slog.Error("notif prefs: scan", "err", err)
 			continue
 		}
-		on := map[string]bool{notifArrivals: arr, notifDepartures: dep, notifLowBattery: low, notifDriving: drv}[category]
+		on := map[string]bool{notifArrivals: arr, notifDepartures: dep, notifLowBattery: low, notifDriving: drv, notifSilent: true}[category]
 		switch {
 		case muted, !on:
 			out[uid] = true

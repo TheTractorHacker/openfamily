@@ -16,6 +16,7 @@ export type RouteKey =
   | 'e2ee'
   | 'private'
   | 'alerts'
+  | 'fleet'
   | 'system'
   | 'builds'
   | 'settings'
@@ -225,6 +226,21 @@ export const ROUTES: RouteDef[] = [
     icon: icon(
       <path
         d="M12 4 3 19h18L12 4Zm0 5.5v4.5m0 2.5v.01"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    ),
+  },
+  {
+    key: 'fleet',
+    label: 'Fleet health',
+    hash: '#/fleet',
+    adminOnly: true,
+    icon: icon(
+      <path
+        d="M8 3h8a1.5 1.5 0 0 1 1.5 1.5v15A1.5 1.5 0 0 1 16 21H8a1.5 1.5 0 0 1-1.5-1.5v-15A1.5 1.5 0 0 1 8 3zM10.5 18h3M9 9.5l2 2 4-4"
         stroke="currentColor"
         strokeWidth="1.6"
         strokeLinecap="round"

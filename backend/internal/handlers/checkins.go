@@ -199,7 +199,7 @@ func (s *Server) pushUsers(ctx context.Context, userIDs []string, title, body st
 }
 
 // pushUsersRender is pushUsers with per-recipient copy (see pushRender).
-func (s *Server) pushUsersRender(ctx context.Context, userIDs []string, render pushRender) {
+func (s *Server) pushUsersRender(ctx context.Context, userIDs []string, render pushRender) (sent, failed int) {
 	dir := s.recipients(ctx)
 	rows, err := s.Pool.Query(ctx, `
 		SELECT d.user_id, d.platform, d.push_token, d.unifiedpush_endpoint, d.id, d.push_transport
@@ -210,7 +210,7 @@ func (s *Server) pushUsersRender(ctx context.Context, userIDs []string, render p
 		       OR (d.platform = 'android' AND d.push_transport = 'direct'))`, userIDs)
 	if err != nil {
 		slog.Error("checkin: list devices", "err", err)
-		return
+		return 0, 0
 	}
 	type dev struct{ uid, platform, token, endpoint, id, transport string }
 	var devs []dev
@@ -226,14 +226,20 @@ func (s *Server) pushUsersRender(ctx context.Context, userIDs []string, render p
 	rows.Close()
 	for _, d := range devs {
 		title, body := render(dir.For(d.uid))
-		n := push.Notification{Title: title, Body: body, Platform: d.platform, PushToken: d.token, UnifiedPushEndpoint: d.endpoint}
+		n := push.Notification{Title: title, Body: body, Platform: d.platform, PushToken: d.token, UnifiedPushEndpoint: d.endpoint, Route: pushRouteFrom(ctx)}
 		if d.platform == "android" && d.transport == "direct" && s.Direct != nil {
 			n = directNotification(n, d.id, d.uid, "", "")
 		}
-		if err := s.dispatchBest(ctx, n); err != nil {
+		err := s.dispatchBest(ctx, n)
+		s.notePushResult(ctx, d.id, err == nil)
+		if err != nil {
+			failed++
 			slog.Debug("checkin: push failed", "user_id", d.uid, "err", err)
+		} else {
+			sent++
 		}
 	}
+	return sent, failed
 }
 
 // ListCheckins returns check-ins the caller received (default) or sent

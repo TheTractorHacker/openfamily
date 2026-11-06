@@ -429,3 +429,41 @@ export interface MapStyleSettings {
   /** What /config serves right now ("" = built-in OpenFreeMap). */
   effective: string
 }
+
+// ---- Fleet health (platform admin) ----
+
+/** One phone as reported by GET /api/admin/fleet. No coordinates, no credentials. */
+export interface FleetDevice {
+  id: string
+  platform: string
+  name: string
+  app_version: string
+  os_version: string
+  last_seen: string | null
+  push_registered: boolean
+  push_transport: string
+  direct_seen_at: string | null
+  last_push_ok_at: string | null
+  last_push_fail_at: string | null
+  battery_opt: 'unrestricted' | 'optimized' | 'restricted' | 'unknown'
+  outbox_pending: number | null
+  loc_permission: 'always' | 'while_in_use' | 'denied' | 'unknown'
+  notif_permission: 'granted' | 'denied' | 'unknown'
+  bg_service: boolean | null
+  diag_reported_at: string | null
+}
+
+export interface FleetMember {
+  user_id: string
+  name: string
+  email: string
+  last_report_at: string | null
+  last_ws_at: string | null
+  in_private_circle: boolean
+  devices: FleetDevice[]
+}
+
+export interface FleetResponse {
+  server_time: string
+  members: FleetMember[]
+}
