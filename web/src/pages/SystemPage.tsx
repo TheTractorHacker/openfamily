@@ -1,12 +1,14 @@
 // System health — migration version, database size, last backup, release
 // version and recent server warnings/errors. Read-only; no secrets.
 
+import React from 'react'
 import { getAdminHealth } from '../lib/api'
 import { isAccessDenied, useAsync } from '../lib/useAsync'
-import { AccessDenied, Badge, Button, Card, EmptyState, ErrorState, Mono, Spinner } from '../components/primitives'
+import { AccessDenied, Badge, Button, Card, EmptyState, ErrorState, Spinner } from '../components/primitives'
+import { Alert, CopyCommand, KeyValueList, PageHeader, Section } from '../components/patterns'
 import { formatRelativeTime } from '../lib/format'
 import './pages.css'
-import './ActivityPage.css'
+import './SystemPage.css'
 
 export function formatBytes(n: number): string {
   if (!Number.isFinite(n) || n < 0) return '—'
@@ -23,8 +25,18 @@ export function formatBytes(n: number): string {
 const BACKUP_TONE = { ok: 'green', stale: 'orange', missing: 'red' } as const
 const BACKUP_TEXT = { ok: 'Recent', stale: 'Overdue', missing: 'No backup recorded' } as const
 
+/** Splits a server warning into its prose and an embedded ./scripts/... command, if any. */
+export function splitWarning(w: string): { message: string; command?: string } {
+  const m = w.match(/(\.\/scripts\/[\w.-]+)/)
+  return m ? { message: w, command: m[1] } : { message: w }
+}
+
 export function SystemPage() {
   const q = useAsync(getAdminHealth, [])
+  const [updatedAt, setUpdatedAt] = React.useState<Date | null>(null)
+  React.useEffect(() => {
+    if (q.data) setUpdatedAt(new Date())
+  }, [q.data])
 
   if (isAccessDenied(q.error)) {
     return (
@@ -34,91 +46,107 @@ export function SystemPage() {
     )
   }
 
+  const refreshing = q.loading && !!q.data
+  const h = q.data
+
   return (
     <div className="wb-page">
-      <div className="wb-page-header">
-        <div>
-          <h1 className="wb-page-title">System health</h1>
-          <p className="wb-page-subtitle">The server&apos;s state at a glance. Read-only.</p>
-        </div>
-        <Button variant="secondary" size="sm" onClick={q.refetch}>
-          Refresh
-        </Button>
-      </div>
+      <PageHeader
+        title="System health"
+        subtitle="The server's state at a glance. Read-only."
+        actions={
+          <>
+            {updatedAt && <span className="wb-sys-updated">Updated {updatedAt.toLocaleTimeString()}</span>}
+            <Button variant="secondary" size="sm" onClick={q.refetch} loading={refreshing} aria-label="Refresh system health">
+              {refreshing ? 'Refreshing' : 'Refresh'}
+            </Button>
+          </>
+        }
+      />
 
-      {q.loading && !q.data ? (
+      {q.loading && !h ? (
         <div className="wb-page-loading">
           <Spinner /> Loading…
         </div>
       ) : q.error ? (
         <ErrorState title="Couldn’t load system health" description={q.error.message} onRetry={q.refetch} />
-      ) : q.data ? (
+      ) : h ? (
         <>
-          {q.data.warnings.length > 0 && (
-            <Card>
-              <ul role="alert" style={{ margin: 0, paddingLeft: 20 }}>
-                {q.data.warnings.map((w) => (
-                  <li key={w} className="wb-error-text">
-                    {w}
-                  </li>
-                ))}
-              </ul>
-            </Card>
+          {h.warnings.length > 0 && (
+            <div className="wb-alert-stack">
+              {h.warnings.map((w) => {
+                const { message, command } = splitWarning(w)
+                return (
+                  <Alert
+                    key={w}
+                    tone="danger"
+                    title="Needs attention"
+                    action={command ? <CopyCommand command={command} /> : undefined}
+                  >
+                    {message}
+                  </Alert>
+                )
+              })}
+            </div>
           )}
-          <Card>
-            <dl style={{ margin: 0, display: 'grid', gap: 12 }} aria-label="Server facts">
-              <div className="wb-row">
-                <dt className="wb-label" style={{ minWidth: 180 }}>Release</dt>
-                <dd style={{ margin: 0 }}>
-                  <Mono>{q.data.release_version || 'dev'}</Mono>
-                </dd>
-              </div>
-              <div className="wb-row">
-                <dt className="wb-label" style={{ minWidth: 180 }}>Database migration</dt>
-                <dd style={{ margin: 0 }}>
-                  <Mono>{String(q.data.migration.version)}</Mono>{' '}
-                  {q.data.migration.dirty && <Badge tone="red">not clean</Badge>}
-                </dd>
-              </div>
-              <div className="wb-row">
-                <dt className="wb-label" style={{ minWidth: 180 }}>Database size</dt>
-                <dd style={{ margin: 0 }}>{formatBytes(q.data.database_bytes)}</dd>
-              </div>
-              <div className="wb-row">
-                <dt className="wb-label" style={{ minWidth: 180 }}>Last backup</dt>
-                <dd style={{ margin: 0 }}>
-                  <Badge tone={BACKUP_TONE[q.data.backup.status]}>{BACKUP_TEXT[q.data.backup.status]}</Badge>{' '}
-                  {q.data.backup.last_at && (
-                    <span title={new Date(q.data.backup.last_at).toLocaleString()}>
-                      {formatRelativeTime(q.data.backup.last_at)}
-                      {q.data.backup.size_bytes != null ? ` · ${formatBytes(q.data.backup.size_bytes)}` : ''}
-                    </span>
-                  )}
-                </dd>
-              </div>
-            </dl>
-          </Card>
 
-          <h2 className="wb-audit-h2">Recent warnings and errors</h2>
-          {q.data.recent_errors.length === 0 ? (
-            <EmptyState title="Nothing to report" description="No warnings or errors since the server started." />
-          ) : (
-            <Card padded={false}>
-              <ul className="wb-activity-list">
-                {q.data.recent_errors.map((e, i) => (
-                  <li key={`${e.time}-${i}`} className="wb-activity-row">
-                    <Badge tone={e.level === 'ERROR' ? 'red' : 'orange'}>{e.level.toLowerCase()}</Badge>
-                    <div className="wb-activity-main">
-                      <span className="wb-activity-text">{e.message}</span>
-                    </div>
-                    <span className="wb-activity-time" title={new Date(e.time).toLocaleString()}>
-                      {formatRelativeTime(e.time)}
-                    </span>
-                  </li>
-                ))}
-              </ul>
+          <Section title="Server">
+            <Card>
+              <KeyValueList
+                label="Server facts"
+                items={[
+                  { label: 'Release', value: h.release_version || 'dev', mono: true },
+                  {
+                    label: 'Database migration',
+                    value: (
+                      <>
+                        <span>{String(h.migration.version)}</span>
+                        {h.migration.dirty && <Badge tone="red">not clean</Badge>}
+                      </>
+                    ),
+                    mono: true,
+                  },
+                  { label: 'Database size', value: formatBytes(h.database_bytes), mono: true },
+                  {
+                    label: 'Last backup',
+                    value: (
+                      <>
+                        <Badge tone={BACKUP_TONE[h.backup.status]} dot>
+                          {BACKUP_TEXT[h.backup.status]}
+                        </Badge>
+                        {h.backup.last_at && (
+                          <span className="wb-kv-note" title={new Date(h.backup.last_at).toLocaleString()}>
+                            {formatRelativeTime(h.backup.last_at)}
+                            {h.backup.size_bytes != null ? ` · ${formatBytes(h.backup.size_bytes)}` : ''}
+                          </span>
+                        )}
+                      </>
+                    ),
+                  },
+                ]}
+              />
             </Card>
-          )}
+          </Section>
+
+          <Section title="Recent warnings and errors" description="Since the server last started.">
+            {h.recent_errors.length === 0 ? (
+              <EmptyState title="Nothing to report" description="No warnings or errors since the server started." />
+            ) : (
+              <Card padded={false}>
+                <ul className="wb-sys-log">
+                  {h.recent_errors.map((e, i) => (
+                    <li key={`${e.time}-${i}`} className="wb-sys-log-row">
+                      <Badge tone={e.level === 'ERROR' ? 'red' : 'orange'}>{e.level.toLowerCase()}</Badge>
+                      <span className="wb-sys-log-msg">{e.message}</span>
+                      <span className="wb-sys-log-time" title={new Date(e.time).toLocaleString()}>
+                        {formatRelativeTime(e.time)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </Card>
+            )}
+          </Section>
         </>
       ) : null}
     </div>
