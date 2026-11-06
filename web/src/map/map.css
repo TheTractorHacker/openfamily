@@ -1022,3 +1022,9 @@
     transform: translateY(calc(100% + var(--space-4)));
   }
 }
+
+/* The dashboard already shows a "Streaming" status; on phones the centred LIVE
+   badge only collides with the group chips. */
+@media (max-width: 640px) {
+  .wb-live-badge { display: none; }
+}

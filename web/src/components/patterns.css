@@ -1,0 +1,187 @@
+/* Shared layout patterns: page header actions, section headings, alert
+   callouts, aligned key/value lists. Tokens only — works in Ice and Night. */
+
+.wb-page-header-text { min-width: 0; }
+.wb-page-actions { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+
+.wb-section { margin-top: var(--space-8); }
+.wb-section-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-3);
+}
+.wb-section-head-text { min-width: 0; }
+.wb-section-title { margin: 0; font-size: var(--font-lg); font-weight: 600; line-height: 1.3; }
+.wb-section-desc { margin: 2px 0 0; font-size: var(--font-sm); color: var(--text-muted); }
+.wb-section-actions { display: flex; gap: var(--space-2); }
+
+/* ---- Alert ---- */
+.wb-alert {
+  --alert-fg: var(--status-orange-fg);
+  --alert-bg: var(--status-orange-bg);
+  --alert-border: var(--status-orange-border);
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: var(--alert-bg);
+  border: 1px solid var(--alert-border);
+  border-radius: var(--radius-md);
+  color: var(--text);
+}
+.wb-alert-danger { --alert-fg: var(--status-red-fg); --alert-bg: var(--status-red-bg); --alert-border: var(--status-red-border); }
+.wb-alert-success { --alert-fg: var(--status-green-fg); --alert-bg: var(--status-green-bg); --alert-border: var(--status-green-border); }
+.wb-alert-info { --alert-fg: var(--status-grey-fg); --alert-bg: var(--status-grey-bg); --alert-border: var(--status-grey-border); }
+.wb-alert-icon { flex: 0 0 auto; margin-top: 1px; color: var(--alert-fg); }
+.wb-alert-body { min-width: 0; flex: 1 1 auto; display: flex; flex-direction: column; gap: var(--space-1); }
+.wb-alert-title { font-size: var(--font-md); font-weight: 600; color: var(--alert-fg); line-height: 1.4; }
+.wb-alert-message { font-size: var(--font-sm); line-height: 1.5; overflow-wrap: anywhere; }
+.wb-alert-action { margin-top: var(--space-2); }
+.wb-alert-stack { display: flex; flex-direction: column; gap: var(--space-3); }
+
+/* ---- CopyCommand ---- */
+.wb-copycmd {
+  display: inline-flex;
+  align-items: stretch;
+  max-width: 100%;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-xs);
+  background: var(--surface);
+  overflow: hidden;
+}
+.wb-copycmd-text {
+  padding: 6px var(--space-3);
+  font-family: var(--font-mono);
+  font-size: var(--font-xs);
+  color: var(--text);
+  white-space: nowrap;
+  overflow-x: auto;
+}
+.wb-copycmd-btn {
+  border: 0;
+  border-left: 1px solid var(--border-strong);
+  background: var(--surface-soft);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--font-xs);
+  font-weight: 600;
+  padding: 0 var(--space-3);
+  min-width: 64px;
+  cursor: pointer;
+}
+.wb-copycmd-btn:hover { background: var(--surface-hover); }
+.wb-copycmd-btn:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--accent); }
+
+/* ---- KeyValueList ---- */
+.wb-kv { margin: 0; display: flex; flex-direction: column; }
+.wb-kv-row {
+  display: grid;
+  grid-template-columns: minmax(140px, 220px) 1fr;
+  align-items: center;
+  column-gap: var(--space-4);
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--border);
+}
+.wb-kv-row:first-child { padding-top: 0; }
+.wb-kv-row:last-child { padding-bottom: 0; border-bottom: none; }
+.wb-kv-key { font-size: var(--font-sm); font-weight: 500; color: var(--text-muted); }
+.wb-kv-value {
+  margin: 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  font-size: var(--font-md);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.wb-kv-mono { font-family: var(--font-mono); font-size: var(--font-sm); }
+.wb-kv-note { font-size: var(--font-sm); color: var(--text-muted); font-family: var(--font-sans); }
+
+@media (max-width: 520px) {
+  .wb-kv-row { grid-template-columns: 1fr; row-gap: 2px; }
+}
+
+/* ---- Page header actions: filters sit bottom-aligned next to buttons ---- */
+.wb-page-actions { align-items: flex-end; }
+.wb-page-actions .wb-field { gap: var(--space-1); }
+.wb-page-actions .wb-select,
+.wb-page-actions .wb-input { height: 32px; font-size: var(--font-sm); }
+
+/* Filter row under a page header. */
+.wb-toolbar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--space-4); margin-bottom: var(--space-4); }
+.wb-toolbar .wb-field { min-width: 160px; }
+
+/* ---- Form controls: styled native selects, checkbox, inline code ---- */
+select.wb-select,
+select.wb-input {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 34px;
+  cursor: pointer;
+  background-color: var(--surface);
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--text-muted) 50%),
+    linear-gradient(135deg, var(--text-muted) 50%, transparent 50%);
+  background-position: calc(100% - 17px) 50%, calc(100% - 12px) 50%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+}
+.wb-page input[type="checkbox"], .wb-check input[type="checkbox"] { accent-color: var(--accent-dark); width: 16px; height: 16px; margin: 0; }
+.wb-check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 32px;
+  font-size: var(--font-sm);
+  font-weight: 500;
+  cursor: pointer;
+}
+.wb-inline-code {
+  font-family: var(--font-mono);
+  font-size: var(--font-xs);
+  padding: 1px 6px;
+  border-radius: var(--radius-xs);
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+.wb-page td code {
+  font-family: var(--font-mono);
+  font-size: var(--font-xs);
+}
+
+@media (max-width: 520px) {
+  .wb-page-actions { width: 100%; }
+  .wb-page-actions .wb-field { flex: 1 1 160px; }
+  .wb-toolbar .wb-field { flex: 1 1 140px; }
+  .wb-section { margin-top: var(--space-6); }
+}
+
+/* ---- Activity-style list rows on phones: badge + time on top, text below ---- */
+@media (max-width: 640px) {
+  .wb-page .wb-activity-row { flex-wrap: wrap; gap: var(--space-2) var(--space-3); padding: var(--space-3) var(--space-4); }
+  .wb-page .wb-activity-main { flex: 1 1 100%; order: 3; }
+  .wb-page .wb-activity-time { margin-left: auto; }
+}
+
+@media (max-width: 520px) {
+  .wb-page .wb-audit-filters .wb-field,
+  .wb-page .wb-audit-sectionhead .wb-field { flex: 1 1 140px; min-width: 0; }
+}
+
+@media (max-width: 520px) {
+  .wb-page .wb-audit-h2 { flex: 1 1 100%; }
+  .wb-page .wb-audit-sectionhead .wb-field { min-width: 0; flex: 1 1 200px; }
+}
+
+/* Family rows on phones: the member count drops under the name so the name is not cut. */
+@media (max-width: 520px) {
+  .wb-group-head { flex-wrap: wrap; row-gap: var(--space-1); }
+  .wb-group-head .wb-group-meta { flex: 1 1 0; }
+  .wb-group-head .wb-group-count { order: 4; flex: 1 1 100%; padding-left: 56px; }
+}

@@ -95,7 +95,7 @@ export function AlertsPage() {
         </Button>
       </div>
 
-      <div className="wb-activity-filters">
+      <div className="wb-toolbar">
         <label className="wb-field" htmlFor="alerts-status">
           <span className="wb-label">Status</span>
           <select id="alerts-status" className="wb-input" value={status} onChange={(e) => setStatus(e.target.value)}>

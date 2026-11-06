@@ -5,6 +5,9 @@
   max-width: 1180px;
   margin: 0 auto;
 }
+@media (max-width: 520px) {
+  .wb-page { padding: var(--space-4) var(--space-4) var(--space-8); }
+}
 .wb-page-header {
   display: flex;
   align-items: flex-end;

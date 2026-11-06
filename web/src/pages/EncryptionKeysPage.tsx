@@ -9,6 +9,7 @@ import { listE2eeKeys } from '../lib/api'
 import type { E2eeAdminDevice } from '../lib/api'
 import { isAccessDenied, useAsync } from '../lib/useAsync'
 import { AccessDenied, Badge, Button, Card, EmptyState, ErrorState, Spinner } from '../components/primitives'
+import { PageHeader, Section } from '../components/patterns'
 import './pages.css'
 import './AuditPage.css'
 
@@ -58,15 +59,18 @@ export function EncryptionKeysPage() {
 
   return (
     <div className="wb-page">
-      <div className="wb-audit-sectionhead">
-        <div style={{ marginRight: 'auto' }}>
-          <h1 className="wb-page-title">Encryption keys</h1>
-          <p className="wb-page-subtitle">
+      <PageHeader
+        title="Encryption keys"
+        subtitle={
+          <>
             Public device keys and circle key epochs. The server never holds a private key or a readable circle key.
-            Compare a fingerprint with the member’s phone (Settings, Security, Encryption keys). On the server, run
-            <code> server e2ee-fingerprints </code> or <code> server e2ee-log-head </code>.
-          </p>
-        </div>
+            Compare a fingerprint with the member’s phone (Settings, Security, Encryption keys). On the server, run{' '}
+            <code className="wb-inline-code">server e2ee-fingerprints</code> or{' '}
+            <code className="wb-inline-code">server e2ee-log-head</code>.
+          </>
+        }
+        actions={
+          <>
         <label className="wb-field" htmlFor="e2ee-revoked">
           <span className="wb-label">Show</span>
           <select
@@ -82,9 +86,11 @@ export function EncryptionKeysPage() {
         <Button variant="secondary" size="sm" onClick={() => q.refetch()}>
           Refresh
         </Button>
-      </div>
+          </>
+        }
+      />
 
-      <h2 className="wb-section-title">Circles</h2>
+      <Section title="Circles">
       {circles.length === 0 ? (
         <EmptyState title="No private circles" description="Circles appear here once an admin turns on Private circle in the app." />
       ) : (
@@ -120,8 +126,9 @@ export function EncryptionKeysPage() {
           </div>
         </Card>
       )}
+      </Section>
 
-      <h2 className="wb-section-title">Keys</h2>
+      <Section title="Keys">
       {devices.length === 0 ? (
         <EmptyState title="No keys registered" description="Members register keys from the app (Settings, Security, Encryption keys)." />
       ) : (
@@ -167,6 +174,7 @@ export function EncryptionKeysPage() {
           </div>
         </Card>
       )}
+      </Section>
     </div>
   )
 }

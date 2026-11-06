@@ -1,0 +1,21 @@
+/* System health */
+.wb-sys-log { list-style: none; margin: 0; padding: 0; }
+.wb-sys-log-row {
+  display: grid;
+  grid-template-columns: 72px 1fr auto;
+  align-items: baseline;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-5);
+  border-bottom: 1px solid var(--border);
+}
+.wb-sys-log-row:last-child { border-bottom: none; }
+.wb-sys-log-msg { font-size: var(--font-sm); font-family: var(--font-mono); line-height: 1.5; overflow-wrap: anywhere; min-width: 0; }
+.wb-sys-log-time { font-size: var(--font-xs); color: var(--text-faint); white-space: nowrap; }
+.wb-sys-log-row .wb-badge { justify-self: start; }
+.wb-sys-updated { font-size: var(--font-xs); color: var(--text-faint); }
+
+@media (max-width: 520px) {
+  .wb-sys-log-row { grid-template-columns: auto 1fr; row-gap: var(--space-1); padding: var(--space-3) var(--space-4); }
+  .wb-sys-log-msg { grid-column: 1 / -1; grid-row: 2; }
+  .wb-sys-log-time { justify-self: end; }
+}

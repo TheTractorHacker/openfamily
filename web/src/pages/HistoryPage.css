@@ -270,3 +270,8 @@
     display: none;
   }
 }
+
+@media (max-width: 520px) {
+  .wb-history-toolbar { gap: var(--space-3); }
+  .wb-history-toolbar .wb-field { min-width: 0; flex: 1 1 140px; }
+}
