@@ -8,10 +8,10 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/coder/websocket"
-	"github.com/jackc/pgx/v5"
 	"github.com/TheTractorHacker/openfamily/backend/internal/auth"
 	"github.com/TheTractorHacker/openfamily/backend/internal/models"
+	"github.com/coder/websocket"
+	"github.com/jackc/pgx/v5"
 )
 
 // adminWsMember is a family member in the platform-admin members snapshot,
@@ -88,7 +88,14 @@ func (s *Server) AdminStream(w http.ResponseWriter, r *http.Request) {
 		done: make(chan struct{}),
 	}
 	c.userID = claims.UserID
-	s.auditAdminView(r.Context(), claims.UserID, "", "opened live location stream for all families", clientIP(r))
+	// With admin location access off (default) the socket still opens, for
+	// avatar updates, but carries no positions: the snapshot is redacted and
+	// the hub skips it for location, presence and alert frames.
+	redact := s.adminLocationDenied(r.Context(), claims.UserID, "", "opened live stream for all families (locations withheld)", clientIP(r))
+	c.noLocation = redact
+	if !redact {
+		s.auditAdminView(r.Context(), claims.UserID, "", "opened live location stream for all families", clientIP(r))
+	}
 	s.hub.registerAdmin(c)
 	go s.hub.watch(c, wsRevalidateInterval, func(ctx context.Context) (bool, error) {
 		return s.adminStreamAuthorized(ctx, claims.UserID, claims.TokenVersion)
@@ -115,6 +122,11 @@ func (s *Server) AdminStream(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		slog.Warn("admin members snapshot failed", "err", err, "user_id", claims.UserID)
 		return
+	}
+	if redact {
+		for i := range members {
+			members[i].redactLocation()
+		}
 	}
 	snapshot, err := json.Marshal(map[string]any{"type": "members", "members": members})
 	if err != nil {

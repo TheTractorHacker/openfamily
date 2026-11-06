@@ -168,6 +168,7 @@ func (s *Server) AdminActivityFeed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer rows.Close()
+	redact := s.adminLocationDenied(r.Context(), middleware.ClaimsFromContext(r.Context()).UserID, "", "read activity feed coordinates", clientIP(r))
 	out := []activityOut{}
 	for rows.Next() {
 		var a activityOut
@@ -175,6 +176,9 @@ func (s *Server) AdminActivityFeed(w http.ResponseWriter, r *http.Request) {
 			&a.Detail, &a.Status, &a.Lat, &a.Lon); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to read activity")
 			return
+		}
+		if redact {
+			a.Lat, a.Lon = nil, nil
 		}
 		out = append(out, a)
 	}

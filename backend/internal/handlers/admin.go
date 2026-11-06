@@ -10,11 +10,11 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5"
 	"github.com/TheTractorHacker/openfamily/backend/internal/auth"
 	"github.com/TheTractorHacker/openfamily/backend/internal/middleware"
 	"github.com/TheTractorHacker/openfamily/backend/internal/models"
+	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 )
 
 // adminFamily is the platform-admin view of a family: identity fields plus a
@@ -79,6 +79,8 @@ func (s *Server) AdminListFamilyMembers(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, "family id is required")
 		return
 	}
+	claims := middleware.ClaimsFromContext(r.Context())
+	redact := s.adminLocationDenied(r.Context(), claims.UserID, familyID, "listed member locations of a family", clientIP(r))
 
 	rows, err := s.Pool.Query(r.Context(), `
 		SELECT u.id, u.email, u.name, u.role, u.totp_enabled, u.created_at, u.updated_at,
@@ -109,11 +111,17 @@ func (s *Server) AdminListFamilyMembers(w http.ResponseWriter, r *http.Request) 
 			writeError(w, http.StatusInternalServerError, "failed to scan member")
 			return
 		}
+		if redact {
+			redactAdminLocation(&m)
+		}
 		members = append(members, m)
 	}
 	if rows.Err() != nil {
 		writeError(w, http.StatusInternalServerError, "failed to read members")
 		return
+	}
+	if !redact {
+		s.auditAdminView(r.Context(), claims.UserID, familyID, "listed member locations of a family", clientIP(r))
 	}
 	// Distinguish "family has no members" (empty array) from "family not found".
 	if len(members) == 0 {
@@ -152,6 +160,7 @@ func (s *Server) AdminListMembers(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "unauthenticated")
 		return
 	}
+	redact := s.adminLocationDenied(r.Context(), claims.UserID, "", "listed last known locations of all members", clientIP(r))
 	rows, err := s.Pool.Query(r.Context(), `
 		SELECT u.id, u.email, u.name, u.role, u.totp_enabled, u.created_at, u.updated_at,
 		       u.avatar_data IS NOT NULL, u.avatar_version, u.avatar_updated_at,
@@ -185,13 +194,18 @@ func (s *Server) AdminListMembers(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		m.FamilyName = familyName
+		if redact {
+			redactAdminLocation(&m.MemberWithLocation)
+		}
 		members = append(members, m)
 	}
 	if rows.Err() != nil {
 		writeError(w, http.StatusInternalServerError, "failed to read members")
 		return
 	}
-	s.auditAdminView(r.Context(), claims.UserID, "", "listed last known locations of all members", clientIP(r))
+	if !redact {
+		s.auditAdminView(r.Context(), claims.UserID, "", "listed last known locations of all members", clientIP(r))
+	}
 	writeJSON(w, http.StatusOK, members)
 }
 

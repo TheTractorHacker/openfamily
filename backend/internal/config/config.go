@@ -82,6 +82,13 @@ type Config struct {
 	// modes.
 	VerbosePush bool
 
+	// AdminLocationAccess lets platform admins read member locations (admin
+	// member lists, history, export, live admin stream, activity coordinates).
+	// Default false (SEC-007): a platform admin manages accounts but sees no
+	// positions unless the operator explicitly opts in. Every permitted read
+	// is audit-logged (admin.location_view).
+	AdminLocationAccess bool
+
 	// DirectPush enables the built-in direct push channel (DIRECT_PUSH,
 	// default true): the app keeps an authenticated stream open and the server
 	// delivers alerts over it, with no ntfy/FCM dependency. See docs/push.md.
@@ -184,6 +191,12 @@ type Config struct {
 	TwilioAccountSID string
 	TwilioAuthToken  string
 	TwilioFrom       string
+	// SMSProvider selects the SMS backend: twilio (default), telnyx, plivo or
+	// sns. SMSRegion is the AWS region for sns. The credential fields above are
+	// reused for every provider (see docs/sms.md); SMS_ACCOUNT_ID, SMS_AUTH_TOKEN
+	// and SMS_FROM are accepted as provider-neutral aliases.
+	SMSProvider string
+	SMSRegion   string
 
 	// PublicBaseURL is the https origin used in SMS share links
 	// (https://example.com/alerts/share/{token}). Empty or non-https falls
@@ -233,6 +246,7 @@ func Load() Config {
 		DBSSLDisableOK:        getenvBool("DB_SSL_DISABLE_OK", false),
 		InsecureHTTP:          getenvBool("INSECURE_HTTP", false),
 		VerbosePush:           getenvBool("VERBOSE_PUSH", false),
+		AdminLocationAccess:   getenvBool("ADMIN_LOCATION_ACCESS", false),
 		DirectPush:            getenvBool("DIRECT_PUSH", true),
 		NtfyBaseURL:           strings.TrimRight(getenv("NTFY_BASE_URL", ""), "/"),
 		TileURL:               getenv("TILE_URL", DefaultTileURL),
@@ -258,9 +272,11 @@ func Load() Config {
 		APKGitHubToken:        getenv("APK_GITHUB_TOKEN", ""),
 		FlutterAppDir:         getenv("FLUTTER_APP_DIR", "./app"),
 		BuildVersion:          buildVersion,
-		TwilioAccountSID:      getenv("TWILIO_ACCOUNT_SID", ""),
-		TwilioAuthToken:       getenv("TWILIO_AUTH_TOKEN", ""),
-		TwilioFrom:            getenv("TWILIO_FROM", ""),
+		TwilioAccountSID:      getenv("SMS_ACCOUNT_ID", getenv("TWILIO_ACCOUNT_SID", "")),
+		TwilioAuthToken:       getenv("SMS_AUTH_TOKEN", getenv("TWILIO_AUTH_TOKEN", "")),
+		TwilioFrom:            getenv("SMS_FROM", getenv("TWILIO_FROM", "")),
+		SMSProvider:           getenv("SMS_PROVIDER", ""),
+		SMSRegion:             getenv("SMS_REGION", ""),
 		PublicBaseURL:         strings.TrimRight(getenv("PUBLIC_BASE_URL", ""), "/"),
 		SiteAddress:           strings.TrimSpace(getenv("SITE_ADDRESS", "")),
 		TrustedProxies:        strings.TrimSpace(getenv("TRUSTED_PROXIES", "")),

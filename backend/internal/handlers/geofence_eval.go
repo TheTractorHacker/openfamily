@@ -7,8 +7,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/TheTractorHacker/openfamily/backend/internal/push"
+	"github.com/jackc/pgx/v5"
 )
 
 // geofenceDebounceInterval is the minimum time between fired notifications for
@@ -28,6 +28,21 @@ const geofenceDebounceInterval = 60 * time.Second
 // runs: it re-evaluates the latest point per user, fires pending (debounced)
 // transitions whose window elapsed, and re-dispatches pushes that failed.
 const geofenceReconcileInterval = 60 * time.Second
+
+// geofenceMaxAccuracyMeters is the worst horizontal accuracy (the fix's
+// reported 68% radius) at which a position may drive a geofence transition.
+// A coarser fix (typically a network/cell fallback or indoor GPS multipath that
+// can place a stationary phone hundreds of metres away) is stored and shown on
+// the map but never enters, exits or arms a pending transition, so GPS drift
+// cannot raise a false arrival/departure. A fix with no reported accuracy is
+// trusted (older clients). Documented in docs/geofencing.md.
+const geofenceMaxAccuracyMeters = 100.0
+
+// geofenceFixUsable reports whether a fix is accurate enough to evaluate
+// geofences against.
+func geofenceFixUsable(accuracyMeters *float64) bool {
+	return accuracyMeters == nil || *accuracyMeters <= geofenceMaxAccuracyMeters
+}
 
 // pushRetryAttempts is how many times a failed push dispatch is retried before
 // giving up, and pushRetryBackoff is the delay between attempts. Retrying
@@ -75,7 +90,10 @@ type geofenceCandidate struct {
 // point per user on a timer, so a transient failure is self-healed on the next
 // pass. A crash between the location INSERT and evaluation is likewise healed
 // by the worker.
-func (s *Server) evaluateGeofences(ctx context.Context, userID string, lon, lat float64, ts time.Time) {
+func (s *Server) evaluateGeofences(ctx context.Context, userID string, lon, lat float64, ts time.Time, accuracyMeters *float64) {
+	if !geofenceFixUsable(accuracyMeters) {
+		return
+	}
 	// Bubbles (temporary per-person geofences, bubbles.go) ride the same path.
 	s.evaluateBubbles(ctx, userID, lon, lat, ts)
 
@@ -445,7 +463,7 @@ const reconcileLookback = 24 * time.Hour
 // DISTINCT ON over the whole locations hypertable (PERF-001). The ts predicate
 // bounds the work to recently active users. $1 is the lookback in seconds.
 const reconcileLatestPointsSQL = `
-	SELECT user_id, lon, lat, ts
+	SELECT user_id, lon, lat, ts, accuracy_meters
 	FROM member_positions
 	WHERE ts > now() - make_interval(secs => $1::float8)`
 
@@ -466,11 +484,12 @@ func (s *Server) reconcileLatestPoints(ctx context.Context) {
 		var userID string
 		var lon, lat float64
 		var ts time.Time
-		if err := rows.Scan(&userID, &lon, &lat, &ts); err != nil {
+		var accuracy *float64
+		if err := rows.Scan(&userID, &lon, &lat, &ts, &accuracy); err != nil {
 			slog.Error("geofence: reconcile scan", "err", err)
 			continue
 		}
-		s.evaluateGeofences(ctx, userID, lon, lat, ts)
+		s.evaluateGeofences(ctx, userID, lon, lat, ts, accuracy)
 	}
 	if err := rows.Err(); err != nil {
 		slog.Error("geofence: reconcile iterate", "err", err)

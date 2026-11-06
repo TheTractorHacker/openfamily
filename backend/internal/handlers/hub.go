@@ -33,6 +33,9 @@ type wsClient struct {
 	// filter is the one circle an aware client subscribed to; "" means all of
 	// its circles. Guarded by hub.mu.
 	filter string
+	// noLocation marks a platform-admin socket opened while admin location
+	// access is disabled: it never receives location-bearing frames.
+	noLocation bool
 }
 
 // close signals the writer goroutine to stop and closes the connection. It is
@@ -411,10 +414,19 @@ func (h *hub) unregisterAdmin(c *wsClient) {
 // broadcastAdmin enqueues msg to every connected platform admin client without
 // blocking. A client whose send buffer is full is dropped and unregistered so a
 // slow consumer cannot stall location ingest.
-func (h *hub) broadcastAdmin(msg []byte) {
+func (h *hub) broadcastAdmin(msg []byte) { h.broadcastAdminFiltered(msg, true) }
+
+// broadcastAdminSafe is broadcastAdmin for frames that carry no location
+// (avatar metadata): it also reaches admin sockets with location access off.
+func (h *hub) broadcastAdminSafe(msg []byte) { h.broadcastAdminFiltered(msg, false) }
+
+func (h *hub) broadcastAdminFiltered(msg []byte, location bool) {
 	h.mu.Lock()
 	clients := make([]*wsClient, 0, len(h.admins))
 	for c := range h.admins {
+		if location && c.noLocation {
+			continue
+		}
 		clients = append(clients, c)
 	}
 	h.mu.Unlock()

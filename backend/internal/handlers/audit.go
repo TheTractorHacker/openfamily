@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/TheTractorHacker/openfamily/backend/internal/middleware"
+	"github.com/TheTractorHacker/openfamily/backend/internal/models"
 )
 
 // auditEntry is the API representation of a single audit log row.
@@ -58,6 +59,27 @@ func (s *Server) auditAdminView(ctx context.Context, adminID, familyID, detail, 
 		return
 	}
 	s.logAudit(ctx, adminID, familyID, "admin.location_view", detail, ipAddress)
+}
+
+// adminLocationDenied reports whether platform-admin location reads are
+// disabled on this deployment (ADMIN_LOCATION_ACCESS unset). When denied it
+// writes an admin.location_denied audit row (throttled like views) and the
+// caller must refuse or redact the read.
+func (s *Server) adminLocationDenied(ctx context.Context, adminID, familyID, detail, ip string) bool {
+	if s.AdminLocationAccess {
+		return false
+	}
+	if s.viewAudit == nil || s.viewAudit.Allow("admindeny:"+adminID+"|"+familyID+"|"+detail, 1, auditViewThrottle) {
+		s.logAudit(ctx, adminID, familyID, "admin.location_denied", detail, ip)
+	}
+	return true
+}
+
+// redactAdminLocation clears every location-derived field of an admin member
+// row (the member and their account fields stay listed).
+func redactAdminLocation(m *models.MemberWithLocation) {
+	m.Lat, m.Lon, m.TS, m.BatteryPct, m.SpeedMPS, m.HeadingDeg, m.MotionState, m.AccuracyMeters, m.LastSeenAt =
+		nil, nil, nil, nil, nil, nil, nil, nil, nil
 }
 
 // clientIP extracts the client IP from r.RemoteAddr, stripping any port.
