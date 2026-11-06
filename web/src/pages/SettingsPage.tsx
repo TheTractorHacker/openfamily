@@ -21,6 +21,7 @@ import { Button, Card, CopyButton, Mono, Spinner } from '../components/primitive
 import { ServerVersionCard } from './ServerVersionCard'
 import { TwilioSettingsCard } from './TwilioSettingsCard'
 import { DawarichSettingsCard } from './DawarichSettingsCard'
+import { IntegrationsCard } from './IntegrationsCard'
 import { ThemeAccentCard } from './ThemeAccentCard'
 import { UnitsDefaultCard } from './UnitsDefaultCard'
 import { DomainSettingsCard } from './DomainSettingsCard'
@@ -344,6 +345,7 @@ export function SettingsPage({ email, onLogout }: SettingsPageProps) {
           {isPlatformAdmin && <UnitsDefaultCard />}
           {isPlatformAdmin && <MapStyleCard />}
           {isPlatformAdmin && <DawarichSettingsCard />}
+          <IntegrationsCard />
 
           {/* Self-update lives here too: it restarts the server the panel is
               served from, so only platform admins see the card. */}

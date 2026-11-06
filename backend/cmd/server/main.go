@@ -181,6 +181,9 @@ func main() {
 
 	// Segment new locations into trips (bounded, cancelled with ctx).
 	go (&trips.Worker{Store: trips.NewStore(pool)}).Run(ctx)
+	// Home Assistant event outbox scanner and webhook delivery (idle unless a
+	// token with the events scope exists).
+	go srv.RunHAIntegrations(ctx)
 
 	trustedProxies, err := resolveTrustedProxies(cfg)
 	if err != nil {
@@ -211,6 +214,13 @@ func main() {
 	r.Put("/internal/e2ee/server-device", srv.E2EEPinServerDevice)
 	r.Post("/internal/e2ee/ingest", srv.E2EEServerIngest)
 	r.Get("/alerts/share/{token}", srv.ShareAlert)
+	// Home Assistant integration API (docs/integrations/home-assistant.md): read-only,
+	// authenticated by a scoped integration token (ofha_...) checked inside each
+	// handler (a user session token is refused), per-token rate limited and audited.
+	r.Get("/integrations/ha/v1/ping", srv.HAPing)
+	r.Get("/integrations/ha/v1/members", srv.HAMembers)
+	r.Get("/integrations/ha/v1/places", srv.HAPlaces)
+	r.Get("/integrations/ha/v1/events", srv.HAEvents)
 	// Public invite landing page: static, no database access, no secrets.
 	r.Get("/join/{code}", srv.JoinLanding)
 	// Public signed-APK download for invited family members (rate limited).
@@ -406,6 +416,14 @@ func main() {
 		r.Post("/bubbles", srv.CreateBubble)
 		r.Get("/bubbles", srv.ListBubbles)
 		r.Delete("/bubbles/{id}", srv.DeleteBubble)
+
+		// Home Assistant integration tokens (managed by their owner; the admin
+		// panel's Integrations card uses these).
+		r.Get("/integrations/ha/tokens", srv.ListHATokens)
+		r.Post("/integrations/ha/tokens", srv.CreateHAToken)
+		r.Patch("/integrations/ha/tokens/{id}", srv.UpdateHAToken)
+		r.Delete("/integrations/ha/tokens/{id}", srv.RevokeHAToken)
+		r.Post("/integrations/ha/tokens/{id}/test", srv.TestHAWebhook)
 
 		r.Post("/share-links", srv.CreateShareLink)
 		r.Get("/share-links", srv.ListShareLinks)

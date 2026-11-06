@@ -157,6 +157,17 @@ who share a home, not for vehicles, tools, or public sharing.
 - ntfy / UnifiedPush on Android; APNs on iOS
 - One generic APK for every deployment — first launch asks for the server URL
 
+### Home Assistant
+
+- A HACS custom component (`integrations/home_assistant/`) turns every family
+  member into a device tracker with battery, speed, place and driving sensors,
+  SOS / crash binary sensors, and `openfamily_arrival`, `openfamily_departure`,
+  `openfamily_sos` and other events on the Home Assistant bus
+- Scoped, read-only, revocable integration tokens (Settings, Integrations in the
+  admin panel); signed webhooks with retry; a Private circle never reveals a
+  position to Home Assistant
+- Setup and automation examples: [docs/integrations/home-assistant.md](docs/integrations/home-assistant.md)
+
 ### Web admin panel
 
 Served by the API at `/admin` (embedded in the Go binary). A **platform
@@ -564,6 +575,9 @@ circle", see `docs/design/E2EE.md`). In a normal circle the server must read
   mode" section of `docs/design/E2EE.md`.
 
 ## API reference
+
+The read-only Home Assistant API (`/integrations/ha/v1/*`, scoped tokens) is
+documented in [docs/integrations/home-assistant.md](docs/integrations/home-assistant.md).
 
 <details>
 <summary>Family API</summary>

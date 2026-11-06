@@ -171,6 +171,8 @@ func (s *Server) notifyLowBattery(ctx context.Context, ownerID string, pct float
 	}
 	var name string
 	_ = s.Pool.QueryRow(ctx, `SELECT name FROM users WHERE id = $1`, ownerID).Scan(&name)
+	s.haEnqueue(ctx, "low_battery", ownerID, fmt.Sprintf("lowbat:%s:%d", ownerID, time.Now().Unix()), "", "", "", time.Now(),
+		map[string]any{"battery_pct": int(pct)})
 	s.notifySharersRender(ctx, ownerID, "low_battery", notifLowBattery, func(rc pushRecipient) (string, string) {
 		who := nameIf(rc.Show, name)
 		return who + "'s battery is low", fmt.Sprintf("%s's phone is at %d%%.", who, int(pct))

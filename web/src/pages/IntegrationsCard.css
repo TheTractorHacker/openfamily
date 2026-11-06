@@ -1,0 +1,83 @@
+/* Integrations card (Home Assistant) */
+.wb-ha-reveal {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  margin: 0 0 var(--space-4);
+  background: var(--status-orange-bg);
+  border: 1px solid var(--status-orange-border);
+  border-radius: var(--radius-md);
+}
+.wb-ha-secret {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--space-1) var(--space-2);
+  align-items: center;
+}
+.wb-ha-secret .wb-label { grid-column: 1 / -1; }
+.wb-ha-secret code,
+.wb-ha-snippet pre {
+  font-family: var(--font-mono);
+  font-size: var(--font-sm);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  padding: var(--space-2) var(--space-3);
+  overflow-x: auto;
+  white-space: pre;
+  word-break: normal;
+  margin: 0;
+}
+.wb-ha-snippet {
+  position: relative;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-soft);
+  padding: var(--space-2) var(--space-3);
+}
+.wb-ha-snippet summary { cursor: pointer; font-weight: 600; font-size: var(--font-sm); }
+.wb-ha-snippet pre { margin-top: var(--space-2); }
+.wb-ha-snippet .wb-copy-btn { position: absolute; top: var(--space-2); right: var(--space-3); }
+
+.wb-ha-form { display: flex; flex-direction: column; gap: var(--space-4); }
+.wb-ha-fieldset {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  background: var(--surface-soft);
+}
+.wb-ha-fieldset legend { padding: 0 var(--space-2); }
+.wb-ha-check {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  font-size: var(--font-md);
+  cursor: pointer;
+}
+.wb-ha-check input { margin-top: 3px; accent-color: var(--accent); }
+.wb-ha-events { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: var(--space-2); }
+
+.wb-ha-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-3); }
+.wb-ha-row {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-soft);
+  padding: var(--space-3) var(--space-4);
+}
+.wb-ha-row-head { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--space-3); flex-wrap: wrap; }
+.wb-ha-row-main { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
+.wb-ha-row-actions { display: flex; gap: var(--space-2); }
+.wb-ha-badges { display: flex; flex-wrap: wrap; gap: var(--space-1); margin-top: var(--space-1); }
+.wb-ha-webhook {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
+}
