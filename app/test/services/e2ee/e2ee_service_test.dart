@@ -173,18 +173,91 @@ void main() {
       expect(server.circles[circle]!.wraps.keys.where((String k) => k.startsWith('2/')).length, 2);
     });
 
-    test('pending: first-seen member is wrapped automatically (TOFU)', () async {
+    test('pending: first-seen member is wrapped automatically by the epoch publisher only (TOFU)', () async {
       final (Phone a, Phone b) = await twoMembers();
       await a.svc.enableCircle(circle);
       server.circles[circle]!.members.add(uC);
       final Phone c = Phone(server, uC);
       await c.svc.registerThisDevice();
-      final PendingReport r = await b.svc.processPending(circle);
-      expect(r.wrapped, 0); // b does not hold... actually does after sync
       await b.svc.syncCircleKeys(circle);
-      final PendingReport r2 = await b.svc.processPending(circle);
-      expect(r2.wrapped, 1);
+      // Bob holds the key but did not publish the epoch: he must not issue it.
+      expect((await b.svc.processPending(circle)).wrapped, 0);
+      expect(await c.svc.syncCircleKeys(circle), 0);
+      expect((await a.svc.processPending(circle)).wrapped, 1);
       expect(await c.svc.syncCircleKeys(circle), 1);
+    });
+
+    test('a wrap whose key does not match the signed commitment is rejected; the publisher can replace it', () async {
+      server.circle(circle, members: <String>[uA, uB, uC], admin: uA);
+      final Phone a = Phone(server, uA), b = Phone(server, uB), c = Phone(server, uC);
+      for (final Phone p in <Phone>[a, b, c]) {
+        await p.svc.registerThisDevice();
+      }
+      await a.svc.enableCircle(circle);
+      final FakeCircle fc = server.circles[circle]!;
+      final LocalIdentity bid = (await b.svc.identity())!;
+      final LocalIdentity cid = (await c.svc.identity())!;
+      final DeviceKey cKey = server.activeOf(uC).single;
+
+      // A malicious member cannot insert a wrap for Cleo through the API...
+      final Uint8List bogusKey = E2ee.randomBytes(32);
+      final Uint8List aad = E2ee.wrapAad(circle, 1, cid.deviceId, bid.deviceId);
+      final Uint8List blob = await E2ee.wrap(bogusKey, cid.xPub, aad);
+      final Uint8List sig = await E2ee.sign(bid.edSeed, E2ee.wrapSigMessage(circle, 1, cid.deviceId, bid.deviceId, blob));
+      await expectLater(
+          b.svc.api.submitWraps(circle, 1, <Map<String, dynamic>>[
+            <String, dynamic>{'recipient_device_id': cid.deviceId, 'wrapper_device_id': bid.deviceId, 'wrapped_key': E2ee.b64(blob), 'signature': E2ee.b64(sig)}
+          ]),
+          throwsA(isA<StateError>()));
+
+      // ...and even if a hostile server stored it, Cleo's phone refuses the key.
+      fc.wraps['1/${cid.deviceId}'] = WrapRecord(
+          epoch: 1, recipientDeviceId: cid.deviceId, wrapperDeviceId: bid.deviceId,
+          wrapperEdPub: bid.edPub, blob: blob, signature: sig);
+      expect(await c.svc.syncCircleKeys(circle), 0);
+      expect(c.svc.rejectedWraps, 1);
+      expect(await c.svc.circleKey(circle, 1), isNull);
+
+      // The publisher's later wrap replaces the bad one and is accepted.
+      await a.svc.confirmWrap(circle, cKey);
+      expect(await c.svc.syncCircleKeys(circle), 1);
+      expect(E2ee.hex((await c.svc.circleKey(circle, 1))!), E2ee.hex((await a.svc.circleKey(circle, 1))!));
+      // A non-publisher cannot confirm-wrap for others either.
+      await b.svc.syncCircleKeys(circle);
+      await expectLater(b.svc.confirmWrap(circle, cKey), throwsA(isA<StateError>()));
+    });
+
+    test('an epoch record with a forged signature or commitment is not trusted', () async {
+      final (Phone a, Phone b) = await twoMembers();
+      await a.svc.enableCircle(circle);
+      final FakeCircle fc = server.circles[circle]!;
+      final EpochRecord r = fc.epochRecords[1]!;
+      fc.epochRecords[1] = EpochRecord(epoch: 1, action: r.action, publisherUserId: r.publisherUserId,
+          publisherDeviceId: r.publisherDeviceId, publisherPub: r.publisherPub,
+          commitment: E2ee.randomBytes(32), signature: r.signature);
+      expect(await b.svc.syncCircleKeys(circle), 0);
+      expect(b.svc.rejectedWraps, 1);
+      fc.epochRecords.remove(1);
+      expect(await b.svc.syncCircleKeys(circle), 0); // no record: fail closed
+    });
+
+    test('approval is transitive: a key signed by an unapproved key stays unapproved until the root is approved', () async {
+      final (Phone a, Phone b) = await twoMembers();
+      await a.svc.enableCircle(circle);
+      await b.svc.syncCircleKeys(circle);
+      final Phone b2 = Phone(server, uB);
+      await b2.svc.registerThisDevice(reset: true); // new root, needs approval
+      final Phone b3 = Phone(server, uB);
+      final String code = await b2.svc.approveLinkRequest(await b2.svc.inspectLinkRequest(await b3.svc.createLinkRequest()));
+      await b3.svc.registerThisDevice(approval: b3.svc.parseApproval(code)); // cross-signed by the UNAPPROVED b2
+      PendingReport r = await a.svc.processPending(circle);
+      expect(r.wrapped, 0);
+      expect(r.waiting.length, 2); // both wait for approval
+      final DeviceKey root = r.waiting.firstWhere((PendingItem p) => p.key.isRoot).key;
+      await a.svc.approveDevice(circle, root);
+      r = await a.svc.processPending(circle);
+      expect(r.waiting, isEmpty);
+      expect(r.needConfirm.length + r.wrapped, 2); // now only the normal policy applies
     });
 
     test('replacement key of a VERIFIED member waits for explicit approval, then confirm', () async {

@@ -63,7 +63,7 @@ type vIdent struct {
 	BindingSig                 string
 }
 type vWrap struct {
-	CircleKey, EphemeralSecret, Nonce, AAD, Blob, SigMessage, Signature string
+	CircleKey, EphemeralSecret, Nonce, AAD, Blob, SigMessage, Signature, Commitment string
 }
 type vSeal struct {
 	Purpose, Nonce, Plaintext, Payload string
@@ -112,6 +112,7 @@ func build(t *testing.T) vectors {
 		t.Fatal(err)
 	}
 	sm, _ := WrapSigMessage(circ, 1, devB, devA, blob)
+	commit, _ := KeyCommitment(ck, circ, 1)
 	var n2 [NonceLen]byte
 	copy(n2[:], bytes.Repeat([]byte{0x0b}, NonceLen))
 	pt := []byte(`{"lat":52.5200,"lon":13.4050}`)
@@ -130,7 +131,7 @@ func build(t *testing.T) vectors {
 		Safety:   SafetyNumber(uidA, [][]byte{fpA}, uidB, [][]byte{fpB}),
 		CircleID: circ, Epoch: 1,
 		Wrap: vWrap{hex.EncodeToString(ck), hex.EncodeToString(esk[:]), hex.EncodeToString(nonce[:]), hex.EncodeToString(aad),
-			hex.EncodeToString(blob), hex.EncodeToString(sm), hex.EncodeToString(ed25519.Sign(a.priv, sm))},
+			hex.EncodeToString(blob), hex.EncodeToString(sm), hex.EncodeToString(ed25519.Sign(a.priv, sm)), hex.EncodeToString(commit)},
 		Seal: vSeal{"loc", hex.EncodeToString(n2[:]), hex.EncodeToString(pt), hex.EncodeToString(payload)},
 		LogAction: vLog{int(ActRegister), uidB, devA, devB, hex.EncodeToString(fpB), hex.EncodeToString(lm), hex.EncodeToString(lsig),
 			hex.EncodeToString(GenesisHash), "1", hex.EncodeToString(lh)},
@@ -475,5 +476,23 @@ func TestSealOpen(t *testing.T) {
 	}
 	if !strings.HasPrefix(DigitGroups(make([]byte, 32)), "") || ConstEq([]byte("a"), []byte("b")) {
 		t.Fatal("sanity")
+	}
+}
+
+func TestKeyCommitment(t *testing.T) {
+	k := seed(0x42)
+	c1, err := KeyCommitment(k, circ, 1)
+	if err != nil || len(c1) != 32 {
+		t.Fatal(err)
+	}
+	c1b, _ := KeyCommitment(k, circ, 1)
+	c2, _ := KeyCommitment(k, circ, 2)
+	c3, _ := KeyCommitment(seed(0x43), circ, 1)
+	c4, _ := KeyCommitment(k, "dddddddd-dddd-4ddd-8ddd-dddddddddddd", 1)
+	if !bytes.Equal(c1, c1b) || bytes.Equal(c1, c2) || bytes.Equal(c1, c3) || bytes.Equal(c1, c4) {
+		t.Fatal("commitment must be deterministic and bound to key, epoch and circle")
+	}
+	if bytes.Contains(c1, k) {
+		t.Fatal("commitment leaks the key")
 	}
 }

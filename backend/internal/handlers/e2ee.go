@@ -69,10 +69,10 @@ const e2eeDeviceCols = `d.device_id::text, d.user_id::text, d.kind, d.ed25519_pu
 	d.registered_by_device_id::text, d.registered_by_pub, d.registration_action, d.registration_signature, d.initial,
 	d.label, d.created_at, d.revoked_at, d.revoked_reason`
 
-// e2eeApprovedExpr is true when wraps may go to device d in circle $N.
+// e2eeApprovedExpr is true when wraps may go to device d in circle $N. It is
+// transitive: see migration 000151 (e2ee_device_approved).
 func e2eeApprovedExpr(circleParam string) string {
-	return `(d.initial OR d.registered_by_device_id <> d.device_id OR EXISTS (
-		SELECT 1 FROM device_approvals ap WHERE ap.device_id = d.device_id AND ap.circle_id = ` + circleParam + `))`
+	return `e2ee_device_approved(d.device_id, ` + circleParam + `::uuid)`
 }
 
 type rowScanner interface{ Scan(dest ...any) error }
@@ -692,9 +692,32 @@ func (s *Server) E2EECircleState(w http.ResponseWriter, r *http.Request) {
 			mo.Devices = append(mo.Devices, d)
 		}
 	}
+	type epochOut struct {
+		Epoch         int    `json:"epoch"`
+		Action        int    `json:"action"`
+		PublisherUser string `json:"publisher_user_id"`
+		PublisherDev  string `json:"publisher_device_id"`
+		PublisherPub  string `json:"publisher_ed25519_pub"`
+		KeyCommitment string `json:"key_commitment"`
+		Signature     string `json:"signature"`
+	}
+	epochs := []epochOut{}
+	if er, err := s.Pool.Query(ctx, `SELECT epoch, action, user_id::text, actor_device_id::text, actor_pub, ref, signature
+		FROM e2ee_log WHERE circle_id = $1 AND action IN (5, 6) ORDER BY seq`, m.CircleID); err == nil {
+		for er.Next() {
+			var o epochOut
+			var pub, ref, sig []byte
+			if er.Scan(&o.Epoch, &o.Action, &o.PublisherUser, &o.PublisherDev, &pub, &ref, &sig) == nil {
+				o.PublisherPub, o.KeyCommitment, o.Signature = base64.StdEncoding.EncodeToString(pub),
+					base64.StdEncoding.EncodeToString(ref), base64.StdEncoding.EncodeToString(sig)
+				epochs = append(epochs, o)
+			}
+		}
+		er.Close()
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"circle_id": m.CircleID, "mode": mode, "epoch": epoch, "rekey_required": rekey,
-		"updated_at": updated, "members": members,
+		"updated_at": updated, "members": members, "epochs": epochs,
 	})
 }
 
@@ -709,21 +732,11 @@ type wrapIn struct {
 type wrapsReq struct {
 	Epoch int      `json:"epoch"`
 	Wraps []wrapIn `json:"wraps"`
+	// KeyCommitment = HKDF(circle_key, ..., "OFE2EE1-KEY-COMMIT") (base64, 32
+	// bytes). It is the signed `ref` of the enable/epoch log action; phones check
+	// every unwrapped key against it before accepting it.
+	KeyCommitment string `json:"key_commitment"`
 	signedAction
-}
-
-// wrapsDigest recomputes the commitment the actor signed.
-func wrapsDigest(wraps []wrapIn) ([]byte, bool) {
-	ids := make([]string, len(wraps))
-	blobs := make([][]byte, len(wraps))
-	for i, w := range wraps {
-		b, ok := b64d(w.WrappedKey, e2ee.WrapBlobLen)
-		if !ok {
-			return nil, false
-		}
-		ids[i], blobs[i] = w.RecipientDeviceID, b
-	}
-	return e2ee.WrapsDigest(ids, blobs), true
 }
 
 // insertWraps validates and stores wraps for (circleID, epoch). Every wrap must
@@ -731,7 +744,7 @@ func wrapsDigest(wraps []wrapIn) ([]byte, bool) {
 // member that is APPROVED in this circle, and carry a valid wrapper signature.
 // It returns how many rows were inserted and whether any wrap targets one of the
 // caller's own keys. Existing wraps are never overwritten.
-func (s *Server) insertWraps(ctx context.Context, tx pgx.Tx, circleID string, epoch int, callerID string, wraps []wrapIn) (inserted int, selfWrapped bool, msg string) {
+func (s *Server) insertWraps(ctx context.Context, tx pgx.Tx, circleID string, epoch int, callerID, publisherUserID string, wraps []wrapIn) (inserted int, selfWrapped bool, msg string) {
 	if len(wraps) > e2eeMaxWrapsPerReq {
 		return 0, false, "too many wraps in one request"
 	}
@@ -764,12 +777,21 @@ func (s *Server) insertWraps(ctx context.Context, tx pgx.Tx, circleID string, ep
 		if !approved {
 			return 0, false, "recipient device is waiting for approval"
 		}
+		// Only the epoch's publisher may issue the key to other people; anyone may
+		// wrap only to their OWN other keys (new phone, recovery identity). A
+		// malicious member therefore cannot pre-seed or substitute a wrap.
+		if recipientUser != callerID && callerID != publisherUserID {
+			return 0, false, "only the publisher of this epoch may wrap its key for other members"
+		}
 		if err := e2ee.VerifyWrapSignature(wrapperEd, circleID, uint32(epoch), w.RecipientDeviceID, w.WrapperDeviceID, blob, sig); err != nil {
 			return 0, false, "wrap signature does not verify"
 		}
 		ct, err := tx.Exec(ctx, `INSERT INTO circle_key_wraps
 			(circle_id, epoch, recipient_device_id, wrapper_device_id, wrapper_ed25519_pub, wrapped_key, signature)
-			VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING`,
+			VALUES ($1,$2,$3,$4,$5,$6,$7)
+			ON CONFLICT (circle_id, epoch, recipient_device_id) DO UPDATE SET
+			  wrapper_device_id = EXCLUDED.wrapper_device_id, wrapper_ed25519_pub = EXCLUDED.wrapper_ed25519_pub,
+			  wrapped_key = EXCLUDED.wrapped_key, signature = EXCLUDED.signature, created_at = now()`,
 			circleID, epoch, w.RecipientDeviceID, w.WrapperDeviceID, wrapperEd, blob, sig)
 		if err != nil {
 			return 0, false, "failed to store wraps"
@@ -901,12 +923,12 @@ func (s *Server) commitEpoch(w http.ResponseWriter, r *http.Request, tx pgx.Tx, 
 		writeError(w, http.StatusBadRequest, "at least one wrap is required")
 		return false
 	}
-	digest, ok := wrapsDigest(req.Wraps)
+	commit, ok := b64d(req.KeyCommitment, e2ee.KeyLen)
 	if !ok {
-		writeError(w, http.StatusBadRequest, "malformed wrap")
+		writeError(w, http.StatusBadRequest, "key_commitment must be 32 bytes, base64")
 		return false
 	}
-	_, self, msg := s.insertWraps(ctx, tx, circleID, req.Epoch, uid, req.Wraps)
+	_, self, msg := s.insertWraps(ctx, tx, circleID, req.Epoch, uid, uid, req.Wraps)
 	if msg != "" {
 		writeError(w, http.StatusBadRequest, msg)
 		return false
@@ -915,7 +937,7 @@ func (s *Server) commitEpoch(w http.ResponseWriter, r *http.Request, tx pgx.Tx, 
 		writeError(w, http.StatusBadRequest, "the new key must be wrapped to the caller's own device")
 		return false
 	}
-	if !s.verifyCircleAction(w, r, tx, action, uid, circleID, req.Epoch, "", digest, req.signedAction) {
+	if !s.verifyCircleAction(w, r, tx, action, uid, circleID, req.Epoch, "", commit, req.signedAction) {
 		return false
 	}
 	if _, err := tx.Exec(ctx, `UPDATE circles SET e2ee_mode = 'private', e2ee_epoch = $2,
@@ -957,7 +979,10 @@ func (s *Server) E2EESubmitWraps(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "epoch must be between 1 and the current epoch")
 		return
 	}
-	n, _, msg := s.insertWraps(r.Context(), tx, m.CircleID, req.Epoch, uid, req.Wraps)
+	var publisher string
+	_ = tx.QueryRow(r.Context(), `SELECT user_id::text FROM e2ee_log WHERE circle_id = $1 AND epoch = $2 AND action IN (5, 6)
+		ORDER BY seq DESC LIMIT 1`, m.CircleID, req.Epoch).Scan(&publisher)
+	n, _, msg := s.insertWraps(r.Context(), tx, m.CircleID, req.Epoch, uid, publisher, req.Wraps)
 	if msg != "" {
 		writeError(w, http.StatusBadRequest, msg)
 		return
@@ -1227,6 +1252,19 @@ func (s *Server) E2EELog(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	vr.Close()
+	mine := map[string]bool{}
+	cr, err := s.Pool.Query(ctx, `SELECT circle_id::text FROM live_circle_members WHERE user_id = $1`, uid)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load log")
+		return
+	}
+	for cr.Next() {
+		var id string
+		if cr.Scan(&id) == nil {
+			mine[id] = true
+		}
+	}
+	cr.Close()
 	rows, err := s.Pool.Query(ctx, `SELECT seq, action, user_id::text, actor_device_id::text, actor_pub, circle_id::text,
 		subject_id::text, epoch, ref, signature, prev_hash, entry_hash, created_at
 		FROM e2ee_log WHERE seq > $1 ORDER BY seq LIMIT 500`, after)
@@ -1248,7 +1286,21 @@ func (s *Server) E2EELog(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		e.PrevHash, e.EntryHash = hex.EncodeToString(prev), hex.EncodeToString(hash)
-		if !visible[user] {
+		// An entry is shown in full only when the caller can see the person AND
+		// (for circle-scoped entries) is a member of that circle AND (for an
+		// approval) can see the person whose key was approved. Otherwise only the
+		// hash-chain fields are returned: no ids, circle, subject or epoch.
+		show := visible[user]
+		if show && circle != nil && !mine[*circle] {
+			show = false
+		}
+		if show && action == int(e2ee.ActApprove) && subject != nil {
+			var owner string
+			if s.Pool.QueryRow(ctx, `SELECT user_id::text FROM device_keys WHERE device_id = $1`, *subject).Scan(&owner) != nil || !visible[owner] {
+				show = false
+			}
+		}
+		if !show {
 			e.Redacted = true
 		} else {
 			rs := hex.EncodeToString(ref)

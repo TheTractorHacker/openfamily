@@ -64,7 +64,7 @@ const (
 	domBind         = "OFE2EE1-BIND\x00"
 	domLogAct       = "OFE2EE1-LOGACT\x00"
 	domLog          = "OFE2EE1-LOG\x00"
-	domWraps        = "OFE2EE1-WRAPS\x00"
+	domCommit       = "OFE2EE1-KEY-COMMIT\x00"
 	domWrapKey      = "OFE2EE1-WRAP-KEY\x00"
 	domWrapAAD      = "OFE2EE1-WRAP-AAD\x00"
 	domWrapSig      = "OFE2EE1-WRAP-SIG\x00"
@@ -363,24 +363,6 @@ func VerifyLogAction(actorEdPub []byte, action byte, userID, actorDeviceID, circ
 		return ErrBadSig
 	}
 	return nil
-}
-
-// WrapsDigest commits an enable/epoch action to the exact wraps submitted:
-// SHA-256 over "OFE2EE1-WRAPS\0" and, for each wrap ordered by recipient
-// device id, recipient_device_id(36) || wrapped_key(105).
-func WrapsDigest(recipients []string, blobs [][]byte) []byte {
-	idx := make([]int, len(recipients))
-	for i := range idx {
-		idx[i] = i
-	}
-	sort.Slice(idx, func(a, b int) bool { return recipients[idx[a]] < recipients[idx[b]] })
-	h := sha256.New()
-	h.Write([]byte(domWraps))
-	for _, i := range idx {
-		h.Write([]byte(recipients[i]))
-		h.Write(blobs[i])
-	}
-	return h.Sum(nil)
 }
 
 // GenesisHash is the prev hash of log entry 1.
@@ -772,4 +754,29 @@ func Unpad(p []byte) ([]byte, error) {
 		}
 	}
 	return p[2 : 2+n], nil
+}
+
+// KeyCommitment binds an epoch to its circle key without revealing it:
+// HKDF-SHA256(ikm = circle_key, salt = circle_id || epoch(4 BE),
+// info = "OFE2EE1-KEY-COMMIT\0", 32 bytes). The publisher signs it as the `ref`
+// of the enable/epoch log action; every phone recomputes it from the key it just
+// unwrapped and rejects the key on a mismatch, so a bogus or substituted wrap can
+// never be accepted.
+func KeyCommitment(circleKey []byte, circleID string, epoch uint32) ([]byte, error) {
+	if len(circleKey) != KeyLen {
+		return nil, errors.New("e2ee: circle key must be 32 bytes")
+	}
+	if err := CheckID(circleID); err != nil {
+		return nil, err
+	}
+	eb, err := epochBytes(epoch)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]byte, 32)
+	salt := append([]byte(circleID), eb...)
+	if _, err := io.ReadFull(hkdf.New(sha256.New, circleKey, salt, []byte(domCommit)), out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }

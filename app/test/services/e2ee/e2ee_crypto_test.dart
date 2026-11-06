@@ -65,6 +65,10 @@ void main() {
       expect(E2ee.hex(await E2ee.sign(h(a['EdSeed']), sm)), w['Signature']);
       final Uint8List key = await E2ee.unwrap(h(w['Blob']), h(b['XSecret']), h(b['XPub']), aad);
       expect(E2ee.hex(key), w['CircleKey']);
+      expect(E2ee.hex(await E2ee.keyCommitment(key, circle, v['epoch'])), w['Commitment']);
+      // The commitment is bound to key, epoch and circle.
+      expect(E2ee.hex(await E2ee.keyCommitment(key, circle, 2)), isNot(w['Commitment']));
+      expect(E2ee.hex(await E2ee.keyCommitment(E2ee.randomBytes(32), circle, 1)), isNot(w['Commitment']));
     });
 
     test('seal/open payload and padding match Go', () async {

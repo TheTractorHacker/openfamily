@@ -3,7 +3,10 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:openfamily/models/circle.dart';
+import 'package:openfamily/screens/circle_detail_screen.dart';
 import 'package:openfamily/screens/encryption_keys_screen.dart';
+import 'package:openfamily/services/e2ee/e2ee_app.dart';
+import 'package:openfamily/widgets/ds/ds.dart';
 import 'package:openfamily/screens/key_log_screen.dart';
 import 'package:openfamily/screens/member_safety_screen.dart';
 import 'package:openfamily/screens/recovery_screens.dart';
@@ -21,8 +24,17 @@ const String uB = '22222222-2222-4222-8222-222222222222';
 const String circleId = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 
 class FakeCircles implements CircleService {
+  FakeCircles({this.me = uA});
+  final String me;
   @override
-  Future<String> myUserId() async => uA;
+  Future<String> myUserId() async => me;
+  @override
+  Future<List<CircleMember>> listMembers(String id) async => const <CircleMember>[
+        CircleMember(userId: uA, name: 'Alice', role: 'admin', sharingEnabled: true),
+        CircleMember(userId: uB, name: 'Bob', role: 'member', sharingEnabled: true),
+      ];
+  @override
+  Future<List<CircleInvite>> listInvites(String id) async => <CircleInvite>[];
   @override
   Future<List<Circle>> listCircles() async => const <Circle>[
         Circle(id: circleId, name: 'Family', role: 'admin', sharingEnabled: true, memberCount: 2),
@@ -175,6 +187,56 @@ void main() {
       await open(t, theme: ThemeData.dark());
       expect(t.takeException(), isNull);
       expect(find.textContaining('Normal').evaluate().length + find.textContaining('Private').evaluate().length, greaterThan(0));
+    });
+  });
+
+  group('Private circle toggle in circle settings', () {
+    Finder toggle() => find.widgetWithText(DsToggleRow, 'Private circle (end-to-end encrypted)');
+
+    Future<void> openDetail(WidgetTester t, String role) async {
+      CircleService.instance = FakeCircles(me: role == 'admin' ? uA : uB);
+      E2eeApp.override = alice;
+      addTearDown(() => E2eeApp.override = null);
+      await t.pumpWidget(wrap(CircleDetailScreen(
+          circle: Circle(id: circleId, name: 'Family', role: role, sharingEnabled: true, memberCount: 2))));
+      await t.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 300)));
+      await t.pump(const Duration(milliseconds: 100));
+    }
+
+    testWidgets('is OFF by default for an admin, explains honestly, and turns on after confirmation', (t) async {
+      tall(t);
+      await setup(t);
+      await openDetail(t, 'admin');
+      expect(toggle(), findsOneWidget);
+      expect(t.widget<DsToggleRow>(toggle()).value, isFalse);
+      expect(find.textContaining('location data is not moved yet'), findsOneWidget);
+      expect(server.circles[circleId]!.mode, 'off');
+
+      await t.tap(toggle());
+      await t.pump(const Duration(milliseconds: 300));
+      expect(find.textContaining('nothing is encrypted yet'), findsOneWidget);
+      expect(find.textContaining('trips, driving reports'), findsOneWidget);
+      await t.tap(find.text('Turn on'));
+      await t.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 600)));
+      await t.pump(const Duration(milliseconds: 300));
+      expect(server.circles[circleId]!.mode, 'private');
+      expect(t.widget<DsToggleRow>(toggle()).value, isTrue);
+    });
+
+    testWidgets('cancelling the explanation leaves the circle unchanged; members do not see the toggle', (t) async {
+      tall(t);
+      await setup(t);
+      await openDetail(t, 'admin');
+      await t.tap(toggle());
+      await t.pump(const Duration(milliseconds: 300));
+      await t.tap(find.text('Cancel'));
+      await t.pump(const Duration(milliseconds: 300));
+      expect(server.circles[circleId]!.mode, 'off');
+      expect(t.widget<DsToggleRow>(toggle()).value, isFalse);
+
+      await t.pumpWidget(const SizedBox());
+      await openDetail(t, 'member');
+      expect(toggle(), findsNothing);
     });
   });
 

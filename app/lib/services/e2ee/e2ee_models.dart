@@ -95,6 +95,38 @@ class CircleE2eeMember {
   final List<DeviceKey> devices;
 }
 
+/// The signed log record of one circle key epoch: who published it and the key
+/// commitment they signed. Copied by the server from the immutable log; phones
+/// verify the signature themselves.
+class EpochRecord {
+  const EpochRecord({
+    required this.epoch,
+    required this.action,
+    required this.publisherUserId,
+    required this.publisherDeviceId,
+    required this.publisherPub,
+    required this.commitment,
+    required this.signature,
+  });
+  final int epoch;
+  final int action;
+  final String publisherUserId;
+  final String publisherDeviceId;
+  final Uint8List publisherPub;
+  final Uint8List commitment;
+  final Uint8List signature;
+
+  factory EpochRecord.fromJson(Map<String, dynamic> j) => EpochRecord(
+        epoch: (j['epoch'] as num).toInt(),
+        action: (j['action'] as num).toInt(),
+        publisherUserId: j['publisher_user_id'] as String,
+        publisherDeviceId: j['publisher_device_id'] as String,
+        publisherPub: E2ee.unb64(j['publisher_ed25519_pub'] as String),
+        commitment: E2ee.unb64(j['key_commitment'] as String),
+        signature: E2ee.unb64(j['signature'] as String),
+      );
+}
+
 class CircleE2eeState {
   const CircleE2eeState({
     required this.circleId,
@@ -102,7 +134,9 @@ class CircleE2eeState {
     required this.epoch,
     required this.rekeyRequired,
     required this.members,
+    this.epochs = const <EpochRecord>[],
   });
+  final List<EpochRecord> epochs;
   final String circleId;
   final String mode;
   final int epoch;
@@ -110,6 +144,15 @@ class CircleE2eeState {
   final List<CircleE2eeMember> members;
 
   bool get isPrivate => mode == 'private';
+
+  /// The latest signed record for [epoch] (a re-enable reuses nothing, but be safe).
+  EpochRecord? epochRecord(int epoch) {
+    EpochRecord? r;
+    for (final EpochRecord e in epochs) {
+      if (e.epoch == epoch) r = e;
+    }
+    return r;
+  }
 
   Iterable<DeviceKey> get allDevices =>
       members.expand((CircleE2eeMember m) => m.devices);
@@ -119,6 +162,10 @@ class CircleE2eeState {
         mode: j['mode'] as String? ?? 'off',
         epoch: (j['epoch'] as num?)?.toInt() ?? 0,
         rekeyRequired: j['rekey_required'] == true,
+        epochs: ((j['epochs'] as List<dynamic>?) ?? <dynamic>[])
+            .cast<Map<String, dynamic>>()
+            .map(EpochRecord.fromJson)
+            .toList(),
         members: ((j['members'] as List<dynamic>?) ?? <dynamic>[])
             .cast<Map<String, dynamic>>()
             .map((Map<String, dynamic> m) => CircleE2eeMember(

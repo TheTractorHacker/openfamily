@@ -293,18 +293,15 @@ class E2ee {
     ]);
   }
 
-  /// SHA-256("OFE2EE1-WRAPS\0" || (recipient_id || blob)...) ordered by id.
-  static Future<Uint8List> wrapsDigest(
-      List<String> recipients, List<Bytes> blobs) {
-    final List<int> idx = List<int>.generate(recipients.length, (i) => i)
-      ..sort((a, b) => recipients[a].compareTo(recipients[b]));
-    final List<Bytes> parts = <Bytes>[_dom('OFE2EE1-WRAPS')];
-    for (final int i in idx) {
-      parts
-        ..add(_ascii(recipients[i]))
-        ..add(blobs[i]);
+  /// HKDF-SHA256(circle_key, salt = circle_id || epoch(4 BE),
+  /// info = "OFE2EE1-KEY-COMMIT\0", 32). The publisher signs it in the log;
+  /// every phone checks an unwrapped key against it before accepting the key.
+  static Future<Uint8List> keyCommitment(Bytes circleKey, String circleId, int epoch) {
+    checkId(circleId);
+    if (circleKey.length != keyLen || epoch < 1) {
+      throw const E2eeFormatException('bad commitment input');
     }
-    return sha256(cat(parts));
+    return hkdf(circleKey, cat(<Bytes>[_ascii(circleId), u32(epoch)]), _dom('OFE2EE1-KEY-COMMIT'), 32);
   }
 
   static final Uint8List genesisHash = Uint8List(32);

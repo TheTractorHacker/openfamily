@@ -85,8 +85,7 @@ its own NUL-terminated domain string, so one signature or hash can never be repl
 * Every state change is a **log action** signed by the acting device key:
   `"OFE2EE1-LOGACT\0" || action(1) || user_id || actor_device_id || circle_id|zeros || subject_id|zeros || epoch(4) || ref(32)|zeros`.
   Actions: 1 register (cross-signed), 2 rotate, 3 revoke, 4 recovery registered, 5 enable, 6 epoch, 7 disable, 8 reset (new root), 9 approve.
-  `ref` is the new key's fingerprint, the revoked key's fingerprint, or the digest of the submitted wraps
-  (`SHA-256("OFE2EE1-WRAPS\0" || (recipient_id || wrapped_key) ordered by recipient id)`).
+  `ref` is the new key's fingerprint, the revoked key's fingerprint, or, for enable/epoch, the **key commitment** (below).
 
 ### Sealed-box wrap of a circle key
 
@@ -96,6 +95,13 @@ info = "OFE2EE1-WRAP-KEY\0")`; XChaCha20-Poly1305 with a **random 24-byte nonce*
 `AAD = "OFE2EE1-WRAP-AAD\0" || circle_id || epoch || recipient_device_id || wrapper_device_id`. The wrapper signs
 `"OFE2EE1-WRAP-SIG\0" || (circle, epoch, recipient, wrapper) || wrapped_key`. The AAD binds circle, epoch and both devices, so a wrap cannot
 be replayed to another circle/epoch/device (rollback and substitution fail authentication).
+
+### Key commitment (epoch integrity)
+
+`commitment = HKDF-SHA256(ikm = circle_key, salt = circle_id || epoch(4 BE), info = "OFE2EE1-KEY-COMMIT\0", 32 bytes)`. The publishing admin signs it as the `ref` of the
+enable/epoch log action. The server returns, per epoch, the signed record (publisher user/device/key, commitment, signature) in the circle state; **every phone verifies that
+signature and, after unwrapping, recomputes the commitment from the key and rejects the key on any mismatch (fail closed if there is no record)**. A bogus or substituted
+wrap therefore can never be accepted, whoever managed to store it. (The v1 formats were never released, so this changed the meaning of `ref` for actions 5/6 in place and the vectors were regenerated.)
 
 ### Circle payload format (for phase 2)
 
@@ -126,13 +132,15 @@ The server stores **public keys and ciphertext only**; no endpoint accepts a pri
 | `GET /e2ee/users/{user_id}/devices` | self or co-member | active keys; others get 404 |
 | `GET /circles/{id}/e2ee`, `/pending`, `/wraps?device_id=` | circle member | state with approval flags; queue of devices lacking a wrap (ciphertext/public data only); my own wraps |
 | `POST /circles/{id}/e2ee/enable`, `/epoch`, `/disable`, `/approvals` | circle admin | enable (epoch = current+1), publish next epoch, disable, approve a replacement key |
-| `POST /circles/{id}/e2ee/wraps` | circle member | add wraps (never overwrites) for epoch <= current |
+| `POST /circles/{id}/e2ee/wraps` | epoch publisher, or anyone for their OWN other keys | add or replace wraps for epoch <= current |
 | `GET /e2ee/log?after=N` | any user | the transparency log (redacted for unrelated people) |
 | `GET /api/admin/e2ee/keys` | platform admin | public keys and circle epochs |
 
-Enforced by the server: authentication, rate limits (register 10/h, rotate 5/h, wraps 30/min, admin ops 20/h, reads 120/min), key length/weak-key
+Enforced by the server (migrations 000150 and 000151): authentication, rate limits (register 10/h, rotate 5/h, wraps 30/min, admin ops 20/h, reads 120/min), key length/weak-key
 checks (small-order Ed25519 and low-order X25519 points), binding signature, log-action signature of an **active key of the caller**, wrap
-signature by the wrapper's registered key, wrapper = caller, recipient = approved active key of a live circle member, strictly increasing epoch
+signature by the wrapper's registered key, wrapper = caller, recipient = **transitively approved** active key of a live circle member (below),
+**only the epoch's publisher (the user recorded in that epoch's signed enable/epoch log entry) may wrap a key for other members; anyone may wrap only to their own other keys** (new phone, recovery identity),
+a later wrap from the publisher or the owner replaces an earlier one (a bad first submission cannot block the real one), strictly increasing epoch
 (`current+1` only; the counter is kept when a circle is switched off), admin-only epoch operations, IDOR-safe lookups (404 for non-members), one
 active recovery key per user, max 10 active device keys, immutable log (UPDATE/DELETE blocked by trigger).
 Triggers: removing a member deletes that member's wraps and sets `e2ee_rekey_required`; revoking a key deletes its wraps and sets the flag in all the owner's private circles. The server cannot re-key itself (it holds no key): an admin phone publishes the next epoch.
@@ -144,9 +152,11 @@ Operator tools: `server e2ee-fingerprints [--all]` (each user's key fingerprints
 1. **First key** of an account is a root, trust-on-first-use. For a joiner the invite link/QR carries the **inviter's key fingerprint and circle id
    in the URL fragment** (never sent to the server by a browser), so the new phone checks the keys the server returns against a value that never came from the server (mismatch = loud alarm; match = inviter pinned as verified).
 2. **A second phone** of the same account is **cross-signed** by an existing device (manual copy/paste codes, server not involved) or by the recovery key. Others see the chain (`registered_by_device_id`, signature) and verify it.
-3. **A replacement root key** (reset, e.g. a lost phone without backup) is not cross-signed. The server accepts it but **refuses to store any wrap for it in a circle until a circle admin of another user approves it for that circle** (signed approval entry in the log, shown as "Waiting for approval"). The phone additionally prompts, after the owner compares the safety number out of band, before sharing a key with a replacement or a verified member's new device.
+3. **A replacement root key** (reset, e.g. a lost phone without backup) is not cross-signed. The server accepts it but **refuses to store any wrap for it in a circle until a circle admin of another user approves it for that circle**.
+   Approval is **transitive** (`e2ee_device_approved`): a key counts as approved in a circle only if it, or any ancestor in its `registered_by` chain (cross-signatures, rotations, recovery registrations), is the user's *first key ever* or was approved for that circle. A key signed or rotated by an unapproved key stays unapproved; approving a root covers its descendants; approving a middle key covers it and its descendants; approval is per circle; revoking a signer neither approves nor un-approves anyone (revoked rows stay in the chain). An attacker holding only a session token cannot cross-sign (it has no signing key) and a reset root needs an in-app admin approval in every circle (signed approval entry in the log, shown as "Waiting for approval"). The phone additionally prompts, after the owner compares the safety number out of band, before sharing a key with a replacement or a verified member's new device.
 4. **Rotate epoch** on member removal and on key revoke/compromise: the server flags the circle; an admin phone generates a new key and wraps it only to remaining approved keys. Removed members keep what they already hold (unavoidable) but cannot read new epochs.
 5. New epochs are wrapped to every member's recovery key too, so recovery keeps working.
+6. Availability trade-off: because only the epoch publisher can issue a key to a *new member*, a new member waits until that admin's phone is online (any admin can publish a fresh epoch, becoming the publisher). A member's own new phone never waits: it wraps to itself from the recovery key or an existing own device.
 
 ## Verification model ("server record")
 
@@ -158,7 +168,7 @@ Authenticity is anchored **out of band**:
 * the inviter fingerprint in the invite;
 * a loud, persistent alarm when a **verified** person's key set changes, when a member resets all keys, and when a circle epoch is published by someone this phone never verified;
 * the **key transparency log**: an append-only, hash-chained log of every registration, revocation, approval and epoch change, each entry signed by the acting device. Phones pin the head, verify the chain/signatures on every sync and alarm on rollback, fork/rewrite, gaps or forged entries.
-  Entries about people the viewer shares no circle with are redacted to hashes (the chain stays checkable, other tenants stay private).
+  An entry is returned in full only if the viewer shares a circle with its user **and** (for circle-scoped entries) is a member of that entry's circle **and** (for an approval) can see the approved key's owner. Otherwise it is redacted to `seq`, `prev_hash`, `entry_hash`: no user, circle, subject, epoch or action (the chain stays checkable, other tenants and other circles stay private).
 
 ## Recovery
 
@@ -205,7 +215,8 @@ The transparency log keeps only ids, hashes and signatures; it is append-only by
 * **Split view:** a server can show different people different logs. Phones only catch this when members compare log heads (in-app "Key log" screen, `number:hash` tokens) or safety numbers. A gossip protocol is out of scope.
 * **First-use trust:** the first key of a member is accepted on first sight unless the invite carried the inviter's fingerprint.
 * **Admin approval depends on the admin's care** and an admin cannot approve their own replacement key; a circle whose only admin loses everything needs the recovery phrase.
-* **A hostile or compromised member** holds the circle key and can read and forge payloads from that moment (out of scope).
+* **A hostile or compromised member** holds the circle key and can read and forge payloads from that moment (out of scope). They cannot, however, block or substitute another member's wrap (publisher-only wrapping plus commitment check).
+* **A compromised admin/publisher** can issue keys to anyone approved and can approve replacement keys; the log makes this visible after the fact, not impossible.
 * **Removal is not revocation of the past:** a removed member keeps keys and data they already received.
 * **Device compromise:** malware on the phone can read keys in memory. The Keystore wrapping key does not protect against code running as the app.
 * **Pure-Dart crypto** is not constant-time hardened like libsodium; the main protection is that secrets are short-lived and the threat model is the server, not a local attacker with timing access. Comparisons of secret-derived values use constant-time helpers.
@@ -216,7 +227,7 @@ The transparency log keeps only ids, hashes and signatures; it is append-only by
 
 ## Security review (phase 1)
 
-Checked: constant-time comparisons for secrets and fingerprints (`ConstEq`, `constEq`), no key material or plaintext in logs/errors/audit (regression test), random 24-byte XChaCha20 nonces and fresh ephemeral keys per wrap, AAD binding of circle/epoch/device, epoch monotonicity (enforced by the server: `current+1` only; phase 2 clients must also ignore epochs below the highest seen), replay/rollback of wraps and epochs, low-order/small-order key rejection, signature domain separation, key substitution (TOFU + safety numbers + invite anchor + log), IDOR across circles and users (authz matrix and tests), rate limits, immutable log, cascading cleanup on removal/revoke, and secrets zeroed from UI controllers after use.
+Checked: constant-time comparisons for secrets and fingerprints (`ConstEq`, `constEq`), no key material or plaintext in logs/errors/audit (regression test), random 24-byte XChaCha20 nonces and fresh ephemeral keys per wrap, AAD binding of circle/epoch/device, epoch monotonicity (enforced by the server: `current+1` only; phase 2 clients must also ignore epochs below the highest seen), replay/rollback of wraps and epochs, low-order/small-order key rejection, signature domain separation, key substitution (TOFU + safety numbers + invite anchor + log), IDOR across circles and users (authz matrix and tests), rate limits, immutable log, transitive per-circle approval, publisher-only wrapping, key commitments, circle-scoped log redaction, cascading cleanup on removal/revoke, and secrets zeroed from UI controllers after use.
 Not reviewed by an external cryptographer; the formats should be audited before they carry real locations (phase 2).
 
 ## Alternatives considered

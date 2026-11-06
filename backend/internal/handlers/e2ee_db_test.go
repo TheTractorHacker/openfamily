@@ -97,6 +97,10 @@ func (e *circleEnv) register(user string, d *tdev) {
 	e.mustCode(user, "POST", "/e2ee/devices", regBody(e.t, d, "device", nil, e2ee.ActRegister, false), 201)
 }
 
+// wrapKeys remembers which circle key each test wrap carries, so epochBody can
+// compute the key commitment the publisher signs.
+var wrapKeys = map[string][]byte{}
+
 func mkWrap(t *testing.T, circle string, epoch int, wrapper, rcpt *tdev, key []byte) map[string]any {
 	t.Helper()
 	aad, err := e2ee.WrapAAD(circle, uint32(epoch), rcpt.id, wrapper.id)
@@ -108,24 +112,31 @@ func mkWrap(t *testing.T, circle string, epoch int, wrapper, rcpt *tdev, key []b
 		t.Fatal(err)
 	}
 	sm, _ := e2ee.WrapSigMessage(circle, uint32(epoch), rcpt.id, wrapper.id, blob)
+	wrapKeys[b64s(blob)] = key
 	return map[string]any{"recipient_device_id": rcpt.id, "wrapper_device_id": wrapper.id,
 		"wrapped_key": b64s(blob), "signature": b64s(ed25519.Sign(wrapper.priv, sm))}
 }
 
-// epochBody builds an enable/epoch request signed by actor.
+// epochBody builds an enable/epoch request signed by actor. The signed ref is
+// the key commitment.
 func epochBody(t *testing.T, action byte, circle string, epoch int, actor *tdev, wraps ...map[string]any) map[string]any {
 	t.Helper()
-	ids := make([]string, len(wraps))
-	blobs := make([][]byte, len(wraps))
-	for i, w := range wraps {
-		ids[i] = w["recipient_device_id"].(string)
-		blobs[i], _ = base64.StdEncoding.DecodeString(w["wrapped_key"].(string))
-	}
-	lm, err := e2ee.LogActionMessage(action, actor.uid, actor.id, circle, "", uint32(epoch), e2ee.WrapsDigest(ids, blobs))
+	key := wrapKeys[wraps[0]["wrapped_key"].(string)]
+	commit, err := e2ee.KeyCommitment(key, circle, uint32(epoch))
 	if err != nil {
 		t.Fatal(err)
 	}
-	return map[string]any{"epoch": epoch, "wraps": wraps, "actor_device_id": actor.id, "log_signature": b64s(ed25519.Sign(actor.priv, lm))}
+	return epochBodyWithCommit(t, action, circle, epoch, actor, commit, wraps...)
+}
+
+func epochBodyWithCommit(t *testing.T, action byte, circle string, epoch int, actor *tdev, commit []byte, wraps ...map[string]any) map[string]any {
+	t.Helper()
+	lm, err := e2ee.LogActionMessage(action, actor.uid, actor.id, circle, "", uint32(epoch), commit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return map[string]any{"epoch": epoch, "wraps": wraps, "actor_device_id": actor.id,
+		"log_signature": b64s(ed25519.Sign(actor.priv, lm)), "key_commitment": b64s(commit)}
 }
 
 func simpleAction(t *testing.T, action byte, actor *tdev, circle string, epoch int, subject string, ref []byte) map[string]any {
@@ -301,8 +312,9 @@ func TestE2EECircleLifecycleAndEpochs(t *testing.T) {
 	}
 	e.mustCode("D", "GET", "/circles/"+c+"/e2ee/pending", nil, 404)
 
-	// A member wraps for C (cross-user wrapping is allowed for members); replay ignored.
-	e.mustCode("B", "POST", "/circles/"+c+"/e2ee/wraps", map[string]any{"epoch": 1, "wraps": []any{mkWrap(t, c, 1, b, cc, key1)}}, 200)
+	// Only the epoch publisher (A) may wrap the key for C; a plain member may not.
+	e.mustCode("B", "POST", "/circles/"+c+"/e2ee/wraps", map[string]any{"epoch": 1, "wraps": []any{mkWrap(t, c, 1, b, cc, key1)}}, 400)
+	e.mustCode("A", "POST", "/circles/"+c+"/e2ee/wraps", map[string]any{"epoch": 1, "wraps": []any{mkWrap(t, c, 1, a, cc, key1)}}, 200)
 	// A wrap claiming a wrapper device that is not the caller's is refused.
 	e.mustCode("B", "POST", "/circles/"+c+"/e2ee/wraps", map[string]any{"epoch": 1, "wraps": []any{mkWrap(t, c, 1, a, cc, key1)}}, 400)
 	// Wrong epoch for a member submission.
@@ -320,7 +332,7 @@ func TestE2EECircleLifecycleAndEpochs(t *testing.T) {
 	// The served wrap opens with C's key and only C's.
 	w0 := own[0].(map[string]any)
 	blob, _ := base64.StdEncoding.DecodeString(w0["wrapped_key"].(string))
-	aad, _ := e2ee.WrapAAD(c, 1, cc.id, b.id)
+	aad, _ := e2ee.WrapAAD(c, 1, cc.id, a.id)
 	if got, err := e2ee.Unwrap(blob, cc.xsec, cc.x, aad); err != nil || !bytes.Equal(got, key1) {
 		t.Fatalf("recipient could not open its wrap: %v", err)
 	}
@@ -425,7 +437,9 @@ func TestE2EEReplacementDeviceNeedsApproval(t *testing.T) {
 	// The earlier cross-signed path needs no approval: a second device of A.
 	a2 := newTDev(t, e.ids["A"])
 	e.mustCode("A", "POST", "/e2ee/devices", regBody(t, a2, "device", a, e2ee.ActRegister, false), 201)
-	e.mustCode("B", "POST", "/circles/"+c+"/e2ee/wraps", map[string]any{"epoch": 1, "wraps": []any{mkWrap(t, c, 1, b2, a2, key)}}, 200)
+	// B may not wrap for A's new device (not the publisher, not B's own key); A may.
+	e.mustCode("B", "POST", "/circles/"+c+"/e2ee/wraps", map[string]any{"epoch": 1, "wraps": []any{mkWrap(t, c, 1, b2, a2, key)}}, 400)
+	e.mustCode("A", "POST", "/circles/"+c+"/e2ee/wraps", map[string]any{"epoch": 1, "wraps": []any{mkWrap(t, c, 1, a, a2, key)}}, 200)
 }
 
 func TestE2EELogChainAndRedaction(t *testing.T) {
@@ -588,5 +602,249 @@ func TestE2EERotateRequiresOldKeySignature(t *testing.T) {
 	pend := e.mustCode("A", "GET", "/circles/"+c+"/e2ee/pending", nil, 200)["pending"].([]any)
 	if len(pend) != 1 || pend[0].(map[string]any)["approved"] != true {
 		t.Fatalf("pending after rotation: %v", pend)
+	}
+}
+
+func TestE2EEMaliciousMemberCannotBlockOrSubstituteWraps(t *testing.T) {
+	e := newE2EEEnv(t)
+	c := e.createCircle("A", "Pre", "B", "C")
+	a, b, cc := newTDev(t, e.ids["A"]), newTDev(t, e.ids["B"]), newTDev(t, e.ids["C"])
+	e.register("A", a)
+	e.register("B", b)
+	e.register("C", cc)
+	key := bytes.Repeat([]byte{0x21}, 32)
+	good := epochBody(t, e2ee.ActEnable, c, 1, a, mkWrap(t, c, 1, a, a, key), mkWrap(t, c, 1, a, b, key))
+
+	// Enable needs a well-formed commitment that the publisher signed.
+	missing := epochBody(t, e2ee.ActEnable, c, 1, a, mkWrap(t, c, 1, a, a, key))
+	delete(missing, "key_commitment")
+	e.mustCode("A", "POST", "/circles/"+c+"/e2ee/enable", missing, 400)
+	short := epochBody(t, e2ee.ActEnable, c, 1, a, mkWrap(t, c, 1, a, a, key))
+	short["key_commitment"] = b64s(make([]byte, 16))
+	e.mustCode("A", "POST", "/circles/"+c+"/e2ee/enable", short, 400)
+	other, _ := e2ee.KeyCommitment(key, c, 1)
+	mismatch := epochBody(t, e2ee.ActEnable, c, 1, a, mkWrap(t, c, 1, a, a, key))
+	other[0] ^= 1
+	mismatch["key_commitment"] = b64s(other) // not what the log signature covers
+	e.mustCode("A", "POST", "/circles/"+c+"/e2ee/enable", mismatch, 400)
+	e.mustCode("A", "POST", "/circles/"+c+"/e2ee/enable", good, 200)
+
+	// The state exposes the signed commitment and publisher for clients to check.
+	st := e.mustCode("B", "GET", "/circles/"+c+"/e2ee", nil, 200)
+	eps := st["epochs"].([]any)
+	if len(eps) != 1 {
+		t.Fatalf("epochs: %v", eps)
+	}
+	ep := eps[0].(map[string]any)
+	want, _ := e2ee.KeyCommitment(key, c, 1)
+	if ep["publisher_user_id"] != e.ids["A"] || ep["key_commitment"] != b64s(want) || ep["publisher_device_id"] != a.id {
+		t.Fatalf("epoch record: %v", ep)
+	}
+
+	// B, a plain member, tries to pre-seed a bogus wrap for C and to wrap for A.
+	bogusKey := bytes.Repeat([]byte{0x66}, 32)
+	e.mustCode("B", "POST", "/circles/"+c+"/e2ee/wraps", map[string]any{"epoch": 1, "wraps": []any{mkWrap(t, c, 1, b, cc, bogusKey)}}, 400)
+	var n int
+	_ = e.pool.QueryRow(context.Background(), `SELECT count(*) FROM circle_key_wraps WHERE recipient_device_id = $1`, cc.id).Scan(&n)
+	if n != 0 {
+		t.Fatal("a plain member seeded a wrap for another member")
+	}
+	// The legitimate publisher delivers; a later wrap from the publisher REPLACES it.
+	e.mustCode("A", "POST", "/circles/"+c+"/e2ee/wraps", map[string]any{"epoch": 1, "wraps": []any{mkWrap(t, c, 1, a, cc, bogusKey)}}, 200)
+	second := mkWrap(t, c, 1, a, cc, key)
+	e.mustCode("A", "POST", "/circles/"+c+"/e2ee/wraps", map[string]any{"epoch": 1, "wraps": []any{second}}, 200)
+	var blob []byte
+	_ = e.pool.QueryRow(context.Background(), `SELECT wrapped_key FROM circle_key_wraps WHERE recipient_device_id = $1 AND epoch = 1`, cc.id).Scan(&blob)
+	if b64s(blob) != second["wrapped_key"] {
+		t.Fatal("publisher's later wrap did not replace the earlier one")
+	}
+	// The recipient's own other key may also wrap to its own devices (restore path).
+	cc2 := newTDev(t, e.ids["C"])
+	e.mustCode("C", "POST", "/e2ee/devices", regBody(t, cc2, "device", cc, e2ee.ActRegister, false), 201)
+	e.mustCode("C", "POST", "/circles/"+c+"/e2ee/wraps", map[string]any{"epoch": 1, "wraps": []any{mkWrap(t, c, 1, cc, cc2, key)}}, 200)
+	// ...but not to someone else's.
+	e.mustCode("C", "POST", "/circles/"+c+"/e2ee/wraps", map[string]any{"epoch": 1, "wraps": []any{mkWrap(t, c, 1, cc, b, key)}}, 400)
+	// Epochs later than current stay refused.
+	e.mustCode("A", "POST", "/circles/"+c+"/e2ee/wraps", map[string]any{"epoch": 2, "wraps": []any{mkWrap(t, c, 2, a, cc, key)}}, 409)
+}
+
+func approvedIn(t *testing.T, e *circleEnv, d *tdev, circle string) bool {
+	t.Helper()
+	var ok bool
+	if err := e.pool.QueryRow(context.Background(), `SELECT e2ee_device_approved($1::uuid, $2::uuid)`, d.id, circle).Scan(&ok); err != nil {
+		t.Fatal(err)
+	}
+	return ok
+}
+
+func TestE2EEApprovalIsTransitive(t *testing.T) {
+	e := newE2EEEnv(t)
+	c1 := e.createCircle("A", "One", "B")
+	c2 := e.createCircle("A", "Two", "B")
+	a, b := newTDev(t, e.ids["A"]), newTDev(t, e.ids["B"])
+	e.register("A", a)
+	e.register("B", b)
+	key := bytes.Repeat([]byte{0x31}, 32)
+	for _, c := range []string{c1, c2} {
+		e.mustCode("A", "POST", "/circles/"+c+"/e2ee/enable", epochBody(t, e2ee.ActEnable, c, 1, a, mkWrap(t, c, 1, a, a, key), mkWrap(t, c, 1, a, b, key)), 200)
+	}
+	if !approvedIn(t, e, b, c1) || !approvedIn(t, e, a, c2) {
+		t.Fatal("first keys must be approved")
+	}
+	approve := func(circle string, by, d *tdev) int {
+		body := simpleAction(t, e2ee.ActApprove, by, circle, 0, d.id, d.fp)
+		body["device_id"] = d.id
+		code, _, _ := e.do("A", "POST", "/circles/"+circle+"/e2ee/approvals", body)
+		return code
+	}
+
+	// B resets: root b2. Then a 3-level chain b2 -> b3 -> recovery r.
+	b2, b3, r := newTDev(t, e.ids["B"]), newTDev(t, e.ids["B"]), newTDev(t, e.ids["B"])
+	e.mustCode("B", "POST", "/e2ee/devices", regBody(t, b2, "device", nil, e2ee.ActReset, true), 201)
+	e.mustCode("B", "POST", "/e2ee/devices", regBody(t, b3, "device", b2, e2ee.ActRegister, false), 201)
+	e.mustCode("B", "POST", "/e2ee/devices", regBody(t, r, "recovery", b3, e2ee.ActRecovery, false), 201)
+	for _, d := range []*tdev{b2, b3, r} {
+		if approvedIn(t, e, d, c1) {
+			t.Fatalf("key %s signed (transitively) by an unapproved root counts as approved", d.id)
+		}
+	}
+	// The server refuses wraps for each, and the pending list flags them.
+	for _, d := range []*tdev{b2, b3, r} {
+		code, _, raw := e.do("A", "POST", "/circles/"+c1+"/e2ee/wraps", map[string]any{"epoch": 1, "wraps": []any{mkWrap(t, c1, 1, a, d, key)}})
+		if code != 400 || !strings.Contains(string(raw), "approval") {
+			t.Fatalf("wrap to unapproved chain key: %d %s", code, raw)
+		}
+	}
+	for _, p := range e.mustCode("A", "GET", "/circles/"+c1+"/e2ee/pending", nil, 200)["pending"].([]any) {
+		if p.(map[string]any)["approved"] != false {
+			t.Fatalf("pending entry wrongly approved: %v", p)
+		}
+	}
+	// A key rotated from an unapproved key is unapproved too.
+	b3r := newTDev(t, e.ids["B"])
+	rot := regBody(t, b3r, "device", nil, e2ee.ActRotate, false)
+	delete(rot, "actor_device_id")
+	lm, _ := e2ee.LogActionMessage(e2ee.ActRotate, b3r.uid, b3.id, "", b3r.id, 0, b3r.fp)
+	rot["log_signature"] = b64s(ed25519.Sign(b3.priv, lm))
+	e.mustCode("B", "POST", "/e2ee/devices/"+b3.id+"/rotate", rot, 201)
+	if approvedIn(t, e, b3r, c1) {
+		t.Fatal("rotation from an unapproved key became approved")
+	}
+	// Approving the root approves the descendants in THAT circle only.
+	if code := approve(c1, a, b2); code != 200 {
+		t.Fatalf("approve root: %d", code)
+	}
+	if !approvedIn(t, e, b2, c1) || !approvedIn(t, e, r, c1) || !approvedIn(t, e, b3r, c1) {
+		t.Fatal("approval did not propagate down the chain")
+	}
+	if approvedIn(t, e, b2, c2) || approvedIn(t, e, r, c2) || approvedIn(t, e, b3r, c2) {
+		t.Fatal("approval leaked into another circle")
+	}
+	// Approving a middle key covers it and its descendants, not its ancestors.
+	b4, b5, b6 := newTDev(t, e.ids["B"]), newTDev(t, e.ids["B"]), newTDev(t, e.ids["B"])
+	e.mustCode("B", "POST", "/e2ee/devices", regBody(t, b4, "device", nil, e2ee.ActReset, true), 201)
+	e.mustCode("B", "POST", "/e2ee/devices", regBody(t, b5, "device", b4, e2ee.ActRegister, false), 201)
+	e.mustCode("B", "POST", "/e2ee/devices", regBody(t, b6, "device", b5, e2ee.ActRegister, false), 201)
+	if code := approve(c2, a, b5); code != 200 {
+		t.Fatalf("approve middle: %d", code)
+	}
+	if approvedIn(t, e, b4, c2) || !approvedIn(t, e, b5, c2) || !approvedIn(t, e, b6, c2) {
+		t.Fatal("middle approval scope wrong")
+	}
+	if approvedIn(t, e, b5, c1) {
+		t.Fatal("cross-circle approval")
+	}
+	// Revoking the signer changes nothing: approved stays approved...
+	e.mustCode("B", "DELETE", "/e2ee/devices/"+b5.id, simpleAction(t, e2ee.ActRevoke, b6, "", 0, b5.id, b5.fp), 200)
+	if !approvedIn(t, e, b6, c2) {
+		t.Fatal("revoking the signer un-approved its approved child")
+	}
+	// ...and unapproved stays unapproved (a revoked signer is no loophole).
+	b7, b8 := newTDev(t, e.ids["B"]), newTDev(t, e.ids["B"])
+	e.mustCode("B", "POST", "/e2ee/devices", regBody(t, b7, "device", nil, e2ee.ActReset, true), 201)
+	e.mustCode("B", "POST", "/e2ee/devices", regBody(t, b8, "device", b7, e2ee.ActRegister, false), 201)
+	e.mustCode("B", "DELETE", "/e2ee/devices/"+b7.id, simpleAction(t, e2ee.ActRevoke, b8, "", 0, b7.id, b7.fp), 200)
+	if approvedIn(t, e, b8, c1) || approvedIn(t, e, b8, c2) {
+		t.Fatal("revoked unapproved signer made its child approved")
+	}
+	// A key registered by another account can never claim B's chain: a stolen
+	// session without an active signing key cannot cross-sign at all.
+	evil := newTDev(t, e.ids["B"])
+	if code, _, _ := e.do("B", "POST", "/e2ee/devices", regBody(t, evil, "device", nil, e2ee.ActRegister, false)); code != 409 {
+		t.Fatalf("unsigned key for a user with active keys: %d", code)
+	}
+	if code, _, _ := e.do("B", "POST", "/e2ee/devices", regBody(t, evil, "device", a, e2ee.ActRegister, false)); code != 400 {
+		t.Fatalf("cross-signed by another user's key: %d", code)
+	}
+}
+
+func TestE2EELogRedactsOtherCirclesAndSubjects(t *testing.T) {
+	e := newE2EEEnv(t)
+	cx := e.createCircle("B", "X", "A")
+	cy := e.createCircle("B", "Y", "C")
+	a, b, cc := newTDev(t, e.ids["A"]), newTDev(t, e.ids["B"]), newTDev(t, e.ids["C"])
+	e.register("A", a)
+	e.register("B", b)
+	e.register("C", cc)
+	key := bytes.Repeat([]byte{0x41}, 32)
+	e.mustCode("B", "POST", "/circles/"+cy+"/e2ee/enable", epochBody(t, e2ee.ActEnable, cy, 1, b, mkWrap(t, cy, 1, b, b, key), mkWrap(t, cy, 1, b, cc, key)), 200)
+	e.mustCode("B", "POST", "/circles/"+cx+"/e2ee/enable", epochBody(t, e2ee.ActEnable, cx, 1, b, mkWrap(t, cx, 1, b, b, key), mkWrap(t, cx, 1, b, a, key)), 200)
+
+	entries := func(user string) []map[string]any {
+		var out []map[string]any
+		for _, r := range e.mustCode(user, "GET", "/e2ee/log?after=0", nil, 200)["entries"].([]any) {
+			out = append(out, r.(map[string]any))
+		}
+		return out
+	}
+	// A shares circle X with B but is not in Y.
+	sawX := false
+	for _, en := range entries("A") {
+		if en["circle_id"] == cy {
+			t.Fatalf("A learned circle Y from the log: %v", en)
+		}
+		if en["circle_id"] == cx {
+			sawX = true
+		}
+		if en["redacted"] == true {
+			for _, f := range []string{"circle_id", "subject_id", "epoch", "user_id", "actor_device_id", "ref", "signature", "action"} {
+				if _, ok := en[f]; ok {
+					t.Fatalf("redacted entry leaks %s: %v", f, en)
+				}
+			}
+			if en["prev_hash"] == nil || en["entry_hash"] == nil {
+				t.Fatal("redacted entry lost its chain fields")
+			}
+		}
+	}
+	if !sawX {
+		t.Fatal("A should see the circle-X entry")
+	}
+	// The Y entry is still present as a redacted link in A's view (chain intact).
+	for _, en := range entries("C") {
+		if en["circle_id"] == cx {
+			t.Fatalf("C learned circle X from the log: %v", en)
+		}
+	}
+	// The Y epoch is visible to a member of Y.
+	seenY := false
+	for _, en := range entries("C") {
+		if en["circle_id"] == cy && en["epoch"] != nil {
+			seenY = true
+		}
+	}
+	if !seenY {
+		t.Fatal("C should see the circle-Y entry")
+	}
+	// An approval whose subject belongs to someone the viewer cannot see is hidden.
+	b2 := newTDev(t, e.ids["C"])
+	e.mustCode("C", "POST", "/e2ee/devices", regBody(t, b2, "device", nil, e2ee.ActReset, true), 201)
+	body := simpleAction(t, e2ee.ActApprove, b, cy, 0, b2.id, b2.fp)
+	body["device_id"] = b2.id
+	e.mustCode("B", "POST", "/circles/"+cy+"/e2ee/approvals", body, 200)
+	for _, en := range entries("A") {
+		if en["subject_id"] == b2.id || en["circle_id"] == cy {
+			t.Fatalf("A learned of the approval in Y: %v", en)
+		}
 	}
 }

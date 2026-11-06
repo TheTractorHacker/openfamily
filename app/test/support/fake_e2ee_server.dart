@@ -38,8 +38,27 @@ class FakeE2eeServer {
 
   List<DeviceKey> activeOf(String user) => (keys[user] ?? <DeviceKey>[]).where((DeviceKey k) => k.isActive).toList();
 
-  bool approved(DeviceKey d, String circleId) =>
-      d.initial || !d.isRoot || circles[circleId]!.approvals.contains(d.deviceId);
+  /// Transitive approval, like migration 000151: the key or ANY ancestor in its
+  /// registration chain is the user's first key or was approved for the circle.
+  bool approved(DeviceKey d, String circleId) {
+    final Set<String> seen = <String>{};
+    DeviceKey? cur = d;
+    while (cur != null && seen.add(cur.deviceId)) {
+      if (cur.initial || circles[circleId]!.approvals.contains(cur.deviceId)) return true;
+      if (cur.isRoot) return false;
+      cur = anyKey(cur.registeredByDeviceId);
+    }
+    return false;
+  }
+
+  DeviceKey? anyKey(String deviceId) {
+    for (final List<DeviceKey> l in keys.values) {
+      for (final DeviceKey k in l) {
+        if (k.deviceId == deviceId) return k;
+      }
+    }
+    return null;
+  }
 
   DeviceKey? findActive(String deviceId) {
     for (final List<DeviceKey> l in keys.values) {
@@ -61,6 +80,7 @@ class FakeCircle {
   bool rekey = false;
   final Set<String> approvals = <String>{};
   final Map<String, WrapRecord> wraps = <String, WrapRecord>{}; // "epoch/recipient"
+  final Map<int, EpochRecord> epochRecords = <int, EpochRecord>{};
 }
 
 class FakeE2eeClient implements E2eeApi {
@@ -158,6 +178,7 @@ class FakeE2eeClient implements E2eeApi {
     if (!c.members.contains(uid)) throw StateError('404');
     return CircleE2eeState(
       circleId: circleId, mode: c.mode, epoch: c.epoch, rekeyRequired: c.rekey,
+      epochs: c.epochRecords.values.toList(),
       members: <CircleE2eeMember>[
         for (final String m in c.members)
           CircleE2eeMember(userId: m, name: s.names[m] ?? m, role: m == c.admin ? 'admin' : 'member', devices: <DeviceKey>[
@@ -197,14 +218,17 @@ class FakeE2eeClient implements E2eeApi {
       final DeviceKey r = s.findActive(w['recipient_device_id'] as String)!;
       if (!c.members.contains(r.userId)) throw StateError('recipient not a member');
       if (!s.approved(r, c.id)) throw StateError('waiting for approval');
+      if (r.userId != uid && c.epochRecords[epoch]?.publisherUserId != uid) {
+        throw StateError('only the epoch publisher may wrap for other members');
+      }
       final DeviceKey wr = s.findActive(w['wrapper_device_id'] as String)!;
       if (wr.userId != uid) throw StateError('wrapper not mine');
       final Uint8List blob = E2ee.unb64(w['wrapped_key']);
       final Uint8List sm = E2ee.wrapSigMessage(c.id, epoch, r.deviceId, wr.deviceId, blob);
       if (!await E2ee.verify(wr.edPub, sm, E2ee.unb64(w['signature']))) throw StateError('bad wrap sig');
-      c.wraps.putIfAbsent('$epoch/${r.deviceId}', () => WrapRecord(
+      c.wraps['$epoch/${r.deviceId}'] = WrapRecord(
           epoch: epoch, recipientDeviceId: r.deviceId, wrapperDeviceId: wr.deviceId,
-          wrapperEdPub: wr.edPub, blob: blob, signature: E2ee.unb64(w['signature'])));
+          wrapperEdPub: wr.edPub, blob: blob, signature: E2ee.unb64(w['signature']));
     }
   }
 
@@ -215,17 +239,18 @@ class FakeE2eeClient implements E2eeApi {
     if (epoch != c.epoch + 1) throw StateError('409 epoch');
     if (enabling != (c.mode == 'off')) throw StateError('409 mode');
     final List<Map<String, dynamic>> wraps = (body['wraps'] as List<dynamic>).cast<Map<String, dynamic>>();
-    await _store(c, epoch, wraps);
     final String actor = body['actor_device_id'] as String;
     final DeviceKey a = s.findActive(actor)!;
-    final Uint8List digest = await E2ee.wrapsDigest(
-        wraps.map((Map<String, dynamic> w) => w['recipient_device_id'] as String).toList(),
-        wraps.map((Map<String, dynamic> w) => E2ee.unb64(w['wrapped_key'])).toList());
+    final Uint8List commit = E2ee.unb64(body['key_commitment']);
     final Uint8List sig = E2ee.unb64(body['log_signature']);
-    if (!await E2ee.verify(a.edPub, E2ee.logActionMessage(action, uid, actor, circleId: circleId, epoch: epoch, ref: digest), sig)) {
+    if (!await E2ee.verify(a.edPub, E2ee.logActionMessage(action, uid, actor, circleId: circleId, epoch: epoch, ref: commit), sig)) {
       throw StateError('bad log signature');
     }
-    await s.appendLog(action, uid, actor, a.edPub, circleId: circleId, epoch: epoch, ref: digest, sig: sig);
+    c.epochRecords[epoch] = EpochRecord(
+        epoch: epoch, action: action, publisherUserId: uid, publisherDeviceId: actor,
+        publisherPub: a.edPub, commitment: commit, signature: sig);
+    await _store(c, epoch, wraps);
+    await s.appendLog(action, uid, actor, a.edPub, circleId: circleId, epoch: epoch, ref: commit, sig: sig);
     c.mode = 'private';
     c.epoch = epoch;
     c.rekey = false;

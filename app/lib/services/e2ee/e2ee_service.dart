@@ -313,14 +313,13 @@ class E2eeService {
     };
   }
 
-  Future<Map<String, dynamic>> _epochBody(LocalIdentity me, int action, String circleId, int epoch, List<Map<String, dynamic>> wraps) async {
-    final Uint8List digest = await E2ee.wrapsDigest(
-        wraps.map((Map<String, dynamic> w) => w['recipient_device_id'] as String).toList(),
-        wraps.map((Map<String, dynamic> w) => E2ee.unb64(w['wrapped_key'] as String)).toList());
-    final Uint8List msg = E2ee.logActionMessage(action, me.userId, me.deviceId, circleId: circleId, epoch: epoch, ref: digest);
+  Future<Map<String, dynamic>> _epochBody(LocalIdentity me, int action, String circleId, int epoch, Uint8List key, List<Map<String, dynamic>> wraps) async {
+    final Uint8List commit = await E2ee.keyCommitment(key, circleId, epoch);
+    final Uint8List msg = E2ee.logActionMessage(action, me.userId, me.deviceId, circleId: circleId, epoch: epoch, ref: commit);
     return <String, dynamic>{
       'epoch': epoch,
       'wraps': wraps,
+      'key_commitment': E2ee.b64(commit),
       'actor_device_id': me.deviceId,
       'log_signature': E2ee.b64(await E2ee.sign(me.edSeed, msg)),
     };
@@ -354,7 +353,7 @@ class E2eeService {
     final List<Map<String, dynamic>> wraps = <Map<String, dynamic>>[
       for (final DeviceKey k in await _recipients(st, me)) await _wrapTo(me, circleId, epoch, key, k)
     ];
-    await api.enable(circleId, await _epochBody(me, E2ee.actEnable, circleId, epoch, wraps));
+    await api.enable(circleId, await _epochBody(me, E2ee.actEnable, circleId, epoch, key, wraps));
     await vault.write(_ckName(circleId, epoch), key);
     return epoch;
   }
@@ -368,7 +367,7 @@ class E2eeService {
     final List<Map<String, dynamic>> wraps = <Map<String, dynamic>>[
       for (final DeviceKey k in await _recipients(st, me)) await _wrapTo(me, circleId, epoch, key, k)
     ];
-    await api.bumpEpoch(circleId, await _epochBody(me, E2ee.actEpoch, circleId, epoch, wraps));
+    await api.bumpEpoch(circleId, await _epochBody(me, E2ee.actEpoch, circleId, epoch, key, wraps));
     await vault.write(_ckName(circleId, epoch), key);
     return epoch;
   }
@@ -383,29 +382,61 @@ class E2eeService {
     });
   }
 
-  /// Fetches wraps addressed to this phone and stores the circle keys. Each wrap
-  /// signature is checked against the wrapper's key and the AAD binds circle,
-  /// epoch, recipient and wrapper. Returns the number of NEW keys stored.
+  /// Wraps this phone refused in the last [syncCircleKeys] because the key did
+  /// not match the publisher's signed commitment (or the epoch record was missing).
+  int rejectedWraps = 0;
+
+  /// Fetches wraps addressed to this phone and stores the circle keys. For each
+  /// wrap: the wrapper signature must verify, the epoch's signed log record must
+  /// verify (publisher signature), the AAD binds circle/epoch/recipient/wrapper,
+  /// and the unwrapped key must match the publisher's KEY COMMITMENT. A bogus or
+  /// substituted wrap therefore never gets stored. Returns the NEW keys stored.
   Future<int> syncCircleKeys(String circleId, {String? asDeviceId, Uint8List? xSecret, Uint8List? xPub}) async {
     final LocalIdentity me = (await identity())!;
     final String dev = asDeviceId ?? me.deviceId;
     final Uint8List sec = xSecret ?? me.xSecret;
     final Uint8List pub = xPub ?? me.xPub;
+    final CircleE2eeState st = await api.circleState(circleId);
     int n = 0;
+    rejectedWraps = 0;
     for (final WrapRecord w in await api.myWraps(circleId, dev)) {
       if (await vault.read(_ckName(circleId, w.epoch)) != null) continue;
       if (w.recipientDeviceId != dev) continue;
       final Uint8List sm = E2ee.wrapSigMessage(circleId, w.epoch, dev, w.wrapperDeviceId, w.blob);
-      if (!await E2ee.verify(w.wrapperEdPub, sm, w.signature)) continue;
+      if (!await E2ee.verify(w.wrapperEdPub, sm, w.signature)) {
+        rejectedWraps++;
+        continue;
+      }
+      final EpochRecord? rec = st.epochRecord(w.epoch);
+      if (rec == null || !await _epochRecordValid(circleId, rec)) {
+        rejectedWraps++;
+        continue;
+      }
       try {
         final Uint8List key = await E2ee.unwrap(w.blob, sec, pub, E2ee.wrapAad(circleId, w.epoch, dev, w.wrapperDeviceId));
+        final Uint8List commit = await E2ee.keyCommitment(key, circleId, w.epoch);
+        if (!E2ee.constEq(commit, rec.commitment)) {
+          rejectedWraps++;
+          continue;
+        }
         await vault.write(_ckName(circleId, w.epoch), key);
         n++;
       } on E2eeAuthException {
+        rejectedWraps++;
         continue; // tampered or not for us
       }
     }
     return n;
+  }
+
+  Future<bool> _epochRecordValid(String circleId, EpochRecord rec) async {
+    try {
+      final Uint8List msg = E2ee.logActionMessage(rec.action, rec.publisherUserId, rec.publisherDeviceId,
+          circleId: circleId, epoch: rec.epoch, ref: rec.commitment);
+      return rec.action != E2ee.actDisable && await E2ee.verify(rec.publisherPub, msg, rec.signature);
+    } catch (_) {
+      return false;
+    }
   }
 
   /// Wraps the current circle key for members' keys that lack one, following the
@@ -415,6 +446,9 @@ class E2eeService {
     final CircleE2eeState st = await api.circleState(circleId);
     if (!st.isPrivate) return const PendingReport();
     final Uint8List? key = await circleKey(circleId, st.epoch);
+    // Only the publisher of the epoch (the admin who created it) may issue the key
+    // to other people; anyone may wrap to their OWN other keys.
+    final bool iAmPublisher = st.epochRecord(st.epoch)?.publisherUserId == me.userId;
     final List<DeviceKey> pending = await api.pending(circleId);
     final Set<String> own = st.allDevices.where((DeviceKey k) => k.userId == me.userId).map((DeviceKey k) => k.deviceId).toSet();
     final List<Map<String, dynamic>> wraps = <Map<String, dynamic>>[];
@@ -423,7 +457,7 @@ class E2eeService {
       final WrapDecisionResult d = await decideWrap(key: k, selfUserId: me.userId, trust: trust, ownKnownDeviceIds: own);
       switch (d.decision) {
         case WrapDecision.auto:
-          if (key != null) wraps.add(await _wrapTo(me, circleId, st.epoch, key, k));
+          if (key != null && (iAmPublisher || k.userId == me.userId)) wraps.add(await _wrapTo(me, circleId, st.epoch, key, k));
         case WrapDecision.confirm:
           confirm.add(PendingItem(k, d));
         case WrapDecision.waitingForApproval:
@@ -444,6 +478,9 @@ class E2eeService {
     final CircleE2eeState st = await api.circleState(circleId);
     final Uint8List? k = await circleKey(circleId, st.epoch);
     if (k == null) throw StateError('This phone does not hold the current circle key yet.');
+    if (st.epochRecord(st.epoch)?.publisherUserId != me.userId && key.userId != me.userId) {
+      throw StateError('Only the admin who published this key epoch can share it with other members.');
+    }
     await api.submitWraps(circleId, st.epoch, <Map<String, dynamic>>[await _wrapTo(me, circleId, st.epoch, k, key)]);
     if (markVerified) {
       final List<DeviceKey> all = await api.userKeys(key.userId);
