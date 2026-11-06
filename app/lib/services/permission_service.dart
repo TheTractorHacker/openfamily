@@ -27,14 +27,17 @@ class PermissionService {
 
   /// Whether the current device supports the motion & fitness permission.
   ///
-  /// iOS (Core Motion) supports it. On Android, activity recognition requires
+  /// iOS: false for now. Motion is only needed for the Android-only driving
+  /// detection (PlatformFeatures.drivingSensors), and asking for Core Motion
+  /// access for a feature that cannot run would be misleading and invites an
+  /// App Review question. On Android, activity recognition requires
   /// Google Play Services, so we only request it when Play Services is
   /// actually available — "on some devices", as the brand bar specifies.
   /// Other platforms (web, desktop) do not support it.
   static Future<bool> supportsMotion() async {
     switch (defaultTargetPlatform) {
       case TargetPlatform.iOS:
-        return true;
+        return false;
       case TargetPlatform.android:
         try {
           final GooglePlayServicesAvailability availability =

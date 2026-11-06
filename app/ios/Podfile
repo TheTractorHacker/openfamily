@@ -57,6 +57,17 @@ post_install do |installer|
       if config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'].to_f < 15.0
         config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.0'
       end
+
+      # permission_handler compiles each permission out unless its macro is 1,
+      # and then EVERY request for it silently returns "denied". Enable only
+      # what the app uses (App Review also rejects unused permission code):
+      # location (when-in-use + always) and notifications. Camera and photos go
+      # through image_picker's own native prompts, contacts through the system
+      # picker. Motion/Core Motion is not requested on iOS (driving detection
+      # is Android only), so PERMISSION_SENSORS stays 0.
+      defs = Array(config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] || ['$(inherited)'])
+      defs += ['PERMISSION_LOCATION=1', 'PERMISSION_NOTIFICATIONS=1']
+      config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] = defs.uniq
     end
   end
 end

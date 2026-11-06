@@ -304,7 +304,12 @@ builds on Gradle 8).
   backgrounded or killed, and after reboot. Settings → **Background updates**
   opens the battery-optimization exemption screen — needed on many OEMs.
 - **iOS:** the `location` background mode keeps updates flowing while
-  backgrounded. “Always” authorization is required.
+  backgrounded. “Always” authorization is required. The iPhone app is
+  **untested on real hardware** (no Mac or Apple account yet): it builds for the
+  Simulator in CI; TestFlight signing is scripted but has never run. Driving
+  detection, crash detection and the home-screen widget are Android only for
+  now. See [docs/design/IOS_RELEASE.md](docs/design/IOS_RELEASE.md) for the
+  feature table and the owner checklist.
 - Credentials are mirrored to `shared_preferences` so the background isolate
   (which cannot reach secure storage) can authenticate. See [Security](#security).
 
@@ -315,6 +320,9 @@ builds on Gradle 8).
   generic APK can register without a rebuild.
 - **iOS:** APNs. Requires an Apple Developer account and an auth key — see
   [Configuration](#configuration). Payloads do not include coordinates.
+  Invite links can open the iPhone app when the server sets `IOS_TEAM_ID`
+  (and `IOS_BUNDLE_ID`): it then serves
+  `/.well-known/apple-app-site-association`.
 
 ## Web admin panel
 

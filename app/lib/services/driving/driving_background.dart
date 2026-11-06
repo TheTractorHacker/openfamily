@@ -1,3 +1,4 @@
+import '../platform_features.dart';
 import 'crash_responder.dart';
 import 'driving_events_service.dart';
 import 'driving_platform_feed.dart';
@@ -34,6 +35,9 @@ class DrivingBackground {
     required double lat,
     required double lon,
   }) async {
+    // The sensor feeds only exist on Android: on iPhone do nothing at all (and
+    // never tell the server the user opted in to something that cannot run).
+    if (!PlatformFeatures.drivingSensors) return;
     try {
       await _rt.onBackgroundFix(speedMps: speedMps, lat: lat, lon: lon);
     } catch (_) {

@@ -148,6 +148,13 @@ type Config struct {
 	APNsTopic      string
 	APNsProduction bool
 
+	// IOSTeamID / IOSBundleID drive GET /.well-known/apple-app-site-association
+	// (iOS Universal Links for /join/{code}). IOS_TEAM_ID falls back to
+	// APNS_TEAM_ID; IOS_BUNDLE_ID falls back to APNS_TOPIC, then app.openfamily.
+	// Empty team id = the route answers 404.
+	IOSTeamID   string
+	IOSBundleID string
+
 	// PlatformAdminEmail bootstraps the first platform admin. When set, on
 	// startup the server promotes the existing user with this email to
 	// platform_admin = TRUE (the platform-admin flag is added by migration
@@ -270,6 +277,8 @@ func Load() Config {
 		APNsTeamID:            getenv("APNS_TEAM_ID", ""),
 		APNsTopic:             getenv("APNS_TOPIC", ""),
 		APNsProduction:        getenvBool("APNS_PRODUCTION", false),
+		IOSTeamID:             getenv("IOS_TEAM_ID", getenv("APNS_TEAM_ID", "")),
+		IOSBundleID:           getenv("IOS_BUNDLE_ID", getenv("APNS_TOPIC", "app.openfamily")),
 		PlatformAdminEmail:    getenv("PLATFORM_ADMIN_EMAIL", ""),
 		PlatformAdminPassword: getenv("PLATFORM_ADMIN_PASSWORD", ""),
 		APKDir:                getenv("APK_DIR", ""),

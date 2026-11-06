@@ -62,6 +62,16 @@ They set no cookies and ship no analytics or tracking code.
   Payloads omit the tracked person's name unless `VERBOSE_PUSH=true`.
 - **iOS push:** APNs (platform requirement). Payloads do not include
   coordinates.
+- **iPhone app (TestFlight/App Store):** Apple sees the usual app distribution
+  and push-token traffic; OpenFamily adds no analytics or tracking
+  (`NSPrivacyTracking` is false in the app's privacy manifest). The iPhone app
+  asks for precise location (also in the background, "Always"), notifications,
+  and optionally the camera, photo library and Face ID; it does not request
+  Motion & Fitness. On iPhone the secrets of end-to-end encrypted circles are
+  wrapped by a key in the Secure Enclave where the phone has one, stay on that
+  device only (not in iCloud Keychain, not in backups), and are removed when the
+  app is reinstalled. Driving sensor detection (hard braking, phone use, crash
+  detection) is not available on iPhone yet and nothing is collected for it.
 - **Optional SMS:** Twilio sees destination numbers and the share URL.
 
 ## Your controls

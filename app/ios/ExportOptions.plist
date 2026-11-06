@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- TEMPLATE for the flutter build ipa export options. The __PLACEHOLDERS__
+	     are replaced by .github/workflows/ios-release.yml (never commit real values
+	     other than what is already public: team id and bundle id are not secret).
+	       __TEAM_ID__       repository variable IOS_TEAM_ID (10 characters, Apple Developer > Membership)
+	       __BUNDLE_ID__     repository variable IOS_BUNDLE_ID (default app.openfamily)
+	       __PROFILE_NAME__  read from the provisioning profile secret by the workflow
+	     Local use on a Mac: copy this file, fill the three values by hand.
+	     method "app-store-connect" needs Xcode 15.3+; on older Xcode use "app-store". -->
+	<key>method</key>
+	<string>app-store-connect</string>
+	<key>teamID</key>
+	<string>__TEAM_ID__</string>
+	<key>signingStyle</key>
+	<string>manual</string>
+	<key>signingCertificate</key>
+	<string>Apple Distribution</string>
+	<key>provisioningProfiles</key>
+	<dict>
+		<key>__BUNDLE_ID__</key>
+		<string>__PROFILE_NAME__</string>
+	</dict>
+	<key>uploadSymbols</key>
+	<true/>
+	<key>compileBitcode</key>
+	<false/>
+	<key>destination</key>
+	<string>export</string>
+</dict>
+</plist>

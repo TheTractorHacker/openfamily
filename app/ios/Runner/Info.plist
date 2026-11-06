@@ -47,11 +47,32 @@
 	<!-- Motion & fitness (Core Motion) — requested only on supported devices. -->
 	<key>NSMotionUsageDescription</key>
 	<string>OpenFamily uses motion &amp; fitness to detect when you're driving, biking, or walking.</string>
+	<!-- Chat photo attachments can use the camera (image_picker ImageSource.camera). -->
+	<key>NSCameraUsageDescription</key>
+	<string>OpenFamily uses the camera to take a photo to send in family chat.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>OpenFamily lets you choose a profile photo from your photo library.</string>
 	<!-- Face ID is used only when the user enables biometric app unlock. -->
 	<key>NSFaceIDUsageDescription</key>
 	<string>OpenFamily uses Face ID to unlock your private family location map.</string>
+	<!-- Invite links open the app. https://<server>/join/<code> needs the
+	     Associated Domains entitlement (see docs/design/IOS_RELEASE.md);
+	     openfamily://join?server=...&code=... works without any entitlement. -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>app.openfamily.invite</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>openfamily</string>
+			</array>
+		</dict>
+	</array>
+	<!-- The app routes invite links itself (LinkBridge.swift -> DeepLinkService);
+	     stop Flutter from also pushing the URL path onto the Navigator. -->
+	<key>FlutterDeepLinkingEnabled</key>
+	<false/>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>location</string>

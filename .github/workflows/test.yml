@@ -83,6 +83,8 @@ jobs:
           cache: true
       - name: Dependencies
         run: flutter pub get
+      - name: Lint plists (Info, entitlements, privacy manifest, export options)
+        run: plutil -lint ios/Runner/Info.plist ios/Runner/Runner.entitlements ios/Runner/PrivacyInfo.xcprivacy ios/ExportOptions.plist
       - name: Build for the iOS Simulator (unsigned)
         run: flutter build ios --simulator --no-codesign --debug
       - name: Boot a simulator, install, and launch the app

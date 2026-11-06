@@ -3,8 +3,11 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
-/// Where the Android Keystore wrapping key lives.
-enum KeystoreLevel { strongBox, tee, software, unavailable }
+/// Where the wrapping key lives. `strongBox` / `tee` are Android Keystore
+/// levels; `secureEnclave` / `keychain` are the iOS equivalents (Secure
+/// Enclave private key vs. a software key held in the Keychain, which is what
+/// the Simulator and any device without a Secure Enclave report).
+enum KeystoreLevel { strongBox, tee, secureEnclave, keychain, software, unavailable }
 
 class KeystoreStatus {
   const KeystoreStatus({
@@ -22,6 +25,10 @@ class KeystoreStatus {
         return 'StrongBox (dedicated security chip)';
       case KeystoreLevel.tee:
         return 'Trusted Execution Environment (TEE)';
+      case KeystoreLevel.secureEnclave:
+        return 'Secure Enclave (dedicated security chip)';
+      case KeystoreLevel.keychain:
+        return 'iOS Keychain, software key (no Secure Enclave)';
       case KeystoreLevel.software:
         return 'Software only (no secure hardware on this phone)';
       case KeystoreLevel.unavailable:
@@ -63,13 +70,21 @@ class MemoryVault implements E2eeVault {
   Future<KeystoreStatus> status() async => const KeystoreStatus(level: KeystoreLevel.software);
 }
 
-/// Thin wrapper over the native Android Keystore channel. The Keystore holds
-/// ONE non-extractable AES-256-GCM key that encrypts the secrets before they are
-/// written to disk. Ed25519, X25519 and XChaCha20 are NOT hardware-backed:
-/// they run in app memory, and only the key that protects them at rest is.
+/// Thin wrapper over the native key-store channel, which has the same name and
+/// contract on both platforms (`encrypt`, `decrypt`, `status`, `recreateKey`,
+/// `setSecure`):
+///  * Android (KeystoreChannel.kt): ONE non-extractable AES-256-GCM key in the
+///    Android Keystore (StrongBox / TEE).
+///  * iOS (SecureKeyChannel.swift): ONE non-extractable P-256 key (Secure
+///    Enclave when present) used for ECIES, so secrets are encrypted with the
+///    public half and only decrypted with the hardware key.
+/// Either way Ed25519, X25519 and XChaCha20 are NOT hardware-backed: they run
+/// in app memory, and only the key that protects them at rest is.
 class KeystoreChannel {
-  const KeystoreChannel();
-  static const MethodChannel _ch = MethodChannel('app.openfamily/keystore');
+  const KeystoreChannel({MethodChannel? channel}) : _override = channel;
+  final MethodChannel? _override;
+  static const MethodChannel _default = MethodChannel('app.openfamily/keystore');
+  MethodChannel get _ch => _override ?? _default;
 
   Future<Uint8List> encrypt(Uint8List plain) async {
     final Uint8List? r = await _ch.invokeMethod<Uint8List>('encrypt', plain);
@@ -97,6 +112,8 @@ class KeystoreChannel {
         level: switch (l) {
           'strongbox' => KeystoreLevel.strongBox,
           'tee' => KeystoreLevel.tee,
+          'secure_enclave' => KeystoreLevel.secureEnclave,
+          'keychain' => KeystoreLevel.keychain,
           'software' => KeystoreLevel.software,
           _ => KeystoreLevel.unavailable,
         },
@@ -129,8 +146,20 @@ class SecureVault implements E2eeVault {
                 sharedPreferencesName: 'openfamily_e2ee',
                 preferencesKeyPrefix: 'e2ee_',
               ),
+              // iOS: a dedicated Keychain namespace (so names()/readAll never
+              // lists tokens), readable after the first unlock so the
+              // background isolate can seal location while the phone is locked,
+              // this device only (no backup migration) and never iCloud-synced.
+              iOptions: iosVaultOptions,
             ),
         _channel = channel;
+
+  /// Keychain options of the vault blobs on iOS. See docs/design/E2EE.md.
+  static const IOSOptions iosVaultOptions = IOSOptions(
+    accountName: 'openfamily_e2ee',
+    accessibility: KeychainAccessibility.first_unlock_this_device,
+    synchronizable: false,
+  );
 
   final FlutterSecureStorage _storage;
   final KeystoreChannel _channel;
@@ -175,15 +204,19 @@ class SecureVault implements E2eeVault {
 }
 
 /// Blocks screenshots / recents thumbnails while a secret is on screen
-/// (Android FLAG_SECURE). Best effort on other platforms.
+/// (Android FLAG_SECURE; on iOS the native side hides the window while the
+/// screen is being recorded/mirrored and in the app switcher). Best effort on
+/// other platforms.
 class ScreenSecurity {
-  const ScreenSecurity();
-  static const MethodChannel _ch = MethodChannel('app.openfamily/keystore');
+  const ScreenSecurity({MethodChannel? channel}) : _override = channel;
+  final MethodChannel? _override;
+  static const MethodChannel _default = MethodChannel('app.openfamily/keystore');
+  MethodChannel get _ch => _override ?? _default;
   Future<void> setSecure(bool on) async {
     try {
       await _ch.invokeMethod<void>('setSecure', on);
     } on MissingPluginException {
-      // Not Android: nothing to do.
+      // No native implementation on this platform: nothing to do.
     } on PlatformException {
       // Ignore: the phrase screen still warns the user.
     }

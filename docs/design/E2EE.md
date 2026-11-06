@@ -191,6 +191,61 @@ The key is created in StrongBox when the phone has it, otherwise in the TEE, `se
 (StrongBox / TEE / software). If the Keystore key is invalidated, reads fail closed (`VaultInvalidatedException`) and the app asks for a recovery-phrase restore rather than minting a new identity. Backups are disabled (`allowBackup=false`), so keys are not in cloud backups.
 Unverified: StrongBox/TEE reporting and the auth-bound mode have not been exercised on a physical device.
 
+## iOS: what is different (written, not yet run on an iPhone)
+
+The Dart code and the method channel `app.openfamily/keystore` are shared with Android; only the
+native side differs (`app/ios/Runner/SecureKeyChannel.swift`). Nothing in this section has been
+compiled or run: no Mac or Apple account was available (see `IOS_RELEASE.md`, "Verification status").
+
+* **Secure Enclave limits.** The Secure Enclave can generate and hold only NIST P-256 keys, and
+  only sign/key-agree with them. It cannot hold Ed25519 or X25519, and it does no symmetric
+  encryption of bulk data. So, exactly like Android, the identity seed and the circle keys live
+  in app memory while in use. What the Enclave protects is **one non-extractable P-256 wrapping
+  key**. Secrets are wrapped with ECIES (`eciesEncryptionCofactorVariableIVX963SHA256AESGCM`,
+  `SecKeyCreateEncryptedData`) under its public half and unwrapped with `SecKeyCreateDecryptedData`,
+  an operation performed inside the Enclave. The wrapped blob is stored in the Keychain by
+  `flutter_secure_storage` as before.
+* **Honest level reporting.** `status` reads the key's real attributes: `secure_enclave` when the
+  key's token is the Enclave, `keychain` when it is a software key (the Simulator, or an Enclave
+  key generation that failed). The Encryption keys screen prints "Secure Enclave (dedicated security
+  chip)" or "iOS Keychain, software key (no Secure Enclave)". There is **no StrongBox equivalent
+  label**: Apple does not distinguish chip classes, and the app never claims "StrongBox" on iOS.
+* **Keychain accessibility versus background uploads.** The location background mode seals and
+  uploads fixes while the phone is locked. Encrypting needs only the public key, which needs no
+  unlock. Decrypting the seed needs the private key. So the wrapping key and the wrapped blobs use
+  `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` (usable after the first unlock since boot,
+  also while locked), **not** `WhenUnlocked`. The trade-off is stated plainly: while the phone is
+  locked but has been unlocked once since boot, code running as the app (and a forensic tool with
+  the passcode-derived class key) can use the key. Before the first unlock after a reboot nothing
+  can be read; background sealing then fails closed and fixes are parked, never sent in plaintext.
+  The stricter mode, `recreateKey(requireUserAuth: true)`, uses `WhenUnlockedThisDeviceOnly` plus
+  `.userPresence` (Face ID/Touch ID or passcode on every use). It cannot work for background
+  sealing, which is why it is opt-in and off by default.
+* **No iCloud, no backup, no new-phone migration.** Everything is `ThisDeviceOnly` and
+  `kSecAttrSynchronizable = false`. A restored backup or a new phone does **not** carry the
+  wrapping key; the wrapped blobs then cannot be decrypted, `decrypt` reports `invalidated`, and
+  the app fails closed and asks for the recovery phrase (same as Android). The vault uses its own
+  Keychain service (`openfamily_e2ee`), so `names()` never lists tokens.
+* **Reinstall.** iOS keeps Keychain items when an app is deleted. On the first launch of a fresh
+  install (no marker in `UserDefaults`, which are deleted with the app, and only once protected data
+  is available) the app deletes the wrapping key and its own Keychain services, so a reinstalled
+  app starts clean instead of inheriting the old identity.
+* **Screen protection is weaker than Android.** Android's `FLAG_SECURE` blocks screenshots and
+  the recents thumbnail. iOS lets an app do neither for screenshots. `ScreenProtector.swift`
+  hides the window behind a blur while the screen is being recorded, mirrored or AirPlayed
+  (`UIScreen.isCaptured`) and when the app goes to the app switcher. A plain screenshot of the
+  recovery phrase is possible on iPhone; the phrase screen already tells the user to write the
+  words on paper.
+* **APNs wake-ups are best effort.** The content-free `e2ee_wake` is a silent `content-available`
+  push. iOS throttles these, ignores them after the user force-quits the app and in Low Power
+  Mode, and gives no delivery guarantee. Correctness does not depend on it (pull on open,
+  sequence numbers, idempotent ids); only the latency of event notifications does. There are no
+  background-fetch or BGTask jobs to compensate.
+* **Unverified:** key creation in the Enclave, the access-control flags, ECIES round trips and the
+  `auth`/`locked`/`invalidated` error mapping, the Face ID/passcode mode, the reinstall wipe and
+  the blur have not run on any device or Simulator. The Simulator test (`RunnerTests.swift`) will
+  cover only the software-key path once the macOS CI job runs.
+
 ## Phase 2 requirements (original list; all are implemented, see the next section)
 
 1. Geofence, arrival/departure, "nearby" and driving state are computed **on the sender's phone** and sent as end-to-end encrypted events (purpose `event`) to authorised members. The server relays opaque payloads plus a **wake-up push that carries no location, name or place**; the receiving app decrypts and raises a **local** notification.
