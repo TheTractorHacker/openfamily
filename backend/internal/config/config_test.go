@@ -125,3 +125,14 @@ func TestLoadRequireAdminMFA(t *testing.T) {
 		t.Fatal("REQUIRE_ADMIN_MFA=true not honoured")
 	}
 }
+
+func TestAdminLocationAccessDefaultsOff(t *testing.T) {
+	t.Setenv("ADMIN_LOCATION_ACCESS", "")
+	if Load().AdminLocationAccess {
+		t.Fatal("admin location access must be opt-in")
+	}
+	t.Setenv("ADMIN_LOCATION_ACCESS", "true")
+	if !Load().AdminLocationAccess {
+		t.Fatal("ADMIN_LOCATION_ACCESS=true must enable it")
+	}
+}
