@@ -2,6 +2,7 @@
 // 401 with a single refresh attempt, and normalizes errors into ApiResult.
 
 import { clearTokens, getAccessToken, getRefreshToken, setTokens } from './auth'
+import type { HaCircleChoice, HaEventKind, HaScope, HaToken } from './haTypes'
 import type {
   AdminInvite,
   AdminMember,
@@ -83,6 +84,7 @@ function isRootApiPath(path: string): boolean {
     path.startsWith('/auth') ||
     path.startsWith('/me') ||
     path.startsWith('/circles') ||
+    path.startsWith('/integrations') ||
     path.startsWith('/e2ee') ||
     path.startsWith('/family') ||
     path.startsWith('/ws') ||
@@ -789,4 +791,39 @@ export const e2eeHttp = {
   get: <T,>(path: string): Promise<T> => request<T>(path),
   post: <T,>(path: string, body: unknown): Promise<T> => request<T>(path, { method: 'POST', body }),
   del: <T,>(path: string, body?: unknown): Promise<T> => request<T>(path, { method: 'DELETE', body }),
+}
+
+// ---- Home Assistant integration tokens (any adult account; own tokens only) ----
+
+export function listHaCircles(): Promise<HaCircleChoice[]> {
+  return request<HaCircleChoice[]>('/circles')
+}
+
+export function listHaTokens(): Promise<HaToken[]> {
+  return request<HaToken[]>('/integrations/ha/tokens')
+}
+
+export function createHaToken(input: { name: string; scopes: HaScope[]; circle_ids: string[] }): Promise<HaToken> {
+  return request<HaToken>('/integrations/ha/tokens', { method: 'POST', body: input })
+}
+
+export function updateHaToken(
+  id: string,
+  input: {
+    name?: string
+    webhook_url?: string
+    webhook_allow_private?: boolean
+    webhook_events?: HaEventKind[]
+    rotate_webhook_secret?: boolean
+  }
+): Promise<HaToken> {
+  return request<HaToken>(`/integrations/ha/tokens/${encodeURIComponent(id)}`, { method: 'PATCH', body: input })
+}
+
+export function revokeHaToken(id: string): Promise<void> {
+  return request<void>(`/integrations/ha/tokens/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
+
+export function testHaWebhook(id: string): Promise<{ ok: boolean; status_code: number; error: string }> {
+  return request(`/integrations/ha/tokens/${encodeURIComponent(id)}/test`, { method: 'POST' })
 }

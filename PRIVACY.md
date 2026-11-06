@@ -73,6 +73,19 @@ They set no cookies and ship no analytics or tracking code.
   app is reinstalled. Driving sensor detection (hard braking, phone use, crash
   detection) is not available on iPhone yet and nothing is collected for it.
 - **Optional SMS:** Twilio sees destination numbers and the share URL.
+- **Optional Home Assistant:** only if someone creates an integration token
+  (Settings, Integrations). Your Home Assistant then *pulls* data with that
+  token, and, if a webhook URL is configured, your server *pushes* signed events
+  (arrival, departure, SOS, possible crash, trip start/end, low battery) to
+  that one URL. What can leave is limited to the token's circles and scopes: no
+  position unless the token has the `location` scope, nothing for a member who
+  turned sharing off or paused it, and **never anything about a Private
+  (end-to-end encrypted) circle's positions unless that circle is in
+  trusted-server mode** (then the server already holds them). Webhooks to
+  loopback, link-local or cloud-metadata addresses are refused; private LAN
+  addresses need an explicit administrator setting. Tokens are revocable, hashed
+  at rest, rate limited, and their creation, use and webhook changes are written
+  to the audit log. See `docs/integrations/home-assistant.md`.
 
 ## Your controls
 

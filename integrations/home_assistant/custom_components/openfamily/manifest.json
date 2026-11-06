@@ -1,0 +1,13 @@
+{
+  "domain": "openfamily",
+  "name": "OpenFamily",
+  "codeowners": ["@TheTractorHacker"],
+  "config_flow": true,
+  "dependencies": ["webhook"],
+  "documentation": "https://github.com/TheTractorHacker/openfamily/blob/main/docs/integrations/home-assistant.md",
+  "integration_type": "hub",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/TheTractorHacker/openfamily/issues",
+  "requirements": [],
+  "version": "0.1.0"
+}

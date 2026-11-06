@@ -24,6 +24,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"go/ast"
@@ -167,6 +168,10 @@ var publicRoutes = map[string]string{
 	"GET /healthz":                     "liveness",
 	"GET /config":                      "public server config",
 	"GET /alerts/share/{token}":        "unguessable SOS share token",
+	"GET /integrations/ha/v1/ping":     "scoped integration token (ofha_...), checked in the handler; see TestAuthzMatrixHAAPI",
+	"GET /integrations/ha/v1/members":  "scoped integration token (ofha_...); see TestAuthzMatrixHAAPI and handlers/ha_integrations_db_test.go",
+	"GET /integrations/ha/v1/places":   "scoped integration token (ofha_...); see TestAuthzMatrixHAAPI",
+	"GET /integrations/ha/v1/events":   "scoped integration token (ofha_...); see TestAuthzMatrixHAAPI",
 	"GET /join/{code}":                 "static invite landing page",
 	"GET /.well-known/apple-app-site-association": "iOS Universal Links association file (static)",
 	"GET /app.apk":                     "signed APK for invitees",
@@ -316,6 +321,9 @@ func newAuthzFixture(t *testing.T, routes []parsedRoute) *authzFixture {
 		"BINV"+strings.ToUpper(tag), f.famB, f.bAdmin.id)
 	f.ids["share_link"] = one(`INSERT INTO share_links (user_id, token_hash, label, expires_at)
 		VALUES ($1, sha256($2::bytea), 'BSECRETLINK', now() + interval '1 hour') RETURNING id`, f.bMember.id, []byte("b"+tag))
+	f.ids["ha_token"] = one(`INSERT INTO ha_integrations (user_id, name, token_hash, token_hint, scopes, circle_ids)
+		VALUES ($1, 'BSECRETHA', sha256($2::bytea), '...zzzz', ARRAY['presence','location'], ARRAY[$3]::uuid[]) RETURNING id`,
+		f.bMember.id, []byte("ha"+tag), f.famB)
 	f.ids["live_share"] = one(`INSERT INTO live_shares (owner_id, viewer_id, expires_at) VALUES ($1,$2,now()+interval '1 hour') RETURNING id`,
 		f.bMember.id, f.bAdmin.id)
 	f.ids["bubble"] = one(`INSERT INTO bubbles (circle_id, creator_id, subject_id, lat, lon, radius_m, expires_at)
@@ -442,6 +450,7 @@ func (f *authzFixture) victimID(t *testing.T, rt parsedRoute, param string) stri
 			"/bubbles/":                           "bubble",
 			"/api/admin/bubbles":                  "bubble",
 			"/share-links/":                       "share_link",
+			"/integrations/ha/tokens/":            "ha_token",
 			"/api/admin/share-links/":             "share_link",
 			"/api/admin/sessions/":                "session",
 			"/api/admin/invites/":                 "invite",
@@ -529,6 +538,7 @@ func (f *authzFixture) snapshot(t *testing.T) string {
 	  (SELECT coalesce(string_agg(i::text, ',' ORDER BY i.id), '') FROM invite_codes i WHERE i.family_id = $1 OR i.circle_id = $1),
 	  (SELECT coalesce(string_agg(s::text, ',' ORDER BY s.id), '') FROM share_links s WHERE s.user_id = ANY($2::uuid[])),
 	  (SELECT coalesce(string_agg(l::text, ',' ORDER BY l.id), '') FROM live_shares l WHERE l.owner_id = ANY($2::uuid[])),
+	  (SELECT coalesce(string_agg(h::text, ',' ORDER BY h.id), '') FROM ha_integrations h WHERE h.user_id = ANY($2::uuid[])),
 	  (SELECT coalesce(string_agg(b::text, ',' ORDER BY b.id), '') FROM bubbles b WHERE b.circle_id = $1),
 	  (SELECT coalesce(string_agg(tr::text, ',' ORDER BY tr.id), '') FROM trips tr WHERE tr.user_id = ANY($2::uuid[])),
 	  (SELECT coalesce(string_agg(te::text, ',' ORDER BY te.id), '') FROM trip_events te WHERE te.user_id = ANY($2::uuid[])),
@@ -810,6 +820,105 @@ loop:
 			if strings.Contains(fr, m) {
 				t.Fatalf("family-A stream leaked family-B data %q in frame %s", m, trunc(fr))
 			}
+		}
+	}
+}
+
+// TestAuthzMatrixHAAPI covers the token-authenticated Home Assistant routes,
+// which sit outside the session groups: no token, a user session JWT, a
+// malformed or unknown token and a revoked token are all 401; a token without
+// the route's scope is 403; and a family-A token never shows family-B data.
+func TestAuthzMatrixHAAPI(t *testing.T) {
+	routes := parseMainRoutes(t)
+	f := newAuthzFixture(t, routes)
+	ctx := context.Background()
+
+	mux := chi.NewRouter()
+	mux.Get("/integrations/ha/v1/ping", f.srv.HAPing)
+	mux.Get("/integrations/ha/v1/members", f.srv.HAMembers)
+	mux.Get("/integrations/ha/v1/places", f.srv.HAPlaces)
+	mux.Get("/integrations/ha/v1/events", f.srv.HAEvents)
+	paths := []string{"/integrations/ha/v1/ping", "/integrations/ha/v1/members", "/integrations/ha/v1/places", "/integrations/ha/v1/events?after=0"}
+	// every HA route main.go registers must be mounted here too
+	have := map[string]bool{}
+	for _, p := range paths {
+		have["GET "+strings.SplitN(p, "?", 2)[0]] = true
+	}
+	for _, rt := range routes {
+		if strings.HasPrefix(rt.path, "/integrations/ha/v1/") && !have[rt.key()] {
+			t.Errorf("%s is not covered by TestAuthzMatrixHAAPI", rt.key())
+		}
+	}
+	get := func(path, tok string) (int, string) {
+		req := httptest.NewRequest("GET", path, nil)
+		req.RemoteAddr = "192.0.2.77:1234"
+		if tok != "" {
+			req.Header.Set("Authorization", "Bearer "+tok)
+		}
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		return rec.Code, rec.Body.String()
+	}
+	mint := func(owner actor, circle string, scopes ...string) (string, string) {
+		raw := make([]byte, 32)
+		for i := range raw {
+			raw[i] = byte(i*7 + len(scopes) + len(circle))
+		}
+		tok := "ofha_" + base64.RawURLEncoding.EncodeToString(append(raw[:16:16], []byte(owner.id + circle)[:16]...))
+		var id string
+		if err := f.pool.QueryRow(ctx, `INSERT INTO ha_integrations (user_id, name, token_hash, scopes, circle_ids)
+			VALUES ($1,'matrix',sha256($2::bytea),$3,ARRAY[$4]::uuid[]) RETURNING id`, owner.id, []byte(tok), scopes, circle).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _, _ = f.pool.Exec(ctx, `DELETE FROM ha_integrations WHERE id = $1`, id) })
+		return tok, id
+	}
+	for _, p := range paths {
+		for _, tok := range []string{"", "junk", f.aAdmin.token, "ofha_" + strings.Repeat("A", 43)} {
+			if code, body := get(p, tok); code != http.StatusUnauthorized {
+				t.Errorf("GET %s with token %.12q: %d, want 401 (%s)", p, tok, code, trunc(body))
+			}
+		}
+	}
+	tokA, idA := mint(f.aAdmin, f.famA, "presence", "location", "places", "events", "driving")
+	for _, p := range paths {
+		code, body := get(p, tokA)
+		if code != http.StatusOK {
+			t.Errorf("GET %s with a valid family-A token: %d %s", p, code, trunc(body))
+		}
+		for _, m := range append(f.markers, "65.432109", "12.345678") {
+			if strings.Contains(body, m) {
+				t.Errorf("GET %s leaks family-B data %q: %s", p, m, trunc(body))
+			}
+		}
+	}
+	// A token that names family B's circle but whose owner is not a member of it sees nothing.
+	tokX, _ := mint(f.aMember, f.famB, "presence", "location", "places", "events")
+	for _, p := range paths[1:3] {
+		code, body := get(p, tokX)
+		if code != http.StatusOK {
+			t.Errorf("GET %s forged-scope token: %d", p, code)
+		}
+		for _, m := range append(f.markers, "65.432109", "12.345678") {
+			if strings.Contains(body, m) {
+				t.Errorf("GET %s with a token scoped to a foreign circle leaks %q: %s", p, m, trunc(body))
+			}
+		}
+	}
+	// Wrong scope.
+	tokP, _ := mint(f.aMember, f.famA, "presence")
+	for _, p := range []string{"/integrations/ha/v1/places", "/integrations/ha/v1/events?after=0"} {
+		if code, _ := get(p, tokP); code != http.StatusForbidden {
+			t.Errorf("GET %s with presence-only token: %d, want 403", p, code)
+		}
+	}
+	// Revoked.
+	if _, err := f.pool.Exec(ctx, `UPDATE ha_integrations SET revoked_at = now() WHERE id = $1`, idA); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range paths {
+		if code, _ := get(p, tokA); code != http.StatusUnauthorized {
+			t.Errorf("GET %s with a revoked token: %d, want 401", p, code)
 		}
 	}
 }
