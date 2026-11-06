@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../screens/crash_countdown_screen.dart';
+import '../platform_features.dart';
 import 'crash_pending.dart';
 import 'driving_settings.dart';
 
@@ -20,6 +21,7 @@ class CrashWatcher {
   bool _open = false;
 
   void start() {
+    if (!PlatformFeatures.drivingSensors) return; // crash detection is Android only
     _timer ??= Timer.periodic(every, (_) => unawaited(check()));
     unawaited(check());
   }

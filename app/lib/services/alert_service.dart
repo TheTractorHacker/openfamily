@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 
 import '../models/alert.dart';
 import 'api_client.dart';
+import 'native_uri_opener.dart';
 
 /// Thin wrapper over the alerts endpoints. Screens take one so tests can
 /// substitute a fake.
@@ -95,9 +96,9 @@ String emergencyNumberForCountry(String? countryCode) {
 
 /// Opens the phone's dialer pre-filled with an emergency number. It only
 /// opens the dialer; the user must press call, and OpenFamily never places the
-/// call. Android only, via the existing android_intent_plus dependency
-/// (ACTION_DIAL needs no permission). The number follows the phone's region.
-/// iOS has no equivalent dependency, so [available] is false there.
+/// call. Android uses android_intent_plus (ACTION_DIAL needs no permission),
+/// iOS the `tel:` handler through LinkBridge.swift. The number follows the
+/// phone's region.
 class EmergencyDialer {
   const EmergencyDialer();
 
@@ -105,10 +106,15 @@ class EmergencyDialer {
       emergencyNumberForCountry(PlatformDispatcher.instance.locale.countryCode);
 
   bool get available =>
-      !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+      !kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.android ||
+          defaultTargetPlatform == TargetPlatform.iOS);
 
   Future<bool> dial() async {
     if (!available) return false;
+    if (defaultTargetPlatform == TargetPlatform.iOS) {
+      return NativeUriOpener.open('tel:$number');
+    }
     try {
       await AndroidIntent(
         action: 'android.intent.action.DIAL',

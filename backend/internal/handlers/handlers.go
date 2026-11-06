@@ -46,6 +46,11 @@ type Server struct {
 	// client uses this to skip iOS token registration when APNs cannot work.
 	APNsConfigured bool
 
+	// IOSTeamID / IOSBundleID build the Universal Links association file
+	// served at /.well-known/apple-app-site-association (empty team = 404).
+	IOSTeamID   string
+	IOSBundleID string
+
 	// SMSEnv is the process environment fallback used when no admin
 	// settings row exists (or a field on that row is empty).
 	SMSEnv sms.Settings

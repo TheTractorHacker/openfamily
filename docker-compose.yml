@@ -110,6 +110,8 @@ services:
       APNS_TEAM_ID: ${APNS_TEAM_ID:-}
       APNS_TOPIC: ${APNS_TOPIC:-}
       APNS_PRODUCTION: ${APNS_PRODUCTION:-false}
+      IOS_TEAM_ID: ${IOS_TEAM_ID:-}
+      IOS_BUNDLE_ID: ${IOS_BUNDLE_ID:-}
       # Optional Twilio SMS for family alerts. Empty disables SMS.
       TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-}
       TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}

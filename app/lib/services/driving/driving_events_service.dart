@@ -2,6 +2,7 @@ import '../api_client.dart';
 import '../background_credential_store.dart';
 import 'driving_event.dart';
 import 'driving_event_outbox.dart';
+import '../platform_features.dart';
 import 'driving_settings.dart';
 
 /// Server reply to `POST /trips/sensor-events`.
@@ -145,6 +146,8 @@ class DrivingEventsService {
   /// leaves the state unsynced so the next call retries. Never throws.
   /// Returns true when the server is known to be in sync.
   Future<bool> syncOptIn() async {
+    // No sensor feed on this platform (iPhone): there is nothing to opt in to.
+    if (!PlatformFeatures.drivingSensors) return true;
     try {
       if (await DrivingSettings.serverSynced()) return true;
       final bool enabled = await DrivingSettings.sensorEnabled();

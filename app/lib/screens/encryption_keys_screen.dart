@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
@@ -331,8 +332,12 @@ class _EncryptionKeysScreenState extends State<EncryptionKeysScreen> {
       const SizedBox(height: AppSpace.lg),
       Text('Key storage: ${_store?.label ?? '...'}', key: const Key('keystore-level'), style: AppType.secondary),
       Text(
-        'Only the key that protects your private keys at rest lives in the Android Keystore. '
-        'The encryption itself runs in the app, not in secure hardware.',
+        defaultTargetPlatform == TargetPlatform.iOS
+            ? 'Only the key that protects your private keys at rest lives in the iPhone Keychain '
+                '(in the Secure Enclave when this iPhone has one). '
+                'The encryption itself runs in the app, not in secure hardware.'
+            : 'Only the key that protects your private keys at rest lives in the Android Keystore. '
+                'The encryption itself runs in the app, not in secure hardware.',
         style: AppType.secondary.copyWith(color: cs.onSurfaceVariant),
       ),
       const SizedBox(height: AppSpace.lg),

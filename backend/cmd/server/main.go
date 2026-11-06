@@ -96,6 +96,8 @@ func main() {
 	srv.MapStyleURL = cfg.MapStyleURL
 	srv.RequireAdminMFA = cfg.RequireAdminMFA
 	srv.APNsConfigured = cfg.APNsKeyFile != ""
+	srv.IOSTeamID = cfg.IOSTeamID
+	srv.IOSBundleID = cfg.IOSBundleID
 	if geo, err := geocode.New(geocode.Settings{
 		URL: cfg.GeocoderURL, Type: cfg.GeocoderType, Lang: cfg.GeocoderLang,
 		AllowPrivate: cfg.GeocoderAllowPrivate, Version: config.BuildVersion(),
@@ -213,6 +215,8 @@ func main() {
 	r.Get("/alerts/share/{token}", srv.ShareAlert)
 	// Public invite landing page: static, no database access, no secrets.
 	r.Get("/join/{code}", srv.JoinLanding)
+	// iOS Universal Links association (public, static; 404 unless IOS_TEAM_ID is set).
+	r.Get("/.well-known/apple-app-site-association", srv.AppleAppSiteAssociation)
 	// Public signed-APK download for invited family members (rate limited).
 	r.Get("/app.apk", srv.PublicDownloadAPK)
 	// Public share-link viewer (docs/share-links.md): hash lookup, generic 404,

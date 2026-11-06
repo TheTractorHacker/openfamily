@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../services/driving/driving_events_service.dart';
+import '../services/platform_features.dart';
 import '../services/driving/driving_settings.dart';
 import '../theme/app_theme.dart';
 import '../widgets/ds/ds.dart';
@@ -135,6 +136,37 @@ class _DrivingDetectionScreenState extends State<DrivingDetectionScreen> {
         AppType.secondary.copyWith(color: cs.onSurfaceVariant);
     const EdgeInsets pad =
         EdgeInsets.fromLTRB(AppSpace.xl, AppSpace.xs, AppSpace.xl, AppSpace.xs);
+    if (!PlatformFeatures.drivingSensors) {
+      return DsPage(
+        title: 'Driving detection',
+        maxWidth: 640,
+        children: <Widget>[
+          Padding(
+            padding: pad,
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: DsStatusChip(
+                key: const Key('driving-unavailable'),
+                icon: Icons.info_outline,
+                label: PlatformFeatures.notOnIphone,
+                color: AppColors.statusGrey,
+              ),
+            ),
+          ),
+          Padding(
+            padding: pad,
+            child: Text(
+              'Hard-braking and acceleration detection, the phone-use '
+              'estimate and crash detection need sensor access that only the '
+              'Android app has today. Nothing is recorded or sent from this '
+              'iPhone. Trips and driving reports still work from your '
+              'location.',
+              style: AppType.body,
+            ),
+          ),
+        ],
+      );
+    }
     return DsPage(
       title: 'Driving detection',
       maxWidth: 640,

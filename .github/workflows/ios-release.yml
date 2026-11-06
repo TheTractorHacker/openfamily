@@ -1,66 +1,168 @@
-name: iOS release (TestFlight) - SKELETON, DISABLED
+name: iOS release (TestFlight)
 
-# Decision record: docs/design/IOS_RELEASE.md. Not run on GitHub; not yet
-# validated against a real Apple account. The job is disabled unless the repository variable IOS_RELEASE_ENABLED is 'true'
-# until the secrets below exist; set the variable after adding them.
+# Decision record and the owner checklist: docs/design/IOS_RELEASE.md.
 #
-# Secrets (GitHub secrets only, never committed):
-#   IOS_P12_BASE64, IOS_P12_PASSWORD, IOS_PROVISIONING_PROFILE_BASE64,
-#   ASC_KEY_ID, ASC_ISSUER_ID, ASC_PRIVATE_KEY
+# STATUS: written blind (no Mac and no Apple account existed when it was
+# authored), NEVER RUN. The job is disabled unless the repository variable
+# IOS_RELEASE_ENABLED is 'true'. Expect to debug signing on the first attempt;
+# every step prints what it does so the log tells you where it stopped.
+#
+# Repository VARIABLES (Settings > Secrets and variables > Actions > Variables):
+#   IOS_RELEASE_ENABLED     'true' to allow the job to run
+#   IOS_TEAM_ID             10-character Apple Developer Team ID (not secret)
+#   IOS_BUNDLE_ID           optional, default app.openfamily
+#   IOS_ASSOCIATED_DOMAIN   optional, e.g. family.example.com: adds the
+#                           applinks:<domain> Associated Domains entitlement
+#                           (the App ID must have that capability enabled)
+# Repository SECRETS (never committed):
+#   IOS_P12_BASE64                   Apple Distribution certificate + private key, base64 of the .p12
+#   IOS_P12_PASSWORD                 password chosen when exporting the .p12
+#   IOS_PROVISIONING_PROFILE_BASE64  base64 of the App Store .mobileprovision
+#   ASC_KEY_ID                       App Store Connect API key id
+#   ASC_ISSUER_ID                    App Store Connect issuer id (UUID)
+#   ASC_PRIVATE_KEY                  full text of the AuthKey_XXXX.p8 file
+#
+# Version: versionName = x.y.z (App Store requires digits only; rc/beta
+# suffixes are dropped). Build number uses the Android formula so builds are
+# monotonic: (major*1000000 + minor*1000 + patch)*100 + suffix, suffix 99 for a
+# final release, rc/beta number for a pre-release. Override with build_number.
 
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Build name, e.g. 0.14.0'
+        description: 'Release, e.g. 0.19.0 or v0.19.0-rc1'
         required: true
       build_number:
-        description: 'Build number (monotonic integer)'
-        required: true
+        description: 'Optional build number override (monotonic integer)'
+        required: false
+        default: ''
 
 permissions:
   contents: read
 
+concurrency:
+  group: ios-release
+  cancel-in-progress: false
+
 jobs:
   testflight:
-    if: ${{ vars.IOS_RELEASE_ENABLED == 'true' }} # BLOCKED: needs an Apple Developer account + secrets
+    if: ${{ vars.IOS_RELEASE_ENABLED == 'true' }} # BLOCKED until an Apple Developer account + secrets exist
     runs-on: macos-15
-    timeout-minutes: 60
+    timeout-minutes: 75
+    env:
+      TEAM_ID: ${{ vars.IOS_TEAM_ID }}
+      BUNDLE_ID: ${{ vars.IOS_BUNDLE_ID || 'app.openfamily' }}
+      ASSOCIATED_DOMAIN: ${{ vars.IOS_ASSOCIATED_DOMAIN }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Check configuration
+        env:
+          HAVE_P12: ${{ secrets.IOS_P12_BASE64 != '' && secrets.IOS_P12_PASSWORD != '' }}
+          HAVE_PROFILE: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 != '' }}
+          HAVE_ASC: ${{ secrets.ASC_KEY_ID != '' && secrets.ASC_ISSUER_ID != '' && secrets.ASC_PRIVATE_KEY != '' }}
+        run: |
+          set -euo pipefail
+          fail=0
+          if ! [[ "$TEAM_ID" =~ ^[A-Z0-9]{10}$ ]]; then echo "::error::Repository variable IOS_TEAM_ID must be the 10-character Team ID"; fail=1; fi
+          [ "$HAVE_P12" = "true" ] || { echo "::error::Secrets IOS_P12_BASE64 / IOS_P12_PASSWORD missing"; fail=1; }
+          [ "$HAVE_PROFILE" = "true" ] || { echo "::error::Secret IOS_PROVISIONING_PROFILE_BASE64 missing"; fail=1; }
+          [ "$HAVE_ASC" = "true" ] || { echo "::error::Secrets ASC_KEY_ID / ASC_ISSUER_ID / ASC_PRIVATE_KEY missing"; fail=1; }
+          exit $fail
+
+      - name: Compute version
+        id: ver
+        env:
+          IN_VERSION: ${{ inputs.version }}
+          IN_BUILD: ${{ inputs.build_number }}
+        run: |
+          set -euo pipefail
+          V="${IN_VERSION#v}"
+          if ! [[ "$V" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)(-(rc|beta)\.?([0-9]+))?$ ]]; then
+            echo "::error::version must look like 0.19.0 or v0.19.0-rc1"; exit 1
+          fi
+          MAJ="${BASH_REMATCH[1]}"; MIN="${BASH_REMATCH[2]}"; PAT="${BASH_REMATCH[3]}"
+          SUF="${BASH_REMATCH[6]:-99}"
+          NAME="$MAJ.$MIN.$PAT"
+          CODE="${IN_BUILD:-$(( (MAJ*1000000 + MIN*1000 + PAT)*100 + 10#$SUF ))}"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "code=$CODE" >> "$GITHUB_OUTPUT"
+          echo "CFBundleShortVersionString=$NAME CFBundleVersion=$CODE"
+
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
           channel: stable
           flutter-version: '3.47.0'
           cache: true
 
-      - name: Import signing certificate and profile
+      - name: Import signing certificate and provisioning profile
         env:
           IOS_P12_BASE64: ${{ secrets.IOS_P12_BASE64 }}
           IOS_P12_PASSWORD: ${{ secrets.IOS_P12_PASSWORD }}
           IOS_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
         run: |
           set -euo pipefail
-          kc="$RUNNER_TEMP/build.keychain"
+          kc="$RUNNER_TEMP/build.keychain-db"
           pw="$(uuidgen)"
           security create-keychain -p "$pw" "$kc"
-          security set-keychain-settings -lut 3600 "$kc"
+          security set-keychain-settings -lut 21600 "$kc"
           security unlock-keychain -p "$pw" "$kc"
           printf '%s' "$IOS_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
           security import "$RUNNER_TEMP/cert.p12" -P "$IOS_P12_PASSWORD" -A -t cert -f pkcs12 -k "$kc"
-          security set-key-partition-list -S apple-tool:,apple: -k "$pw" "$kc"
-          security list-keychains -d user -s "$kc" login.keychain
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$pw" "$kc"
+          security list-keychains -d user -s "$kc" login.keychain-db
+          security find-identity -v -p codesigning "$kc"
+
           mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
-          printf '%s' "$IOS_PROVISIONING_PROFILE_BASE64" | base64 --decode \
-            > "$HOME/Library/MobileDevice/Provisioning Profiles/openfamily.mobileprovision"
+          printf '%s' "$IOS_PROVISIONING_PROFILE_BASE64" | base64 --decode > "$RUNNER_TEMP/profile.mobileprovision"
+          security cms -D -i "$RUNNER_TEMP/profile.mobileprovision" > "$RUNNER_TEMP/profile.plist"
+          uuid="$(/usr/libexec/PlistBuddy -c 'Print :UUID' "$RUNNER_TEMP/profile.plist")"
+          name="$(/usr/libexec/PlistBuddy -c 'Print :Name' "$RUNNER_TEMP/profile.plist")"
+          ptype="$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:aps-environment' "$RUNNER_TEMP/profile.plist" || true)"
+          pteam="$(/usr/libexec/PlistBuddy -c 'Print :TeamIdentifier:0' "$RUNNER_TEMP/profile.plist")"
+          pappid="$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' "$RUNNER_TEMP/profile.plist")"
+          cp "$RUNNER_TEMP/profile.mobileprovision" "$HOME/Library/MobileDevice/Provisioning Profiles/$uuid.mobileprovision"
+          echo "profile: $name ($uuid) team=$pteam app=$pappid aps-environment=${ptype:-MISSING}"
+          [ "$pteam" = "$TEAM_ID" ] || { echo "::error::Profile team $pteam != IOS_TEAM_ID $TEAM_ID"; exit 1; }
+          [ "$pappid" = "$TEAM_ID.$BUNDLE_ID" ] || { echo "::error::Profile app id $pappid != $TEAM_ID.$BUNDLE_ID (wildcard profiles are not supported)"; exit 1; }
+          [ "$ptype" = "production" ] || { echo "::error::Profile has no production Push Notifications capability: enable it on the App ID and regenerate the profile"; exit 1; }
+          echo "PROFILE_NAME=$name" >> "$GITHUB_ENV"
+
+      - name: Configure signing (CI copy only, not committed)
+        run: |
+          set -euo pipefail
+          cd app/ios
+          # Manual signing for the Runner project only (Pods keep their own settings).
+          for f in Flutter/Release.xcconfig; do
+            {
+              echo "CODE_SIGN_STYLE = Manual"
+              echo "DEVELOPMENT_TEAM = $TEAM_ID"
+              echo "CODE_SIGN_IDENTITY = Apple Distribution"
+              echo "PROVISIONING_PROFILE_SPECIFIER = $PROFILE_NAME"
+              echo "PRODUCT_BUNDLE_IDENTIFIER = $BUNDLE_ID"
+            } >> "$f"
+          done
+          sed -e "s/__TEAM_ID__/$TEAM_ID/" -e "s/__BUNDLE_ID__/$BUNDLE_ID/" \
+              -e "s/__PROFILE_NAME__/$PROFILE_NAME/" ExportOptions.plist > "$RUNNER_TEMP/ExportOptions.plist"
+          plutil -lint "$RUNNER_TEMP/ExportOptions.plist"
+          if [ -n "$ASSOCIATED_DOMAIN" ]; then
+            /usr/libexec/PlistBuddy \
+              -c "Add :com.apple.developer.associated-domains array" \
+              -c "Add :com.apple.developer.associated-domains:0 string applinks:$ASSOCIATED_DOMAIN" \
+              Runner/Runner.entitlements
+          fi
+          plutil -lint Runner/Runner.entitlements Runner/Info.plist Runner/PrivacyInfo.xcprivacy
 
       - name: Build signed IPA
         working-directory: app
         run: |
+          set -euo pipefail
           flutter pub get
           flutter build ipa --release \
-            --build-name='${{ inputs.version }}' --build-number='${{ inputs.build_number }}' \
-            --export-options-plist=ios/ExportOptions.plist
+            --build-name='${{ steps.ver.outputs.name }}' --build-number='${{ steps.ver.outputs.code }}' \
+            --export-options-plist="$RUNNER_TEMP/ExportOptions.plist"
+          ls -l build/ios/ipa/
 
       - name: Upload to TestFlight
         env:
@@ -71,11 +173,14 @@ jobs:
           set -euo pipefail
           mkdir -p "$HOME/.appstoreconnect/private_keys"
           printf '%s' "$ASC_PRIVATE_KEY" > "$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8"
-          xcrun altool --upload-app --type ios -f app/build/ios/ipa/*.ipa \
-            --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID"
+          ipa="$(ls app/build/ios/ipa/*.ipa | head -n 1)"
+          xcrun altool --validate-app --type ios -f "$ipa" --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID"
+          xcrun altool --upload-app --type ios -f "$ipa" --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID"
+          echo "Uploaded. The build appears in App Store Connect > TestFlight after Apple's processing (10-30 minutes)."
 
       - name: Remove signing material
         if: always()
         run: |
-          security delete-keychain "$RUNNER_TEMP/build.keychain" || true
-          rm -rf "$HOME/Library/MobileDevice/Provisioning Profiles" "$HOME/.appstoreconnect" "$RUNNER_TEMP/cert.p12"
+          security delete-keychain "$RUNNER_TEMP/build.keychain-db" || true
+          rm -rf "$HOME/Library/MobileDevice/Provisioning Profiles" "$HOME/.appstoreconnect" \
+            "$RUNNER_TEMP/cert.p12" "$RUNNER_TEMP/profile.mobileprovision" "$RUNNER_TEMP/profile.plist"

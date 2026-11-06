@@ -15,6 +15,8 @@ import background_locator_2
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
+    // A reinstalled app must not inherit the previous install's Keychain items.
+    SecureKeyChannel.resetKeychainOnFreshInstall()
     GeneratedPluginRegistrant.register(with: self)
     // background_locator_2 starts a headless Flutter engine for the background
     // isolate (also on relaunch after termination via significant-change
@@ -24,8 +26,18 @@ import background_locator_2
     // invoked by the plugin with the headless engine.
     BackgroundLocatorPlugin.setPluginRegistrantCallback { registry in
       GeneratedPluginRegistrant.register(with: registry)
+      // The background isolate seals private-circle fixes with the vault, so
+      // it needs the same key-store channel as the UI isolate.
+      if let bg = registry.registrar(forPlugin: "OpenFamilySecureKeyBackground") {
+        SecureKeyChannel.register(messenger: bg.messenger())
+      }
     }
     let ok = super.application(application, didFinishLaunchingWithOptions: launchOptions)
+
+    if let registrar = self.registrar(forPlugin: "OpenFamilySecureKey") {
+      SecureKeyChannel.register(messenger: registrar.messenger())
+      LinkBridge.shared.attach(messenger: registrar.messenger())
+    }
 
     if let registrar = self.registrar(forPlugin: "OpenFamilyApns") {
       let channel = FlutterMethodChannel(
@@ -50,6 +62,33 @@ import background_locator_2
     UNUserNotificationCenter.current().delegate = self
 
     return ok
+  }
+
+  // Invite links. Universal links (https://<server>/join/<code>) arrive as a
+  // browsing-web user activity; openfamily://join?... arrives as an open-URL.
+  // If this project is ever migrated to the UIScene lifecycle (Info.plist gets a
+  // UIApplicationSceneManifest) these two callbacks move to SceneDelegate.
+  override func application(
+    _ app: UIApplication,
+    open url: URL,
+    options: [UIApplication.OpenURLOptionsKey: Any] = [:]
+  ) -> Bool {
+    if LinkBridge.shared.handle(url: url) { return true }
+    return super.application(app, open: url, options: options)
+  }
+
+  override func application(
+    _ application: UIApplication,
+    continue userActivity: NSUserActivity,
+    restorationHandler: @escaping ([UIUserActivityRestoring]?) -> Void
+  ) -> Bool {
+    if userActivity.activityType == NSUserActivityTypeBrowsingWeb,
+      let url = userActivity.webpageURL,
+      LinkBridge.shared.handle(url: url)
+    {
+      return true
+    }
+    return super.application(application, continue: userActivity, restorationHandler: restorationHandler)
   }
 
   override func application(

@@ -11,6 +11,7 @@ import '../services/widget_snapshot.dart';
 import '../services/battery_optimization_service.dart';
 import '../services/biometric_service.dart';
 import '../services/location_sharing_service.dart';
+import '../services/platform_features.dart';
 import '../services/push_service.dart';
 import '../services/server_config.dart';
 import '../services/map_style_preference.dart';
@@ -510,8 +511,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
               icon: Icons.lock_clock_outlined,
               title: 'Keep me signed in on this device',
               subtitle: 'If the server ends your session, sign in again '
-                  'automatically. Your password is kept in the Android '
-                  'Keystore on this device only. Turn off to delete it.',
+                  'automatically. Your password is kept in the '
+                  '${PlatformFeatures.isIOS ? 'iPhone Keychain' : 'Android Keystore'} '
+                  'on this device only. Turn off to delete it.',
               value: _keepSignedIn,
               onChanged: _setKeepSignedIn,
             ),
@@ -524,7 +526,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
             DsListRow(
               leading: DsListRow.iconTile(context, Icons.speed_outlined),
               title: 'Driving detection',
-              subtitle: 'Motion-sensor braking and acceleration events',
+              subtitle: PlatformFeatures.drivingSensors
+                  ? 'Motion-sensor braking and acceleration events'
+                  : PlatformFeatures.notOnIphone,
               chevron: true,
               onTap: () => push(const DrivingDetectionScreen()),
             ),
@@ -535,7 +539,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               value: _locationSharing,
               onChanged: _locationSharingLoading ? null : _setLocationSharing,
             ),
-            if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android)
+            if (PlatformFeatures.homeWidget)
               DsToggleRow(
                 icon: Icons.widgets_outlined,
                 title: 'Show family on home screen widget',

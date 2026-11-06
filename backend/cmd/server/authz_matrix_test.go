@@ -168,6 +168,7 @@ var publicRoutes = map[string]string{
 	"GET /config":                      "public server config",
 	"GET /alerts/share/{token}":        "unguessable SOS share token",
 	"GET /join/{code}":                 "static invite landing page",
+	"GET /.well-known/apple-app-site-association": "iOS Universal Links association file (static)",
 	"GET /app.apk":                     "signed APK for invitees",
 	"GET /s/{token}":                   "share-link viewer (hash lookup)",
 	"GET /s/{token}/data":              "share-link viewer",
