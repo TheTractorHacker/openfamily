@@ -152,7 +152,8 @@ class KeystoreChannel(private val activity: Activity) {
                 @Suppress("DEPRECATION")
                 level = if (info.isInsideSecureHardware) "tee" else "software"
             }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) unlocked = info.isUnlockedDeviceRequired
+            // KeyInfo cannot report this; it was requested when the key was created (API 28+).
+            unlocked = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
             auth = info.isUserAuthenticationRequired
         } catch (_: Throwable) {
             // keep "software": we could not prove hardware backing
