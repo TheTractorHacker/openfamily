@@ -32,8 +32,11 @@ type identityFile struct {
 	CreatedAt    string `json:"created_at"`
 	RegisteredAt string `json:"registered_at,omitempty"`
 	ApprovedBy   string `json:"approved_by_device,omitempty"`
-	RevokedAt    string `json:"revoked_at,omitempty"`
-	Secret       box    `json:"secret"`
+	// ApproverEdPub is the approving phone's key, pinned from the approval signature the
+	// user carried (e2ee.PinApprover). It is the root of trust for our own account.
+	ApproverEdPub string `json:"approver_ed25519_pub,omitempty"`
+	RevokedAt     string `json:"revoked_at,omitempty"`
+	Secret        box    `json:"secret"`
 }
 
 type identitySecret struct {

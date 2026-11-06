@@ -223,6 +223,12 @@ func (a *app) cmdEnroll(ctx context.Context, o enrollOpts) error {
 	if rec.DeviceID != id.f.DeviceID || rec.Fingerprint != fmt.Sprintf("%x", id.fp) || !e2ee.VerifyRegistration(rec) {
 		return errors.New("the server's record of this bridge does not match its keys; not trusting it")
 	}
+	// Pin the approving phone's key: it is bound to the signature the user carried here.
+	anchor, err := e2ee.PinApprover(rec, id.f.DeviceID, ap.A, sig)
+	if err != nil {
+		return err
+	}
+	id.f.ApproverEdPub = anchor.EdPub
 	id.f.RegisteredAt = time.Now().UTC().Format(time.RFC3339)
 	id.f.ApprovedBy = ap.A
 	if err := a.st.saveIdentity(id); err != nil {

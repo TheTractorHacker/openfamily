@@ -54,6 +54,7 @@ export class World {
     this.epoch = 0
     this.revoked = false
     this.requests = []
+    this.admins = new Set([USER_A])
   }
 
   appendLog(action, user, actor, { circle, subject, epoch = 0, ref, sig, msg }) {
@@ -74,17 +75,17 @@ export class World {
     return rec
   }
 
-  publishEpoch(epoch, { commitmentOfOther } = {}) {
+  publishEpoch(epoch, { commitmentOfOther, publisher = this.A } = {}) {
     const key = c.randomBytes(32)
     this.keys.set(epoch, key)
     const commit = c.keyCommitment(commitmentOfOther ?? key, CIRCLE, epoch)
     const action = epoch === 1 ? c.ACT.enable : c.ACT.epoch
-    const msg = c.logActionMessage(action, USER_A, this.A.deviceId, { circleId: CIRCLE, epoch, ref: commit })
-    const sig = ed25519.sign(msg, this.A.edSeed)
-    this.appendLog(action, USER_A, this.A, { circle: CIRCLE, epoch, ref: commit, sig, msg })
+    const msg = c.logActionMessage(action, publisher.userId, publisher.deviceId, { circleId: CIRCLE, epoch, ref: commit })
+    const sig = ed25519.sign(msg, publisher.edSeed)
+    this.appendLog(action, publisher.userId, publisher, { circle: CIRCLE, epoch, ref: commit, sig, msg })
     this.epochs.push({
-      epoch, action, publisher_user_id: USER_A, publisher_device_id: this.A.deviceId,
-      publisher_ed25519_pub: c.b64(this.A.ed), key_commitment: c.b64(commit), signature: c.b64(sig),
+      epoch, action, publisher_user_id: publisher.userId, publisher_device_id: publisher.deviceId,
+      publisher_ed25519_pub: c.b64(publisher.ed), key_commitment: c.b64(commit), signature: c.b64(sig),
     })
     this.epoch = epoch
     return key
@@ -112,7 +113,7 @@ export class World {
     const byUser = (u, name) => ({ user_id: u, name, role: 'admin', devices: this.devices.filter((d) => d.user_id === u).map(strip) })
     return {
       circle_id: CIRCLE, mode: this.mode, epoch: this.epoch, rekey_required: false,
-      members: [byUser(USER_A, 'Alex'), { ...byUser(USER_B, 'Bea'), role: 'member' }], epochs: this.epochs,
+      members: [byUser(USER_A, 'Alex'), { ...byUser(USER_B, 'Bea'), role: this.admins.has(USER_B) ? 'admin' : 'member' }], epochs: this.epochs,
     }
   }
 
@@ -147,7 +148,15 @@ export class World {
       async post(path, body) {
         w.requests.push('POST ' + path)
         w.lastPost = { path, body }
-        return { ...body, device_id: body.device_id }
+        // Like the real server: the stored record, including who vouched for the key.
+        const actor = [w.A, w.B].find((x) => x.deviceId === body.actor_device_id)
+        const ed = c.unb64(body.ed25519_pub)
+        const x = c.unb64(body.x25519_pub)
+        return {
+          device_id: body.device_id, user_id: USER_A, kind: body.kind, ed25519_pub: body.ed25519_pub, x25519_pub: body.x25519_pub,
+          fingerprint: c.hex(c.fingerprint(ed, x)), signature: body.signature, registered_by_device_id: body.actor_device_id,
+          registered_by_ed25519_pub: actor ? c.b64(actor.ed) : '', registration_action: 1, registration_signature: body.log_signature,
+        }
       },
       async del(path, body) {
         w.requests.push('DELETE ' + path)

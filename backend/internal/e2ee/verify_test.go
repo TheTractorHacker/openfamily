@@ -397,7 +397,10 @@ func (l *tlog) add(action byte, signer ed25519.PrivateKey, asDevice string, asPu
 }
 
 // device registers device n, vouched by voucher (0 = root).
-func (l *tlog) device(n, voucher byte) DeviceRecord {
+func (l *tlog) device(n, voucher byte) DeviceRecord { return l.deviceAs(n, voucher, ActRegister) }
+
+// deviceAs registers device n with the given log action (register, rotate, reset ...).
+func (l *tlog) deviceAs(n, voucher, action byte) DeviceRecord {
 	seed := make([]byte, 32)
 	seed[0], seed[1] = n, 0x77
 	priv := ed25519.NewKeyFromSeed(seed)
@@ -415,12 +418,12 @@ func (l *tlog) device(n, voucher byte) DeviceRecord {
 		byPub = byPriv.Public().(ed25519.PublicKey)
 	}
 	bind, _ := BindingMessage(tUser, id, ed, x)
-	msg, _ := LogActionMessage(ActRegister, tUser, by, "", id, 0, fp)
+	msg, _ := LogActionMessage(action, tUser, by, "", id, 0, fp)
 	ap := true
 	rec := DeviceRecord{DeviceID: id, UserID: tUser, Kind: "device", Ed25519Pub: sb(ed), X25519Pub: sb(x),
 		Fingerprint: hex.EncodeToString(fp), Signature: sb(ed25519.Sign(priv, bind)), RegisteredByDeviceID: by,
-		RegisteredByPub: sb(byPub), RegistrationAction: int(ActRegister), RegistrationSignature: sb(ed25519.Sign(byPriv, msg)), Approved: &ap}
-	l.add(ActRegister, byPriv, by, byPub, id, fp)
+		RegisteredByPub: sb(byPub), RegistrationAction: int(action), RegistrationSignature: sb(ed25519.Sign(byPriv, msg)), Approved: &ap}
+	l.add(action, byPriv, by, byPub, id, fp)
 	l.recs[id] = rec
 	return rec
 }
@@ -569,7 +572,7 @@ func TestChainWalkRevocationOrder(t *testing.T) {
 	if !c.OK() {
 		t.Fatal(c.Detail)
 	}
-	m := members(l, 2)
+	m := members(l, 1, 2) // a (lying) state still lists the revoked voucher
 	if err := AuthorizeSender(idx, m, &w, &m[0]); err != nil {
 		t.Fatalf("registration that predates the voucher's revoke refused: %v", err)
 	}
@@ -582,7 +585,7 @@ func TestChainWalkRevocationOrder(t *testing.T) {
 	if !c2.OK() {
 		t.Fatal(c2.Detail)
 	}
-	m2 := members(l2, 3)
+	m2 := members(l2, 1, 3)
 	if err := AuthorizeSender(idx2, m2, &late, &m2[0]); err == nil {
 		t.Fatal("device registered by an already revoked voucher accepted")
 	}
@@ -593,7 +596,7 @@ func TestChainWalkRevocationOrder(t *testing.T) {
 	l3.revoke(2, 1)
 	deep := l3.device(4, 2)
 	idx3, _ := l3.index()
-	m3 := members(l3, 4)
+	m3 := members(l3, 1, 2, 4)
 	if err := AuthorizeSender(idx3, m3, &deep, &m3[0]); err == nil {
 		t.Fatal("chain through a revoked voucher accepted")
 	}
@@ -630,5 +633,175 @@ func TestSyncLogFullHandlesOverlappingPages(t *testing.T) {
 	})
 	if err != nil || !c.OK() || idx == nil {
 		t.Fatalf("paged full sync: %v %v %s", err, c.Problem, c.Detail)
+	}
+}
+
+func TestChainWalkListedVoucherMustMatchItsLoggedRegistration(t *testing.T) {
+	l := newTLog(t)
+	l.device(1, 0)
+	mid := l.device(2, 1)
+	leaf := l.device(3, 2)
+	idx, c := l.index()
+	if !c.OK() {
+		t.Fatal(c.Detail)
+	}
+	ok := members(l, 1, 2, 3)
+	if err := AuthorizeSender(idx, ok, &leaf, &ok[0]); err != nil {
+		t.Fatalf("honest chain refused: %v", err)
+	}
+	mut := map[string]func(*DeviceRecord){
+		"fingerprint differs from the logged ref":            func(d *DeviceRecord) { d.Fingerprint = hex.EncodeToString(make([]byte, 32)) },
+		"x25519 key swapped (fingerprint no longer matches)": func(d *DeviceRecord) { d.X25519Pub = sb(make([]byte, 32)) },
+		"registration signature differs":                     func(d *DeviceRecord) { d.RegistrationSignature = sb(make([]byte, 64)) },
+		"owned by another user":                              func(d *DeviceRecord) { d.UserID = "22222222-2222-4222-8222-222222222222" },
+	}
+	for name, f := range mut {
+		t.Run(name, func(t *testing.T) {
+			m := members(l, 1, 2, 3)
+			for i := range m[0].Devices {
+				if m[0].Devices[i].DeviceID == mid.DeviceID {
+					f(&m[0].Devices[i])
+				}
+			}
+			if err := AuthorizeSender(idx, m, &leaf, &m[0]); err == nil {
+				t.Fatal("chain through a tampered listed voucher accepted")
+			}
+		})
+	}
+	// An unlisted voucher (even a root) is refused: its key is not bound by anything we can check.
+	if err := AuthorizeSender(idx, members(l, 3), &leaf, &members(l, 3)[0]); err == nil {
+		t.Fatal("chain with unlisted vouchers accepted")
+	}
+}
+
+func TestRotationAndResetRetireKeys(t *testing.T) {
+	// Rotation: the OLD key is retired at the rotate entry; devices it vouches for afterwards are refused,
+	// the new key (registered by that very entry) and registrations before it stay valid.
+	l := newTLog(t)
+	l.device(1, 0)
+	l.device(2, 1)
+	before := l.device(3, 2)
+	l.deviceAs(5, 2, ActRotate) // 2 rotates to 5
+	after := l.device(6, 2)     // old key vouches after being rotated away
+	idx, c := l.index()
+	if !c.OK() {
+		t.Fatal(c.Detail)
+	}
+	if !idx.Revoked(tid(2)) {
+		t.Fatal("a rotation must retire the old key")
+	}
+	m := members(l, 1, 2, 3, 5, 6) // a lying state lists the rotated-away key
+	if err := AuthorizeSender(idx, m, &after, &m[0]); err == nil {
+		t.Fatal("device vouched by a rotated-away key AFTER the rotation accepted")
+	}
+	if err := AuthorizeSender(idx, m, &before, &m[0]); err != nil {
+		t.Fatalf("registration before the rotation refused: %v", err)
+	}
+	rotated := l.recs[tid(5)]
+	if err := AuthorizeSender(idx, m, &rotated, &m[0]); err != nil {
+		t.Fatalf("the rotated-to key refused: %v", err)
+	}
+	old := l.recs[tid(2)]
+	if err := AuthorizeSender(idx, m, &old, &m[0]); err == nil {
+		t.Fatal("the rotated-away key itself accepted")
+	}
+
+	// Reset: a new root retires every earlier key of the user.
+	l2 := newTLog(t)
+	l2.device(1, 0)
+	prev := l2.device(2, 1)
+	root := l2.deviceAs(7, 0, ActReset)
+	post := l2.device(8, 7)
+	late := l2.device(9, 1) // the retired root vouching after the reset
+	idx2, c2 := l2.index()
+	if !c2.OK() {
+		t.Fatal(c2.Detail)
+	}
+	m2 := members(l2, 1, 2, 7, 8, 9)
+	if err := AuthorizeSender(idx2, m2, &prev, &m2[0]); err == nil {
+		t.Fatal("a key retired by a reset accepted")
+	}
+	if err := AuthorizeSender(idx2, m2, &late, &m2[0]); err == nil {
+		t.Fatal("device vouched by a key retired by a reset accepted")
+	}
+	for _, d := range []DeviceRecord{root, post} {
+		d := d
+		if err := AuthorizeSender(idx2, m2, &d, &m2[0]); err != nil {
+			t.Fatalf("post-reset device %s refused: %v", d.DeviceID, err)
+		}
+	}
+}
+
+func TestOwnAccountDevicesMustChainToThePinnedApprover(t *testing.T) {
+	l := newTLog(t)
+	root := l.device(1, 0)
+	phone := l.device(2, 1)  // approver
+	viewer := l.device(3, 2) // the viewer itself would be this
+	sibling := l.device(4, 1)
+	idx, c := l.index()
+	if !c.OK() {
+		t.Fatal(c.Detail)
+	}
+	_ = viewer
+	m := members(l, 1, 2, 3, 4)
+	tr := Trust{Index: idx, Members: m, OwnUserID: tUser, Anchor: &Anchor{DeviceID: phone.DeviceID, EdPub: phone.Ed25519Pub}}
+	for _, d := range []DeviceRecord{root, phone, sibling} {
+		d := d
+		if err := tr.AuthorizeSender(&d, &m[0]); err != nil {
+			t.Fatalf("device %s of the approver's chain refused: %v", d.DeviceID, err)
+		}
+	}
+	// A reset retires the earlier keys; build the unanchored case on its own log instead.
+	l2 := newTLog(t)
+	l2.device(1, 0)
+	ph := l2.device(2, 1)
+	other := l2.device(5, 0) // second ROOT of the same account, not related to the approver
+	idx2, _ := l2.index()
+	m2 := members(l2, 1, 2, 5)
+	tr2 := Trust{Index: idx2, Members: m2, OwnUserID: tUser, Anchor: &Anchor{DeviceID: ph.DeviceID, EdPub: ph.Ed25519Pub}}
+	if err := tr2.AuthorizeSender(&other, &m2[0]); err == nil {
+		t.Fatal("own-account device with a different root accepted")
+	}
+	// No pinned approver: own-account devices are refused (fail closed).
+	tr3 := Trust{Index: idx2, Members: m2, OwnUserID: tUser}
+	if err := tr3.AuthorizeSender(&ph, &m2[0]); err == nil {
+		t.Fatal("own-account device accepted without a pinned approver")
+	}
+	// Wrong key pinned for the approver id.
+	bad := Trust{Index: idx2, Members: m2, OwnUserID: tUser, Anchor: &Anchor{DeviceID: ph.DeviceID, EdPub: other.Ed25519Pub}}
+	if err := bad.AuthorizeSender(&ph, &m2[0]); err == nil {
+		t.Fatal("accepted with an anchor whose key is not the approver's")
+	}
+}
+
+func TestPinApprover(t *testing.T) {
+	v := loadVectors(t)
+	rec := vectorRecordB(t, v)
+	sig := unhex(t, v.LogAction.Signature)
+	a, err := PinApprover(rec, v.IdentB.DeviceID, v.IdentA.DeviceID, sig)
+	if err != nil || a.DeviceID != v.IdentA.DeviceID || a.EdPub != sb(unhex(t, v.IdentA.EdPub)) {
+		t.Fatalf("pin: %v %+v", err, a)
+	}
+	other := make([]byte, 64)
+	for name, f := range map[string]func() error{
+		"server chose another signature": func() error { _, e := PinApprover(rec, v.IdentB.DeviceID, v.IdentA.DeviceID, other); return e },
+		"other approver id": func() error {
+			_, e := PinApprover(rec, v.IdentB.DeviceID, "cccccccc-cccc-4ccc-8ccc-cccccccccccc", sig)
+			return e
+		},
+		"other device": func() error {
+			_, e := PinApprover(rec, "dddddddd-dddd-4ddd-8ddd-dddddddddddd", v.IdentA.DeviceID, sig)
+			return e
+		},
+		"approver key swapped by the server": func() error {
+			r := rec
+			r.RegisteredByPub = sb(unhex(t, v.IdentB.EdPub))
+			_, e := PinApprover(r, v.IdentB.DeviceID, v.IdentA.DeviceID, sig)
+			return e
+		},
+	} {
+		if f() == nil {
+			t.Fatalf("%s: accepted", name)
+		}
 	}
 }

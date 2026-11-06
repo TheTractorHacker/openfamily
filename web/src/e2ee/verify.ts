@@ -292,8 +292,10 @@ export class LogIndex {
   hashes = new Map<number, string>()
   regs = new Map<string, LogEntry>()
   epochs = new Map<string, LogEntry>()
-  /** device -> sequence number of its first logged revoke */
+  /** device -> first logged revoke OR rotate-away (its key was replaced) */
   revoked = new Map<string, number>()
+  /** user -> ascending sequence numbers of reset entries (each retires all earlier keys of that user) */
+  resets = new Map<string, number[]>()
   /** The one Ed25519 key each acting device id has used in the log. */
   actorKey = new Map<string, string>()
   /** Set when one device id shows two different keys, or is registered twice (the log is then not trusted). */
@@ -310,6 +312,10 @@ export class LogIndex {
     if (e.action === ACT.enable || e.action === ACT.epoch) {
       if (e.circle_id && e.epoch !== undefined) this.epochs.set(`${e.circle_id}|${e.epoch}`, e)
     } else if (e.action === ACT.register || e.action === ACT.rotate || e.action === ACT.recovery || e.action === ACT.reset) {
+      // A rotation retires the OLD key (the actor); a reset retires every earlier key of the user.
+      // The server writes no separate revoke entry for either.
+      if (e.action === ACT.rotate && e.actor_device_id && !this.revoked.has(e.actor_device_id)) this.revoked.set(e.actor_device_id, e.seq)
+      if (e.action === ACT.reset && e.user_id) this.resets.set(e.user_id, [...(this.resets.get(e.user_id) ?? []), e.seq])
       if (e.subject_id) {
         if (this.regs.has(e.subject_id)) {
           if (!this.conflict) this.conflict = `entry ${e.seq}: device ${e.subject_id} is registered twice`
@@ -318,6 +324,25 @@ export class LogIndex {
     } else if (e.action === ACT.revoke) {
       if (e.subject_id && !this.revoked.has(e.subject_id)) this.revoked.set(e.subject_id, e.seq)
     }
+  }
+
+  /** Sequence number at which the log retires a device (revoke, rotated away, or a later reset of its user). */
+  revokeSeq(deviceId: string): number | undefined {
+    let best = this.revoked.get(deviceId)
+    const reg = this.regs.get(deviceId)
+    if (reg?.user_id) {
+      for (const rs of this.resets.get(reg.user_id) ?? []) {
+        if (rs > reg.seq) {
+          if (best === undefined || rs < best) best = rs
+          break
+        }
+      }
+    }
+    return best
+  }
+
+  isRevoked(deviceId: string): boolean {
+    return this.revokeSeq(deviceId) !== undefined
   }
 
   registrationLogged(d: DeviceRecord): boolean {
@@ -334,50 +359,48 @@ export class LogIndex {
   }
 
   /**
-   * Follows the voucher chain to a self-registered root. Fail-closed rules: every hop is in the
-   * log field for field; each voucher's key as used in the hop equals the key that device id has
-   * always signed with in the log and the key the circle state lists for it; a voucher revoked in
-   * the log BEFORE the vouched registration cannot mint devices (earlier registrations stay valid).
+   * Follows the voucher chain to a self-registered root and returns the devices on it (leaf first).
+   * Fail-closed rules: every hop is in the log field for field; EVERY voucher is listed in the state
+   * with a registration that verifies, the same user, and its own registration in the log field for
+   * field (so the key we trust is bound to the fingerprint the log recorded, not merely listed); the
+   * voucher key used equals the key that device id always signed with in the log; a voucher retired
+   * in the log (revoke, rotation, reset) BEFORE the vouched registration cannot mint devices.
    */
-  chainLogged(d: DeviceRecord, members: CircleMember[]): boolean {
+  walkChain(d: DeviceRecord, members: CircleMember[]): { id: string; pub: string }[] | null {
     const own = this.actorKey.get(d.device_id)
-    if (own !== undefined && own !== d.ed25519_pub) return false
+    if (own !== undefined && own !== d.ed25519_pub) return null
     let cur = d
+    const nodes = [{ id: d.device_id, pub: d.ed25519_pub }]
     for (let depth = 0; depth < 16; depth++) {
-      if (!this.registrationLogged(cur)) return false
+      if (!this.registrationLogged(cur)) return null
       const regSeq = this.regs.get(cur.device_id)!.seq
       const v = cur.registered_by_device_id
       const k = this.actorKey.get(v)
-      if (k === undefined || k !== cur.registered_by_ed25519_pub) return false
-      const listed = findDevice(members, v)
+      if (k === undefined || k !== cur.registered_by_ed25519_pub) return null
       if (v === cur.device_id) {
-        if (listed && listed.dev.ed25519_pub !== k) return false
-        return true // self-registered root, anchored by its own key
+        if (cur.ed25519_pub && cur.ed25519_pub !== k) return null
+        return nodes // self-registered root, anchored by its own key
       }
-      // A non-root voucher's key is only known to be genuine from the circle state (its fingerprint
-      // binds that key). An unlisted voucher counts only if it is a self-registered root.
-      if (listed) {
-        if (listed.dev.ed25519_pub !== k) return false
-      } else if (this.regs.get(v)?.actor_device_id !== v) return false
-      const r = this.revoked.get(v)
-      if (r !== undefined && r < regSeq) return false
-      const e = this.regs.get(v)
-      if (!e || e.user_id !== d.user_id) return false
-      cur = {
-        device_id: e.subject_id!,
-        user_id: e.user_id!,
-        kind: '',
-        ed25519_pub: '',
-        x25519_pub: '',
-        signature: '',
-        fingerprint: e.ref!,
-        registered_by_device_id: e.actor_device_id!,
-        registered_by_ed25519_pub: e.actor_ed25519_pub!,
-        registration_action: e.action!,
-        registration_signature: e.signature!,
+      const listed = findDevice(members, v)
+      if (
+        !listed ||
+        listed.dev.ed25519_pub !== k ||
+        listed.dev.user_id !== d.user_id ||
+        !verifyRegistration(listed.dev) ||
+        !this.registrationLogged(listed.dev)
+      ) {
+        return null
       }
+      const r = this.revokeSeq(v)
+      if (r !== undefined && r < regSeq) return null
+      nodes.push({ id: v, pub: k })
+      cur = listed.dev
     }
-    return false
+    return null
+  }
+
+  chainLogged(d: DeviceRecord, members: CircleMember[]): boolean {
+    return this.walkChain(d, members) !== null
   }
 
   epochLogged(circleId: string, r: EpochRecord): boolean {
@@ -442,7 +465,7 @@ export function findDevice(members: CircleMember[], deviceId: string): { dev: De
 
 function usable(idx: LogIndex | null, members: CircleMember[], d: DeviceRecord): string | null {
   if (!idx) return 'no verified log'
-  if (d.revoked_at || idx.revoked.has(d.device_id)) return 'device is revoked'
+  if (d.revoked_at || idx.isRevoked(d.device_id)) return 'device is revoked'
   if (d.kind === 'recovery') return 'recovery keys do not act in a circle'
   if (d.approved !== true) return 'device is not approved'
   if (!verifyRegistration(d)) return 'device registration does not verify'
@@ -450,39 +473,101 @@ function usable(idx: LogIndex | null, members: CircleMember[], d: DeviceRecord):
   return null
 }
 
-/** Returns null when the sender may speak for the member, else the reason (fail closed). */
-export function authorizeSender(idx: LogIndex | null, members: CircleMember[], found: { dev: DeviceRecord; member: CircleMember } | null): string | null {
-  if (!found) return 'sender is not in the circle state'
-  if (found.dev.user_id !== found.member.user_id) return 'device belongs to another user than the member it is listed under'
-  return usable(idx, members, found.dev)
+/** The key we know is genuine without trusting the server: the phone that approved this viewer/bridge. */
+export interface Anchor {
+  deviceId: string
+  edPub: string
 }
 
-/** Returns null when a wrap addressed to us may be opened, else the reason (fail closed). */
-export function authorizeWrap(
-  idx: LogIndex | null,
-  members: CircleMember[],
-  circleId: string,
-  recipientUserId: string,
-  w: WrapRecord,
-  rec: EpochRecord | undefined,
-): string | null {
-  if (!idx || !rec) return 'no verified log or epoch record'
-  if (!idx.epochLogged(circleId, rec)) return 'epoch record is not in the verified log'
-  const pub = findDevice(members, rec.publisher_device_id)
-  if (!pub) return 'epoch publisher is not in the circle state'
-  if (pub.dev.ed25519_pub !== rec.publisher_ed25519_pub || pub.dev.user_id !== rec.publisher_user_id || pub.member.user_id !== rec.publisher_user_id) {
-    return 'epoch publisher key differs from the registered key'
+/**
+ * Derives the trust anchor from our OWN registration response: it must be for this device, carry the
+ * approval signature the user carried from the phone (not one the server chose), be vouched by the
+ * approver the user named, and verify completely. The approver key is thereby bound to a signature
+ * only the real phone could produce.
+ */
+export function pinApprover(rec: DeviceRecord, deviceId: string, approverId: string, approvalSig: Uint8Array): Anchor {
+  let ok = false
+  try {
+    ok =
+      rec.device_id === deviceId &&
+      rec.registered_by_device_id === approverId &&
+      rec.registered_by_device_id !== rec.device_id &&
+      constEq(unb64(rec.registration_signature), approvalSig) &&
+      verifyRegistration(rec)
+  } catch {
+    ok = false
   }
-  if (pub.member.role !== 'admin') return 'epoch publisher is not a circle admin'
-  const pr = usable(idx, members, pub.dev)
-  if (pr) return `epoch publisher: ${pr}`
-  const wr = findDevice(members, w.wrapper_device_id)
-  if (!wr) return 'wrapper is not in the circle state'
-  if (wr.dev.ed25519_pub !== w.wrapper_ed25519_pub || wr.dev.user_id !== wr.member.user_id) return 'wrapper key differs from the registered key'
-  const wu = usable(idx, members, wr.dev)
-  if (wu) return `wrapper: ${wu}`
-  if (wr.dev.user_id !== rec.publisher_user_id && wr.dev.user_id !== recipientUserId) {
-    return "wrapper is neither the epoch publisher nor the recipient's own device"
+  if (!ok) throw new E2eeError("the server's record of this registration does not match the approval the phone gave")
+  return { deviceId: approverId, edPub: rec.registered_by_ed25519_pub }
+}
+
+/** Everything a verifier knows: the verified log, the (server-served) members, our account and the pinned approver. */
+export interface TrustCtx {
+  index: LogIndex | null
+  members: CircleMember[]
+  /** Empty means "no own-account concept" (log-binding rules only). */
+  ownUserId: string
+  anchor: Anchor | null
+}
+
+export const TRUST_ANCHORED = 'anchored' // wrapped by a device of OUR account chaining to the approving phone
+export const TRUST_MEMBER = 'member' // wrapped by another member: first-use trust, not verified by our phone
+
+function anchored(t: TrustCtx, d: DeviceRecord): boolean {
+  if (!t.anchor || !t.ownUserId || !t.index) return false
+  const nodes = t.index.walkChain(d, t.members)
+  if (!nodes) return false
+  if (nodes.some((n) => n.id === t.anchor!.deviceId && n.pub === t.anchor!.edPub)) return true
+  const ad = findDevice(t.members, t.anchor.deviceId)
+  if (!ad || ad.dev.ed25519_pub !== t.anchor.edPub) return false
+  const an = t.index.walkChain(ad.dev, t.members)
+  if (!an) return false
+  const ra = an[an.length - 1]!
+  const rd = nodes[nodes.length - 1]!
+  return ra.id === rd.id && ra.pub === rd.pub
+}
+
+/** Returns null when the sender may speak for the member, else the reason (fail closed). */
+export function authorizeSender(t: TrustCtx, found: { dev: DeviceRecord; member: CircleMember } | null): string | null {
+  if (!found) return 'sender is not in the circle state'
+  if (found.dev.user_id !== found.member.user_id) return 'device belongs to another user than the member it is listed under'
+  const why = usable(t.index, t.members, found.dev)
+  if (why) return why
+  if (t.ownUserId && found.dev.user_id === t.ownUserId && !anchored(t, found.dev)) {
+    return 'a device of your own account that does not chain to the phone that approved this viewer'
   }
   return null
+}
+
+/** Returns {level} when a wrap addressed to us may be opened, else {error} (fail closed). */
+export function authorizeWrap(
+  t: TrustCtx,
+  circleId: string,
+  w: WrapRecord,
+  rec: EpochRecord | undefined,
+): { level: string; error?: undefined } | { error: string; level?: undefined } {
+  const no = (error: string) => ({ error })
+  if (!t.index || !rec) return no('no verified log or epoch record')
+  if (!t.index.epochLogged(circleId, rec)) return no('epoch record is not in the verified log')
+  const pub = findDevice(t.members, rec.publisher_device_id)
+  if (!pub) return no('epoch publisher is not in the circle state')
+  if (pub.dev.ed25519_pub !== rec.publisher_ed25519_pub || pub.dev.user_id !== rec.publisher_user_id || pub.member.user_id !== rec.publisher_user_id) {
+    return no('epoch publisher key differs from the registered key')
+  }
+  if (pub.member.role !== 'admin') return no('epoch publisher is not a circle admin')
+  const pr = usable(t.index, t.members, pub.dev)
+  if (pr) return no(`epoch publisher: ${pr}`)
+  const wr = findDevice(t.members, w.wrapper_device_id)
+  if (!wr) return no('wrapper is not in the circle state')
+  if (wr.dev.ed25519_pub !== w.wrapper_ed25519_pub || wr.dev.user_id !== wr.member.user_id) return no('wrapper key differs from the registered key')
+  const wu = usable(t.index, t.members, wr.dev)
+  if (wu) return no(`wrapper: ${wu}`)
+  if (t.ownUserId && wr.dev.user_id === t.ownUserId) {
+    return anchored(t, wr.dev) ? { level: TRUST_ANCHORED } : no('wrapper is a device of your own account that does not chain to the phone that approved this viewer')
+  }
+  if (wr.dev.user_id === rec.publisher_user_id) {
+    if (t.ownUserId && pub.dev.user_id === t.ownUserId && !anchored(t, pub.dev)) return no('epoch publisher is of your own account but does not chain to the approving phone')
+    return { level: TRUST_MEMBER }
+  }
+  return no("wrapper is neither the epoch publisher nor the recipient's own device")
 }

@@ -242,6 +242,8 @@ export interface IdentityMeta {
   xPub: string // b64
   registered: boolean
   createdAt: number
+  /** The approving phone, pinned from the approval signature (the root of trust for our own account). */
+  approver?: { deviceId: string; edPub: string }
 }
 
 interface StoredDevice extends IdentityMeta {
@@ -330,12 +332,12 @@ export async function createIdentity(o: CreateOpts): Promise<Unlocked> {
 export async function loadMeta(kv: KV, userId: string): Promise<IdentityMeta | null> {
   const v = (await kv.get(idKey(userId))) as IdentityMeta | undefined
   if (!v) return null
-  return { mode: v.mode, userId: v.userId, deviceId: v.deviceId, name: v.name, edPub: v.edPub, xPub: v.xPub, registered: v.registered, createdAt: v.createdAt }
+  return { mode: v.mode, userId: v.userId, deviceId: v.deviceId, name: v.name, edPub: v.edPub, xPub: v.xPub, registered: v.registered, createdAt: v.createdAt, approver: v.approver }
 }
 
-export async function markRegistered(kv: KV, userId: string): Promise<void> {
+export async function markRegistered(kv: KV, userId: string, approver: { deviceId: string; edPub: string }): Promise<void> {
   const v = (await kv.get(idKey(userId))) as IdentityMeta | undefined
-  if (v) await kv.put(idKey(userId), { ...v, registered: true })
+  if (v) await kv.put(idKey(userId), { ...v, registered: true, approver })
 }
 
 /** Opens a stored identity. Passphrase mode needs the passphrase (wrong one throws). */

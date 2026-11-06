@@ -124,12 +124,13 @@ type fakeOF struct {
 	expire   bool // next authenticated request answers 401 once
 
 	// injected behaviour
-	itemsStatus int
-	itemsCode   string
-	hits        map[string]int
-	registered  []map[string]any
-	revoked     []map[string]any
-	rawLogHook  func(entries []e2ee.LogEntry) []e2ee.LogEntry
+	itemsStatus  int
+	itemsCode    string
+	hits         map[string]int
+	registered   []map[string]any
+	revoked      []map[string]any
+	rawLogHook   func(entries []e2ee.LogEntry) []e2ee.LogEntry
+	swapApprover *tdev // when set, the registration response names this key as the approver's
 }
 
 func newFakeOF(t *testing.T, circle, user string) *fakeOF {
@@ -264,6 +265,9 @@ func (f *fakeOF) serve(w http.ResponseWriter, r *http.Request) {
 		rec.Fingerprint = hex.EncodeToString(fp)
 		if d := f.findDev(rec.RegisteredByDeviceID); d != nil {
 			rec.RegisteredByPub = std(d.edPub)
+			if f.swapApprover != nil {
+				rec.RegisteredByPub = std(f.swapApprover.edPub)
+			}
 		}
 		jw(w, 201, rec)
 	case strings.HasPrefix(path, "/e2ee/devices/") && r.Method == "DELETE":
@@ -586,6 +590,10 @@ func newWorld(t *testing.T) *world {
 	}
 	w.phone = newTDev(t, aliceID, "device", nil)
 	w.bob = newTDev(t, bobID, "device", nil)
+	w.id.f.ApprovedBy, w.id.f.ApproverEdPub = w.phone.id, std(w.phone.edPub)
+	if err := st.saveIdentity(w.id); err != nil {
+		t.Fatal(err)
+	}
 	w.bridge = finishTDev(t, aliceID, "service", w.id.f.DeviceID, w.id, w.phone)
 	w.of.members = []*tmember{{user: aliceID, name: "Alice", admin: true, devs: []*tdev{w.phone, w.bridge}}, {user: bobID, name: "Bob", devs: []*tdev{w.bob}}}
 	// A redacted entry of another tenant, then the registrations, then epoch 1.

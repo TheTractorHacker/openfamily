@@ -2,7 +2,13 @@ package main
 
 import (
 	"context"
+	"crypto/ed25519"
+	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/TheTractorHacker/openfamily/backend/internal/e2ee"
@@ -201,5 +207,83 @@ func TestRegistrationCacheIsKeyedByWholeRecord(t *testing.T) {
 	st2 := &circleState{}
 	if st2.registrationOK(&bad) || !st2.registrationOK(&good) {
 		t.Fatal("poisoned cache")
+	}
+}
+
+// A server that reports another key for the approving phone must not get that key pinned.
+func TestEnrollRefusesAnApproverKeySwappedByTheServer(t *testing.T) {
+	aliceID := newUUIDv4()
+	of := newFakeOF(t, newUUIDv4(), aliceID)
+	phone := newTDev(t, aliceID, "device", nil)
+	evil := newTDev(t, aliceID, "device", nil)
+	of.members = []*tmember{{user: aliceID, name: "Alice", devs: []*tdev{phone}}}
+	dir := filepath.Join(t.TempDir(), "state")
+	env := map[string]string{"E2EE_BRIDGE_PASSWORD": of.password, "E2EE_BRIDGE_STATE": dir}
+	_, out, errs := runCLI(t, env, "", "enroll", "--server", of.srv.URL, "--email", "a@example.org")
+	var rc requestCode
+	for i, l := range strings.Split(strings.TrimSpace(out), "\n") {
+		if strings.HasPrefix(l, "REQUEST CODE") {
+			raw, _ := base64.URLEncoding.DecodeString(strings.TrimSpace(strings.Split(strings.TrimSpace(out), "\n")[i+2]))
+			_ = json.Unmarshal(raw, &rc)
+		}
+	}
+	if rc.D == "" {
+		t.Fatalf("no request code: %s", errs)
+	}
+	fp, _ := hex.DecodeString(hexOfRC(rc))
+	msg, _ := e2ee.LogActionMessage(e2ee.ActRegister, aliceID, phone.id, "", rc.D, 0, fp)
+	ap, _ := json.Marshal(approvalCode{A: phone.id, S: std(ed25519.Sign(phone.priv, msg))})
+	of.mu.Lock()
+	of.swapApprover = evil
+	of.mu.Unlock()
+	code, _, errs := runCLI(t, env, "", "enroll", "--approval", base64.URLEncoding.EncodeToString(ap))
+	if code == 0 || !strings.Contains(errs, "does not match") {
+		t.Fatalf("a swapped approver key was accepted: %d %s", code, errs)
+	}
+	raw, _ := os.ReadFile(filepath.Join(dir, fileIdentity))
+	var f identityFile
+	_ = json.Unmarshal(raw, &f)
+	if f.ApproverEdPub != "" || f.RegisteredAt != "" {
+		t.Fatalf("identity was marked registered / pinned: %+v", f)
+	}
+}
+
+func hexOfRC(rc requestCode) string {
+	ed, _ := base64.StdEncoding.DecodeString(rc.E)
+	x, _ := base64.StdEncoding.DecodeString(rc.X)
+	fp, _ := e2ee.Fingerprint(ed, x)
+	return hex.EncodeToString(fp)
+}
+
+// Devices of the bridge's OWN account must chain to the pinned approving phone: a
+// second root of the account (e.g. made up by the server) and a bridge without a pin
+// are refused; the approver's own chain is fine.
+func TestOwnAccountDevicesMustChainToTheApprover(t *testing.T) {
+	w := newWorld(t)
+	b, st, _ := prepared(t, w)
+	fake := newTDev(t, w.phone.user, "device", nil) // a second root of alice's account
+	w.of.mu.Lock()
+	w.of.members[0].devs = append(w.of.members[0].devs, fake)
+	w.of.logReg(fake, fake)
+	w.of.mu.Unlock()
+	b2, st2, _ := prepared(t, w)
+	_ = b
+	_ = st
+	dev, mem := st2.device(fake.id)
+	if err := b2.trust(st2).AuthorizeSender(dev, mem); err == nil {
+		t.Fatal("an own-account device with an unrelated root was accepted")
+	}
+	ph, memP := st2.device(w.phone.id)
+	if err := b2.trust(st2).AuthorizeSender(ph, memP); err != nil {
+		t.Fatalf("the approving phone itself was refused: %v", err)
+	}
+	// No pinned approver: own-account devices are refused.
+	b2.id.f.ApproverEdPub = ""
+	if err := b2.trust(st2).AuthorizeSender(ph, memP); err == nil {
+		t.Fatal("own-account device accepted without a pinned approver")
+	}
+	// ...and so is every wrap.
+	if _, err := b2.acceptWrap(w.of.circle, st2, w.of.wraps[w.bridge.id][0]); err == nil {
+		t.Fatal("wrap accepted without a pinned approver")
 	}
 }

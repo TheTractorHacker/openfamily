@@ -4,7 +4,7 @@ import { ed25519 } from '@noble/curves/ed25519.js'
 import * as c from '../src/e2ee/core.ts'
 import * as vw from '../src/e2ee/viewer.ts'
 import * as ks from '../src/e2ee/keystore.ts'
-import { verifyLogSlice, verifyRegistration, syncLog, syncLogFull, authorizeWrap, authorizeSender, findDevice } from '../src/e2ee/verify.ts'
+import { verifyLogSlice, verifyRegistration, syncLog, syncLogFull, authorizeWrap, authorizeSender, findDevice, pinApprover } from '../src/e2ee/verify.ts'
 import { World, CIRCLE, USER_A, deviceRecord, phone } from './world.mjs'
 
 const NOW = 1_700_000_100_000
@@ -36,7 +36,10 @@ async function pair(s) {
   const approval = c.b64urlPadded(c.utf8(JSON.stringify({ a: s.w.A.deviceId, s: c.b64(s.asig) })))
   const parsed = vw.parseApproval(approval)
   assert.equal(parsed.actorDeviceId, s.w.A.deviceId)
-  await vw.registerViewer(s.w.http(), s.id.meta, s.id.ops, parsed)
+  const reg = await vw.registerViewer(s.w.http(), s.id.meta, s.id.ops, parsed)
+  s.id.meta.approver = reg.anchor // what the controller persists
+  assert.equal(reg.anchor.deviceId, s.w.A.deviceId)
+  assert.equal(reg.anchor.edPub, c.b64(s.w.A.ed))
   const body = s.w.lastPost.body
   assert.equal(s.w.lastPost.path, '/e2ee/devices')
   assert.equal(body.kind, 'web')
@@ -287,6 +290,9 @@ test('keystore: session mode stores nothing', async () => {
 
 // ---------------------------------------------------------------- fail-closed authorization
 
+const ctx = (s, index, members, over = {}) => ({ index, members, ownUserId: USER_A, anchor: s.id.meta.approver ?? null, ...over })
+const AW = (s, index, members, w, rec, over) => authorizeWrap(ctx(s, index, members, over), CIRCLE, w, rec).error ?? null
+
 async function synced() {
   const s = await setup()
   await pair(s)
@@ -300,7 +306,7 @@ const wrapFor = (s) => s.w.wraps.find((x) => x.recipient_device_id === s.sub.dev
 
 test('authorizeWrap baseline accepts the honest wrap', async () => {
   const { s, rep } = await synced()
-  assert.equal(authorizeWrap(rep.logIndex, rep.state.members, CIRCLE, USER_A, wrapFor(s), rep.state.epochs[0]), null)
+  assert.equal(AW(s, rep.logIndex, rep.state.members, wrapFor(s), rep.state.epochs[0]), null)
 })
 
 test('authorizeWrap fails closed', async () => {
@@ -309,33 +315,33 @@ test('authorizeWrap fails closed', async () => {
   const w0 = wrapFor(s)
   const rec0 = rep.state.epochs[0]
   const cases = {
-    'no log index': () => authorizeWrap(null, rep.state.members, CIRCLE, USER_A, w0, rec0),
-    'no epoch record': () => authorizeWrap(rep.logIndex, rep.state.members, CIRCLE, USER_A, w0, undefined),
+    'no log index': () => AW(s, null, rep.state.members, w0, rec0),
+    'no epoch record': () => AW(s, rep.logIndex, rep.state.members, w0, undefined),
     'publisher missing from state': () => {
       const st = clone()
       for (const m of st.members) m.devices = m.devices.filter((d) => d.device_id !== s.w.A.deviceId)
-      return authorizeWrap(rep.logIndex, st.members, CIRCLE, USER_A, w0, rec0)
+      return AW(s, rep.logIndex, st.members, w0, rec0)
     },
-    'publisher key differs': () => authorizeWrap(rep.logIndex, rep.state.members, CIRCLE, USER_A, w0, { ...rec0, publisher_ed25519_pub: c.b64(s.w.B.ed) }),
+    'publisher key differs': () => AW(s, rep.logIndex, rep.state.members, w0, { ...rec0, publisher_ed25519_pub: c.b64(s.w.B.ed) }),
     'publisher revoked in state': () => {
       const st = clone(); findDevice(st.members, s.w.A.deviceId).dev.revoked_at = '2026-01-01T00:00:00Z'
-      return authorizeWrap(rep.logIndex, st.members, CIRCLE, USER_A, w0, rec0)
+      return AW(s, rep.logIndex, st.members, w0, rec0)
     },
     'publisher not approved': () => {
       const st = clone(); findDevice(st.members, s.w.A.deviceId).dev.approved = false
-      return authorizeWrap(rep.logIndex, st.members, CIRCLE, USER_A, w0, rec0)
+      return AW(s, rep.logIndex, st.members, w0, rec0)
     },
     'publisher not admin': () => {
       const st = clone(); findDevice(st.members, s.w.A.deviceId).member.role = 'member'
-      return authorizeWrap(rep.logIndex, st.members, CIRCLE, USER_A, w0, rec0)
+      return AW(s, rep.logIndex, st.members, w0, rec0)
     },
-    'epoch record not in log': () => authorizeWrap(rep.logIndex, rep.state.members, CIRCLE, USER_A, w0, { ...rec0, key_commitment: c.b64(new Uint8Array(32)) }),
-    'wrapper missing': () => authorizeWrap(rep.logIndex, rep.state.members, CIRCLE, USER_A, { ...w0, wrapper_device_id: 'ffffffff-ffff-4fff-8fff-ffffffffffff' }, rec0),
-    'wrapper wrong key': () => authorizeWrap(rep.logIndex, rep.state.members, CIRCLE, USER_A, { ...w0, wrapper_ed25519_pub: c.b64(s.w.B.ed) }, rec0),
-    'wrapper is another member': () => authorizeWrap(rep.logIndex, rep.state.members, CIRCLE, USER_A, { ...w0, wrapper_device_id: s.w.B.deviceId, wrapper_ed25519_pub: c.b64(s.w.B.ed) }, rec0),
+    'epoch record not in log': () => AW(s, rep.logIndex, rep.state.members, w0, { ...rec0, key_commitment: c.b64(new Uint8Array(32)) }),
+    'wrapper missing': () => AW(s, rep.logIndex, rep.state.members, { ...w0, wrapper_device_id: 'ffffffff-ffff-4fff-8fff-ffffffffffff' }, rec0),
+    'wrapper wrong key': () => AW(s, rep.logIndex, rep.state.members, { ...w0, wrapper_ed25519_pub: c.b64(s.w.B.ed) }, rec0),
+    'wrapper is another member': () => AW(s, rep.logIndex, rep.state.members, { ...w0, wrapper_device_id: s.w.B.deviceId, wrapper_ed25519_pub: c.b64(s.w.B.ed) }, rec0),
     'wrapper registration forged': () => {
       const st = clone(); findDevice(st.members, s.w.A.deviceId).dev.registration_signature = c.b64(new Uint8Array(64))
-      return authorizeWrap(rep.logIndex, st.members, CIRCLE, USER_A, w0, rec0)
+      return AW(s, rep.logIndex, st.members, w0, rec0)
     },
   }
   for (const [name, f] of Object.entries(cases)) assert.notEqual(f(), null, name)
@@ -352,11 +358,11 @@ test('a wrapper that is not in the verified log is refused; revoked in the log t
   const sig = ed25519.sign(c.wrapSigMessage(CIRCLE, 1, s.sub.deviceId, phone2.deviceId, blob), phone2.edSeed)
   const w2 = { epoch: 1, recipient_device_id: s.sub.deviceId, wrapper_device_id: phone2.deviceId, wrapper_ed25519_pub: c.b64(phone2.ed), wrapped_key: c.b64(blob), signature: c.b64(sig) }
   const rep2 = await vw.syncCircle(d, CIRCLE)
-  assert.match(authorizeWrap(rep2.logIndex, rep2.state.members, CIRCLE, USER_A, w2, rep2.state.epochs[0]), /not in the verified log/)
+  assert.match(AW(s, rep2.logIndex, rep2.state.members, w2, rep2.state.epochs[0]), /not in the verified log/)
   // The log revokes the publisher although the state still lists it.
   s.w.appendLog(3, USER_A, s.w.A, { subject: s.w.A.deviceId, ref: c.fingerprint(s.w.A.ed, s.w.A.x), sig: ed25519.sign(c.logActionMessage(3, USER_A, s.w.A.deviceId, { subjectId: s.w.A.deviceId, ref: c.fingerprint(s.w.A.ed, s.w.A.x) }), s.w.A.edSeed), msg: c.logActionMessage(3, USER_A, s.w.A.deviceId, { subjectId: s.w.A.deviceId, ref: c.fingerprint(s.w.A.ed, s.w.A.x) }) })
   const rep3 = await vw.syncCircle(d, CIRCLE)
-  assert.match(authorizeWrap(rep3.logIndex, rep3.state.members, CIRCLE, USER_A, wrapFor(s), rep3.state.epochs[0]), /revoked/)
+  assert.match(AW(s, rep3.logIndex, rep3.state.members, wrapFor(s), rep3.state.epochs[0]), /revoked/)
   void rep
 })
 
@@ -407,16 +413,16 @@ test('sender not in the verified log is deferred, never accepted; revoked sender
 test('registration verdicts cannot be poisoned: same device_id and signature, different covered field', async () => {
   const { s, rep } = await synced()
   const good = findDevice(rep.state.members, s.w.B.deviceId).dev
-  assert.equal(authorizeSender(rep.logIndex, rep.state.members, findDevice(rep.state.members, s.w.B.deviceId)), null)
+  assert.equal(authorizeSender(ctx(s, rep.logIndex, rep.state.members), findDevice(rep.state.members, s.w.B.deviceId)), null)
   const forged = structuredClone(rep.state.members)
   const f = findDevice(forged, s.w.B.deviceId)
   f.dev.x25519_pub = c.b64(s.w.A.x) // same device_id + registration_signature, another covered field
-  assert.notEqual(authorizeSender(rep.logIndex, rep.state.members, f), null)
+  assert.notEqual(authorizeSender(ctx(s, rep.logIndex, rep.state.members), f), null)
   assert.equal(verifyRegistration(good), true)
   assert.equal(verifyRegistration(f.dev), false)
   // Order independence.
-  assert.notEqual(authorizeSender(rep.logIndex, rep.state.members, f), null)
-  assert.equal(authorizeSender(rep.logIndex, rep.state.members, findDevice(rep.state.members, s.w.B.deviceId)), null)
+  assert.notEqual(authorizeSender(ctx(s, rep.logIndex, rep.state.members), f), null)
+  assert.equal(authorizeSender(ctx(s, rep.logIndex, rep.state.members), findDevice(rep.state.members, s.w.B.deviceId)), null)
 })
 
 test('full-log sync keeps the pin rules: fork and rollback with a pinned head', async () => {
@@ -428,6 +434,8 @@ test('full-log sync keeps the pin rules: fork and rollback with a pinned head', 
 })
 
 // ---------------------------------------------------------------- chain walk (key binding, revoke order)
+
+const AS = (index, m, found) => authorizeSender({ index, members: m, ownUserId: '', anchor: null }, found)
 
 async function indexOfWorld(w) {
   const r = await syncLogFull(null, async (after) => ({
@@ -454,7 +462,7 @@ test('chain walk: real flows (root phone, second phone, viewer vouched by a phon
   const { check, index } = await indexOfWorld(w)
   assert.ok(check.ok)
   const m = membersOf(w, a, p2, v)
-  for (const d of [a, p2, v]) assert.equal(authorizeSender(index, m, asFound(m, d)), null)
+  for (const d of [a, p2, v]) assert.equal(AS(index, m, asFound(m, d)), null)
 })
 
 test('chain walk: a second entry for a device signed with another key makes the whole log untrusted', async () => {
@@ -485,7 +493,7 @@ test('chain walk: voucher id with a key the state does not list is refused', asy
   assert.ok(check.ok) // p2 only signs once, so the log alone cannot tell
   assert.ok(verifyRegistration(forged))
   const m = membersOf(w, a, p2, forged)
-  assert.notEqual(authorizeSender(index, m, asFound(m, forged)), null)
+  assert.notEqual(AS(index, m, asFound(m, forged)), null)
   assert.equal(index.chainLogged(forged, []), false) // and without the state: p2's own chain does not support that key
 })
 
@@ -502,7 +510,7 @@ test('chain walk: root whose claimed key differs from the logged one is refused'
 
 test('chain walk: registration before the voucher revoke stays valid, after it is refused', async () => {
   const w = new World()
-  w.register(w.A, { action: 1 })
+  const a = w.register(w.A, { action: 1 })
   const p2s = phone(3, USER_A, '33333333-3333-4333-8333-333333333333')
   const p2 = w.register(p2s, { actor: w.A })
   revokeEntry(w, w.A, w.A) // the first phone is revoked AFTER p2 was registered by it
@@ -510,20 +518,23 @@ test('chain walk: registration before the voucher revoke stays valid, after it i
   const lateRec = w.register(late, { actor: w.A }) // registered AFTER the revoke by the revoked key
   const { check, index } = await indexOfWorld(w)
   assert.ok(check.ok)
-  const m = membersOf(w, p2, lateRec)
-  assert.equal(authorizeSender(index, m, asFound(m, p2)), null)
-  assert.match(authorizeSender(index, m, asFound(m, lateRec)), /not in the verified log/)
-  // A chain through a log-revoked middle voucher.
+  const m = membersOf(w, a, p2, lateRec) // a (lying) state still lists the revoked voucher
+  assert.equal(AS(index, m, asFound(m, p2)), null)
+  assert.match(AS(index, m, asFound(m, lateRec)), /not in the verified log/)
+  // An honest state does not list the revoked voucher; the chain then fails closed.
+  const honest = membersOf(w, p2)
+  assert.notEqual(AS(index, honest, asFound(honest, p2)), null)
+  // A chain THROUGH a log-revoked middle voucher.
   const w2 = new World()
-  w2.register(w2.A, { action: 1 })
+  const a2 = w2.register(w2.A, { action: 1 })
   const midS = phone(3, USER_A, '33333333-3333-4333-8333-333333333333')
-  w2.register(midS, { actor: w2.A })
+  const mid = w2.register(midS, { actor: w2.A })
   revokeEntry(w2, midS, w2.A)
   const deepS = phone(4, USER_A, '44444444-4444-4444-8444-444444444444')
   const deep = w2.register(deepS, { actor: midS })
   const r2 = await indexOfWorld(w2)
-  const m2 = membersOf(w2, deep)
-  assert.notEqual(authorizeSender(r2.index, m2, asFound(m2, deep)), null)
+  const m2 = membersOf(w2, a2, mid, deep)
+  assert.notEqual(AS(r2.index, m2, asFound(m2, deep)), null)
 })
 
 test('a device revoked in the log is refused even if the state still lists it', async () => {
@@ -534,7 +545,7 @@ test('a device revoked in the log is refused even if the state still lists it', 
   revokeEntry(w, p2s, w.A)
   const { index } = await indexOfWorld(w)
   const m = membersOf(w, p2)
-  assert.match(authorizeSender(index, m, asFound(m, p2)), /revoked/)
+  assert.match(AS(index, m, asFound(m, p2)), /revoked/)
 })
 
 test('redacted entries are tolerated by the index but never count as proof of anything', async () => {
@@ -549,5 +560,112 @@ test('redacted entries are tolerated by the index but never count as proof of an
   const r = await syncLogFull(null, async (after) => ({ entries: red.filter((e) => e.seq > after), head: { seq: red.length, hash: red.at(-1).entry_hash } }))
   assert.ok(r.check.ok)
   const m = membersOf(w, a, p2)
-  assert.notEqual(authorizeSender(r.index, m, asFound(m, p2)), null)
+  assert.notEqual(AS(r.index, m, asFound(m, p2)), null)
+})
+
+// ---------------------------------------------------------------- audit pass: listed vouchers, rotation/reset, anchor
+
+test('listed voucher must match its logged registration (fingerprint, keys, user)', async () => {
+  const w = new World()
+  const a = w.register(w.A, { action: 1 })
+  const midS = phone(3, USER_A, '33333333-3333-4333-8333-333333333333')
+  const mid = w.register(midS, { actor: w.A })
+  const leafS = phone(4, USER_A, '44444444-4444-4444-8444-444444444444')
+  const leaf = w.register(leafS, { actor: midS })
+  const { index } = await indexOfWorld(w)
+  const base = () => membersOf(w, a, mid, leaf)
+  const ok = base()
+  assert.equal(AS(index, ok, asFound(ok, leaf)), null)
+  const muts = {
+    'fingerprint differs': (d) => { d.fingerprint = '00'.repeat(32) },
+    'x25519 key swapped': (d) => { d.x25519_pub = c.b64(new Uint8Array(32)) },
+    'registration signature differs': (d) => { d.registration_signature = c.b64(new Uint8Array(64)) },
+    'other user': (d) => { d.user_id = USER_B },
+  }
+  for (const [name, f] of Object.entries(muts)) {
+    const m = base()
+    f(m[0].devices.find((x) => x.device_id === midS.deviceId))
+    assert.notEqual(AS(index, m, asFound(m, m[0].devices.find((x) => x.device_id === leafS.deviceId))), null, name)
+  }
+  const unlisted = membersOf(w, leaf)
+  assert.notEqual(AS(index, unlisted, asFound(unlisted, leaf)), null, 'unlisted vouchers')
+})
+
+test('rotation retires the old key; a reset retires all earlier keys of the user', async () => {
+  const w = new World()
+  const a = w.register(w.A, { action: 1 })
+  const midS = phone(3, USER_A, '33333333-3333-4333-8333-333333333333')
+  const mid = w.register(midS, { actor: w.A })
+  const beforeS = phone(4, USER_A, '44444444-4444-4444-8444-444444444444')
+  const before = w.register(beforeS, { actor: midS })
+  const newS = phone(5, USER_A, '55555555-5555-4555-8555-555555555555')
+  const rotated = w.register(newS, { actor: midS, action: 2 }) // mid rotates to newS
+  const afterS = phone(6, USER_A, '66666666-6666-4666-8666-666666666666')
+  const after = w.register(afterS, { actor: midS }) // the rotated-away key vouches afterwards
+  const { index } = await indexOfWorld(w)
+  assert.equal(index.isRevoked(midS.deviceId), true)
+  const m = membersOf(w, a, mid, before, rotated, after)
+  assert.equal(AS(index, m, asFound(m, before)), null, 'registered before the rotation')
+  assert.equal(AS(index, m, asFound(m, rotated)), null, 'the rotated-to key')
+  assert.notEqual(AS(index, m, asFound(m, after)), null, 'vouched by the rotated-away key afterwards')
+  assert.notEqual(AS(index, m, asFound(m, mid)), null, 'the rotated-away key itself')
+
+  const w2 = new World()
+  const r1 = w2.register(w2.A, { action: 1 })
+  const oldS = phone(3, USER_A, '33333333-3333-4333-8333-333333333333')
+  const old = w2.register(oldS, { actor: w2.A })
+  const rootS = phone(7, USER_A, '77777777-7777-4777-8777-777777777777')
+  const root = w2.register(rootS, { action: 8 })
+  const postS = phone(8, USER_A, '88888888-8888-4888-8888-888888888888')
+  const post = w2.register(postS, { actor: rootS })
+  const lateS = phone(9, USER_A, '99999999-9999-4999-8999-999999999999')
+  const late = w2.register(lateS, { actor: w2.A }) // retired root vouching after the reset
+  const r2 = await indexOfWorld(w2)
+  const m2 = membersOf(w2, r1, old, root, post, late)
+  assert.notEqual(AS(r2.index, m2, asFound(m2, old)), null, 'key retired by the reset')
+  assert.notEqual(AS(r2.index, m2, asFound(m2, late)), null, 'vouched by a key retired by the reset')
+  assert.equal(AS(r2.index, m2, asFound(m2, root)), null)
+  assert.equal(AS(r2.index, m2, asFound(m2, post)), null)
+})
+
+test('own-account devices must chain to the pinned approver; no pin means refusal', async () => {
+  const w = new World()
+  const a = w.register(w.A, { action: 1 })
+  const phS = phone(3, USER_A, '33333333-3333-4333-8333-333333333333')
+  const ph = w.register(phS, { actor: w.A })
+  const otherS = phone(5, USER_A, '55555555-5555-4555-8555-555555555555')
+  const other = w.register(otherS, { action: 1 }) // a second ROOT of the account: a server-made "own device"
+  const { index } = await indexOfWorld(w)
+  const m = membersOf(w, a, ph, other)
+  const anchor = { deviceId: phS.deviceId, edPub: c.b64(phS.ed) }
+  const T = (an, own = USER_A) => ({ index, members: m, ownUserId: own, anchor: an })
+  assert.equal(authorizeSender(T(anchor), asFound(m, ph)), null)
+  assert.equal(authorizeSender(T(anchor), asFound(m, a)), null)
+  assert.notEqual(authorizeSender(T(anchor), asFound(m, other)), null, 'different root')
+  assert.notEqual(authorizeSender(T(null), asFound(m, ph)), null, 'no pin')
+  assert.notEqual(authorizeSender(T({ deviceId: phS.deviceId, edPub: c.b64(otherS.ed) }), asFound(m, ph)), null, 'wrong key pinned')
+})
+
+test('pinApprover binds the approver key to the signature the user carried', async () => {
+  const s = await setup()
+  const w = s.w
+  const record = await vw.registerViewer(w.http(), s.id.meta, s.id.ops, vw.parseApproval(c.b64urlPadded(c.utf8(JSON.stringify({ a: w.A.deviceId, s: c.b64(s.asig) })))))
+  const rec = record.record
+  const sig = s.asig
+  assert.equal(pinApprover(rec, s.sub.deviceId, w.A.deviceId, sig).edPub, c.b64(w.A.ed))
+  assert.throws(() => pinApprover(rec, s.sub.deviceId, w.A.deviceId, new Uint8Array(64)), /does not match/) // server chose another signature
+  assert.throws(() => pinApprover(rec, s.sub.deviceId, w.B.deviceId, sig), /does not match/)
+  assert.throws(() => pinApprover({ ...rec, registered_by_ed25519_pub: c.b64(w.B.ed) }, s.sub.deviceId, w.A.deviceId, sig), /does not match/) // key swapped by the server
+  assert.throws(() => pinApprover(rec, 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', w.A.deviceId, sig), /does not match/)
+})
+
+test('a key published by another member is accepted but reported as member-trusted', async () => {
+  const s = await setup()
+  await pair(s)
+  s.w.admins.add(USER_B)
+  s.w.publishEpoch(2, { publisher: s.w.B })
+  s.w.wrapTo(2, s.sub, s.w.B) // the other account's admin wraps straight to the viewer
+  const rep = await vw.syncCircle(deps(s), CIRCLE)
+  assert.deepEqual(rep.heldEpochs, [1, 2])
+  assert.deepEqual(rep.memberTrustedEpochs, [2]) // epoch 1 came from our own approving phone (anchored)
 })

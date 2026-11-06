@@ -325,14 +325,28 @@ func (b *bridge) syncKeys(ctx context.Context, circle string, st *circleState, f
 	return nil
 }
 
+// trust bundles what the authorization rules need. An enrollment without a pinned
+// approver has no anchor, so devices of our own account are refused (fail closed).
+func (b *bridge) trust(st *circleState) e2ee.Trust {
+	t := e2ee.Trust{Index: b.logIdx, Members: st.Members, OwnUserID: b.id.f.UserID}
+	if b.id.f.ApprovedBy != "" && b.id.f.ApproverEdPub != "" {
+		t.Anchor = &e2ee.Anchor{DeviceID: b.id.f.ApprovedBy, EdPub: b.id.f.ApproverEdPub}
+	}
+	return t
+}
+
 // acceptWrap is the phone's syncCircleKeys policy plus server-independent
 // authorization, failing closed: the epoch publisher and the wrapper must be
 // listed, active, approved devices with the keys the wrap/record carry, their
 // registrations must be in the verified log, and so must the epoch record.
 func (b *bridge) acceptWrap(circle string, st *circleState, w e2ee.WrapRecord) ([]byte, error) {
 	rec := st.record(w.Epoch)
-	if err := e2ee.AuthorizeWrap(b.logIdx, st.Members, circle, b.id.f.UserID, w, rec); err != nil {
+	level, err := b.trust(st).AuthorizeWrap(circle, w, rec)
+	if err != nil {
 		return nil, err
+	}
+	if level != e2ee.TrustAnchored {
+		b.log.Warn("circle key accepted from another member (first-use trust, not verified by your phone)", "circle", circle[:8], "epoch", w.Epoch)
 	}
 	return e2ee.OpenWrap(circle, b.id.f.DeviceID, b.id.xSecret, b.id.xPub, w, rec)
 }
@@ -542,7 +556,7 @@ func (b *bridge) process(ctx context.Context, circle string, it wireItem) reason
 		}
 		return rUnknownSender
 	}
-	if err := e2ee.AuthorizeSender(b.logIdx, st.Members, dev, mem); err != nil {
+	if err := b.trust(st).AuthorizeSender(dev, mem); err != nil {
 		switch {
 		case errors.Is(err, e2ee.ErrNotInLog):
 			return rUnknownSender // may appear after the next log verification

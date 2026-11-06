@@ -26,12 +26,16 @@ import {
   type EpochRecord,
   type LogEntry,
   type LogHead,
+  type Anchor,
   type LogIndex,
+  type TrustCtx,
   type WrapRecord,
+  TRUST_MEMBER,
   authorizeSender,
   authorizeWrap,
   findDevice,
   openWrap,
+  pinApprover,
   syncLogFull,
 } from './verify.ts'
 
@@ -87,10 +91,19 @@ export function parseApproval(code: string): Approval {
   }
 }
 
-/** Registers the viewer's PUBLIC keys, cross-signed by the approving phone. */
-export async function registerViewer(http: Http, meta: IdentityMeta, ops: KeyOps, approval: Approval, kind: ViewerKind = 'web'): Promise<DeviceRecord> {
+/**
+ * Registers the viewer's PUBLIC keys, cross-signed by the approving phone, and pins that phone's key
+ * from the approval signature the user carried (never from what the server merely lists).
+ */
+export async function registerViewer(
+  http: Http,
+  meta: IdentityMeta,
+  ops: KeyOps,
+  approval: Approval,
+  kind: ViewerKind = 'web',
+): Promise<{ record: DeviceRecord; anchor: Anchor }> {
   const binding = await ops.sign(bindingMessage(meta.userId, meta.deviceId, ops.edPub, ops.xPub))
-  return http.post<DeviceRecord>('/e2ee/devices', {
+  const record = await http.post<DeviceRecord>('/e2ee/devices', {
     device_id: meta.deviceId,
     kind,
     ed25519_pub: b64(ops.edPub),
@@ -102,6 +115,8 @@ export async function registerViewer(http: Http, meta: IdentityMeta, ops: KeyOps
     reset: false,
     can_upload: false,
   })
+  const anchor = pinApprover(record, meta.deviceId, approval.actorDeviceId, approval.signature)
+  return { record, anchor }
 }
 
 /** Revokes this viewer's key on the server (self-signed, action revoke). */
@@ -143,6 +158,8 @@ export interface SyncReport {
   self?: DeviceRecord
   logHead?: LogHead
   logIndex?: LogIndex
+  /** Epochs whose key came from another member, not from one of your own phones (first-use trust). */
+  memberTrustedEpochs: number[]
 }
 
 export class LogProblemError extends E2eeError {
@@ -180,12 +197,14 @@ export async function syncCircle(d: SessionDeps, circleId: string): Promise<Sync
   const self = state.members.flatMap((m) => m.devices).find((x) => x.device_id === d.meta.deviceId)
   let newKeys = 0
   let rejected = 0
+  const memberTrustedEpochs: number[] = []
+  const trust: TrustCtx = { index: logIndex, members: state.members, ownUserId: d.meta.userId, anchor: d.meta.approver ?? null }
   if (state.mode === 'private') {
     const wr = await d.http.get<{ wraps: WrapRecord[] }>(`/circles/${circleId}/e2ee/wraps?device_id=${d.meta.deviceId}`)
     for (const w of wr.wraps ?? []) {
       if (await d.vault.getCircleKey(circleId, w.epoch)) continue
-      const why = authorizeWrap(logIndex, state.members, circleId, d.meta.userId, w, state.epochs.find((e) => e.epoch === w.epoch))
-      if (why) {
+      const verdict = authorizeWrap(trust, circleId, w, state.epochs.find((e) => e.epoch === w.epoch))
+      if (verdict.error !== undefined) {
         rejected++
         continue
       }
@@ -199,13 +218,14 @@ export async function syncCircle(d: SessionDeps, circleId: string): Promise<Sync
           state.epochs.find((e) => e.epoch === w.epoch),
         )
         await d.vault.putCircleKey(circleId, w.epoch, key)
+        if (verdict.level === TRUST_MEMBER) memberTrustedEpochs.push(w.epoch)
         newKeys++
       } catch {
         rejected++
       }
     }
   }
-  return { state, newKeys, rejectedWraps: rejected, heldEpochs: await d.vault.heldEpochs(circleId), self, logHead, logIndex }
+  return { state, newKeys, rejectedWraps: rejected, heldEpochs: await d.vault.heldEpochs(circleId), self, logHead, logIndex, memberTrustedEpochs }
 }
 
 // ------------------------------------------------------------------ items
@@ -279,6 +299,7 @@ export class Receiver {
     private state: () => CircleState,
     private now: () => number = () => Date.now(),
     private logIndex: () => LogIndex | null = () => null,
+    private own: () => { ownUserId: string; anchor: Anchor | null } | null = () => null,
   ) {}
 
   private senderOf(deviceId: string): { dev: DeviceRecord; member: CircleMember } | null {
@@ -312,7 +333,8 @@ export class Receiver {
     }
     const { dev, member } = sender
     const idx = this.logIndex()
-    const why = authorizeSender(idx, this.state().members, sender)
+    const o = this.own()
+    const why = authorizeSender({ index: idx, members: this.state().members, ownUserId: o?.ownUserId ?? '', anchor: o?.anchor ?? null }, sender)
     if (why) {
       if (idx && why.includes('not in the verified log')) {
         this.deferredCount++

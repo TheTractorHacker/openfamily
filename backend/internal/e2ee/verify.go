@@ -422,7 +422,8 @@ type LogIndex struct {
 	hashes  map[int64][]byte
 	regs    map[string]LogEntry // subject device -> its registration entry
 	epochs  map[string]LogEntry // circle|epoch -> enable/epoch entry
-	revoked map[string]int64    // device -> sequence number of the first logged revoke
+	revoked map[string]int64    // device -> first logged revoke OR rotate-away (its key was replaced)
+	resets  map[string][]int64  // user -> sequence numbers of reset entries (each retires all earlier keys of that user)
 	// actorKey is the one Ed25519 key each acting device id has used in the log.
 	// A log entry only proves "some key signed this"; binding it to the device id is
 	// what stops a forged voucher.
@@ -436,7 +437,7 @@ type LogIndex struct {
 var ErrNotInLog = errors.New("e2ee: not in the verified log")
 
 func newLogIndex() *LogIndex {
-	return &LogIndex{hashes: map[int64][]byte{}, regs: map[string]LogEntry{}, epochs: map[string]LogEntry{}, revoked: map[string]int64{}, actorKey: map[string]string{}}
+	return &LogIndex{hashes: map[int64][]byte{}, regs: map[string]LogEntry{}, epochs: map[string]LogEntry{}, revoked: map[string]int64{}, resets: map[string][]int64{}, actorKey: map[string]string{}}
 }
 
 func (x *LogIndex) add(e LogEntry) {
@@ -459,6 +460,17 @@ func (x *LogIndex) add(e LogEntry) {
 			x.epochs[fmt.Sprintf("%s|%d", *e.CircleID, *e.Epoch)] = e
 		}
 	case ActRegister, ActRotate, ActRecovery, ActReset:
+		// A rotation retires the OLD key (the actor) at that sequence number; a reset
+		// retires every earlier key of the user. The server writes no separate revoke
+		// entry for either (see E2EERotateDevice and the reset branch of E2EERegisterDevice).
+		if byte(*e.Action) == ActRotate && e.ActorDeviceID != nil {
+			if _, ok := x.revoked[*e.ActorDeviceID]; !ok {
+				x.revoked[*e.ActorDeviceID] = e.Seq
+			}
+		}
+		if byte(*e.Action) == ActReset && e.UserID != nil {
+			x.resets[*e.UserID] = append(x.resets[*e.UserID], e.Seq)
+		}
 		if e.SubjectID != nil {
 			if _, dup := x.regs[*e.SubjectID]; dup && x.conflict == "" {
 				x.conflict = fmt.Sprintf("entry %d: device %s is registered twice", e.Seq, *e.SubjectID)
@@ -513,12 +525,29 @@ func SyncLogFull(pinned *LogHead, fetch LogFetcher) (LogCheck, *LogIndex, error)
 	return c, idx, nil
 }
 
-// Revoked reports whether the log revokes the device.
-func (x *LogIndex) Revoked(deviceID string) bool {
+// RevokeSeq returns the sequence number at which the log retires a device:
+// an explicit revoke, being rotated away, or a later reset of its user.
+func (x *LogIndex) RevokeSeq(deviceID string) (int64, bool) {
 	if x == nil {
-		return false
+		return 0, false
 	}
-	_, ok := x.revoked[deviceID]
+	best, ok := x.revoked[deviceID]
+	if e, has := x.regs[deviceID]; has && e.UserID != nil {
+		for _, rs := range x.resets[*e.UserID] { // ascending
+			if rs > e.Seq {
+				if !ok || rs < best {
+					best, ok = rs, true
+				}
+				break
+			}
+		}
+	}
+	return best, ok
+}
+
+// Revoked reports whether the log retires the device at any point.
+func (x *LogIndex) Revoked(deviceID string) bool {
+	_, ok := x.RevokeSeq(deviceID)
 	return ok
 }
 
@@ -536,63 +565,63 @@ func (x *LogIndex) RegistrationLogged(d DeviceRecord) bool {
 		*e.Ref == d.Fingerprint && *e.Signature == d.RegistrationSignature && *e.ActorPub == d.RegisteredByPub
 }
 
-// ChainLogged follows the registration chain (voucher after voucher) up to a
-// self-registered root. Strict rules, all fail closed:
+// ChainNode is one device on a registration chain, with the key it was seen with.
+type ChainNode struct{ ID, Pub string }
+
+// WalkChain follows the registration chain (voucher after voucher) up to a
+// self-registered root and returns the devices on it (leaf first). Strict rules, all
+// fail closed:
 //   - every hop's registration is in the log, field for field;
-//   - each voucher's key as used in the hop (RegisteredByPub) is the key that
-//     device id has always signed with in the log, and equals the key the circle
-//     state lists for it when it is listed (so a forged "voucher" under a real
-//     device id but an attacker's key is refused);
-//   - a voucher revoked in the log BEFORE the vouched registration cannot mint
-//     devices (a registration that predates the revoke stays valid).
-func (x *LogIndex) ChainLogged(d DeviceRecord, members []CircleMember) bool {
+//   - EVERY voucher must be listed in the circle state, with a registration that
+//     verifies, belongs to the same user, and is itself in the log field for field
+//     (so the key we trust for it is bound to the fingerprint the log recorded when
+//     it was registered, not merely to what the server lists);
+//   - the voucher's key as used in the hop equals the key that device id has always
+//     signed with in the log and the key the state lists;
+//   - a voucher retired in the log (revoke, rotation, reset) BEFORE the vouched
+//     registration cannot mint devices (earlier registrations stay valid).
+func (x *LogIndex) WalkChain(d DeviceRecord, members []CircleMember) ([]ChainNode, bool) {
 	if x == nil {
-		return false
+		return nil, false
 	}
 	if k, ok := x.actorKey[d.DeviceID]; ok && k != d.Ed25519Pub {
-		return false
+		return nil, false
 	}
 	cur := d
+	nodes := []ChainNode{{ID: d.DeviceID, Pub: d.Ed25519Pub}}
 	for depth := 0; depth < 16; depth++ {
 		if !x.RegistrationLogged(cur) {
-			return false
+			return nil, false
 		}
 		regSeq := x.regs[cur.DeviceID].Seq
 		v := cur.RegisteredByDeviceID
 		k, ok := x.actorKey[v]
 		if !ok || k != cur.RegisteredByPub {
-			return false
+			return nil, false
 		}
 		if v == cur.DeviceID {
-			if vd, _ := FindDevice(members, v); vd != nil && vd.Ed25519Pub != k {
-				return false
+			if cur.Ed25519Pub != "" && cur.Ed25519Pub != k {
+				return nil, false
 			}
-			return true // self-registered root, anchored by its own key
+			return nodes, true // self-registered root, anchored by its own key
 		}
-		// A non-root voucher's key is only known to be genuine from the circle state
-		// (its fingerprint binds that key). A voucher that is no longer listed counts
-		// only if it is itself a self-registered root, whose entry anchors its key.
-		if vd, _ := FindDevice(members, v); vd != nil {
-			if vd.Ed25519Pub != k {
-				return false
-			}
-		} else if re, ok := x.regs[v]; !ok || re.ActorDeviceID == nil || *re.ActorDeviceID != v {
-			return false
+		vd, _ := FindDevice(members, v)
+		if vd == nil || vd.Ed25519Pub != k || vd.UserID != d.UserID || !VerifyRegistration(*vd) || !x.RegistrationLogged(*vd) {
+			return nil, false
 		}
-		if r, revoked := x.revoked[v]; revoked && r < regSeq {
-			return false
+		if r, revoked := x.RevokeSeq(v); revoked && r < regSeq {
+			return nil, false
 		}
-		e := x.regs[v]
-		if e.Action == nil || e.SubjectID == nil || e.UserID == nil || e.ActorDeviceID == nil || e.Ref == nil || e.Signature == nil || e.ActorPub == nil {
-			return false
-		}
-		if *e.UserID != d.UserID {
-			return false
-		}
-		cur = DeviceRecord{DeviceID: *e.SubjectID, UserID: *e.UserID, RegisteredByDeviceID: *e.ActorDeviceID,
-			RegistrationAction: *e.Action, Fingerprint: *e.Ref, RegistrationSignature: *e.Signature, RegisteredByPub: *e.ActorPub}
+		nodes = append(nodes, ChainNode{ID: v, Pub: k})
+		cur = *vd
 	}
-	return false
+	return nil, false
+}
+
+// ChainLogged reports whether WalkChain succeeds.
+func (x *LogIndex) ChainLogged(d DeviceRecord, members []CircleMember) bool {
+	_, ok := x.WalkChain(d, members)
+	return ok
 }
 
 // EpochLogged requires an enable/epoch log entry that matches the served record.
@@ -631,55 +660,147 @@ func usable(idx *LogIndex, members []CircleMember, d *DeviceRecord) error {
 	return nil
 }
 
+// Anchor is the one key the viewer/bridge knows to be genuine without trusting the
+// server: the phone that approved it. The approval signature was made by the real
+// phone on the user's explicit confirmation, so verifying that signature under the key
+// the server reports for the approver proves the key (see PinApprover).
+type Anchor struct{ DeviceID, EdPub string }
+
+// PinApprover derives the trust anchor from the viewer/bridge's OWN registration
+// response. It checks, in this order, that the record is for this device, carries the
+// approval signature the user carried from the phone (not one the server chose), is
+// vouched by the approver the user named, and verifies completely. The returned anchor
+// is therefore bound to a signature only the real phone could have produced.
+func PinApprover(rec DeviceRecord, deviceID, approverID string, approvalSig []byte) (Anchor, error) {
+	got, err := b64(rec.RegistrationSignature)
+	if err != nil || rec.DeviceID != deviceID || rec.RegisteredByDeviceID != approverID || rec.RegisteredByDeviceID == rec.DeviceID ||
+		!ConstEq(got, approvalSig) || !VerifyRegistration(rec) {
+		return Anchor{}, errors.New("the server's record of this registration does not match the approval the phone gave")
+	}
+	return Anchor{DeviceID: approverID, EdPub: rec.RegisteredByPub}, nil
+}
+
+// Trust bundles everything a verifier knows: the verified log, the (server-served)
+// circle members, who the verifier's own account is, and the pinned approver.
+type Trust struct {
+	Index     *LogIndex
+	Members   []CircleMember
+	OwnUserID string
+	Anchor    *Anchor
+}
+
+// Trust levels of an accepted circle key.
+const (
+	TrustAnchored = "anchored" // wrapped by a device of OUR account that chains to the approving phone
+	TrustMember   = "member"   // wrapped by another member (the epoch publisher); that member's first key was not independently verified
+)
+
+// anchored reports whether d (a device of our own account) chains to the approving
+// phone: the approver is on d's chain, or both chains end at the same root.
+func (t Trust) anchored(d DeviceRecord) bool {
+	if t.Anchor == nil || t.OwnUserID == "" {
+		return false
+	}
+	nodes, ok := t.Index.WalkChain(d, t.Members)
+	if !ok {
+		return false
+	}
+	for _, n := range nodes {
+		if n.ID == t.Anchor.DeviceID && n.Pub == t.Anchor.EdPub {
+			return true
+		}
+	}
+	ad, _ := FindDevice(t.Members, t.Anchor.DeviceID)
+	if ad == nil || ad.Ed25519Pub != t.Anchor.EdPub {
+		return false
+	}
+	an, ok := t.Index.WalkChain(*ad, t.Members)
+	if !ok {
+		return false
+	}
+	return an[len(an)-1] == nodes[len(nodes)-1]
+}
+
 // AuthorizeSender checks that an item's sender device may speak for its member:
-// listed, owned by that member (the signed user id equals the member's), usable.
-func AuthorizeSender(idx *LogIndex, members []CircleMember, d *DeviceRecord, m *CircleMember) error {
+// listed, owned by that member (the signed user id equals the member's), usable, and
+// - for a device of our own account - chained to the approving phone.
+func (t Trust) AuthorizeSender(d *DeviceRecord, m *CircleMember) error {
 	if d == nil || m == nil {
 		return errors.New("sender is not in the circle state")
 	}
 	if d.UserID != m.UserID {
 		return errors.New("device belongs to another user than the member it is listed under")
 	}
-	return usable(idx, members, d)
-}
-
-// AuthorizeWrap decides whether a wrap addressed to the caller may be opened:
-// the epoch record is in the log and published by an active, approved circle
-// admin whose key matches the record; the wrapper is an active, approved listed
-// device whose key matches; and the wrapper is either the publisher's user or
-// the recipient's own user (the server enforces the same rule).
-func AuthorizeWrap(idx *LogIndex, members []CircleMember, circleID, recipientUserID string, w WrapRecord, rec *EpochRecord) error {
-	if idx == nil || rec == nil {
-		return errors.New("no verified log or epoch record")
+	if err := usable(t.Index, t.Members, d); err != nil {
+		return err
 	}
-	if !idx.EpochLogged(circleID, *rec) {
-		return fmt.Errorf("epoch record: %w", ErrNotInLog)
-	}
-	pd, pm := FindDevice(members, rec.PublisherDev)
-	if pd == nil || pm == nil {
-		return errors.New("epoch publisher is not in the circle state")
-	}
-	if pd.Ed25519Pub != rec.PublisherPub || pd.UserID != rec.PublisherUser || pm.UserID != rec.PublisherUser {
-		return errors.New("epoch publisher key differs from the registered key")
-	}
-	if pm.Role != "admin" {
-		return errors.New("epoch publisher is not a circle admin")
-	}
-	if err := usable(idx, members, pd); err != nil {
-		return fmt.Errorf("epoch publisher: %w", err)
-	}
-	wd, wm := FindDevice(members, w.WrapperDeviceID)
-	if wd == nil || wm == nil {
-		return errors.New("wrapper is not in the circle state")
-	}
-	if wd.Ed25519Pub != w.WrapperEd25519Pub || wd.UserID != wm.UserID {
-		return errors.New("wrapper key differs from the registered key")
-	}
-	if err := usable(idx, members, wd); err != nil {
-		return fmt.Errorf("wrapper: %w", err)
-	}
-	if wd.UserID != rec.PublisherUser && wd.UserID != recipientUserID {
-		return errors.New("wrapper is neither the epoch publisher nor the recipient's own device")
+	if t.OwnUserID != "" && d.UserID == t.OwnUserID && !t.anchored(*d) {
+		return errors.New("a device of your own account that does not chain to the phone that approved this viewer")
 	}
 	return nil
+}
+
+// AuthorizeWrap decides whether a wrap addressed to the caller may be opened and at
+// which trust level. The epoch record must be in the log and published by an active,
+// approved circle admin whose key matches; the wrapper must be an active listed device
+// whose key matches and which is the publisher's user or our own account. A wrapper of
+// our own account must chain to the approving phone (TrustAnchored: our phone already
+// verified the record and the commitment before wrapping). A wrap straight from the
+// publisher of another account is TrustMember: that person's keys are known only from
+// the server and the log (first use), which the caller must surface.
+func (t Trust) AuthorizeWrap(circleID string, w WrapRecord, rec *EpochRecord) (string, error) {
+	if t.Index == nil || rec == nil {
+		return "", errors.New("no verified log or epoch record")
+	}
+	if !t.Index.EpochLogged(circleID, *rec) {
+		return "", fmt.Errorf("epoch record: %w", ErrNotInLog)
+	}
+	pd, pm := FindDevice(t.Members, rec.PublisherDev)
+	if pd == nil || pm == nil {
+		return "", errors.New("epoch publisher is not in the circle state")
+	}
+	if pd.Ed25519Pub != rec.PublisherPub || pd.UserID != rec.PublisherUser || pm.UserID != rec.PublisherUser {
+		return "", errors.New("epoch publisher key differs from the registered key")
+	}
+	if pm.Role != "admin" {
+		return "", errors.New("epoch publisher is not a circle admin")
+	}
+	if err := usable(t.Index, t.Members, pd); err != nil {
+		return "", fmt.Errorf("epoch publisher: %w", err)
+	}
+	wd, wm := FindDevice(t.Members, w.WrapperDeviceID)
+	if wd == nil || wm == nil {
+		return "", errors.New("wrapper is not in the circle state")
+	}
+	if wd.Ed25519Pub != w.WrapperEd25519Pub || wd.UserID != wm.UserID {
+		return "", errors.New("wrapper key differs from the registered key")
+	}
+	if err := usable(t.Index, t.Members, wd); err != nil {
+		return "", fmt.Errorf("wrapper: %w", err)
+	}
+	switch {
+	case t.OwnUserID != "" && wd.UserID == t.OwnUserID:
+		if !t.anchored(*wd) {
+			return "", errors.New("wrapper is a device of your own account that does not chain to the phone that approved this viewer")
+		}
+		return TrustAnchored, nil
+	case wd.UserID == rec.PublisherUser:
+		if t.OwnUserID != "" && pd.UserID == t.OwnUserID && !t.anchored(*pd) {
+			return "", errors.New("epoch publisher is of your own account but does not chain to the approving phone")
+		}
+		return TrustMember, nil
+	}
+	return "", errors.New("wrapper is neither the epoch publisher nor the recipient's own device")
+}
+
+// AuthorizeSender is the anchor-less form (no own-account concept); kept for
+// callers and tests that verify only the log-binding rules.
+func AuthorizeSender(idx *LogIndex, members []CircleMember, d *DeviceRecord, m *CircleMember) error {
+	return Trust{Index: idx, Members: members}.AuthorizeSender(d, m)
+}
+
+// AuthorizeWrap is the anchor-less form of Trust.AuthorizeWrap.
+func AuthorizeWrap(idx *LogIndex, members []CircleMember, circleID, recipientUserID string, w WrapRecord, rec *EpochRecord) error {
+	_, err := Trust{Index: idx, Members: members, OwnUserID: recipientUserID}.AuthorizeWrap(circleID, w, rec)
+	return err
 }

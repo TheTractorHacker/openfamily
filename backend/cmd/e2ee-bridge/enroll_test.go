@@ -125,6 +125,9 @@ func TestEnrollRegisterStatusRevoke(t *testing.T) {
 	idRaw, _ := os.ReadFile(filepath.Join(dir, fileIdentity))
 	var f identityFile
 	_ = json.Unmarshal(idRaw, &f)
+	if f.ApprovedBy != phone.id || f.ApproverEdPub != std(phone.edPub) {
+		t.Fatalf("approving phone not pinned: %q %q", f.ApprovedBy, f.ApproverEdPub)
+	}
 	var sec identitySecret
 	_ = json.Unmarshal(f.Secret.Plain, &sec)
 	var sess session

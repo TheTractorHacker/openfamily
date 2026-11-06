@@ -432,6 +432,12 @@ function CircleView({ ctl, conn }: { ctl: ViewerController; conn: CircleConn }) 
         Epoch {conn.state?.epoch ?? '?'} · keys held for epochs {conn.report?.heldEpochs.join(', ') || 'none'} · {conn.counts.opened}{' '}
         items opened, {conn.counts.dropped} rejected, {conn.counts.deferred} waiting. Positions exist only in this page’s memory.
       </p>
+      {conn.report && conn.report.memberTrustedEpochs.length > 0 && (
+        <p className="wb-hint">
+          The key for epoch {conn.report.memberTrustedEpochs.join(', ')} came straight from another member, not from one of your own phones.
+          Its origin rests on first-use trust in that member’s key, which this page cannot verify. Open the circle on your phone and compare safety numbers.
+        </p>
+      )}
       {conn.report && conn.report.rejectedWraps > 0 && (
         <p className="wb-error">{conn.report.rejectedWraps} wrapped key(s) failed verification and were ignored.</p>
       )}

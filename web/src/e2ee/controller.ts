@@ -121,9 +121,9 @@ export class ViewerController {
   /** Registers the public keys with the approval code the phone produced. */
   async register(approvalCode: string): Promise<void> {
     if (!this.unlocked) throw new Error('unlock first')
-    await registerViewer(this.http, this.unlocked.meta, this.unlocked.ops, parseApproval(approvalCode), 'web')
-    await markRegistered(this.kv, this.userId)
-    this.meta = { ...this.unlocked.meta, registered: true }
+    const { anchor } = await registerViewer(this.http, this.unlocked.meta, this.unlocked.ops, parseApproval(approvalCode), 'web')
+    await markRegistered(this.kv, this.userId, anchor)
+    this.meta = { ...this.unlocked.meta, registered: true, approver: anchor }
     this.unlocked.meta = this.meta
     this.emit()
   }
@@ -183,6 +183,7 @@ export class ViewerController {
           () => this.conns.get(circleId)!.state!,
           undefined,
           () => this.conns.get(circleId)?.report?.logIndex ?? null,
+          () => ({ ownUserId: this.userId, anchor: this.meta?.approver ?? null }),
         )
         this.rx.set(circleId, rx)
       }
