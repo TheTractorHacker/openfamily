@@ -7,6 +7,7 @@ import 'package:geolocator/geolocator.dart';
 
 import 'api_client.dart';
 import 'device_service.dart';
+import 'e2ee/private_runtime.dart';
 import 'fix_quality.dart';
 import 'live_boost.dart';
 import 'location_outbox.dart';
@@ -435,21 +436,29 @@ class LocationReporter {
       await _refreshBattery(DateTime.now().toUtc());
       body = buildBody(position, deviceId: _deviceId, batteryPct: _batteryCache);
 
-      final dynamic res = await ApiClient.post('/locations', body: body);
-      _lastSentTs = ts;
-      PerfMonitor.instance.recordFixSent();
-      if (LiveBoost.responseIsLive(res)) {
+      // Private (end-to-end encrypted) circles get a sealed copy; the plaintext
+      // report below is sent only when a standard circle exists. With no private
+      // circle this is a no-op that returns true (unchanged behaviour).
+      if (!await _routePrivate(body)) {
+        _lastSentTs = ts;
+        PerfMonitor.instance.recordFixSent();
+      } else {
+        final dynamic res = await ApiClient.post('/locations', body: body);
+        _lastSentTs = ts;
+        PerfMonitor.instance.recordFixSent();
+        if (LiveBoost.responseIsLive(res)) {
+          final DateTime n = DateTime.now().toUtc();
+          _cadence.startBoost(_cadence.config.liveFlagBoost, n);
+          _applyDesiredProfile(n);
+        }
+        // Connectivity works — opportunistically deliver anything the device
+        // queued while it was offline (throttled: at 1 Hz a drain per post
+        // would hammer storage).
         final DateTime n = DateTime.now().toUtc();
-        _cadence.startBoost(_cadence.config.liveFlagBoost, n);
-        _applyDesiredProfile(n);
-      }
-      // Connectivity works — opportunistically deliver anything the device
-      // queued while it was offline (throttled: at 1 Hz a drain per post
-      // would hammer storage).
-      final DateTime n = DateTime.now().toUtc();
-      if (_lastDrainAt == null || n.difference(_lastDrainAt!) >= _drainEvery) {
-        _lastDrainAt = n;
-        unawaited(LocationOutbox.drain(send: sendOutboxBatchViaApi));
+        if (_lastDrainAt == null || n.difference(_lastDrainAt!) >= _drainEvery) {
+          _lastDrainAt = n;
+          unawaited(LocationOutbox.drain(send: sendOutboxBatchViaApi));
+        }
       }
     } on SessionExpiredException {
       // The app root handles the redirect; stop reporting for this session.
@@ -491,6 +500,18 @@ class LocationReporter {
       if (_lastSentTs == null || pendingTs.isAfter(_lastSentTs!)) {
         await _deliver(pending, bypassRateLimit: true);
       }
+    }
+  }
+
+  /// Routes the fix through the Private-circle uplink. True: also send the
+  /// plaintext report (there is at least one standard circle, or none is private).
+  /// Never throws; on any failure the plaintext path is kept, which the server
+  /// refuses (409) for a user whose circles are all private, so nothing leaks.
+  Future<bool> _routePrivate(Map<String, dynamic> body) async {
+    try {
+      return await PrivateRuntime.instance.routeFix(body);
+    } catch (_) {
+      return true;
     }
   }
 

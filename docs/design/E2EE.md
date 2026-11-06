@@ -1,7 +1,7 @@
 # ADR: End-to-end encryption ("Private circle")
 
 Status: **ACCEPTED** (supersedes the earlier "Proposed" text of this file, which recommended against E2EE).
-Issue: #34. Phase 1 (this document + code) is implemented; phase 2 is specified here as binding requirements.
+Issue: #34. Phase 1 (keys and verification) and phase 2 (the encrypted channel, this release) are implemented. Phase 3 is specified at the end of the phase-2 section.
 
 ## Decision
 
@@ -11,8 +11,8 @@ It is delivered in **phases and opt-in per circle** ("Private circle"):
 | Phase | Scope | State |
 |---|---|---|
 | 1 | Cryptographic foundation and verification UX: device identity keys, circle key epochs, wrapped keys, key transparency log, recovery, safety numbers, server-record check, admin/CLI tooling. **No location data moves.** | implemented |
-| 2 | Live fixes, history, places, arrival/departure events and SOS move into the encrypted channel; geofencing and trip logic run on the phones. | not started (requirements below are binding) |
-| 3 | Optional: private-circle-aware web/desktop client, media (chat photos), push redesign leftovers. | future |
+| 2 | Live fixes, history, places, arrival/departure events and SOS positions move into the encrypted channel; place evaluation runs on the phones. Server-side trips, driving report and weekly summary are unavailable in a Private circle. | implemented; phone background behaviour not yet verified on devices (see phase-2 section) |
+| 3 | Web viewer and Dawarich bridge as approved read-only *device members*; media (chat photos); encrypted chat; phone-side trips. | future (API contract below) |
 
 Existing circles keep working exactly as today. A circle switched to Private mode only gets keys in phase 1. The toggle is OFF by default,
 admin-only, and the UI says honestly what changes now and what will be unavailable later.
@@ -45,9 +45,8 @@ the user's session reads the same data the user can), traffic analysis by the ne
 | Server geocoded place names and address search | server reverse-geocodes | Geocoding moves to the phone (or an on-device lookup); the server never learns an address |
 | Push text naming a place or person | server composes the text | Server sends a content-free wake-up; the app decrypts and raises a LOCAL notification |
 
-**Downgrade rule (TODO hook for phase 2):** a Private circle must refuse unencrypted payload types. `circles.e2ee_mode = 'private'` is
-the switch; every plaintext location/place/event endpoint must check it and answer 409 for a Private circle, and phones must never
-fall back to plaintext after a failed encrypt. Phase 1 deliberately adds no such enforcement because no plaintext path has moved yet.
+**Downgrade rule (implemented in phase 2, see "Enforcement"):** `circles.e2ee_mode = 'private'` is the switch. The server refuses or drops plaintext
+positions and places for a Private circle, a database trigger backs that up, and phones never fall back to plaintext after a failed seal.
 
 ## Cryptographic design (frozen wire formats)
 
@@ -190,7 +189,7 @@ The key is created in StrongBox when the phone has it, otherwise in the TEE, `se
 (StrongBox / TEE / software). If the Keystore key is invalidated, reads fail closed (`VaultInvalidatedException`) and the app asks for a recovery-phrase restore rather than minting a new identity. Backups are disabled (`allowBackup=false`), so keys are not in cloud backups.
 Unverified: StrongBox/TEE reporting and the auth-bound mode have not been exercised on a physical device.
 
-## Phase 2: binding requirements for the next implementation
+## Phase 2 requirements (original list; all are implemented, see the next section)
 
 1. Geofence, arrival/departure, "nearby" and driving state are computed **on the sender's phone** and sent as end-to-end encrypted events (purpose `event`) to authorised members. The server relays opaque payloads plus a **wake-up push that carries no location, name or place**; the receiving app decrypts and raises a **local** notification.
 2. Android background limits: foreground service with the location type, Doze and App Standby buckets, OEM battery killers; follow the existing `docs/testing/PHYSICAL_DEVICES.md` evidence plan before relying on on-device geofencing.
@@ -200,6 +199,137 @@ Unverified: StrongBox/TEE reporting and the auth-bound mode have not been exerci
 6. Server rejects plaintext location/place/event writes for `e2ee_mode = 'private'` (downgrade rule above).
 7. Sender authenticity inside a circle: all members share the key, so AEAD alone does not prove who sent a payload. Phase 2 should sign payloads with the sender device key (Ed25519) and carry the signature inside the plaintext.
 8. Metadata minimisation (below) must be implemented with the first encrypted payload.
+
+## Phase 2: the encrypted channel (implemented)
+
+Migration `000155_e2ee_channel`. Code: `backend/internal/handlers/e2ee_channel.go`, `backend/internal/e2ee/item.go` (reference implementation of the item envelope),
+app `app/lib/services/e2ee/private_{channel,places,history,runtime}.dart`.
+
+### Item format (frozen, vectors in `testdata/vectors.json` section `item`)
+
+```
+body     = JSON (UTF-8), purpose specific (below)
+envelope = 0x01 || seq(8 BE) || ts_ms(8 BE) || sig(64) || body
+sig      = Ed25519(sender DEVICE key, "OFE2EE2-ITEM\0" || circle_id || epoch(4) || device_id ||
+                   len(purpose)(1) || purpose || seq(8) || ts_ms(8) || body)
+payload  = Seal(circle_key, circle_id, epoch, device_id, purpose, Pad(envelope))     (phase-1 format 0x01||epoch||nonce(24)||ct||tag)
+```
+
+* All members share the circle key, so AEAD only proves "a member". The signature proves WHICH approved device sent it, and it covers circle, epoch, device, purpose, `seq`, time and body, so a member cannot forge a position from somebody else's phone, and the server cannot renumber, re-purpose or re-epoch an item.
+* `seq` is per (circle, sender device), starts at 1 and only grows. `ts_ms` is the sender's clock (UTC ms); the server never sees it.
+* Padding uses `Pad` buckets: 256, 512, 1024, 4096, then multiples of 4096. A normal fix is exactly 256 bytes of plaintext, 301 bytes of ciphertext.
+* Nonces are random 24 bytes per item; the HKDF subkey is per (circle key, circle, epoch, purpose), so a purpose can never decrypt as another.
+
+Bodies (keys are short on purpose; unknown keys are ignored):
+
+| purpose | body | notes |
+|---|---|---|
+| `fix` | `{lat, lon, acc?, alt?, spd?, hdg?, bat?, mo?}` | live position. Cap: bucket 1024 |
+| `event` | `{k:"place", a:"enter"|"exit", pid, name, at}` | arrival/departure from the sender's phone. Bucket 1024 |
+| `place` | `{id, name, lat, lon, r, type, addr, en, ex, del}` | newest signed `ts` per `id` wins; `del:true` is a tombstone. Bucket 4096, at most 2000 per circle |
+| `history` | `{pts:[[ts_ms, lat, lon, acc?], ...]}` | sealed track chunks for retention and re-install. Up to bucket 69632 |
+| `checkin` | `{k:"sos"|"help"|"checkin", lat?, lon?, note?}` | position of an alert, which the server withholds from its plaintext alert. Bucket 1024 |
+| `chat` | reserved | chat stays plaintext in this release |
+
+### Server API (ciphertext only)
+
+| Route | Who | Purpose |
+|---|---|---|
+| `POST /circles/{id}/e2ee/batch` | live member, own approved uploader device. Also accepts the device ingest key (`X-Device-Key`) so the headless background reporter can upload | body `{sender_device_id, items:[{seq, purpose, epoch, size_bucket, ciphertext(b64)}]}`, 1-50 items. Reply `{results:[{seq, status:"stored"|"duplicate"|"rejected", id?, error?}]}`; 201 if anything stored, else 200 |
+| `GET /circles/{id}/e2ee/items?after=&purpose=a,b&limit=&device_id=&as_device=` | live member owning at least one ACTIVE, APPROVED key in the circle (any kind) | `{items:[{circle_id,id,device_id,seq,purpose,epoch,size_bucket,ciphertext,received_at}], next_cursor, has_more}`. `limit` 1-500 (default 100). `as_device` makes the check use that key only (a revoked or foreign key id is 403) |
+| `DELETE /circles/{id}/e2ee/items?scope=mine|circle&purpose=&before=` | member (own uploads); `scope=circle` circle admin | erase ciphertext |
+| `POST /circles/{id}/e2ee/purge-plaintext` | circle admin, private circles | delete the legacy plaintext places/geofences/bubbles after the admin phone re-sealed them |
+| WebSocket `/ws/stream` | any member | frame `{"type":"e2ee_item", ...same fields as an item above...}` for every stored item of the member's circles (including the sender's other phones) |
+| `GET /circles` | member | additive `e2ee_mode` and `e2ee_epoch` per circle |
+
+Server rules: sender device must belong to the caller (anything else is 404, no probing), be active, `can_upload` (phones always; `web`/`service` keys only if registered with `can_upload:true`; the recovery kind never) and approved in the circle (transitive approval, `e2ee_device_approved`).
+Per item: purpose known, `1 <= epoch <= circle epoch` (older epochs are allowed so queued backlog can still be delivered), `seq` in `1..2^53`, `size_bucket` a Pad bucket within the purpose cap, ciphertext length exactly `1+4+24+bucket+16`, header version and epoch equal to the declared epoch.
+Idempotency: `UNIQUE (circle_id, device_id, seq)`, a repeated upload answers `duplicate`. Inserts for one circle are serialised by an advisory lock so cursor ids become visible in order (a poller never skips an id).
+Rate limits: 120 batches/min and 240 pulls/min per user, 50 items/batch, 2 MiB body, 2000 sealed places per circle.
+Metadata minimisation: `received_at` is truncated to the minute; no user id is returned (only the device id; the client maps it to a person through the verified key log); no coordinate, name or size finer than a bucket exists in any column; request and audit logs record counts only (regression test scans captured logs and audit rows for coordinates, ciphertext and key bytes).
+Device kinds: `device_keys.kind` is now `device | recovery | web | service`. `web` and `service` keys must be cross-signed by an existing key of the same user (never a root), at most 5 per user, and go through the same approval chain, so a replacement/unvouched viewer waits for a circle admin exactly like a replacement phone.
+
+Retention: `fix` and `event` expire after the live window (default 48 h, `E2EE_LIVE_TTL_HOURS` 1-720); `history` after the sender's personal location retention (`users.location_retention_days`, else the deployment `LOCATION_RETENTION_DAYS`); `checkin` after 30 days; `place` never (until erased or the circle is switched off). Expired rows are invisible immediately and purged every 15 minutes. Personal retention changes also purge sealed history older than the window (by coarse receive time). "Delete my location history" (`DELETE /me/locations`) also erases the caller's sealed items in every circle (places stay). Switching a circle off deletes all of its items. Removing a member does not delete what they uploaded (it is the circle's history), but they lose pull access at once.
+
+### Enforcement (downgrade protection)
+
+* A user whose live circles are ALL private cannot send plaintext locations: `POST /locations`, `POST /locations/batch` and `POST /trips/sensor-events` (events) answer 409 `{code:"e2ee_private_circle"}` before anything is written.
+* Server geofencing, bubbles and place presence skip a private circle. `POST/PATCH /family/places`, geofence create/update answer 409 for a private circle, and a database trigger (`e2ee_refuse_plaintext` on `places`, `geofences`, `bubbles`) refuses any other path. Deletes stay allowed (`purge-plaintext`).
+* SOS / help / crash alerts of a private family circle are still created and pushed (they must not fail), but WITHOUT coordinates and without the `member_positions` fallback; the reply carries `position_withheld:true`. A check-in-to whose recipients do not all share a standard circle with the sender is stored without coordinates (`X-Position-Withheld: 1`). The phone sends the position as a sealed `checkin` item. The SMS/Twilio contacts therefore cannot be told the position.
+* Push for Private circles is a content-free wake-up: silent command `{"type":"e2ee_wake","circle_id":"..."}`, throttled to one per circle per 10 s, only for `event`, `checkin` and `chat`. The app pulls, decrypts and raises a LOCAL notification ("Alex arrived at Home"). Live `fix` items are not pushed.
+* `circles.Authz` (`SharedWith`, `SharingCircles`, `OwnAndSharingCircles`, `LocationVisibility`, `MemberCircles`) treats a private circle as "not sharing plaintext", so a private circle is never a path to anyone's plaintext position, in REST snapshots or WebSocket fan-out.
+
+### Several circles: the multi-circle rule
+
+A location belongs to the person, not to a circle, and the legacy plaintext tables are per user. The rule, enforced by the server and followed by the app (`uplinkModeFor`):
+
+| User's circles | Phone sends | Server accepts plaintext? |
+|---|---|---|
+| none private | plaintext only (exactly as before) | yes |
+| all private | sealed copy per private circle, NO plaintext | no, 409 |
+| both | plaintext (feeds the standard circles only) AND one sealed copy per private circle | yes, but it is never visible through a private circle |
+
+So a private circle's data is never written in plaintext, but a person who also sits in a standard circle still has a plaintext position there (and the platform admin map and Dawarich see that person through the standard circle). To keep a person entirely out of plaintext, all of their circles must be private. The Private-circle screen says this.
+
+### What is available in a Private circle
+
+| Feature | Private circle |
+|---|---|
+| Live map, member list, battery, motion | yes (phones decrypt `fix`) |
+| Day history / trail | yes, from the phone's decrypted store (7 days, sealed `history` chunks rebuild it after a re-install) |
+| Places and arrival/departure alerts | yes, evaluated on the sender's phone (accuracy gate 100 m, 60 s debounce, pending/reversal rules ported from `geofence_eval.go`) |
+| Check-in, help, SOS | yes; position travels sealed; the server and SMS contacts do not learn it |
+| Chat | works as before, NOT end-to-end encrypted yet (shown in the migration dialog) |
+| Trips, driving report, weekly summary | NOT available (explicit placeholder) |
+| Admin map, device last-known positions | NOT available (the server holds none) |
+| Dawarich export | NOT available until phase 3 |
+| Server place names / geocoding, crash scoring, live-share links, "request location" | NOT available (the server cannot read positions) |
+| Bubbles | NOT available |
+
+### App behaviour
+
+* Sealing: `ChannelSealer` takes the newest held epoch key (never falls back to plaintext; no key means nothing is sent for that circle), allocates `seq` persistently, signs, pads, seals. Items are queued sealed (`SealedQueue`, 2000 items, ordered, 48 h except events/places), uploaded in batches of 50 with jitter, idempotent on retry.
+* Receiving (`ChannelReceiver`): header epoch must match the declared one; key for the epoch must be held; AEAD; padding; the signed `seq` must equal the relayed one; the sender device must be a known, ACTIVE (or, for older items, once active) and APPROVED, non-recovery device of a current member (refreshing the circle state once); Ed25519 signature; signed time at most 10 min in the future; duplicates dropped by a per-device window (512); **epoch rollback**: a device never returns to an older epoch for fresh items, and circle-wide an item sealed under an epoch below the highest seen is refused after a 10-minute grace unless its signed time precedes the moment the newer epoch was first seen (backlog). Items whose key or sender record is not here yet are kept (deferred, 200) and retried after the next key sync.
+* Epoch changes mid-flight: old keys are kept, so queued backlog opens; new items use the new epoch; the server accepts any epoch up to the current one.
+* Catch-up: cursor per circle (`catchUp`) on app open, resume, push wake-up and socket reconnect; the cursor only advances after a page was handled.
+* Battery: fixes reuse the existing adaptive cadence; sealing adds one signature and one AEAD per fix; uploads are batched (2 s + jitter) and `history` is cut every 300 points or 20 minutes; no extra wake-ups.
+* Background isolate: the headless isolate seals with the vault when it can and uploads with the ingest key; if the vault is unreachable there, fixes are parked in app-private storage (like the existing location outbox) and sealed with their original timestamps when the app next runs. They are never sent in plaintext.
+
+### API contract for phase 3 (web viewer and Dawarich bridge)
+
+Both are *device members*, not special server roles.
+
+1. The owner (a member) registers the key: `POST /e2ee/devices` with `kind:"web"` or `kind:"service"`, cross-signed by one of the owner's phones (`actor_device_id`, `log_signature`), optional `can_upload:true` for a bridge that must write. It is approved by the existing transitive rule; a circle admin approval (`POST /circles/{id}/e2ee/approvals`) is needed if the owner's chain is not approved.
+2. A phone of the owner (or any admin phone, as publisher) wraps the circle key of each epoch to the new key like to any device (`POST /circles/{id}/e2ee/wraps`); the viewer/bridge unwraps with its X25519 key (`GET /circles/{id}/e2ee/wraps?device_id=`). The server never sees a key.
+3. The device authenticates as the owner's account (session or API token) and pulls: `GET /circles/{id}/e2ee/items?after=<cursor>&as_device=<its key id>&purpose=fix,history,event,place&limit=500`, persisting `next_cursor`. For live data it subscribes to `/ws/stream` and handles `e2ee_item` frames; on reconnect it resumes from its cursor. The pull is ciphertext only.
+4. It verifies each item with `OpenItem` (Go, `internal/e2ee/item.go`) or the Dart equivalent: AEAD, signed `seq` equals the relayed `seq`, signature by the sender device's Ed25519 key taken from `GET /circles/{id}/e2ee` (`members[].devices[]`, `approved:true`) and checked against the key log (`GET /e2ee/log`). It applies the same epoch/duplicate rules as `ChannelReceiver`.
+5. A read-only viewer never uploads (the server answers 403 `device_read_only`). A bridge that exports to Dawarich decrypts `fix` and `history` locally; the plaintext leaves the bridge only toward the user's own Dawarich.
+6. Erasing: `DELETE /circles/{id}/e2ee/items` as above; revoking a key (`DELETE /e2ee/devices/{id}`) removes its wraps and flags the circle for a new epoch (an admin phone rotates).
+
+Open points for phase 3: a browser needs the key log verification in JavaScript (the formats are frozen and have vectors), and where a web viewer keeps its private key (non-extractable WebCrypto Ed25519/X25519 where available, otherwise memory only).
+
+## Security review (phase 2)
+
+Checked:
+* **Nonce reuse**: 24-byte random nonce per item from the OS CSPRNG; the subkey depends on (key, circle, epoch, purpose); a retransmission sends the same stored ciphertext, never a re-encryption under the same nonce with different data. Sequence numbers are never reused (persistent counter, allocated before sealing; a crash after allocation only leaves a gap).
+* **AAD binding**: circle, epoch, sender device and purpose are in the AAD; the signature additionally binds seq, time and body. Tests: purpose swap, device swap, epoch rebind, seq renumber, tampered ciphertext, forged sender.
+* **Replay**: duplicate window per device plus the high-water mark; a replayed old item is either a known duplicate or a genuinely late item with its original signed time (the map only moves forward by `ts`).
+* **Downgrade**: server refuses plaintext for private-only users (409), drops coordinates from alerts, never stores places/geofences/bubbles for a private circle (trigger), excludes private circles from every visibility helper. The app never sends plaintext when sealing fails. Residual: a mixed user's plaintext exists on the server for the standard circles (by design, documented).
+* **Metadata**: coarse timestamps, buckets, no user ids in items, no coordinates in logs or audit (tested), wake-up push carries only the circle id. The server still sees who uploads to which circle, how often and when (minute resolution), and bucket sizes.
+* **Key handling**: no new key material; the Ed25519 seed is read from the vault only for the duration of a seal call and is never persisted by the new code; the on-device history, the history buffer and parked fixes are plaintext in app-private preferences, exactly like the existing location outbox (backups are disabled).
+* **IDOR**: every route authorizes membership first (404 for non-members), sender devices must belong to the caller (404), pulls need an approved key (403). Tests cover foreign circle, foreign device, removed member, unapproved reset key, revoked key, read-only kinds. The authz matrix covers the new routes.
+* **Abuse**: rate limits, item and body caps, place cap, size buckets per purpose; poison batches are dropped client-side after 20 failures.
+
+Residual risks (new in phase 2):
+* **A compromised or malicious member** (or a stolen unlocked phone) reads all positions and can send arbitrary signed items from its own device, including false place records or false arrival events for itself. Place definitions are not admin-only: any member can add or delete a sealed place (like the standard circle's rule for managers).
+* **The server can withhold or delay** items, replay old ones (receivers dedupe and order by signed time) and drop the newest epoch; it cannot forge or alter them. Traffic analysis of upload times and sizes is possible.
+* **Epoch rollback detection is heuristic** (per-device monotonic rule plus a 10-minute grace circle-wide): a slow honest phone that never fetched the new key for more than 10 minutes has its live items refused until it syncs.
+* **A removed member** keeps old keys and everything already downloaded; a new epoch is required (the server flags it), and new members cannot read older epochs unless an admin phone re-wraps them (the app wraps all held epochs to new devices).
+* **Mixed users** are visible in plaintext to the server through their standard circles.
+* **Chat** is still plaintext; chat photos too.
+* **On-device plaintext** (history store, parked fixes) is protected only by the OS app sandbox.
+* **Background execution** (Doze, OEM task killers, the vault in a headless isolate, push wake-up reaching a session-less isolate) is unverified on real devices.
+* Phase-2 formats (like phase 1) are not reviewed by an external cryptographer.
 
 ## Metadata: what the server still learns
 

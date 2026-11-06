@@ -161,3 +161,15 @@ func TestCheckBodyDeviceIgnoresUnparseable(t *testing.T) {
 		t.Fatal("body without device_id should be left to the handler")
 	}
 }
+
+// The sealed-batch endpoint names the E2EE key in sender_device_id, so the ingest
+// key (which is bound to the physical device id) still authenticates it, while a
+// body that names a different physical device is still refused.
+func TestCheckBodyDeviceIgnoresSenderDeviceID(t *testing.T) {
+	if err := checkBodyDevice([]byte(`{"sender_device_id":"aaaa","items":[]}`), "dev-1"); err != nil {
+		t.Fatalf("sender_device_id must not be bound to the ingest device: %v", err)
+	}
+	if err := checkBodyDevice([]byte(`{"device_id":"other","sender_device_id":"aaaa"}`), "dev-1"); err == nil {
+		t.Fatal("a different physical device_id must still be refused")
+	}
+}

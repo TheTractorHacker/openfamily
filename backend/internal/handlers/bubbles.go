@@ -303,7 +303,8 @@ func bubbleInside(wasInside bool, dist float64, radius int) bool {
 func (s *Server) evaluateBubbles(ctx context.Context, subjectID string, lon, lat float64, ts time.Time) {
 	rows, err := s.Pool.Query(ctx, `
 		SELECT id, creator_id, lat, lon, radius_m, last_inside, notify_reenter
-		FROM bubbles WHERE subject_id = $1 AND expires_at > now() AND created_at <= $2`, subjectID, ts)
+		FROM bubbles WHERE subject_id = $1 AND expires_at > now() AND created_at <= $2
+		  AND NOT EXISTS (SELECT 1 FROM circles pc WHERE pc.id = bubbles.circle_id AND pc.e2ee_mode = 'private')`, subjectID, ts)
 	if err != nil {
 		slog.Error("bubble: query", "subject_id", subjectID, "err", err)
 		return

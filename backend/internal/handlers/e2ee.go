@@ -226,11 +226,14 @@ type registerReq struct {
 	LogSignature string `json:"log_signature"`
 	// Reset declares that this root key replaces ALL the user's active keys.
 	Reset bool `json:"reset"`
+	// CanUpload lets a "web" or "service" key post sealed items. Phones always
+	// can; recovery keys never; read-only kinds default to false.
+	CanUpload bool `json:"can_upload"`
 }
 
 const devInsert = `INSERT INTO device_keys (device_id, user_id, kind, ed25519_pub, x25519_pub, fingerprint, signature,
-	registered_by_device_id, registered_by_pub, registration_action, registration_signature, initial, label)
-	VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+	registered_by_device_id, registered_by_pub, registration_action, registration_signature, initial, label, can_upload)
+	VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
 	RETURNING ` + `device_id::text, user_id::text, kind, ed25519_pub, x25519_pub, fingerprint, signature,
 	registered_by_device_id::text, registered_by_pub, registration_action, registration_signature, initial,
 	label, created_at, revoked_at, revoked_reason`
@@ -261,8 +264,8 @@ func (s *Server) E2EERegisterDevice(w http.ResponseWriter, r *http.Request) {
 	if req.Kind == "" {
 		req.Kind = "device"
 	}
-	if req.Kind != "device" && req.Kind != "recovery" {
-		writeError(w, http.StatusBadRequest, "kind must be device or recovery")
+	if req.Kind != "device" && req.Kind != "recovery" && req.Kind != "web" && req.Kind != "service" {
+		writeError(w, http.StatusBadRequest, "kind must be device, recovery, web or service")
 		return
 	}
 	p, msg := parseBundle(uid, req.keyBundle)
@@ -281,6 +284,10 @@ func (s *Server) E2EERegisterDevice(w http.ResponseWriter, r *http.Request) {
 	}
 	root := actor == req.DeviceID
 	ctx := r.Context()
+	if root && (req.Kind == "web" || req.Kind == "service") {
+		writeError(w, http.StatusBadRequest, "a web or service key must be cross-signed by an existing key of the same user")
+		return
+	}
 	if root && req.Kind == "recovery" {
 		writeError(w, http.StatusBadRequest, "a recovery key must be cross-signed by an existing key")
 		return
@@ -348,6 +355,17 @@ func (s *Server) E2EERegisterDevice(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "too many active device keys; revoke one first")
 		return
 	}
+	if req.Kind == "web" || req.Kind == "service" {
+		var n int
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM device_keys WHERE user_id = $1 AND revoked_at IS NULL AND kind IN ('web','service')`, uid).Scan(&n); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to register key")
+			return
+		}
+		if n >= 5 {
+			writeError(w, http.StatusConflict, "too many active web/service keys; revoke one first")
+			return
+		}
+	}
 	if err := e2ee.VerifyLogAction(signerPub, action, uid, actor, "", req.DeviceID, 0, p.fp, logSig); err != nil {
 		writeError(w, http.StatusBadRequest, "log signature does not verify")
 		return
@@ -360,7 +378,7 @@ func (s *Server) E2EERegisterDevice(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	out, err := scanE2EEDevice(tx.QueryRow(ctx, devInsert, req.DeviceID, uid, req.Kind, p.ed, p.x, e2ee.FingerprintHex(p.fp), p.sig,
-		actor, signerPub, int(action), logSig, initial, p.label))
+		actor, signerPub, int(action), logSig, initial, p.label, req.Kind == "device" || (req.CanUpload && req.Kind != "recovery")))
 	if err != nil {
 		if isUniqueViolation(err) {
 			writeError(w, http.StatusConflict, "key already registered")
@@ -427,8 +445,9 @@ func (s *Server) E2EERotateDevice(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback(ctx)
 	var oldEd []byte
 	var kind string
-	err = tx.QueryRow(ctx, `SELECT ed25519_pub, kind FROM device_keys
-		WHERE device_id = $1 AND user_id = $2 AND revoked_at IS NULL FOR UPDATE`, oldID, uid).Scan(&oldEd, &kind)
+	var oldCanUpload bool
+	err = tx.QueryRow(ctx, `SELECT ed25519_pub, kind, can_upload FROM device_keys
+		WHERE device_id = $1 AND user_id = $2 AND revoked_at IS NULL FOR UPDATE`, oldID, uid).Scan(&oldEd, &kind, &oldCanUpload)
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, http.StatusNotFound, "device key not found")
 		return
@@ -449,7 +468,7 @@ func (s *Server) E2EERotateDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out, err := scanE2EEDevice(tx.QueryRow(ctx, devInsert, req.DeviceID, uid, kind, p.ed, p.x, e2ee.FingerprintHex(p.fp), p.sig,
-		oldID, oldEd, int(e2ee.ActRotate), logSig, false, p.label))
+		oldID, oldEd, int(e2ee.ActRotate), logSig, false, p.label, oldCanUpload))
 	if err != nil {
 		if isUniqueViolation(err) {
 			writeError(w, http.StatusConflict, "key already registered")
@@ -1024,6 +1043,11 @@ func (s *Server) E2EEDisable(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := tx.Exec(r.Context(), `DELETE FROM circle_key_wraps WHERE circle_id = $1`, m.CircleID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to disable")
+		return
+	}
+	// The ciphertext is useless without the keys and must not outlive private mode.
+	if _, err := tx.Exec(r.Context(), `DELETE FROM e2ee_items WHERE circle_id = $1`, m.CircleID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to disable")
 		return
 	}

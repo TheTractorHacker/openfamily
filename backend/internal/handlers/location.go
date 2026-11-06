@@ -104,6 +104,9 @@ func (s *Server) IngestLocation(w http.ResponseWriter, r *http.Request) {
 	// read-then-insert of the last timestamp cannot race; the check spans all
 	// of the user's devices (geofence state is per-user, not per-device).
 	ownerID := claims.UserID
+	if s.refusePrivateOnlyPlaintext(w, r, ownerID) {
+		return
+	}
 	tx, err := s.Pool.Begin(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to begin transaction")

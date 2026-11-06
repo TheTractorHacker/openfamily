@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'api_client.dart';
 import 'device_service.dart';
+import 'e2ee/private_runtime.dart';
 import 'location_sharing_service.dart';
 
 enum LocationRefreshResult {
@@ -170,14 +171,41 @@ class LocationRefreshService {
         return null;
       }
     },
-    post: (String path, Map<String, dynamic> body) =>
-        ApiClient.post(path, body: body),
+    post: (String path, Map<String, dynamic> body) async {
+      // A location a member asked for follows the same rule as every fix: sealed
+      // for Private circles, plaintext only for standard ones.
+      if (path == '/locations') {
+        try {
+          if (!await PrivateRuntime.instance.routeFix(body)) return <String, dynamic>{};
+        } catch (_) {}
+      }
+      return ApiClient.post(path, body: body);
+    },
     wasProcessed: _wasProcessed,
     markProcessed: _markProcessed,
   );
 
-  static Future<LocationRefreshResult> handlePush(String body) =>
-      _handler.handle(body);
+  static Future<LocationRefreshResult> handlePush(String body) {
+    // Content-free wake-up of a Private circle ({"type":"e2ee_wake","circle_id"}):
+    // fetch what is waiting, decrypt it here and raise any local notification.
+    final String? wake = _wakeCircle(body);
+    if (wake != null) {
+      return PrivateRuntime.instance.catchUp(wake).then((_) => LocationRefreshResult.notCommand,
+          onError: (Object _) => LocationRefreshResult.failed);
+    }
+    return _handler.handle(body);
+  }
+
+  static String? _wakeCircle(String raw) {
+    try {
+      final dynamic d = jsonDecode(raw);
+      if (d is Map<String, dynamic> && d['type'] == 'e2ee_wake') {
+        final Object? c = d['circle_id'];
+        if (c is String && RegExp(r'^[0-9a-fA-F-]{36}$').hasMatch(c)) return c.toLowerCase();
+      }
+    } catch (_) {}
+    return null;
+  }
 
   static Future<Map<String, dynamic>> request(String memberId) async {
     final dynamic response = await ApiClient.post(

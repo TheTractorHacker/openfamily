@@ -315,6 +315,15 @@ func (s *Server) CreatePlace(w http.ResponseWriter, r *http.Request) {
 	if req.CircleID != nil && *req.CircleID == "" {
 		req.CircleID = nil
 	}
+	{
+		target := familyID
+		if req.CircleID != nil {
+			target = *req.CircleID
+		}
+		if s.refuseIfPrivateCircle(w, r.Context(), target) {
+			return
+		}
+	}
 	if req.Name == "" {
 		writeError(w, http.StatusBadRequest, "name is required")
 		return
@@ -452,6 +461,13 @@ func (s *Server) UpdatePlace(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.CircleID.set && req.CircleID.value != nil && *req.CircleID.value == "" {
 		req.CircleID.value = nil
+	}
+	if s.placePrivate(r.Context(), id) {
+		writeE2EECode(w, http.StatusConflict, "e2ee_private_circle", "this circle is end-to-end encrypted")
+		return
+	}
+	if req.CircleID.set && req.CircleID.value != nil && s.refuseIfPrivateCircle(w, r.Context(), *req.CircleID.value) {
+		return
 	}
 	if msg := placeTextError(req.Name, req.Address); msg != "" {
 		writeError(w, http.StatusBadRequest, msg)

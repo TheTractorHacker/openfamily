@@ -98,6 +98,24 @@ func (s *Server) PostCheckinTo(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// A recipient who shares only a private circle with the sender must not get
+	// a plaintext position: the check-in is delivered without coordinates and the
+	// phone sends the position sealed. (All-or-nothing, so no partial leak.)
+	positionWithheld := false
+	if req.Lat != nil {
+		var covered int
+		if err := s.Pool.QueryRow(r.Context(), `
+			SELECT count(DISTINCT y.user_id) FROM live_circle_members x
+			JOIN live_circle_members y ON y.circle_id = x.circle_id
+			JOIN circles c ON c.id = x.circle_id AND c.e2ee_mode = 'off'
+			WHERE x.user_id = $1 AND y.user_id = ANY($2::uuid[])`, claims.UserID, ids).Scan(&covered); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to authorize recipients")
+			return
+		}
+		if covered < len(ids) {
+			req.Lat, req.Lon, positionWithheld = nil, nil, true
+		}
+	}
 	if s.AlertLimit != nil && !s.AlertLimit.Allow("checkinto:"+claims.UserID, 1, s.alertLimits().CheckInCooldown) {
 		writeError(w, http.StatusTooManyRequests, "too many requests")
 		return
@@ -138,6 +156,9 @@ func (s *Server) PostCheckinTo(w http.ResponseWriter, r *http.Request) {
 	}
 	go s.purgeExpiredSharing()
 	go s.fanOutCheckin(c, ids)
+	if positionWithheld {
+		w.Header().Set("X-Position-Withheld", "1")
+	}
 	writeJSON(w, http.StatusCreated, c)
 }
 

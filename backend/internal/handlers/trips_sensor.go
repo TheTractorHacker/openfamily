@@ -164,6 +164,12 @@ func (s *Server) IngestSensorEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Driving telemetry is server-side trip input: not accepted from a user whose
+	// circles are all private (settings-only requests still work).
+	if len(req.Events) > 0 && s.refusePrivateOnlyPlaintext(w, r, claims.UserID) {
+		return
+	}
+
 	ctx := r.Context()
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {

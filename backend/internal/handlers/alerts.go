@@ -56,6 +56,9 @@ type alertJSON struct {
 	Note      string    `json:"note,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 	Message   string    `json:"message,omitempty"`
+	// PositionWithheld is true when the circle is end-to-end encrypted and the
+	// server therefore stored no position; the phone sends it sealed.
+	PositionWithheld bool `json:"position_withheld,omitempty"`
 }
 
 // PostCheckIn records a family check-in and fans it out (WS, push, SMS).
@@ -201,7 +204,14 @@ func (s *Server) postAlert(w http.ResponseWriter, r *http.Request, typ string, i
 	}
 
 	lat, lon := req.Lat, req.Lon
-	if lat == nil || lon == nil {
+	// A private (end-to-end encrypted) circle never gets a plaintext position:
+	// the alert still goes out (SOS must not fail), without coordinates; the
+	// phone sends the position as a sealed "checkin" item.
+	positionWithheld := s.circleIsPrivate(r.Context(), familyID)
+	if positionWithheld {
+		lat, lon = nil, nil
+	}
+	if !positionWithheld && (lat == nil || lon == nil) {
 		var lastLat, lastLon float64
 		err := s.Pool.QueryRow(r.Context(),
 			`SELECT lat, lon FROM member_positions WHERE user_id = $1`, claims.UserID,
@@ -239,7 +249,7 @@ func (s *Server) postAlert(w http.ResponseWriter, r *http.Request, typ string, i
 
 	writeJSON(w, http.StatusCreated, alertJSON{
 		ID: a.ID, Type: a.Type, Status: a.Status, Lat: a.Lat, Lon: a.Lon, Note: a.Note, CreatedAt: a.CreatedAt,
-		Message: alertNotifiedMessage,
+		Message: alertNotifiedMessage, PositionWithheld: positionWithheld,
 	})
 }
 

@@ -9,6 +9,8 @@ class Circle {
     this.icon,
     this.isPrimary = false,
     this.expiresAt,
+    this.e2eeMode = 'off',
+    this.e2eeEpoch = 0,
   });
 
   final String id;
@@ -30,6 +32,13 @@ class Circle {
   /// When a temporary circle stops sharing (UTC); null for a permanent one.
   final DateTime? expiresAt;
 
+  /// "off" or "private" (end-to-end encrypted, docs/design/E2EE.md).
+  final String e2eeMode;
+  final int e2eeEpoch;
+
+  /// True for a Private (end-to-end encrypted) circle.
+  bool get isPrivate => e2eeMode == 'private';
+
   bool get isAdmin => role == 'admin';
   bool get isTemporary => expiresAt != null;
 
@@ -50,6 +59,8 @@ class Circle {
       expiresAt: json['expires_at'] is String
           ? DateTime.tryParse(json['expires_at'] as String)?.toUtc()
           : null,
+      e2eeMode: json['e2ee_mode'] == 'private' ? 'private' : 'off',
+      e2eeEpoch: (json['e2ee_epoch'] as num?)?.toInt() ?? 0,
     );
   }
 
@@ -60,6 +71,8 @@ class Circle {
     bool? sharingEnabled,
     int? memberCount,
     DateTime? expiresAt,
+    String? e2eeMode,
+    int? e2eeEpoch,
   }) {
     return Circle(
       id: id,
@@ -70,6 +83,8 @@ class Circle {
       memberCount: memberCount ?? this.memberCount,
       isPrimary: isPrimary,
       expiresAt: expiresAt ?? this.expiresAt,
+      e2eeMode: e2eeMode ?? this.e2eeMode,
+      e2eeEpoch: e2eeEpoch ?? this.e2eeEpoch,
     );
   }
 }

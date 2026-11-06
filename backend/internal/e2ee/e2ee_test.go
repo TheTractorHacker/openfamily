@@ -6,6 +6,7 @@ import (
 	"crypto/ed25519"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"os"
 	"regexp"
 	"strings"
@@ -54,6 +55,10 @@ type vectors struct {
 	LogAction vLog      `json:"log_action"`
 	Recovery  vRecovery `json:"recovery"`
 	Padding   vPad      `json:"padding"`
+	Item      vItem     `json:"item"`
+}
+type vItem struct {
+	Purpose, Nonce, Seq, TsMs, Body, Payload string
 }
 type vIdent struct {
 	UserID, DeviceID           string
@@ -137,7 +142,19 @@ func build(t *testing.T) vectors {
 			hex.EncodeToString(GenesisHash), "1", hex.EncodeToString(lh)},
 		Recovery: rec,
 		Padding:  vPad{hex.EncodeToString([]byte("hi")), hex.EncodeToString(padded)},
+		Item:     buildItem(t, a, circ, devA, ck),
 	}
+}
+
+func buildItem(t *testing.T, a ident, circ, devA string, ck []byte) vItem {
+	var n [NonceLen]byte
+	copy(n[:], bytes.Repeat([]byte{0x0c}, NonceLen))
+	body := []byte(`{"lat":52.52,"lon":13.405,"acc":8}`)
+	payload, err := SealItem(ck, circ, 1, devA, a.priv, "fix", 7, 1700000000123, body, n)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return vItem{"fix", hex.EncodeToString(n[:]), "7", "1700000000123", hex.EncodeToString(body), hex.EncodeToString(payload)}
 }
 
 func buildRecovery(t *testing.T) vRecovery {
@@ -494,5 +511,46 @@ func TestKeyCommitment(t *testing.T) {
 	}
 	if bytes.Contains(c1, k) {
 		t.Fatal("commitment leaks the key")
+	}
+}
+
+func TestItemEnvelope(t *testing.T) {
+	a := mk(t, 0x01)
+	dev := devB
+	ck := bytes.Repeat([]byte{5}, 32)
+	var n [NonceLen]byte
+	body := []byte(`{"lat":1}`)
+	p, err := SealItem(ck, circ, 3, dev, a.priv, "fix", 9, 1000, body, n)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seq, ts, got, err := OpenItem(ck, circ, dev, a.ed, "fix", 9, p)
+	if err != nil || seq != 9 || ts != 1000 || !bytes.Equal(got, body) {
+		t.Fatalf("round trip: %v %d %d %q", err, seq, ts, got)
+	}
+	// Another member (same circle key, different key pair) cannot pass as this sender.
+	other := mk(t, 0x02)
+	if _, _, _, err := OpenItem(ck, circ, dev, other.ed, "fix", 9, p); !errors.Is(err, ErrBadItemSig) {
+		t.Fatalf("wrong sender key accepted: %v", err)
+	}
+	// The server renumbering the item is detected; so is a purpose or device swap.
+	if _, _, _, err := OpenItem(ck, circ, dev, a.ed, "fix", 10, p); !errors.Is(err, ErrItemSeqMatch) {
+		t.Fatalf("renumbered item accepted: %v", err)
+	}
+	if _, _, _, err := OpenItem(ck, circ, dev, a.ed, "event", 9, p); err == nil {
+		t.Fatal("purpose swap accepted")
+	}
+	if _, _, _, err := OpenItem(ck, circ, devA, a.ed, "fix", 9, p); err == nil {
+		t.Fatal("device swap accepted")
+	}
+	// A signed item re-sealed under another epoch by a member fails (epoch is signed).
+	padded, _ := Open(ck, circ, dev, "fix", p)
+	re, _ := SealWithNonce(ck, circ, 4, dev, "fix", padded, n)
+	if _, _, _, err := OpenItem(ck, circ, dev, a.ed, "fix", 9, re); !errors.Is(err, ErrBadItemSig) {
+		t.Fatalf("epoch rebind accepted: %v", err)
+	}
+	// Padding: every payload is bucketed.
+	if l := len(p); l != 1+4+NonceLen+256+TagLen {
+		t.Fatalf("payload length %d not a 256 bucket", l)
 	}
 }

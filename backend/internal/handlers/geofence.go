@@ -208,6 +208,9 @@ func (s *Server) CreateGeofence(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	if s.refuseIfPrivateCircle(w, r.Context(), familyID) {
+		return
+	}
 	if req.PlaceID == "" {
 		writeError(w, http.StatusBadRequest, "place_id is required")
 		return
@@ -361,6 +364,9 @@ func (s *Server) UpdateGeofence(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.requireCreator(w, r, createdBy) {
+		return
+	}
+	if s.refuseIfPrivateCircle(w, r.Context(), familyID) {
 		return
 	}
 

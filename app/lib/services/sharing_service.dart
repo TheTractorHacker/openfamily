@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'api_client.dart';
+import 'e2ee/private_runtime.dart';
 
 /// Whether the caller's location sharing is paused, and until when.
 class SharingPause {
@@ -169,6 +171,8 @@ class SharingService {
       'note': note,
       if (lat != null && lon != null) ...<String, dynamic>{'lat': lat, 'lon': lon},
     });
+    // Private circles: the position travels sealed, never in the request above.
+    unawaited(PrivateRuntime.instance.sealAlertPosition('checkin', lat, lon, note: note));
   }
 
   Future<LiveShares> liveShares() async =>

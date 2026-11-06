@@ -1,6 +1,8 @@
 import 'package:latlong2/latlong.dart';
 
 import 'api_client.dart';
+import 'e2ee/private_history.dart';
+import 'e2ee/private_runtime.dart';
 
 /// One downsampled GPS sample on a member's trail.
 class HistoryTrailPoint {
@@ -87,7 +89,31 @@ class HistoryService {
     if (data is! Map<String, dynamic>) {
       throw const ApiException(0, 'Unexpected history response.');
     }
-    return _fromBackend(data);
+    return _withPrivateTrail(_fromBackend(data), memberId, start, end);
+  }
+
+  /// A Private circle's server holds no positions, so its part of the day comes
+  /// from the history this phone decrypted (live window plus sealed history
+  /// chunks). Merged with whatever the server has for standard circles.
+  static Future<MemberHistory> _withPrivateTrail(MemberHistory server, String memberId, DateTime start, DateTime end) async {
+    try {
+      final List<TrackPoint> local = await PrivateRuntime.instance.trailFor(memberId, start, end);
+      if (local.isEmpty) return server;
+      final Map<int, HistoryTrailPoint> byTs = <int, HistoryTrailPoint>{
+        for (final HistoryTrailPoint p in server.trail) p.ts.millisecondsSinceEpoch: p,
+      };
+      for (final TrackPoint p in local) {
+        byTs.putIfAbsent(
+            p.tsMs,
+            () => HistoryTrailPoint(
+                position: LatLng(p.lat, p.lon), ts: DateTime.fromMillisecondsSinceEpoch(p.tsMs, isUtc: true)));
+      }
+      final List<HistoryTrailPoint> trail = byTs.values.toList()
+        ..sort((HistoryTrailPoint a, HistoryTrailPoint b) => a.ts.compareTo(b.ts));
+      return MemberHistory(userId: server.userId.isEmpty ? memberId : server.userId, from: server.from, to: server.to, trail: trail, visits: server.visits);
+    } catch (_) {
+      return server;
+    }
   }
 
   static MemberHistory _fromBackend(Map<String, dynamic> json) {

@@ -80,6 +80,10 @@ type circleOut struct {
 	// ExpiresAt is set for a temporary circle (null = permanent). A circle past
 	// it is no longer listed or served.
 	ExpiresAt *time.Time `json:"expires_at"`
+	// E2EEMode is "off" or "private"; E2EEEpoch the current key epoch
+	// (docs/design/E2EE.md). Additive fields.
+	E2EEMode  string `json:"e2ee_mode"`
+	E2EEEpoch int    `json:"e2ee_epoch"`
 }
 
 type circleMemberOut struct {
@@ -304,7 +308,7 @@ func (s *Server) ListCircles(w http.ResponseWriter, r *http.Request) {
 		SELECT c.id, c.name, c.icon, c.created_by, c.created_at,
 		       cm.role, cm.sharing_enabled, cm.joined_at,
 		       (SELECT count(*) FROM circle_members x WHERE x.circle_id = c.id),
-		       COALESCE(u.family_id = c.id, false), c.expires_at
+		       COALESCE(u.family_id = c.id, false), c.expires_at, c.e2ee_mode, c.e2ee_epoch
 		FROM circle_members cm
 		JOIN circles c ON c.id = cm.circle_id
 		JOIN users u ON u.id = cm.user_id
@@ -319,7 +323,7 @@ func (s *Server) ListCircles(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var c circleOut
 		if err := rows.Scan(&c.ID, &c.Name, &c.Icon, &c.CreatedBy, &c.CreatedAt,
-			&c.Role, &c.SharingEnabled, &c.JoinedAt, &c.MemberCount, &c.IsPrimary, &c.ExpiresAt); err != nil {
+			&c.Role, &c.SharingEnabled, &c.JoinedAt, &c.MemberCount, &c.IsPrimary, &c.ExpiresAt, &c.E2EEMode, &c.E2EEEpoch); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to read circles")
 			return
 		}

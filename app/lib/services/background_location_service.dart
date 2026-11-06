@@ -17,6 +17,7 @@ import 'fix_quality.dart';
 import 'live_boost.dart';
 import 'tracking_cadence.dart';
 import 'direct_push_service.dart';
+import 'e2ee/private_runtime.dart';
 import 'driving/driving_background.dart';
 import 'location_outbox.dart';
 
@@ -238,6 +239,14 @@ Future<void> onLocationUpdate(LocationDto location) async {
     final Map<String, dynamic> body =
         _buildBody(location, credentials.deviceId, _batteryCache);
 
+    // Private circles: seal a copy for each of them; send the plaintext report
+    // only when a standard circle exists (returns true when no circle is private).
+    if (!await _routePrivate(credentials, body)) {
+      _lastPostAt = now;
+      _lastSentTs = fixTs;
+      return;
+    }
+
     // One request at a time: keep only the newest pending fix; the one it
     // replaces goes to the outbox and ships through the batch path.
     if (_posting) {
@@ -249,6 +258,20 @@ Future<void> onLocationUpdate(LocationDto location) async {
     await _sendAndDrain(credentials, body);
   } catch (_) {
     // Never throw from the background callback.
+  }
+}
+
+PrivateRuntime? _privateRuntime;
+
+/// Never throws. On failure the plaintext path is kept: the server refuses it
+/// (409) for a user whose circles are all private, so nothing readable leaves.
+Future<bool> _routePrivate(_BackgroundCredentials c, Map<String, dynamic> body) async {
+  try {
+    final PrivateRuntime rt = _privateRuntime ??=
+        PrivateRuntime.background(apiBaseUrl: c.apiBaseUrl, headers: _ingestHeaders(c));
+    return await rt.routeFix(body);
+  } catch (_) {
+    return true;
   }
 }
 

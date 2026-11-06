@@ -239,6 +239,17 @@ func newAuthzFixture(t *testing.T, routes []parsedRoute) *authzFixture {
 	srv.AuthLimit = sms.NewLimiter()
 	srv.LocationLimit = sms.NewLimiter()
 	srv.RequireInvite = false
+	// main.go creates these lazily-managed tables at startup; the matrix must do
+	// the same so it passes on a freshly migrated database, independent of which
+	// other test packages ran first.
+	for name, ensure := range map[string]func(context.Context) error{
+		"crash": srv.EnsureCrashSchema, "dawarich": srv.EnsureDawarichSchema, "notify events": srv.EnsureNotifyEventsSchema,
+		"notification prefs": srv.EnsureNotificationSchema, "theme": srv.EnsureThemeSchema,
+	} {
+		if err := ensure(ctx); err != nil {
+			t.Fatalf("ensure %s schema: %v", name, err)
+		}
+	}
 
 	f := &authzFixture{pool: pool, srv: srv, tm: tm, ids: map[string]string{}}
 	one := func(q string, args ...any) string {

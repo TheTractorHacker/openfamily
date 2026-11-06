@@ -105,6 +105,11 @@ func (s *Server) evaluateGeofences(ctx context.Context, userID string, lon, lat 
 	if familyID == "" {
 		return
 	}
+	// A private circle's places are evaluated on the members' phones; the server
+	// holds no plaintext places for it and must not geofence it.
+	if s.circleIsPrivate(ctx, familyID) {
+		return
+	}
 
 	// Single query: join places + geofences to find candidate geofences. A
 	// geofence is a candidate when EITHER the point is inside its radius (a

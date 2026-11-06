@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/alert.dart';
 import '../services/alert_service.dart';
 import '../services/api_client.dart';
+import '../services/e2ee/private_runtime.dart';
 import '../services/location_reporter.dart';
 import '../services/location_service.dart';
 import '../services/server_features.dart';
@@ -271,6 +272,7 @@ class _SosScreenState extends State<SosScreen> {
         body['lon'] = position.longitude;
       }
       final dynamic response = await ApiClient.post('/alerts/sos', body: body);
+      unawaited(PrivateRuntime.instance.sealAlertPosition('sos', body['lat'] as double?, body['lon'] as double?));
       final String? id = _alertIdFrom(response);
       if (id == null || id.isEmpty) {
         throw const ApiException(500, 'SOS sent, but no alert id came back.');

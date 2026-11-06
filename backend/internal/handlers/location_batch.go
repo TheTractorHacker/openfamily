@@ -154,7 +154,6 @@ func (s *Server) IngestLocationBatch(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusTooManyRequests, "too many location backfill requests")
 		return
 	}
-
 	r.Body = http.MaxBytesReader(w, r.Body, batchMaxBytes)
 	var req struct {
 		Points []batchPoint `json:"points"`
@@ -184,6 +183,11 @@ func (s *Server) IngestLocationBatch(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "all points must use the same device")
 			return
 		}
+	}
+
+	// Downgrade protection: a user whose circles are all private may not backfill plaintext.
+	if s.refusePrivateOnlyPlaintext(w, r, claims.UserID) {
+		return
 	}
 
 	// Verify the device belongs to the caller (same rule as single ingest).

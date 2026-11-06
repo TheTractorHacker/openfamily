@@ -65,7 +65,12 @@ func (s *Server) PostCrashAlert(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	lat, lon := req.Lat, req.Lon
-	if lat == nil || lon == nil {
+	// Private circle: no plaintext position is stored; the alert still goes out.
+	withheld := false
+	if fid, ferr := s.familyIDForUser(ctx, claims.UserID); ferr == nil && s.circleIsPrivate(ctx, fid) {
+		lat, lon, withheld = nil, nil, true
+	}
+	if !withheld && (lat == nil || lon == nil) {
 		var la, lo float64
 		err := s.Pool.QueryRow(ctx, `SELECT lat, lon FROM member_positions WHERE user_id = $1`,
 			claims.UserID).Scan(&la, &lo)

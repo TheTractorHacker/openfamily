@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:latlong2/latlong.dart';
@@ -7,6 +8,7 @@ import '../services/speed_units.dart';
 import '../models/place.dart';
 import '../services/alert_service.dart';
 import '../services/api_client.dart';
+import '../services/e2ee/private_runtime.dart';
 import 'alert_status_screen.dart';
 import '../services/location_service.dart';
 import '../services/place_service.dart';
@@ -145,6 +147,7 @@ class _CheckInScreenState extends State<CheckInScreen> {
       } else {
         final dynamic response =
             await ApiClient.post('/alerts/check-in', body: body);
+        unawaited(PrivateRuntime.instance.sealAlertPosition('checkin', body['lat'] as double?, body['lon'] as double?, note: body['note'] as String?));
         if (response is Map && response['id'] is String) {
           _alertId = response['id'] as String;
         }

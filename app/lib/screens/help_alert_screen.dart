@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../models/alert.dart';
 import '../services/alert_service.dart';
 import '../services/api_client.dart';
+import '../services/e2ee/private_runtime.dart';
 import 'alert_status_screen.dart';
 import '../services/location_service.dart';
 import '../theme/app_theme.dart';
@@ -56,6 +58,7 @@ class _HelpAlertScreenState extends State<HelpAlertScreen> {
       }
       final dynamic response =
           await ApiClient.post('/alerts/help', body: body);
+      unawaited(PrivateRuntime.instance.sealAlertPosition('help', body['lat'] as double?, body['lon'] as double?));
       if (response is Map && response['id'] is String) {
         _alertId = response['id'] as String;
       }

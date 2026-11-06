@@ -10,6 +10,7 @@ import '../models/member.dart';
 import '../models/place.dart';
 import 'alert_service.dart';
 import 'api_client.dart';
+import 'e2ee/private_runtime.dart';
 import 'bubble_service.dart';
 import 'chat_service.dart';
 import 'inbox_service.dart';
@@ -517,6 +518,11 @@ class FamilyService {
         return true;
       case 'location':
         return _applyLocation(map);
+      case 'e2ee_item':
+        // Ciphertext of a Private circle: verified and decrypted by the runtime,
+        // which feeds the result back through [applySealedLocation].
+        unawaited(PrivateRuntime.instance.onWireFrame(map).catchError((Object _) => false));
+        return true;
       case 'presence':
         return _applyPresence(map);
       case 'avatar':
@@ -537,6 +543,16 @@ class FamilyService {
         return true;
     }
     return false;
+  }
+
+  /// Applies a decrypted position of a Private circle member (a synthetic
+  /// `location` frame built by [PrivateRuntime]). Same scoping rule as a
+  /// server frame.
+  void applySealedLocation(Map<String, dynamic> map) {
+    if (_disposed) return;
+    final dynamic label = map['circle_id'];
+    if (!frameInScope(_circleId, label is String ? label : null)) return;
+    _applyLocation(map);
   }
 
   bool _applyLocation(Map<String, dynamic> map) {
@@ -632,6 +648,8 @@ class FamilyService {
     _members = reconciled
         .map((Member m) => applyPlaceAddress(m, _places))
         .toList();
+    // Private circles carry no server positions: restore last-known ones.
+    unawaited(PrivateRuntime.instance.replayLatest().catchError((Object _) {}));
     return _members;
   }
 

@@ -2,6 +2,9 @@ import 'package:latlong2/latlong.dart';
 
 import '../models/place.dart';
 import 'api_client.dart';
+import 'e2ee/e2ee_crypto.dart';
+import 'e2ee/private_places.dart';
+import 'e2ee/private_runtime.dart';
 
 /// Client for the backend Places (geofence) endpoints.
 ///
@@ -62,9 +65,41 @@ class PlaceService {
         .map((dynamic e) => _fromBackend(e as Map<String, dynamic>))
         .whereType<Place>()
         .toList();
+    places.addAll(await _sealedPlaces());
     _cache = places;
     _cachedAt = clock();
     return places;
+  }
+
+  /// Places of Private circles live on the phones (sealed items), not on the server.
+  static Future<List<Place>> _sealedPlaces() async {
+    try {
+      final PrivateRuntime rt = PrivateRuntime.instance;
+      return <Place>[
+        for (final ({String circleId, SealedPlace place}) e in await rt.allSealedPlaces())
+          Place(
+            id: e.place.id,
+            name: e.place.name,
+            icon: Place.iconForType(e.place.type),
+            address: e.place.address,
+            position: LatLng(e.place.lat, e.place.lon),
+            radiusMeters: e.place.radiusMeters,
+            type: e.place.type,
+            circleId: e.circleId,
+            circleName: rt.circleName(e.circleId),
+          ),
+      ];
+    } catch (_) {
+      return <Place>[];
+    }
+  }
+
+  static Future<String?> _privateTarget(String? circleId) async {
+    try {
+      return await PrivateRuntime.instance.privateTargetFor(circleId);
+    } catch (_) {
+      return null;
+    }
   }
 
   /// Creates a place and returns the created [Place] (with its server id).
@@ -77,6 +112,16 @@ class PlaceService {
     String? address,
     String? circleId,
   }) async {
+    final String? priv = await _privateTarget(circleId);
+    if (priv != null) {
+      final SealedPlace sp = SealedPlace(
+          id: E2ee.newUuid(), name: name, lat: lat, lon: lon, radiusMeters: radiusMeters, type: type, address: address ?? '');
+      await PrivateRuntime.instance.savePlace(priv, sp);
+      invalidateCache();
+      return Place(
+          id: sp.id, name: name, icon: Place.iconForType(type), address: address ?? '', position: LatLng(lat, lon),
+          radiusMeters: radiusMeters, type: type, circleId: priv, circleName: PrivateRuntime.instance.circleName(priv));
+    }
     final Map<String, dynamic> body = <String, dynamic>{
       'name': name,
       'type': type,
@@ -114,6 +159,20 @@ class PlaceService {
     bool setCircle = false,
     String? circleId,
   }) async {
+    final String? sealedIn = await PrivateRuntime.instance.circleOfPlace(id).catchError((Object _) => null);
+    if (sealedIn != null) {
+      final SealedPlace old = PrivateRuntime.instance.book(sealedIn).byId(id)!;
+      final SealedPlace next = SealedPlace(
+          id: id, name: name ?? old.name, lat: lat ?? old.lat, lon: lon ?? old.lon,
+          radiusMeters: radiusMeters ?? old.radiusMeters, type: type ?? old.type, address: address ?? old.address,
+          enterNotify: old.enterNotify, exitNotify: old.exitNotify);
+      await PrivateRuntime.instance.savePlace(sealedIn, next);
+      invalidateCache();
+      return Place(
+          id: id, name: next.name, icon: Place.iconForType(next.type), address: next.address,
+          position: LatLng(next.lat, next.lon), radiusMeters: next.radiusMeters, type: next.type,
+          circleId: sealedIn, circleName: PrivateRuntime.instance.circleName(sealedIn));
+    }
     final Map<String, dynamic> body = <String, dynamic>{
       if (name != null) 'name': name,
       if (type != null) 'type': type,
@@ -136,6 +195,13 @@ class PlaceService {
 
   /// Deletes a place by id.
   static Future<void> deletePlace(String id) async {
+    final String? sealedIn = await PrivateRuntime.instance.circleOfPlace(id).catchError((Object _) => null);
+    if (sealedIn != null) {
+      final SealedPlace old = PrivateRuntime.instance.book(sealedIn).byId(id)!;
+      await PrivateRuntime.instance.deletePlace(sealedIn, old);
+      invalidateCache();
+      return;
+    }
     invalidateCache();
     await ApiClient.delete('/family/places/$id');
     invalidateCache();

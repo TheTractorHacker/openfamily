@@ -5,6 +5,7 @@ import 'package:share_plus/share_plus.dart';
 import '../models/circle.dart';
 import '../services/circle_service.dart';
 import '../services/e2ee/e2ee_app.dart';
+import '../services/e2ee/private_runtime.dart';
 import '../services/e2ee/e2ee_models.dart';
 import '../services/e2ee/e2ee_service.dart';
 import '../services/server_config.dart';
@@ -67,14 +68,21 @@ class _CircleDetailScreenState extends State<CircleDetailScreen> {
       context,
       title: on ? 'Make this a private circle?' : 'Turn off private mode?',
       message: on
-          ? 'This sets up end-to-end encryption KEYS for the circle: a key made on your phone '
-              'and sealed to each member\'s phone. In this version your locations are still shared '
-              'the normal way; nothing is encrypted yet.\n\n'
-              'Once location data moves into the encrypted channel, features that need the server to '
-              'read positions will not be available for private circles: trips, driving reports, the '
-              'weekly summary, Dawarich export, the admin map and server place names. If every phone and '
-              'the recovery phrase are lost, encrypted data cannot be recovered. Members need the latest app.'
-          : 'The circle goes back to normal mode and its stored key copies are deleted from the server. '
+          ? 'From now on, in this circle: live positions, location history, places, arrival and departure '
+              'events and the position in check-ins and SOS are encrypted on each phone. The server '
+              'stores and forwards ciphertext only and cannot read where anyone is.\n\n'
+              'Still visible to the server: who is in the circle, when phones are online and how often '
+              'they upload. Chat messages are not end-to-end encrypted in this version.\n\n'
+              'Not available in this circle: trips, driving reports, the weekly summary, the admin map, '
+              'Dawarich export, and place alerts made by the server (your phones work out arrivals and '
+              'departures instead). SOS reaches your circle, but the server and any SMS contact cannot '
+              'be told the position.\n\n'
+              'Existing places are re-encrypted and the server copies deleted. Location history the server '
+              'already holds stays until each person deletes it in their settings. Every member needs the '
+              'latest app and an approved phone. If every phone and the recovery phrase are lost, encrypted '
+              'data cannot be recovered.'
+          : 'The circle goes back to normal mode and its encrypted items and key copies are deleted from the '
+              'server. Places and history that exist only on phones stay there; the server will not have them. '
               'Keys already on phones stay there.',
       confirmLabel: on ? 'Turn on' : 'Turn off',
       destructive: !on,
@@ -86,10 +94,26 @@ class _CircleDetailScreenState extends State<CircleDetailScreen> {
         final LocalIdentity? id = await svc.identity();
         if (id == null) await svc.registerThisDevice(label: 'This phone');
         await svc.enableCircle(_circle.id);
+        // Migration: seal this circle's existing places, then delete the server's plaintext copies.
+        try {
+          final int moved = await PrivateRuntime.instance.migratePlaces(_circle.id, primary: _circle.isPrimary);
+          if (mounted && moved > 0) {
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                content: Text('$moved ${moved == 1 ? 'place was' : 'places were'} encrypted and removed from the server.')));
+          }
+        } catch (_) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                content: Text('Private mode is on, but existing places could not be moved yet. Open Places to retry.')));
+          }
+        }
       } else {
         await svc.disableCircle(_circle.id);
       }
       await _loadE2ee();
+      try {
+        await PrivateRuntime.instance.setCircles(await _service.listCircles());
+      } catch (_) {}
     } on NeedsCrossSignatureException catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
@@ -114,8 +138,8 @@ class _CircleDetailScreenState extends State<CircleDetailScreen> {
             icon: st.isPrivate ? Icons.lock : Icons.lock_open,
             title: 'Private circle (end-to-end encrypted)',
             subtitle: st.isPrivate
-                ? 'On: keys are set up (epoch ${st.epoch}). Locations are not encrypted yet in this version.'
-                : 'Off. Sets up encryption keys only; location data is not moved yet. Some server features will not work in private circles later.',
+                ? 'On (key epoch ${st.epoch}). Positions, history, places and events are end-to-end encrypted. Trips, driving reports and the weekly summary are not available here.'
+                : 'Off. Turning it on encrypts locations so the server cannot read them. Some server features are not available in private circles.',
             value: st.isPrivate,
             onChanged: _e2eeBusy ? null : _togglePrivate,
           ),

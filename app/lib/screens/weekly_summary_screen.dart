@@ -4,6 +4,8 @@ import '../services/speed_units.dart';
 import '../services/trips_service.dart';
 import '../services/weekly_summary_service.dart';
 import '../theme/app_theme.dart';
+import '../services/e2ee/private_runtime.dart';
+import '../widgets/private_circle_widgets.dart';
 import '../widgets/ds/ds.dart';
 
 /// "Weekly summary": this week against last week for each member, with simple
@@ -29,7 +31,8 @@ class _WeeklySummaryScreenState extends State<WeeklySummaryScreen> {
   void initState() {
     super.initState();
     UnitPreferenceService.ensureLoaded();
-    _load();
+    // A Private circle has no server-readable positions: show the placeholder only.
+    if (!PrivateRuntime.primaryPrivate.value) _load();
   }
 
   Future<void> _load() async {
@@ -55,7 +58,10 @@ class _WeeklySummaryScreenState extends State<WeeklySummaryScreen> {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) =>
+      PrivateFeatureGate(feature: PrivateFeature.weeklySummary, builder: _buildScreen);
+
+  Widget _buildScreen(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Weekly summary'),

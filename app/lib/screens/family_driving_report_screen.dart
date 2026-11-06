@@ -11,6 +11,7 @@ import '../services/speed_units.dart';
 import '../services/trip_report_service.dart';
 import '../services/trips_service.dart';
 import '../theme/app_theme.dart';
+import '../widgets/private_circle_widgets.dart';
 import '../widgets/driving_event_chips.dart';
 import '../widgets/driving_event_sheet.dart';
 import '../widgets/driving_page_widgets.dart';
@@ -240,7 +241,10 @@ class _State extends State<FamilyDrivingReportScreen> {
   // ---- build ----
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) =>
+      PrivateFeatureGate(feature: PrivateFeature.drivingReport, builder: _buildScreen);
+
+  Widget _buildScreen(BuildContext context) {
     return Scaffold(
       body: SafeArea(
         bottom: false,

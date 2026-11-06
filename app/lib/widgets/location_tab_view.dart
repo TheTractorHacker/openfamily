@@ -14,6 +14,7 @@ import '../services/member_day_service.dart';
 import 'person_panel.dart';
 import 'package:latlong2/latlong.dart' show LatLng;
 import '../theme/app_theme.dart';
+import 'private_circle_widgets.dart';
 import '../utils/member_status.dart';
 import '../services/perf/perf_monitor.dart';
 import 'ds/ds.dart';
@@ -321,6 +322,7 @@ class _LocationTabViewState extends State<LocationTabView> {
                           '${c.memberCount} '
                           '${c.memberCount == 1 ? 'person' : 'people'}'
                           '${c.isAdmin ? ' - Admin' : ''}'
+                          '${c.isPrivate ? ' - End-to-end encrypted' : ''}'
                           '${c.sharingEnabled ? '' : ' - Sharing paused'}'
                           '${_isActive(c) ? ' - Shown on the map' : ''}',
                       leading: _circleLeading(ctx, c),
@@ -600,6 +602,11 @@ class _LocationTabViewState extends State<LocationTabView> {
                   ),
                 ],
               ),
+              if (_activeCircle?.isPrivate == true)
+                const Padding(
+                  padding: EdgeInsets.only(top: AppSpace.sm),
+                  child: PrivateCircleBadge(),
+                ),
               if (widget.circleSharingPaused)
                 Padding(
                   padding: const EdgeInsets.only(top: AppSpace.sm),

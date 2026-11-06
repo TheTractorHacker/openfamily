@@ -154,6 +154,7 @@ func main() {
 	go srv.ReconcileGeofences(ctx)
 	go srv.RunCirclePurge(ctx)
 	go srv.RunUserRetention(ctx)
+	go srv.RunE2EEItemPurge(ctx)
 	if err := srv.EnsureCrashSchema(ctx); err != nil {
 		slog.Error("crash schema", "err", err)
 		os.Exit(1)
@@ -315,6 +316,10 @@ func main() {
 		r.Post("/circles/{id}/e2ee/epoch", srv.E2EEBumpEpoch)
 		r.Post("/circles/{id}/e2ee/disable", srv.E2EEDisable)
 		r.Post("/circles/{id}/e2ee/approvals", srv.E2EEApproveDevice)
+		// Phase 2: the encrypted channel (ciphertext only).
+		r.Get("/circles/{id}/e2ee/items", srv.E2EEListItems)
+		r.Delete("/circles/{id}/e2ee/items", srv.E2EEEraseItems)
+		r.Post("/circles/{id}/e2ee/purge-plaintext", srv.E2EEPurgePlaintext)
 		r.Get("/e2ee/log", srv.E2EELog)
 
 		r.Post("/families", srv.CreateFamily)
@@ -419,6 +424,11 @@ func main() {
 		// delivered newest-first once connectivity returns. Relaxed freshness
 		// rules, no geofence/broadcast side effects (see location_batch.go).
 		r.Post("/locations/batch", srv.IngestLocationBatch)
+		// Sealed items of a Private circle (ciphertext only). Also reachable with
+		// the device ingest key so the headless background reporter can upload.
+		// The sender key is named sender_device_id (not device_id) because the
+		// ingest middleware binds device_id to the ingest device.
+		r.Post("/circles/{id}/e2ee/batch", srv.E2EEPostBatch)
 	})
 
 	// Platform admin API, namespaced under /api/admin/* so it never collides

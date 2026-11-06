@@ -74,14 +74,21 @@ They set no cookies and ship no analytics or tracking code.
 
 ## Private circles (end-to-end encryption)
 
-Circles can opt in to end-to-end encryption ("Private circle"). Today this only
-sets up keys: the server stores public keys, an append-only key log and
-ciphertext it cannot read, and locations are still sent the normal way. Once
-location data moves into the encrypted channel (see `docs/design/E2EE.md`) the
-operator can no longer read positions of Private circles, but still sees
-metadata: who is in which circle, when a phone is online and how often and how
-much it uploads, and client IP addresses. Losing every phone and the recovery
-phrase makes the encrypted data unrecoverable.
+Circles can opt in to end-to-end encryption ("Private circle"). In a Private
+circle, live positions, location history, places, arrival and departure events
+and the position of check-ins and SOS are encrypted on each phone. The server
+stores and forwards ciphertext only, kept for a short live window (48 hours by
+default) and, for history, for your location-retention setting; it deletes it
+when the circle is switched back to normal. The operator can no longer read
+positions of Private circles, but still sees metadata: who is in which circle,
+when (to the minute) a phone is online and how often and how much it uploads,
+and client IP addresses. Chat messages are not end-to-end encrypted yet.
+Trips, driving reports, the weekly summary, the admin map and Dawarich export
+are not available for Private circles. If you are also in a normal circle, your
+position is still sent in the normal way to that circle. The key log is append
+only by design, so it keeps ids, hashes and signatures (no names or positions)
+even after an account is deleted. Losing every phone and the recovery phrase
+makes the encrypted data unrecoverable.
 
 ## Operator duties
 

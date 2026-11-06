@@ -111,6 +111,11 @@ func (s *Server) DeleteMyLocations(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to delete history")
 		return
 	}
+	// Sealed copies in private circles are erased too (ciphertext only).
+	if _, err := s.eraseUserE2EELocationItems(r.Context(), claims.UserID, before); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete encrypted history")
+		return
+	}
 	if all {
 		if _, err := s.Pool.Exec(r.Context(), `DELETE FROM member_positions WHERE user_id = $1`, claims.UserID); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to clear last position")
@@ -164,6 +169,14 @@ func (s *Server) PurgeUserRetention(ctx context.Context) (int64, error) {
 			return total, err
 		}
 		total += n
+		// Sealed history follows the same personal window (by coarse receive time).
+		hn, err := s.Pool.Exec(ctx, `DELETE FROM e2ee_items i USING device_keys d
+			WHERE d.device_id = i.device_id AND d.user_id = $1 AND i.purpose = 'history' AND i.received_at < $2`,
+			u.id, time.Now().AddDate(0, 0, -u.days))
+		if err != nil {
+			return total, err
+		}
+		total += hn.RowsAffected()
 	}
 	return total, nil
 }

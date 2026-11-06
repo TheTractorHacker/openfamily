@@ -21,6 +21,7 @@ import '../services/invite_service.dart';
 import '../services/inbox_service.dart';
 import '../services/battery_optimization_service.dart';
 import '../services/circle_selection.dart';
+import '../services/e2ee/private_runtime.dart';
 import '../services/circle_service.dart';
 import '../services/device_service.dart';
 import '../services/family_service.dart';
@@ -237,6 +238,11 @@ class _MapScreenState extends State<MapScreen>
     _familyService.onUserId = _onUserId;
     _familyService.onCircleGone = _onCircleGone;
     _familyService.onSharingChanged = _onCircleSharingChanged;
+    // Private circles: decrypted positions flow into the same roster, and place
+    // events become local notifications naming the member from the roster.
+    PrivateRuntime.instance
+      ..onMemberFrame = _familyService.applySealedLocation
+      ..nameOf = _memberNameFor;
     _selection.addListener(_onSelectionChanged);
     _connectivitySub =
         Connectivity().onConnectivityChanged.listen(_onConnectivityChanged);
@@ -617,6 +623,9 @@ class _MapScreenState extends State<MapScreen>
     if (LocationSharingService.enabled.value) {
       _reporter.start();
     }
+    if (_circles.isNotEmpty) {
+      unawaited(PrivateRuntime.instance.onAppActive(_circles).catchError((Object _) {}));
+    }
     // Refresh member positions right away: the app may have sat in the
     // background for hours, and the WebSocket (or its repair cycle) may not
     // have pushed a fresh snapshot yet. One REST round-trip bounds the
@@ -635,6 +644,13 @@ class _MapScreenState extends State<MapScreen>
     unawaited(DeviceService.ensureIngestKey());
     LocationSharingService.enabled.addListener(_onSharingChanged);
     _applyLocationSharing(startBackgroundAfterFrame: true);
+  }
+
+  String _memberNameFor(String userId) {
+    for (final Member m in _roster.value) {
+      if (m.id == userId) return m.name;
+    }
+    return 'Someone';
   }
 
   void _onSharingChanged() {
@@ -837,6 +853,8 @@ class _MapScreenState extends State<MapScreen>
       final bool fellBack = _selection.update(circles);
       if (fellBack) _applySelection();
       _scheduleCircleExpiry();
+      // Seal parked fixes, upload the queue, catch up on Private circles.
+      unawaited(PrivateRuntime.instance.onAppActive(circles).catchError((Object _) {}));
     } catch (_) {
       // Keep the previous list.
     }

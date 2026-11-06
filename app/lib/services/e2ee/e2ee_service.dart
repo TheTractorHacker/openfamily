@@ -110,6 +110,13 @@ class E2eeService {
 
   Future<bool> hasIdentity() async => (await vault.read(_seedName)) != null;
 
+  /// The account the stored identity belongs to (for the headless background
+  /// isolate, which cannot ask the API who is signed in).
+  Future<String> storedUserId() async {
+    final Uint8List? u = await vault.read(_userName);
+    return u == null ? '' : utf8.decode(u);
+  }
+
   /// Loads (or, with [create], generates) this phone's identity. Generation
   /// happens on the device; only public keys are ever uploaded.
   Future<LocalIdentity?> identity({bool create = false}) async {

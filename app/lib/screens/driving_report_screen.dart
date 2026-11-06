@@ -6,6 +6,7 @@ import '../models/trip.dart';
 import '../services/speed_units.dart';
 import '../services/trips_service.dart';
 import '../theme/app_theme.dart';
+import '../widgets/private_circle_widgets.dart';
 import '../widgets/ds/ds.dart';
 import '../widgets/trip_widgets.dart';
 
@@ -48,7 +49,10 @@ class _DrivingReportScreenState extends State<DrivingReportScreen> {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) =>
+      PrivateFeatureGate(feature: PrivateFeature.drivingReport, builder: _buildScreen);
+
+  Widget _buildScreen(BuildContext context) {
     return DefaultTabController(
       length: kReportPeriods.length,
       child: Scaffold(
