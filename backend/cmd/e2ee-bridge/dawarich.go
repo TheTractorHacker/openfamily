@@ -23,6 +23,9 @@ const dawarichBatch = 500
 
 // point is one validated position ready for delivery.
 type point struct {
+	// server mode: who, where and how the position arrived
+	user, circle, kind string
+
 	tgt       target
 	name      string // member display name -> properties.device_id
 	device    string // sender device id -> properties.unique_id

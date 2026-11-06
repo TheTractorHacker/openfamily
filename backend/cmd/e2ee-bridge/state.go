@@ -21,10 +21,13 @@ import (
 // identityFile keeps the public facts in clear (so `status` works without the
 // passphrase) and the seed in a (possibly sealed) box.
 type identityFile struct {
-	V            int    `json:"v"`
-	DeviceID     string `json:"device_id"`
-	UserID       string `json:"user_id,omitempty"`
-	Name         string `json:"name"`
+	V        int    `json:"v"`
+	DeviceID string `json:"device_id"`
+	UserID   string `json:"user_id,omitempty"`
+	Name     string `json:"name"`
+	// Kind is "service" (Dawarich bridge, default) or "server" (the OpenFamily
+	// server's own device, docs/design/E2EE.md "Trusted-server mode").
+	Kind         string `json:"kind,omitempty"`
 	Server       string `json:"server,omitempty"`
 	Ed25519Pub   string `json:"ed25519_pub"`
 	X25519Pub    string `json:"x25519_pub"`

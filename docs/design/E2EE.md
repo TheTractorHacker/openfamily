@@ -1,7 +1,7 @@
 # ADR: End-to-end encryption ("Private circle")
 
 Status: **ACCEPTED** (supersedes the earlier "Proposed" text of this file, which recommended against E2EE).
-Issue: #34. Phase 1 (keys and verification) and phase 2 (the encrypted channel) are implemented. Phase 3 (web viewer and Dawarich bridge as approved read-only device members) is implemented; see "Phase 3" below. Chat, media and phone-side trips are still future.
+Issue: #34. Phase 1 (keys and verification) and phase 2 (the encrypted channel) are implemented. Phase 3 (web viewer and Dawarich bridge as approved read-only device members) is implemented; see "Phase 3" below. Chat, media and phone-side trips are still future. An **optional trusted-server mode** (the OpenFamily server as an approved member device, owner's decision) is described in "Trusted-server mode" below.
 
 ## Decision
 
@@ -13,6 +13,7 @@ It is delivered in **phases and opt-in per circle** ("Private circle"):
 | 1 | Cryptographic foundation and verification UX: device identity keys, circle key epochs, wrapped keys, key transparency log, recovery, safety numbers, server-record check, admin/CLI tooling. **No location data moves.** | implemented |
 | 2 | Live fixes, history, places, arrival/departure events and SOS positions move into the encrypted channel; place evaluation runs on the phones. Server-side trips, driving report and weekly summary are unavailable in a Private circle. | implemented; phone background behaviour not yet verified on devices (see phase-2 section) |
 | 3 | Web viewer and Dawarich bridge as approved read-only *device members* (API contract below). | implemented (browser viewer, `e2ee-bridge`, phone approval screen); not yet exercised against a live Dawarich or on a physical phone |
+| 3b | Optional **trusted-server mode**: the OpenFamily server as an approved, per-member-consented device so the server can read (and store plaintext for) a circle again. Off by default. | implemented; not exercised on a physical phone or a live deployment (see "Trusted-server mode") |
 | 4 | Media (chat photos); encrypted chat; phone-side trips. | future |
 
 Existing circles keep working exactly as today. A circle switched to Private mode only gets keys in phase 1. The toggle is OFF by default,
@@ -41,8 +42,8 @@ the user's session reads the same data the user can), traffic analysis by the ne
 | Live map, history, day view | server serves rows | Phones decrypt; history is stored as ciphertext and decrypted on the phone |
 | Trips, driving reports, crash scoring, weekly summary | server segments and aggregates fixes | **Computed on-device** and shared as encrypted summaries, or documented as unavailable. Server-side trips/driving/weekly summary are **unavailable** for Private circles |
 | SOS with position | server pushes last position | Position travels in the encrypted payload. The server (and so the SMS/Twilio fallback) **cannot know the position**; SOS in a Private circle must say so in the UI. The wake-up push has no position |
-| Admin map and device last-known positions | operator reads positions | **Unavailable** for Private circles (by design). Admin panel still lists accounts, devices, keys |
-| Dawarich export | server forwards points | **Server-side sync skips Private circles** (it reads only the plaintext table). Use the `e2ee-bridge` (phase 3), a `service` device member that you run off the server host |
+| Admin map and device last-known positions | operator reads positions | **Unavailable** for Private circles (by design), except circles in trusted-server mode (below), where the server holds the plaintext it ingested. Admin panel still lists accounts, devices, keys |
+| Dawarich export | server forwards points | **Server-side sync skips Private circles** (it reads only the plaintext table). Use the `e2ee-bridge` (phase 3), a `service` device member that you run off the server host. **Exception:** with the opt-in trusted-server mode (below) the built-in sync works again for the circles whose members all consented |
 | Server geocoded place names and address search | server reverse-geocodes | Geocoding moves to the phone (or an on-device lookup); the server never learns an address |
 | Push text naming a place or person | server composes the text | Server sends a content-free wake-up; the app decrypts and raises a LOCAL notification |
 
@@ -397,6 +398,90 @@ Closed in this pass: a listed voucher is now bound to its logged fingerprint; ro
 * The viewer is a snapshot-and-stream tool: it does not persist decrypted history, and `history` chunks are limited by the sender's retention.
 * Not exercised: a real Dawarich instance, a physical phone, the browser pages in several real browsers (Node 22 and the bundle build were exercised; the UI was not click-tested), and WebCrypto Ed25519/X25519 in Safari/Firefox ESR. Browsers without them fall back to the passphrase mode.
 * The viewer cannot upload; a read-only web key cannot send positions. No chat or media is decrypted (still plaintext).
+
+## Trusted-server mode (the OpenFamily server as a member device)
+
+Status: implemented as an **opt-in** per instance (token) and per circle (every member's signed consent). Off by default; a default install, and every Private circle without an approved server device, behaves exactly as in phase 2.
+
+### Why this exists, and what it is NOT
+
+The instance owner decided: *"make the server part of the encryption; the Dawarich server is on the same network so it doesn't matter."* The owner trusts their own server host, and wants the admin map, history, Dawarich export and server place alerts back for Private circles.
+
+This mode therefore **gives up** the central phase-2 promise for the circles that use it: **the server can read their locations and keeps plaintext copies in its database.**
+The circle is labelled "Server can read (trusted server)" in the app instead of "End-to-end encrypted", and every dialog says so.
+
+What it still protects against: a leaked or stolen **database dump or backup of ciphertext/keys-less data**, a **network observer** (the channel stays sealed end to end up to the server device), and any **un-consented** use (the server reads a circle only while every member's phone has signed for it). Note that plaintext copies in the database are *also* in dumps and backups: for these circles that protection no longer exists for the data the server already ingested. It does **not** protect against a compromised server host, its operator, its administrators with database or file access, or its backups of the plaintext tables.
+
+### Design
+
+The server is a **device member**, not a special role, using the same machinery as the web viewer and the Dawarich bridge:
+
+* A new device kind `server` ("OpenFamily server"). It is registered with `POST /e2ee/devices` like a bridge: cross-signed by a phone key of its owner's account, never `can_upload`, never rotatable (revoke and enroll again).
+* It runs as a **sidecar process**, `e2ee-bridge` in server mode (`backend/cmd/e2ee-bridge`, compose service `e2ee-server-device`, profile `e2ee-server`), **not** inside the API process and **not** in Postgres. Its identity seed and the circle keys live in a `0600` file in a Docker volume (optionally sealed with Argon2id + XChaCha20-Poly1305 under `E2EE_SERVER_DEVICE_PASSPHRASE`). The database only ever holds its public key.
+* The sidecar reuses the bridge's verified-trust engine unchanged: key log verification and pinning, `AuthorizeWrap`/`AuthorizeSender`/`PinApprover`, wrap and key-commitment checks, item AEAD + signature + sequence/replay/rollback rules. A circle whose log does not verify stops the sidecar (exit 4), as for the bridge.
+* It hands each verified plaintext position to `POST /internal/e2ee/ingest`. That endpoint is **not a user route**: it needs the server-device bearer token (`E2EE_SERVER_INGEST_TOKEN`, at least 32 characters, shared only between the API and the sidecar; compared in constant time; `404` while unset). A user JWT never works there.
+* The ingest writes into the **normal tables** (`locations`, `member_positions`) tagged `source='e2ee_server'` and `locations.e2ee_circle_id`, then triggers the same post-commit work as a plaintext fix (geofence/bubble evaluation, battery alerts, live fan-out). Admin map, history, trips, the driving report, the weekly summary and the server-side Dawarich sync therefore work without further changes.
+
+### What binds the server device to the phones' consent
+
+`circles.e2ee_server_member` is **not a stored toggle**. It is the SQL function `e2ee_server_member(circle)` (migration 000165), true only while ALL hold:
+
+1. the circle is Private;
+2. the pinned server key (`e2ee_server_device`, set only with the ingest token, only for an already registered `server`-kind key) is active, and approved by the existing transitive rule (its registration was cross-signed by a phone);
+3. that key holds a **wrap of the circle's current epoch** (only a phone can produce a wrap; phones issue it only as described below);
+4. its owner is a live member;
+5. **every live member that has an active phone key has a consent row** whose approver is an active phone key of that member.
+
+A consent is `PUT /circles/{id}/e2ee/server-consent` carrying an **Ed25519 signature made by the member's phone** over `"OFE2EE1-SERVERCONSENT\0" || circle || user || server device || server fingerprint` (frozen vector `backend/internal/e2ee/testdata/server_consent.json`, checked by Go and Dart). It names the circle, the person and the exact server key, so it cannot be moved to another circle, person or key. A session token alone cannot grant it. Withdrawing deletes the row and requests a new key epoch; a member leaving, a phone key being revoked, the server key being revoked (its wraps are deleted by the existing trigger), the circle going back to normal mode (consents are deleted by a trigger), or a new member with a phone key joining each make the function false **at once**.
+
+Defence in depth, so a stored row is not enough: the ingest endpoint re-derives the state and **re-verifies every consent signature in Go** against the member's phone key before writing; the sidecar independently verifies the consents it is shown against the key log (a consent only counts if its approver is a phone key that `AuthorizeSender` accepts) and does not even pull a circle until every member's consent verifies; the phones verify the same thing themselves before wrapping.
+
+### Phone behaviour (Flutter)
+
+* **Approve a viewer or bridge** shows a `server` request distinctly ("OpenFamily server (can read the circle)") with its own warning. Approving only registers the key; it grants nothing.
+* **Encryption keys > circle > Trusted server** shows the server key's name and fingerprint (compare it with the enroll command's output), who has allowed it (each signature re-verified on the phone), and the buttons *Allow the server to read this circle* (an explicit destructive-styled confirmation with the warning text), *Withdraw my consent*, *Give the server the circle key* (circle-key publisher, enabled only when every consent verifies locally) and *Delete my copies / all copies*.
+* The server key is **never wrapped automatically**: `processPending` skips it, `confirmWrap` refuses it, and `_recipients` (epoch rotation) includes it only while `allowedServerKey` holds (pinned key, matching fingerprint, every consent verified). After a withdrawal the next epoch excludes it.
+* The circle badge reads **"Server can read"** and the circle's toggle subtitle says so. The turn-on dialog of Private mode mentions the option and what it costs.
+* Trips, the weekly summary and the other "server needs plaintext" screens are available again for a server-member primary circle.
+
+### Phase-2 enforcement, relaxed only where the server can read
+
+`e2ee_plaintext_blocked(circle) = private AND NOT e2ee_server_member(circle)` replaces "private" in: the 409 on plaintext positions (`circleModes`), place/geofence/bubble handlers and the DB triggers, the geofence/bubble evaluators, the SOS/check-in position rules, and every `circles.Authz` visibility query. A circle **without** an approved server device is unchanged (the whole phase-2 test suite passes untouched, plus new negative tests). The legacy-plaintext purge refuses a server-member circle (its places are legitimate).
+
+### Source of truth for place alerts (one per circle)
+
+Places of a Private circle are sealed items that the phones evaluate on-device (unchanged). **The phones remain the single source of truth for arrival/departure alerts in a server-member circle.** The server evaluates geofences only for places that exist as *server* places (created through the admin web or API, which are allowed again). Do not define the same place in both worlds or you get two notifications. The sidecar does not import sealed places.
+
+### One user, several circles
+
+Positions are stored per user, not per circle, so the ingest is deliberately conservative: it stores a member's position only if the member has **no normal circle** (otherwise their phone already uploads plaintext to that circle and an ingest would leak a position the user shared in the Private circle into the plaintext table), only while they are sharing in this circle and not paused, only from an active, approved phone key of that user, and never from a user the endpoint cannot tie to the sending key.
+
+### Revoking and purging
+
+Revoking the server key (`e2ee-bridge revoke` or the phone) deletes its wraps, so the circle stops being a server member at once; ingest answers 403 immediately; the circle is flagged for a new epoch. Withdrawing a consent does the same without revoking the key. **The plaintext copies stay until purged**: `DELETE /circles/{id}/e2ee/server-copies?scope=mine|circle` (circle scope: admin) removes the tagged `locations` rows and the last-known positions that can only have come from the server. Derived data that is not tagged (trips already built, geofence events, notifications already sent, history exported to Dawarich, backups) is not removed; Dawarich keeps what it received.
+
+### Adversarial pass on the new trust path
+
+| Question | Result |
+|---|---|
+| Can a circle admin, platform admin or any user session turn a circle into a server-member circle? | No toggle or admin endpoint exists. Needs the token-pinned key, a phone-made wrap and every member's phone-signed consent. Tests: `TestServerMemberNeedsPinWrapAndEveryConsent`, `TestServerMemberKeyBelongsOnlyToTokenHolder`, `TestServerMemberOneMissingConsentKeepsPhase2`. |
+| Can a malicious member register their own `server` key? | They can register one (cross-signed by their own phone), but it is not the pinned device, so consent for it is refused (409), ingest refuses it (403), and phones never wrap it. A second `server` key cannot displace the pinned one while it is active. |
+| Can the server (DB writer) forge consents? | It cannot produce a valid signature. It can plant rows: then the SQL function says yes (relaxing plaintext rules), but `TestServerIngestRejectsPlantedConsentRows` shows ingest still refuses, the sidecar ignores it, and phones do not wrap. **Residual:** a DB writer who also plants the pin and a wrap row can make the *visibility* rules treat a circle as server-member and can forge plaintext location rows for it (integrity, not confidentiality: it learns nothing it could not already learn from a server that holds the plaintext). This mode already trusts the server host. |
+| Can a stolen ingest token read anything? | It reads nothing (the endpoint is write-only). With the token an attacker can inject positions for consenting members of server-member circles, and pin a registered `server` key. Treat the token like a database password (file or secret, 0600). Signing ingest requests with the device key would shrink this; not done, see decisions. |
+| Can the sidecar be tricked into reading a circle without consent? | It verifies consents from the log-vouched phone keys itself and pulls nothing until all members' verify (`TestServerModeReadsOnlyAfterEveryMemberConsented`, `...IgnoresForgedAndMisboundConsents`). A hostile server hiding a member only makes that member's items unattributable (dropped). |
+| Consent replay across circles, people, keys, or after re-enable? | Message binds circle, user, server device id and fingerprint (`TestServerConsentBindsEverything`, `TestServerConsentCannotBeForgedOrMoved`); the primary key includes the server device; consents are deleted when private mode ends or the member leaves (`TestServerConsentsEndWhenPrivateModeEnds`). |
+| Does it leak a Private-circle position into a standard circle? | Not by the ingest: members of any normal circle are skipped (`TestServerIngestSkipsMembersOfStandardCircles`). |
+| Logs and audit | Counts only, no coordinates, no token, no keys (`TestServerIngestLogsNoPlaintext`, `TestServerModeLogsHaveNoCoordinatesOrTokens`). |
+| Does a default install change? | The token is empty, every new endpoint answers 404, `kind:"server"` registration answers 403, and the functions return false. The whole existing suite passes. |
+
+Residual risks of this mode (in addition to the sections below):
+
+* **Plaintext at rest** on the server (database, dumps, backups, replicas) for the consenting circles, for as long as the retention windows keep it; deleting it needs the purge.
+* **The sidecar runs as the owner's account**: its login refresh token and its key are in the state volume. Whoever takes that volume (and the passphrase, if any) can read every consenting circle and act as that account until the key is revoked.
+* **First-use trust of the fingerprint**: a member's consent is only as good as the comparison between the fingerprint on the phone and the one printed on the server host. The phone says so; it cannot check it for the user.
+* **Consent is all-or-nothing per circle**: one member who does not consent keeps the whole circle sealed; one who withdraws closes it for everyone.
+* A server-member circle's integrity rests on the database and on the token (see the table).
+* Not exercised: a physical phone, a real Dawarich instance, a long-running docker deployment, background behaviour on Android.
 
 ## Security review (phase 2)
 

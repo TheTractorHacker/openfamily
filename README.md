@@ -555,6 +555,13 @@ circle", see `docs/design/E2EE.md`). In a normal circle the server must read
   approves it, and `backend/cmd/e2ee-bridge` (run it off the server host, see
   its README) forwards Private-circle points to your own Dawarich. Whoever runs
   a viewer or bridge can read those circles.
+- **Optional trusted-server mode** (`docker compose --profile e2ee-server`, off
+  by default): the OpenFamily server becomes an approved member device of a
+  Private circle so the admin map, history, trips, place alerts and the built-in
+  Dawarich sync work for it again. Every member must allow it on their phone, the
+  circle then shows "Server can read", and the server keeps plaintext copies; it
+  does not protect against a compromised server host. See the "Trusted-server
+  mode" section of `docs/design/E2EE.md`.
 
 ## API reference
 

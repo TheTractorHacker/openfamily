@@ -238,7 +238,7 @@ class E2eeService {
       throw const E2eeAuthException('the request is corrupted or forged');
     }
     final Uint8List fp = await E2ee.fingerprint(ed, x);
-    // Optional device-member fields (phase 3): kind 'web' | 'service' and a name.
+    // Optional device-member fields (phase 3): kind 'web' | 'service' | 'server' and a name.
     final Object? k = m['k'], n = m['n'];
     return LinkRequestInfo(did, fp, E2ee.shortFingerprint(fp), await E2ee.digitGroups(fp),
         kind: k is String ? k : null, name: n is String ? cleanDeviceName(n) : null);
@@ -359,8 +359,15 @@ class E2eeService {
   Future<List<DeviceKey>> _recipients(CircleE2eeState st, LocalIdentity me) async {
     final Set<String> own = st.allDevices.where((DeviceKey k) => k.userId == me.userId).map((DeviceKey k) => k.deviceId).toSet();
     final List<DeviceKey> out = <DeviceKey>[];
+    final DeviceKey? server = await allowedServerKey(st);
     for (final DeviceKey k in st.allDevices) {
       if (k.approved != true) continue;
+      if (k.kind == 'server') {
+        // The OpenFamily server key never gets a key automatically: only while it is
+        // the pinned server key AND every member's consent verifies.
+        if (server != null && k.deviceId == server.deviceId) out.add(k);
+        continue;
+      }
       if (k.deviceId == me.deviceId) {
         out.add(k);
         continue;
@@ -482,6 +489,7 @@ class E2eeService {
     final List<Map<String, dynamic>> wraps = <Map<String, dynamic>>[];
     final List<PendingItem> confirm = <PendingItem>[], waiting = <PendingItem>[], refused = <PendingItem>[];
     for (final DeviceKey k in pending) {
+      if (k.kind == 'server') continue; // only through shareKeyWithServer, after every consent
       final WrapDecisionResult d = await decideWrap(key: k, selfUserId: me.userId, trust: trust, ownKnownDeviceIds: own);
       switch (d.decision) {
         case WrapDecision.auto:
@@ -506,6 +514,12 @@ class E2eeService {
     final CircleE2eeState st = await api.circleState(circleId);
     final Uint8List? k = await circleKey(circleId, st.epoch);
     if (k == null) throw StateError('This phone does not hold the current circle key yet.');
+    if (key.kind == 'server') {
+      final DeviceKey? allowed = await allowedServerKey(st);
+      if (allowed == null || allowed.deviceId != key.deviceId) {
+        throw StateError('The server key only gets the circle key after every member has allowed it.');
+      }
+    }
     if (st.epochRecord(st.epoch)?.publisherUserId != me.userId && key.userId != me.userId) {
       throw StateError('Only the admin who published this key epoch can share it with other members.');
     }
@@ -515,6 +529,97 @@ class E2eeService {
       await trust.markVerified(key.userId, all.map((DeviceKey d) => d.fingerprint));
     }
   }
+
+  // ------------------------------------------------ trusted-server mode
+
+  /// The members that must consent before the server may read the circle: every
+  /// member with an active phone key.
+  static List<String> membersNeedingConsent(CircleE2eeState st) => <String>[
+        for (final CircleE2eeMember m in st.members)
+          if (m.devices.any((DeviceKey d) => d.kind == 'device' && d.isActive)) m.userId
+      ];
+
+  /// Which members' consents verify (signature by one of THEIR active phone keys,
+  /// naming this circle, this person and this exact server key). The server's own
+  /// "server_member" claim is not used.
+  Future<Set<String>> verifiedConsentUsers(CircleE2eeState st, ServerMemberState ss, DeviceKey serverKey) async {
+    final Set<String> ok = <String>{};
+    final Uint8List fp = E2ee.unhex(serverKey.fingerprint);
+    for (final ServerConsent c in ss.consents) {
+      final CircleE2eeMember? m = st.members.where((CircleE2eeMember x) => x.userId == c.userId).firstOrNull;
+      final DeviceKey? d = m?.devices.where((DeviceKey x) => x.deviceId == c.approverDeviceId && x.kind == 'device' && x.isActive).firstOrNull;
+      if (d == null) continue;
+      try {
+        if (await E2ee.verify(d.edPub, E2ee.serverConsentMessage(st.circleId, c.userId, serverKey.deviceId, fp), c.signature)) ok.add(c.userId);
+      } catch (_) {}
+    }
+    return ok;
+  }
+
+  /// The pinned, active server key when the circle may give it the circle key:
+  /// the server reports it as THE server device, its fingerprint matches the key
+  /// in the circle state, and every member's consent verifies. Otherwise null.
+  Future<DeviceKey?> allowedServerKey(CircleE2eeState st) async {
+    if (!st.isPrivate) return null;
+    final ServerMemberState ss;
+    try {
+      ss = await api.serverMemberState(st.circleId);
+    } catch (_) {
+      return null;
+    }
+    final DeviceKey? key = serverKeyOf(st, ss);
+    if (key == null) return null;
+    final Set<String> ok = await verifiedConsentUsers(st, ss, key);
+    final List<String> need = membersNeedingConsent(st);
+    return need.isNotEmpty && need.every(ok.contains) ? key : null;
+  }
+
+  /// The active `server` key of the circle state that matches the pinned device.
+  static DeviceKey? serverKeyOf(CircleE2eeState st, ServerMemberState ss) {
+    final ServerDeviceInfo? d = ss.device;
+    if (!ss.enabled || d == null) return null;
+    for (final DeviceKey k in st.allDevices) {
+      if (k.deviceId == d.deviceId && k.kind == 'server' && k.isActive && k.approved == true && k.fingerprint == d.fingerprint) return k;
+    }
+    return null;
+  }
+
+  /// A member allows the OpenFamily server key to read this circle. The signature
+  /// names the circle, this person and the exact key; it is made by this phone.
+  Future<void> consentToServer(String circleId) async {
+    final LocalIdentity me = (await identity())!;
+    final CircleE2eeState st = await api.circleState(circleId);
+    final ServerMemberState ss = await api.serverMemberState(circleId);
+    final DeviceKey? key = serverKeyOf(st, ss);
+    if (key == null) {
+      throw StateError('This server has no approved server key for this circle. Enroll it first (see the docs), then approve it here.');
+    }
+    final Uint8List sig = await E2ee.sign(me.edSeed, E2ee.serverConsentMessage(circleId, me.userId, key.deviceId, E2ee.unhex(key.fingerprint)));
+    await api.putServerConsent(circleId, <String, dynamic>{
+      'server_device_id': key.deviceId,
+      'approver_device_id': me.deviceId,
+      'signature': E2ee.b64(sig),
+    });
+  }
+
+  /// Withdraws this person's consent: the server stops reading the circle at once
+  /// and the circle asks for a new key epoch (the server key is not wrapped again).
+  Future<void> withdrawServerConsent(String circleId) => api.deleteServerConsent(circleId);
+
+  /// Publisher of the current epoch: gives the server key the circle key, but only
+  /// when every member's consent verifies on this phone.
+  Future<void> shareKeyWithServer(String circleId) async {
+    final CircleE2eeState st = await api.circleState(circleId);
+    final DeviceKey? key = await allowedServerKey(st);
+    if (key == null) {
+      throw StateError('Not every member has allowed the server yet (or the server key is not the pinned one).');
+    }
+    await confirmWrap(circleId, key);
+  }
+
+  /// Deletes the plaintext copies the server made from this circle.
+  Future<int> purgeServerCopies(String circleId, {bool wholeCircle = false}) =>
+      api.purgeServerCopies(circleId, wholeCircle: wholeCircle);
 
   /// Circle admin: approves a replacement key for THIS circle after comparing
   /// its safety number out of band. Logged in the transparency log.
@@ -749,7 +854,8 @@ class LinkRequestInfo {
   /// 'web', 'service', 'device' or null (old request without the field = phone).
   final String? kind;
   final String? name;
-  bool get isViewer => kind == 'web' || kind == 'service';
+  bool get isViewer => kind == 'web' || kind == 'service' || kind == 'server';
+  bool get isServer => kind == 'server';
   final Uint8List fingerprint;
   final String short;
   final String digits;

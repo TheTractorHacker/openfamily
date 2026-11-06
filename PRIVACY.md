@@ -98,6 +98,24 @@ only by design, so it keeps ids, hashes and signatures (no names or positions)
 even after an account is deleted. Losing every phone and the recovery phrase
 makes the encrypted data unrecoverable.
 
+### Optional: trusted server member (the server CAN read the circle)
+
+If the person who runs this server turns it on (an environment variable and a
+separate container, off by default), the OpenFamily server can become an approved
+member device of a Private circle, **only if every member of that circle allows it
+on their own phone** and a circle admin hands it the circle key. From then on the
+server can decrypt that circle and **keeps plaintext copies of positions in its
+database** (so the admin map, history, trips, place alerts and the server's own
+Dawarich export work again). Such a circle is labelled "Server can read" in the
+app, not "End-to-end encrypted". Anyone who controls the server host, its backups
+or its database can read those copies. It still protects the data in transit and
+sealed data in the database from leaks that do not include the server's own key
+file. Any member can withdraw at any time (the server stops reading at once) and
+delete the server's copies for their own positions; an admin can delete all copies
+of the circle. Copies that were already exported (for example to Dawarich) or
+turned into trips, alerts or backups are not removed by that. The server host's
+operator is trusted in this mode; do not allow it unless that is you.
+
 ## Operator duties
 
 Encrypt the disk (or Postgres) at rest, keep backups private, set

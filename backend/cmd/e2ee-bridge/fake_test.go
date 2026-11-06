@@ -130,6 +130,7 @@ type fakeOF struct {
 	registered   []map[string]any
 	revoked      []map[string]any
 	rawLogHook   func(entries []e2ee.LogEntry) []e2ee.LogEntry
+	consents     []consentWire // server mode: what GET .../e2ee/server-member lists
 	swapApprover *tdev // when set, the registration response names this key as the approver's
 }
 
@@ -224,6 +225,8 @@ func (f *fakeOF) serve(w http.ResponseWriter, r *http.Request) {
 			out.Members = append(out.Members, mo)
 		}
 		jw(w, 200, out)
+	case path == "/circles/"+f.circle+"/e2ee/server-member":
+		jw(w, 200, map[string]any{"enabled": true, "consents": f.consents})
 	case path == "/circles/"+f.circle+"/e2ee/wraps":
 		jw(w, 200, map[string]any{"circle_id": f.circle, "wraps": append([]e2ee.WrapRecord{}, f.wraps[r.URL.Query().Get("device_id")]...)})
 	case path == "/circles/"+f.circle+"/e2ee/items":
@@ -256,7 +259,7 @@ func (f *fakeOF) serve(w http.ResponseWriter, r *http.Request) {
 			jw(w, 400, map[string]string{"error": err.Error()})
 			return
 		}
-		rec := e2ee.DeviceRecord{DeviceID: req["device_id"].(string), UserID: f.userID, Kind: "service",
+		rec := e2ee.DeviceRecord{DeviceID: req["device_id"].(string), UserID: f.userID, Kind: req["kind"].(string),
 			Ed25519Pub: req["ed25519_pub"].(string), X25519Pub: req["x25519_pub"].(string), Signature: req["signature"].(string),
 			RegisteredByDeviceID: req["actor_device_id"].(string), RegistrationAction: 1, RegistrationSignature: req["log_signature"].(string)}
 		ed, _ := base64.StdEncoding.DecodeString(rec.Ed25519Pub)
@@ -638,9 +641,11 @@ func (w *world) newBridge() *bridge {
 	if err != nil {
 		w.t.Fatal(err)
 	}
-	b.sink.bo = fastBO()
+	b.sink.setBackoff(fastBO())
 	b.now = func() time.Time { return w.nowT }
-	b.sink.now = b.now
+	if ds, ok := b.sink.(*dawarichSink); ok {
+		ds.now = b.now
+	}
 	return b
 }
 

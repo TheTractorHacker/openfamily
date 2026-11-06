@@ -299,20 +299,27 @@ class PrivateRuntime {
   static final ValueNotifier<bool> primaryPrivate = ValueNotifier<bool>(false);
 
   String? _primary;
+
+  /// Private circles an approved, consented OpenFamily server can read. Server-side
+  /// screens (trips, weekly summary, admin map) work for them again. Place alerts
+  /// stay on the phones' sealed places (the single source of truth for arrivals);
+  /// the server only geofences places that exist as server places.
+  Set<String> _serverMember = <String>{};
   final Map<String, String> _names = <String, String>{};
 
   /// Updates the known circle modes and persists them for the background isolate.
   Future<void> setCircles(List<Circle> circles) async {
     _all = circles.map((Circle c) => c.id).toSet();
     _private = circles.where((Circle c) => c.isPrivate).map((Circle c) => c.id).toSet();
+    _serverMember = circles.where((Circle c) => c.isPrivate && c.e2eeServerMember).map((Circle c) => c.id).toSet();
     _names
       ..clear()
       ..addEntries(circles.map((Circle c) => MapEntry<String, String>(c.id, c.name)));
     final Iterable<Circle> prim = circles.where((Circle c) => c.isPrimary);
     _primary = prim.isEmpty ? null : prim.first.id;
-    primaryPrivate.value = _primary != null && _private.contains(_primary);
+    primaryPrivate.value = _primary != null && _private.contains(_primary) && !_serverMember.contains(_primary);
     await kv.set(_modeKey, jsonEncode(<String, dynamic>{
-      'all': _all.toList(), 'private': _private.toList(), 'primary': _primary, 'names': _names,
+      'all': _all.toList(), 'private': _private.toList(), 'server_member': _serverMember.toList(), 'primary': _primary, 'names': _names,
     }));
   }
 
@@ -325,13 +332,14 @@ class PrivateRuntime {
       _all = ((m['all'] as List<dynamic>?) ?? <dynamic>[]).cast<String>().toSet();
       _private = ((m['private'] as List<dynamic>?) ?? <dynamic>[]).cast<String>().toSet();
       _primary = m['primary'] as String?;
+      _serverMember = ((m['server_member'] as List<dynamic>?) ?? <dynamic>[]).cast<String>().toSet();
       final Object? n = m['names'];
       if (n is Map<String, dynamic>) {
         _names
           ..clear()
           ..addAll(n.map((String k, dynamic v) => MapEntry<String, String>(k, '$v')));
       }
-      primaryPrivate.value = _primary != null && _private.contains(_primary);
+      primaryPrivate.value = _primary != null && _private.contains(_primary) && !_serverMember.contains(_primary);
     } catch (_) {}
   }
 

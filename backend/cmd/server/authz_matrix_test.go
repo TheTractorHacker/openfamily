@@ -180,6 +180,8 @@ var publicRoutes = map[string]string{
 	"POST /auth/passkeys/login/finish": "passkey assertion verified against stored key",
 	"GET /ws/stream":                   "self-authenticating (TestAuthzMatrixWebSocket)",
 	"GET /api/admin/ws":                "self-authenticating (TestAuthzMatrixWebSocket)",
+	"PUT /internal/e2ee/server-device": "server-device bearer token (404 when unconfigured); see e2ee_server_member_db_test.go",
+	"POST /internal/e2ee/ingest":       "server-device bearer token + re-verified member consents; see e2ee_server_member_db_test.go",
 	"GET /":                            "redirect",
 	"GET /admin":                       "static SPA",
 	"GET /admin/":                      "static SPA",

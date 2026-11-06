@@ -16,10 +16,11 @@ import 'security_widgets.dart';
 String viewerKindLabel(String? kind) => switch (kind) {
       'web' => 'Web viewer (browser)',
       'service' => 'Dawarich bridge (server process)',
+      'server' => 'OpenFamily server (can read the circle)',
       _ => 'Phone',
     };
 
-bool _isViewerKind(String k) => k == 'web' || k == 'service';
+bool _isViewerKind(String k) => k == 'web' || k == 'service' || k == 'server';
 
 /// Approves a read-only "device member" of the Private circles of this account:
 /// a browser viewer or a Dawarich bridge. The viewer shows a request code; this
@@ -285,12 +286,20 @@ class _ViewerApprovalScreenState extends State<ViewerApprovalScreen> {
           border: Border.all(color: AppColors.sosRed),
           borderRadius: BorderRadius.circular(12),
         ),
-        child: Text(
-          'If you approve, this ${i.kind == 'service' ? 'bridge' : 'viewer'} can READ the location of every member of all your Private circles '
-          '(every circle your account is in that is private), now and in the future, until you revoke it. '
-          '${i.kind == 'service' ? 'Whoever runs the server where the bridge runs can read that data. ' : 'Whoever controls the browser and the device it runs on can read that data. '}'
-          'Approve only a viewer or bridge you set up yourself. The kind is not part of the signed approval, so check it here.',
-        ),
+        child: i.isServer
+            ? const Text(
+                'This is the key of the OpenFamily SERVER itself. Approving it only registers the key for your account. '
+                'It can read nothing until you open a Private circle\'s "Trusted server" screen, every member of that circle '
+                'allows it, and a circle admin gives it the circle key. After that the server CAN READ that circle and keeps a '
+                'plaintext copy; anyone who controls the server host can read it too. Approve only the server you run yourself.',
+                key: Key('viewer-server-warning'),
+              )
+            : Text(
+                'If you approve, this ${i.kind == 'service' ? 'bridge' : 'viewer'} can READ the location of every member of all your Private circles '
+                '(every circle your account is in that is private), now and in the future, until you revoke it. '
+                '${i.kind == 'service' ? 'Whoever runs the server where the bridge runs can read that data. ' : 'Whoever controls the browser and the device it runs on can read that data. '}'
+                'Approve only a viewer or bridge you set up yourself. The kind is not part of the signed approval, so check it here.',
+              ),
       ),
       const SizedBox(height: AppSpace.sm),
       Row(children: <Widget>[
@@ -338,8 +347,8 @@ class _ViewerApprovalScreenState extends State<ViewerApprovalScreen> {
                 Wrap(spacing: AppSpace.sm, children: <Widget>[
                   FilledButton(
                     key: Key('share-${k.deviceId}'),
-                    onPressed: _busy || k.approved == false ? null : () => _share(k),
-                    child: const Text('Share key'),
+                    onPressed: _busy || k.approved == false || k.kind == 'server' ? null : () => _share(k),
+                    child: Text(k.kind == 'server' ? 'Use "Trusted server"' : 'Share key'),
                   ),
                   OutlinedButton(key: Key('deny-${k.deviceId}'), onPressed: _busy ? null : () => _deny(k), child: const Text('Deny')),
                 ]),

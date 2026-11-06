@@ -156,7 +156,7 @@ func (a *Authz) SharedWith(ctx context.Context, viewerID, subjectID string) ([]s
 		SELECT s.circle_id::text
 		FROM live_circle_members v
 		JOIN live_circle_members s ON s.circle_id = v.circle_id
-		JOIN circles pc ON pc.id = s.circle_id AND pc.e2ee_mode = 'off'
+		JOIN circles pc ON pc.id = s.circle_id AND (pc.e2ee_mode = 'off' OR e2ee_server_member(pc.id))
 		WHERE v.user_id = $1 AND s.user_id = $2 AND s.sharing_enabled AND `+notPausedSQL("s.user_id")+`
 		ORDER BY s.circle_id`, viewerID, subjectID)
 }
@@ -170,7 +170,7 @@ func (a *Authz) SharingCircles(ctx context.Context, subjectID string) ([]string,
 	return a.strings(ctx, `
 		SELECT circle_id::text FROM live_circle_members
 		WHERE user_id = $1 AND sharing_enabled AND `+notPausedSQL("live_circle_members.user_id")+`
-		  AND NOT EXISTS (SELECT 1 FROM circles pc WHERE pc.id = live_circle_members.circle_id AND pc.e2ee_mode = 'private')
+		  AND NOT e2ee_plaintext_blocked(live_circle_members.circle_id)
 		ORDER BY circle_id`, subjectID)
 }
 
@@ -183,7 +183,7 @@ func (a *Authz) OwnAndSharingCircles(ctx context.Context, subjectID string) (own
 	}
 	rows, err := a.db.Query(ctx, `
 		SELECT circle_id::text, (sharing_enabled AND `+notPausedSQL("live_circle_members.user_id")+`
-		       AND NOT EXISTS (SELECT 1 FROM circles pc WHERE pc.id = live_circle_members.circle_id AND pc.e2ee_mode = 'private'))
+		       AND NOT e2ee_plaintext_blocked(live_circle_members.circle_id))
 		FROM live_circle_members
 		WHERE user_id = $1 ORDER BY joined_at, circle_id`, subjectID)
 	if err != nil {
@@ -214,7 +214,7 @@ func (a *Authz) LocationVisibility(ctx context.Context, viewerID string, circleI
 		return out, nil
 	}
 	rows, err := a.db.Query(ctx, `
-		SELECT s.user_id::text, bool_or((s.sharing_enabled AND `+notPausedSQL("s.user_id")+` AND pc.e2ee_mode = 'off') OR s.user_id = v.user_id)
+		SELECT s.user_id::text, bool_or((s.sharing_enabled AND `+notPausedSQL("s.user_id")+` AND (pc.e2ee_mode = 'off' OR e2ee_server_member(pc.id))) OR s.user_id = v.user_id)
 		FROM live_circle_members v
 		JOIN live_circle_members s ON s.circle_id = v.circle_id
 		JOIN circles pc ON pc.id = s.circle_id
@@ -254,7 +254,7 @@ func (a *Authz) MemberCircles(ctx context.Context, viewerID string, circleIDs []
 		return out, nil
 	}
 	rows, err := a.db.Query(ctx, `
-		SELECT s.user_id::text, s.circle_id::text, ((s.sharing_enabled AND `+notPausedSQL("s.user_id")+` AND c.e2ee_mode = 'off') OR s.user_id = v.user_id), c.expires_at
+		SELECT s.user_id::text, s.circle_id::text, ((s.sharing_enabled AND `+notPausedSQL("s.user_id")+` AND (c.e2ee_mode = 'off' OR e2ee_server_member(c.id))) OR s.user_id = v.user_id), c.expires_at
 		FROM live_circle_members v
 		JOIN live_circle_members s ON s.circle_id = v.circle_id
 		JOIN circles c ON c.id = s.circle_id

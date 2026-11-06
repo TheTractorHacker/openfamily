@@ -265,3 +265,73 @@ class LogHead {
   final Uint8List hash;
   String get hex => E2ee.hex(hash);
 }
+
+/// One member's signed consent for the OpenFamily server to read a circle.
+class ServerConsent {
+  const ServerConsent(this.userId, this.approverDeviceId, this.signature);
+  final String userId;
+  final String approverDeviceId;
+  final Uint8List signature;
+}
+
+/// The OpenFamily server's own device key, as pinned by the server.
+class ServerDeviceInfo {
+  const ServerDeviceInfo({required this.deviceId, required this.fingerprint, required this.short, required this.digits, required this.label, required this.ownerUserId});
+  final String deviceId;
+
+  /// Lower-case hex SHA-256 fingerprint.
+  final String fingerprint;
+  final String short;
+  final String digits;
+  final String label;
+  final String ownerUserId;
+
+  static ServerDeviceInfo? fromJson(Object? j) {
+    if (j is! Map<String, dynamic>) return null;
+    final Object? id = j['device_id'], fp = j['fingerprint'];
+    if (id is! String || fp is! String) return null;
+    return ServerDeviceInfo(
+      deviceId: id,
+      fingerprint: fp,
+      short: (j['short'] as String?) ?? '',
+      digits: (j['digits'] as String?) ?? '',
+      label: (j['label'] as String?) ?? 'OpenFamily server',
+      ownerUserId: (j['owner_user_id'] as String?) ?? '',
+    );
+  }
+}
+
+/// Trusted-server mode state of one circle (GET /circles/{id}/e2ee/server-member).
+class ServerMemberState {
+  const ServerMemberState({
+    this.enabled = false,
+    this.device,
+    this.serverMember = false,
+    this.wrapped = false,
+    this.consents = const <ServerConsent>[],
+    this.myConsent = false,
+  });
+  final bool enabled;
+  final ServerDeviceInfo? device;
+
+  /// The server says it can read the circle (a claim; the phone re-checks the consents).
+  final bool serverMember;
+  final bool wrapped;
+  final List<ServerConsent> consents;
+  final bool myConsent;
+
+  static const ServerMemberState off = ServerMemberState();
+
+  factory ServerMemberState.fromJson(Map<String, dynamic> j) => ServerMemberState(
+        enabled: j['enabled'] == true,
+        device: ServerDeviceInfo.fromJson(j['device']),
+        serverMember: j['server_member'] == true,
+        wrapped: j['wrapped'] == true,
+        myConsent: j['my_consent'] == true,
+        consents: ((j['consents'] as List<dynamic>?) ?? <dynamic>[])
+            .cast<Map<String, dynamic>>()
+            .map((Map<String, dynamic> c) => ServerConsent(
+                c['user_id'] as String, c['approver_device_id'] as String, E2ee.unb64(c['signature'] as String)))
+            .toList(),
+      );
+}

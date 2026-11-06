@@ -264,8 +264,11 @@ func (s *Server) E2EERegisterDevice(w http.ResponseWriter, r *http.Request) {
 	if req.Kind == "" {
 		req.Kind = "device"
 	}
-	if req.Kind != "device" && req.Kind != "recovery" && req.Kind != "web" && req.Kind != "service" {
-		writeError(w, http.StatusBadRequest, "kind must be device, recovery, web or service")
+	if req.Kind != "device" && req.Kind != "recovery" && req.Kind != "web" && req.Kind != "service" && req.Kind != "server" {
+		writeError(w, http.StatusBadRequest, "kind must be device, recovery, web, service or server")
+		return
+	}
+	if !registerServerKindOK(w, req.Kind) {
 		return
 	}
 	p, msg := parseBundle(uid, req.keyBundle)
@@ -284,8 +287,8 @@ func (s *Server) E2EERegisterDevice(w http.ResponseWriter, r *http.Request) {
 	}
 	root := actor == req.DeviceID
 	ctx := r.Context()
-	if root && (req.Kind == "web" || req.Kind == "service") {
-		writeError(w, http.StatusBadRequest, "a web or service key must be cross-signed by an existing key of the same user")
+	if root && (req.Kind == "web" || req.Kind == "service" || req.Kind == "server") {
+		writeError(w, http.StatusBadRequest, "a web, service or server key must be cross-signed by an existing key of the same user")
 		return
 	}
 	if root && req.Kind == "recovery" {
@@ -355,9 +358,9 @@ func (s *Server) E2EERegisterDevice(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "too many active device keys; revoke one first")
 		return
 	}
-	if req.Kind == "web" || req.Kind == "service" {
+	if req.Kind == "web" || req.Kind == "service" || req.Kind == "server" {
 		var n int
-		if err := tx.QueryRow(ctx, `SELECT count(*) FROM device_keys WHERE user_id = $1 AND revoked_at IS NULL AND kind IN ('web','service')`, uid).Scan(&n); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM device_keys WHERE user_id = $1 AND revoked_at IS NULL AND kind IN ('web','service','server')`, uid).Scan(&n); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to register key")
 			return
 		}
@@ -378,7 +381,7 @@ func (s *Server) E2EERegisterDevice(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	out, err := scanE2EEDevice(tx.QueryRow(ctx, devInsert, req.DeviceID, uid, req.Kind, p.ed, p.x, e2ee.FingerprintHex(p.fp), p.sig,
-		actor, signerPub, int(action), logSig, initial, p.label, req.Kind == "device" || (req.CanUpload && req.Kind != "recovery")))
+		actor, signerPub, int(action), logSig, initial, p.label, req.Kind == "device" || (req.CanUpload && req.Kind != "recovery" && req.Kind != "server")))
 	if err != nil {
 		if isUniqueViolation(err) {
 			writeError(w, http.StatusConflict, "key already registered")
@@ -453,6 +456,10 @@ func (s *Server) E2EERotateDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	} else if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to rotate key")
+		return
+	}
+	if kind == "server" {
+		writeError(w, http.StatusBadRequest, "a server key cannot be rotated; revoke it and enroll a new one (every member consents again)")
 		return
 	}
 	if e2ee.ConstEq(oldEd, p.ed) {

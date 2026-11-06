@@ -19,6 +19,14 @@ abstract class E2eeApi {
   Future<int> submitWraps(String circleId, int epoch, List<Map<String, dynamic>> wraps);
   Future<void> approve(String circleId, Map<String, dynamic> body);
   Future<({List<LogEntry> entries, LogHead head})> log(int after);
+
+  // Trusted-server mode. Defaults keep older fakes (and servers without the
+  // mode) working: the mode simply reports as off.
+  Future<ServerMemberState> serverMemberState(String circleId) async => ServerMemberState.off;
+  Future<void> putServerConsent(String circleId, Map<String, dynamic> body) async =>
+      throw UnsupportedError('server mode is not available');
+  Future<void> deleteServerConsent(String circleId) async {}
+  Future<int> purgeServerCopies(String circleId, {bool wholeCircle = false}) async => 0;
 }
 
 class ApiE2eeApi implements E2eeApi {
@@ -84,6 +92,23 @@ class ApiE2eeApi implements E2eeApi {
   @override
   Future<void> approve(String circleId, Map<String, dynamic> body) =>
       ApiClient.post('/circles/$circleId/e2ee/approvals', body: body);
+
+  @override
+  Future<ServerMemberState> serverMemberState(String circleId) async => ServerMemberState.fromJson(
+      (await ApiClient.get('/circles/$circleId/e2ee/server-member')) as Map<String, dynamic>);
+
+  @override
+  Future<void> putServerConsent(String circleId, Map<String, dynamic> body) =>
+      ApiClient.put('/circles/$circleId/e2ee/server-consent', body: body);
+
+  @override
+  Future<void> deleteServerConsent(String circleId) => ApiClient.delete('/circles/$circleId/e2ee/server-consent');
+
+  @override
+  Future<int> purgeServerCopies(String circleId, {bool wholeCircle = false}) async {
+    final dynamic r = await ApiClient.delete('/circles/$circleId/e2ee/server-copies?scope=${wholeCircle ? 'circle' : 'mine'}');
+    return r is Map<String, dynamic> ? ((r['locations_deleted'] as num?)?.toInt() ?? 0) : 0;
+  }
 
   @override
   Future<({List<LogEntry> entries, LogHead head})> log(int after) async {

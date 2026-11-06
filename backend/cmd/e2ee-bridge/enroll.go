@@ -40,6 +40,14 @@ func truncRunes(s string, n int) string {
 	return string([]rune(s)[:n])
 }
 
+// kind is the device kind this identity registers as.
+func (id *identity) kind() string {
+	if id.f.Kind == "server" {
+		return "server"
+	}
+	return "service"
+}
+
 func (id *identity) requestCode(userID string) (string, error) {
 	msg, err := e2ee.BindingMessage(userID, id.f.DeviceID, id.edPub, id.xPub)
 	if err != nil {
@@ -47,7 +55,7 @@ func (id *identity) requestCode(userID string) (string, error) {
 	}
 	std := base64.StdEncoding.EncodeToString
 	b, err := json.Marshal(requestCode{U: userID, D: id.f.DeviceID, E: std(id.edPub), X: std(id.xPub),
-		B: std(ed25519.Sign(id.edPriv, msg)), K: "service", N: truncRunes(id.f.Name, 40)})
+		B: std(ed25519.Sign(id.edPriv, msg)), K: id.kind(), N: truncRunes(id.f.Name, 40)})
 	if err != nil {
 		return "", err
 	}
@@ -87,10 +95,10 @@ func readPassword(env func(string) string, in io.Reader) (string, error) {
 }
 
 type enrollOpts struct {
-	server, email, totp, name, approval string
-	env                                 func(string) string
-	stdin                               io.Reader
-	out                                 io.Writer
+	server, email, totp, name, approval, kind string
+	env                                       func(string) string
+	stdin                                     io.Reader
+	out                                       io.Writer
 }
 
 // session returns a logged-in API client, using the stored refresh token when it
@@ -159,11 +167,21 @@ func (a *app) cmdEnroll(ctx context.Context, o enrollOpts) error {
 		name := o.name
 		if name == "" {
 			name = "Dawarich bridge"
+			if o.kind == "server" {
+				name = "OpenFamily server"
+			}
 		}
 		id, err = a.st.createIdentity(truncRunes(name, 40))
+		if err == nil && o.kind == "server" {
+			id.f.Kind = "server"
+			err = a.st.saveIdentity(id)
+		}
 	}
 	if err != nil {
 		return err
+	}
+	if o.kind != "" && o.kind != id.kind() {
+		return fmt.Errorf("this state directory holds a %q key; use a new --state-dir for a %q key", id.kind(), o.kind)
 	}
 	if id.f.RevokedAt != "" {
 		return errors.New("this bridge key was revoked; use a new --state-dir to enroll a new one")
@@ -192,6 +210,10 @@ func (a *app) cmdEnroll(ctx context.Context, o enrollOpts) error {
 			return err
 		}
 		printIdentity(o.out, id)
+		if id.kind() == "server" {
+			fmt.Fprintf(o.out, "\nThis key will let the OPENFAMILY SERVER READ the Private circles whose members all consent.\n")
+			fmt.Fprintf(o.out, "Approve it only on the phone of the owner of this instance, after comparing the digits.\n")
+		}
 		fmt.Fprintf(o.out, "\nREQUEST CODE (paste into the phone: Encryption keys > Approve a viewer or bridge):\n\n%s\n\n", code)
 		fmt.Fprintln(o.out, "Compare the 12x5 digits on the phone with the digits above. Then run:")
 		fmt.Fprintln(o.out, "  e2ee-bridge enroll --approval <APPROVAL CODE shown on the phone>")
@@ -208,7 +230,7 @@ func (a *app) cmdEnroll(ctx context.Context, o enrollOpts) error {
 		return err
 	}
 	req := map[string]any{
-		"device_id": id.f.DeviceID, "kind": "service", "ed25519_pub": std(id.edPub), "x25519_pub": std(id.xPub),
+		"device_id": id.f.DeviceID, "kind": id.kind(), "ed25519_pub": std(id.edPub), "x25519_pub": std(id.xPub),
 		"signature": std(ed25519.Sign(id.edPriv, bind)), "label": truncRunes(id.f.Name, 60),
 		"actor_device_id": ap.A, "log_signature": std(sig), "reset": false, "can_upload": false,
 	}
@@ -233,6 +255,12 @@ func (a *app) cmdEnroll(ctx context.Context, o enrollOpts) error {
 	id.f.ApprovedBy = ap.A
 	if err := a.st.saveIdentity(id); err != nil {
 		return err
+	}
+	if id.kind() == "server" {
+		fmt.Fprintln(o.out, "Registered. The OpenFamily server key is now a `server` member key of your account.")
+		fmt.Fprintln(o.out, "Next: every member of each circle you want to open to the server approves it in the app")
+		fmt.Fprintln(o.out, "(Encryption keys > the circle > Trusted server). Then run `e2ee-bridge run --config <file>`.")
+		return nil
 	}
 	fmt.Fprintln(o.out, "Registered. The bridge key is now a `service` member key of your account.")
 	fmt.Fprintln(o.out, "Next: open the circle's encryption screen on your phone so it wraps the circle keys")

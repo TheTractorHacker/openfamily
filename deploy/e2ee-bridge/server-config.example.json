@@ -1,0 +1,7 @@
+{
+  "mode": "server",
+  "ingest": { "url": "http://api:8080" },
+  "circles": [],
+  "since": "",
+  "poll_seconds": 15
+}

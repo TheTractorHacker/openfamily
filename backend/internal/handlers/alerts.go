@@ -207,7 +207,7 @@ func (s *Server) postAlert(w http.ResponseWriter, r *http.Request, typ string, i
 	// A private (end-to-end encrypted) circle never gets a plaintext position:
 	// the alert still goes out (SOS must not fail), without coordinates; the
 	// phone sends the position as a sealed "checkin" item.
-	positionWithheld := s.circleIsPrivate(r.Context(), familyID)
+	positionWithheld := s.circleBlocksPlaintext(r.Context(), familyID)
 	if positionWithheld {
 		lat, lon = nil, nil
 	}

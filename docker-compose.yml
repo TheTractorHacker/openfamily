@@ -4,6 +4,11 @@
 # COMPOSE_PROFILES variable in .env):
 #   proxy  Caddy reverse proxy with automatic HTTPS (set SITE_ADDRESS)
 #   push   self-hosted ntfy server for UnifiedPush (Android push)
+#   e2ee-server  OPT-IN "trusted server member" for Private circles: the OpenFamily
+#          server gets its own approved device so it can read circles whose members
+#          ALL consent (admin map, history, Dawarich sync, place alerts work again).
+#          The server then holds plaintext for those circles. Read
+#          docs/design/E2EE.md ("Trusted-server mode") before enabling.
 # e.g.  COMPOSE_PROFILES=proxy,push   or   docker compose --profile proxy up -d
 #
 # Without the proxy profile the API is published on 127.0.0.1:${API_PORT:-8080}
@@ -66,6 +71,11 @@ services:
       DRIVING_HARD_BRAKE_MPS2: ${DRIVING_HARD_BRAKE_MPS2:-}
       DRIVING_RAPID_ACCEL_MPS2: ${DRIVING_RAPID_ACCEL_MPS2:-}
       INSECURE_HTTP: ${INSECURE_HTTP:-false}
+      # Trusted-server mode (profile e2ee-server). Empty = the mode does not exist
+      # for this server and Private circles keep the strict phase-2 behaviour.
+      # Generate once: openssl rand -hex 32  (>= 32 characters; shared with the
+      # e2ee-server-device container only).
+      E2EE_SERVER_INGEST_TOKEN: ${E2EE_SERVER_INGEST_TOKEN:-}
       VERBOSE_PUSH: ${VERBOSE_PUSH:-false}
       DIRECT_PUSH: ${DIRECT_PUSH:-true}
       PLATFORM_ADMIN_EMAIL: ${PLATFORM_ADMIN_EMAIL:-}
@@ -213,7 +223,40 @@ services:
           cpus: "0.5"
           memory: 256M
 
+  # OPT-IN: the OpenFamily server as an approved member device of Private circles.
+  # One-time enrollment (prints the name and fingerprint to approve on the phone):
+  #   docker compose --profile e2ee-server run --rm -T e2ee-server-device enroll --kind server \
+  #       --server http://api:8080 --email you@example.org < password.txt
+  #   (approve the REQUEST CODE on the phone: Encryption keys > Approve a viewer or bridge)
+  #   docker compose --profile e2ee-server run --rm e2ee-server-device enroll --approval <APPROVAL CODE>
+  # Then every member opens the circle > Encryption > Trusted server and allows it.
+  # The private key lives in the e2ee_server_state volume (0600), never in Postgres.
+  e2ee-server-device:
+    <<: *hardening
+    profiles: ["e2ee-server"]
+    build:
+      context: .
+      dockerfile: deploy/e2ee-bridge/Dockerfile
+    image: openfamily-e2ee-server-device:local
+    depends_on:
+      - api
+    read_only: true
+    environment:
+      E2EE_BRIDGE_STATE: /state
+      E2EE_SERVER_INGEST_TOKEN: ${E2EE_SERVER_INGEST_TOKEN:-}
+      # Optional: seal the key file with a passphrase (kept out of the database).
+      E2EE_BRIDGE_PASSPHRASE: ${E2EE_SERVER_DEVICE_PASSPHRASE:-}
+    volumes:
+      - e2ee_server_state:/state
+      - ${E2EE_SERVER_DEVICE_CONFIG:-./deploy/e2ee-bridge/server-config.example.json}:/config/config.json:ro
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
 volumes:
+  e2ee_server_state:
   caddy_data:
   caddy_config:
   pgdata:

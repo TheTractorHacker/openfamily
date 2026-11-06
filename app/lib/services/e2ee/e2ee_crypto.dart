@@ -276,6 +276,19 @@ class E2ee {
     ]);
   }
 
+  /// What a member's phone signs to let the OpenFamily server (a `server` key)
+  /// read ONE circle. It names the circle, the person and the exact server key,
+  /// so it cannot be moved. Vector: backend/internal/e2ee/testdata/server_consent.json.
+  static Uint8List serverConsentMessage(String circleId, String userId, String serverDeviceId, Bytes serverFingerprint) {
+    checkId(circleId);
+    checkId(userId);
+    checkId(serverDeviceId);
+    if (serverFingerprint.length != 32) throw const E2eeFormatException('bad fingerprint length');
+    return cat(<Bytes>[
+      _dom('OFE2EE1-SERVERCONSENT'), _ascii(circleId), _ascii(userId), _ascii(serverDeviceId), serverFingerprint
+    ]);
+  }
+
   static Uint8List logActionMessage(int action, String userId, String actorId,
       {String? circleId, String? subjectId, int epoch = 0, Bytes? ref}) {
     final String c = circleId ?? zeroUuid;

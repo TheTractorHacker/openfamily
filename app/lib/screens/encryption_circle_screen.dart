@@ -11,6 +11,7 @@ import '../widgets/ds/ds.dart';
 import 'encryption_widgets.dart';
 import 'member_safety_screen.dart';
 import 'security_widgets.dart';
+import 'trusted_server_screen.dart';
 import 'viewer_approval_screen.dart';
 
 /// One circle's encryption: status, new-key duty, requests from new/replacement
@@ -150,7 +151,9 @@ class _EncryptionCircleScreenState extends State<EncryptionCircleScreen> {
           const SizedBox(height: AppSpace.sm),
           Text(
             st.isPrivate
-                ? 'The circle key is held only by members\' phones. In this version locations are still sent the normal way; the key setup is ready for the next step.'
+                ? (widget.circle.e2eeServerMember
+                    ? 'The circle key is held by members\' phones AND by your OpenFamily server (trusted-server mode): the server can read this circle.'
+                    : 'The circle key is held only by members\' phones. The server stores ciphertext and cannot read locations in this circle.')
                 : 'Turn on "Private circle" in the circle\'s settings (admins only) to set up end-to-end keys.',
             style: AppType.secondary,
           ),
@@ -214,6 +217,22 @@ class _EncryptionCircleScreenState extends State<EncryptionCircleScreen> {
                     : () async {
                         await Navigator.of(context).push<void>(MaterialPageRoute<void>(
                             builder: (_) => ViewerApprovalScreen(circle: widget.circle, service: _svc)));
+                        if (mounted) _load();
+                      },
+              ),
+              DsListRow(
+                key: const Key('trusted-server-row'),
+                leading: DsListRow.iconTile(context, Icons.dns_outlined),
+                title: 'Trusted server',
+                subtitle: widget.circle.e2eeServerMember
+                    ? 'The OpenFamily server CAN read this circle'
+                    : 'Optional: let your own OpenFamily server read this circle',
+                chevron: true,
+                onTap: _busy
+                    ? null
+                    : () async {
+                        await Navigator.of(context).push<void>(MaterialPageRoute<void>(
+                            builder: (_) => TrustedServerScreen(circle: widget.circle, service: _svc)));
                         if (mounted) _load();
                       },
               ),

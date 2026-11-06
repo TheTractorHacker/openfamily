@@ -20,6 +20,10 @@ class FakeE2eeServer {
 
   FakeE2eeClient client(String userId) => FakeE2eeClient(this, userId);
 
+  /// Trusted-server mode switch and the pinned server key (null = none yet).
+  bool serverModeEnabled = false;
+  String? pinnedServerDevice;
+
   FakeCircle circle(String id, {required List<String> members, required String admin}) =>
       circles[id] = FakeCircle(id, members, admin);
 
@@ -81,6 +85,10 @@ class FakeCircle {
   final Set<String> approvals = <String>{};
   final Map<String, WrapRecord> wraps = <String, WrapRecord>{}; // "epoch/recipient"
   final Map<int, EpochRecord> epochRecords = <int, EpochRecord>{};
+
+  /// Trusted-server mode: user -> {approver_device_id, signature}.
+  final Map<String, ({String dev, Uint8List sig})> serverConsents = <String, ({String dev, Uint8List sig})>{};
+  final List<String> serverPurges = <String>[];
 }
 
 class FakeE2eeClient implements E2eeApi {
@@ -171,6 +179,51 @@ class FakeE2eeClient implements E2eeApi {
 
   @override
   Future<List<DeviceKey>> userKeys(String userId) async => s.activeOf(userId);
+
+  @override
+  Future<ServerMemberState> serverMemberState(String circleId) async {
+    final FakeCircle c = s.circles[circleId]!;
+    if (!s.serverModeEnabled) return ServerMemberState.off;
+    final DeviceKey? d = s.pinnedServerDevice == null ? null : s.findActive(s.pinnedServerDevice!);
+    return ServerMemberState(
+      enabled: true,
+      device: d == null
+          ? null
+          : ServerDeviceInfo(deviceId: d.deviceId, fingerprint: d.fingerprint, short: d.short, digits: d.digits, label: d.label, ownerUserId: d.userId),
+      wrapped: d != null && c.wraps.containsKey('${c.epoch}/${d.deviceId}'),
+      myConsent: c.serverConsents.containsKey(uid),
+      consents: <ServerConsent>[
+        for (final MapEntry<String, ({String dev, Uint8List sig})> e in c.serverConsents.entries)
+          ServerConsent(e.key, e.value.dev, e.value.sig)
+      ],
+    );
+  }
+
+  @override
+  Future<void> putServerConsent(String circleId, Map<String, dynamic> body) async {
+    final FakeCircle c = s.circles[circleId]!;
+    final DeviceKey a = s.findActive(body['approver_device_id'] as String)!;
+    if (a.userId != uid || a.kind != 'device') throw StateError('approver must be my phone key');
+    final DeviceKey srv = s.findActive(body['server_device_id'] as String)!;
+    final Uint8List sig = E2ee.unb64(body['signature']);
+    if (!await E2ee.verify(a.edPub, E2ee.serverConsentMessage(circleId, uid, srv.deviceId, E2ee.unhex(srv.fingerprint)), sig)) {
+      throw StateError('consent signature does not verify');
+    }
+    c.serverConsents[uid] = (dev: a.deviceId, sig: sig);
+  }
+
+  @override
+  Future<void> deleteServerConsent(String circleId) async {
+    final FakeCircle c = s.circles[circleId]!;
+    c.serverConsents.remove(uid);
+    c.rekey = true;
+  }
+
+  @override
+  Future<int> purgeServerCopies(String circleId, {bool wholeCircle = false}) async {
+    s.circles[circleId]!.serverPurges.add(wholeCircle ? 'circle' : 'mine');
+    return 3;
+  }
 
   @override
   Future<CircleE2eeState> circleState(String circleId) async {

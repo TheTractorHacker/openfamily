@@ -31,8 +31,14 @@ every position of the circles it joins. Running it next to the OpenFamily server
 removes the point of end-to-end encryption. It never logs keys, coordinates,
 tokens or passwords.
 
+SERVER MODE (enroll --kind server, config "mode": "server"): this program is the
+OpenFamily server's own device. It decrypts circles whose members ALL consented on
+their phones and hands the positions to the OpenFamily API, so the server CAN read
+them and keeps plaintext. Running it next to the server is then the point. See
+docs/design/E2EE.md "Trusted-server mode".
+
 Usage:
-  e2ee-bridge enroll   --server URL --email ADDR [--totp CODE] [--name NAME]
+  e2ee-bridge enroll   --server URL --email ADDR [--totp CODE] [--name NAME] [--kind service|server]
                        step 1: create the key, log in, print the REQUEST CODE
   e2ee-bridge enroll   --approval CODE [--server URL]
                        step 2: register the key with the code the phone shows
@@ -47,6 +53,7 @@ Common flags:
                          (env E2EE_BRIDGE_PASSPHRASE also works)
 
 Environment: E2EE_BRIDGE_PASSWORD (OpenFamily password; otherwise read from stdin),
+E2EE_SERVER_INGEST_TOKEN (server mode: shared secret with the OpenFamily API),
 E2EE_BRIDGE_DAWARICH_KEY (main Dawarich API key).
 
 Exit codes: 0 ok / clean shutdown, 1 error, 2 usage or config, 3 bridge revoked or
@@ -98,6 +105,7 @@ func realMain(ctx context.Context, args []string, env func(string) string, stdin
 	email := fs.String("email", "", "OpenFamily account email (login)")
 	totp := fs.String("totp", "", "TOTP code, if the account uses one")
 	name := fs.String("name", "", "display name of this bridge (max 40 chars)")
+	kind := fs.String("kind", "", `enroll: "service" (Dawarich bridge, default) or "server" (the OpenFamily server's own device)`)
 	approval := fs.String("approval", "", "approval code from the phone")
 	cfgPath := fs.String("config", "", "bridge config file (run)")
 	once := fs.Bool("once", false, "run a single pass and exit")
@@ -134,7 +142,11 @@ func realMain(ctx context.Context, args []string, env func(string) string, stdin
 		return exitError
 	}
 	a := &app{st: st, env: env, stdin: stdin, stdout: stdout, stderr: stderr, log: logger, bo: defaultBackoff()}
-	o := enrollOpts{server: *server, email: *email, totp: *totp, name: *name, approval: *approval, env: env, stdin: stdin, out: stdout}
+	if *kind != "" && *kind != "service" && *kind != "server" {
+		fmt.Fprintln(stderr, `--kind must be "service" or "server"`)
+		return exitUsage
+	}
+	o := enrollOpts{server: *server, email: *email, totp: *totp, name: *name, approval: *approval, kind: *kind, env: env, stdin: stdin, out: stdout}
 
 	switch cmd {
 	case "enroll":
@@ -162,7 +174,7 @@ func exitCodeFor(err error) int {
 		return exitLog
 	case errors.Is(err, errReauth):
 		return exitReauth
-	case errors.Is(err, errDawarichAuth):
+	case errors.Is(err, errDawarichAuth), errors.Is(err, errIngestAuth):
 		return exitDawarich
 	}
 	return exitError
@@ -256,11 +268,19 @@ func (a *app) cmdRun(ctx context.Context, cfgPath string, once bool) int {
 		return a.st.writeSecret(fileSession, sess)
 	})
 	api.bo = a.bo
+	if cfg.serverMode() != (id.kind() == "server") {
+		return fail(errors.New(`config "mode" and the enrolled key disagree: server mode needs a key enrolled with --kind server, the Dawarich bridge a "service" key`))
+	}
 	b, err := newBridge(a.st, id, api, cfg, a.log)
 	if err != nil {
 		return fail(err)
 	}
-	b.sink.bo = a.bo
+	b.sink.setBackoff(a.bo)
+	if ss, ok := b.sink.(*serverSink); ok {
+		if err := ss.pin(ctx); err != nil {
+			return fail(fmt.Errorf("could not register this key as the OpenFamily server device: %w", err))
+		}
+	}
 	return b.loop(ctx, time.Duration(cfg.PollSeconds)*time.Second, once)
 }
 
@@ -284,6 +304,9 @@ func (b *bridge) loop(ctx context.Context, poll time.Duration, once bool) int {
 			b.log.Error("STOPPING: login expired, re-run `e2ee-bridge enroll --email ...`")
 			return exitReauth
 		case errors.Is(err, errDawarichAuth):
+			b.log.Error("STOPPING: " + err.Error())
+			return exitDawarich
+		case errors.Is(err, errIngestAuth):
 			b.log.Error("STOPPING: " + err.Error())
 			return exitDawarich
 		default:

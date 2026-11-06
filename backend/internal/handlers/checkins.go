@@ -107,7 +107,7 @@ func (s *Server) PostCheckinTo(w http.ResponseWriter, r *http.Request) {
 		if err := s.Pool.QueryRow(r.Context(), `
 			SELECT count(DISTINCT y.user_id) FROM live_circle_members x
 			JOIN live_circle_members y ON y.circle_id = x.circle_id
-			JOIN circles c ON c.id = x.circle_id AND c.e2ee_mode = 'off'
+			JOIN circles c ON c.id = x.circle_id AND (c.e2ee_mode = 'off' OR e2ee_server_member(c.id))
 			WHERE x.user_id = $1 AND y.user_id = ANY($2::uuid[])`, claims.UserID, ids).Scan(&covered); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to authorize recipients")
 			return

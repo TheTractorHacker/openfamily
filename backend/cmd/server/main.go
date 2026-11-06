@@ -205,6 +205,11 @@ func main() {
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
 	r.Get("/config", srv.GetConfig)
+	// Trusted-server mode (docs/design/E2EE.md): the server-device sidecar. Not
+	// user routes: each handler authenticates a dedicated bearer token (404 when the
+	// mode is not configured) and re-derives the phones' consent before it writes.
+	r.Put("/internal/e2ee/server-device", srv.E2EEPinServerDevice)
+	r.Post("/internal/e2ee/ingest", srv.E2EEServerIngest)
 	r.Get("/alerts/share/{token}", srv.ShareAlert)
 	// Public invite landing page: static, no database access, no secrets.
 	r.Get("/join/{code}", srv.JoinLanding)
@@ -320,6 +325,12 @@ func main() {
 		r.Get("/circles/{id}/e2ee/items", srv.E2EEListItems)
 		r.Delete("/circles/{id}/e2ee/items", srv.E2EEEraseItems)
 		r.Post("/circles/{id}/e2ee/purge-plaintext", srv.E2EEPurgePlaintext)
+		// Trusted-server mode: the OpenFamily server as an approved, consented member.
+		r.Get("/e2ee/server-device", srv.E2EEServerDevice)
+		r.Get("/circles/{id}/e2ee/server-member", srv.E2EEServerMemberState)
+		r.Put("/circles/{id}/e2ee/server-consent", srv.E2EEPutServerConsent)
+		r.Delete("/circles/{id}/e2ee/server-consent", srv.E2EEDeleteServerConsent)
+		r.Delete("/circles/{id}/e2ee/server-copies", srv.E2EEPurgeServerCopies)
 		r.Get("/e2ee/log", srv.E2EELog)
 
 		r.Post("/families", srv.CreateFamily)

@@ -603,9 +603,9 @@ class _LocationTabViewState extends State<LocationTabView> {
                 ],
               ),
               if (_activeCircle?.isPrivate == true)
-                const Padding(
-                  padding: EdgeInsets.only(top: AppSpace.sm),
-                  child: PrivateCircleBadge(),
+                Padding(
+                  padding: const EdgeInsets.only(top: AppSpace.sm),
+                  child: PrivateCircleBadge(serverMember: _activeCircle?.e2eeServerMember == true),
                 ),
               if (widget.circleSharingPaused)
                 Padding(

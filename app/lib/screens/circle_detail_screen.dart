@@ -77,6 +77,10 @@ class _CircleDetailScreenState extends State<CircleDetailScreen> {
               'Dawarich export, and place alerts made by the server (your phones work out arrivals and '
               'departures instead). SOS reaches your circle, but the server and any SMS contact cannot '
               'be told the position.\n\n'
+              'Optional later: if you run this server yourself you can let it join as a trusted member '
+              '(Encryption keys > this circle > Trusted server). Every member must allow it, and then the '
+              'server CAN read this circle again and keeps plaintext copies; the circle then shows '
+              '"Server can read" instead of "End-to-end encrypted".\n\n'
               'Existing places are re-encrypted and the server copies deleted. Location history the server '
               'already holds stays until each person deletes it in their settings. Every member needs the '
               'latest app and an approved phone. If every phone and the recovery phrase are lost, encrypted '
@@ -138,7 +142,9 @@ class _CircleDetailScreenState extends State<CircleDetailScreen> {
             icon: st.isPrivate ? Icons.lock : Icons.lock_open,
             title: 'Private circle (end-to-end encrypted)',
             subtitle: st.isPrivate
-                ? 'On (key epoch ${st.epoch}). Positions, history, places and events are end-to-end encrypted. Trips, driving reports and the weekly summary are not available here.'
+                ? (_circle.e2eeServerMember
+                    ? 'On (key epoch ${st.epoch}), TRUSTED SERVER: the OpenFamily server can read this circle (every member allowed it). Withdraw under Encryption keys > Trusted server.'
+                    : 'On (key epoch ${st.epoch}). Positions, history, places and events are end-to-end encrypted. Trips, driving reports and the weekly summary are not available here.')
                 : 'Off. Turning it on encrypts locations so the server cannot read them. Some server features are not available in private circles.',
             value: st.isPrivate,
             onChanged: _e2eeBusy ? null : _togglePrivate,

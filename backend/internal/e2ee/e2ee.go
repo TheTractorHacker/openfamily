@@ -62,6 +62,7 @@ const (
 	domDigits       = "OFE2EE1-DIGITS\x00"
 	domSafety       = "OFE2EE1-SAFETY\x00"
 	domBind         = "OFE2EE1-BIND\x00"
+	domServerCons   = "OFE2EE1-SERVERCONSENT\x00"
 	domLogAct       = "OFE2EE1-LOGACT\x00"
 	domLog          = "OFE2EE1-LOG\x00"
 	domCommit       = "OFE2EE1-KEY-COMMIT\x00"
@@ -779,4 +780,39 @@ func KeyCommitment(circleKey []byte, circleID string, epoch uint32) ([]byte, err
 		return nil, err
 	}
 	return out, nil
+}
+
+// ServerConsentMessage is what a member's phone signs to let the OpenFamily
+// server (a `server` device) read ONE circle: domServerCons || circle_id(36) ||
+// user_id(36) || server_device_id(36) || server_fingerprint(32). The signature
+// names the circle, the person and the exact server key, so it cannot be moved
+// to another circle, another person or another server key.
+func ServerConsentMessage(circleID, userID, serverDeviceID string, serverFingerprint []byte) ([]byte, error) {
+	for _, id := range []string{circleID, userID, serverDeviceID} {
+		if err := CheckID(id); err != nil {
+			return nil, err
+		}
+	}
+	if len(serverFingerprint) != 32 {
+		return nil, ErrKeyLength
+	}
+	m := make([]byte, 0, len(domServerCons)+3*UUIDLen+32)
+	m = append(m, domServerCons...)
+	m = append(m, circleID...)
+	m = append(m, userID...)
+	m = append(m, serverDeviceID...)
+	m = append(m, serverFingerprint...)
+	return m, nil
+}
+
+// VerifyServerConsent checks a consent signature made by a member's phone key.
+func VerifyServerConsent(approverEdPub []byte, circleID, userID, serverDeviceID string, serverFingerprint, sig []byte) error {
+	msg, err := ServerConsentMessage(circleID, userID, serverDeviceID, serverFingerprint)
+	if err != nil {
+		return err
+	}
+	if len(approverEdPub) != PubLen || len(sig) != SigLen || !ed25519.Verify(approverEdPub, msg, sig) {
+		return ErrBadSig
+	}
+	return nil
 }

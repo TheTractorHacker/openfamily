@@ -13,6 +13,10 @@ import (
 // config comes from the bridge's own JSON file, never from the OpenFamily
 // database (the server must not learn where the plaintext goes).
 type config struct {
+	// Mode is "" (Dawarich bridge, the default) or "server" (the OpenFamily
+	// server's own device: decrypted positions go to Ingest, not to Dawarich).
+	Mode        string             `json:"mode,omitempty"`
+	Ingest      ingestCfg          `json:"ingest,omitempty"`
 	Dawarich    dawarichCfg        `json:"dawarich"`
 	Users       map[string]userCfg `json:"users"`
 	Circles     []string           `json:"circles"`
@@ -20,6 +24,15 @@ type config struct {
 	PollSeconds int                `json:"poll_seconds"`
 
 	since time.Time
+}
+
+// ingestCfg is where the server device hands decrypted positions: the OpenFamily
+// API, over the private network between the containers.
+type ingestCfg struct {
+	URL       string `json:"url"`
+	TokenFile string `json:"token_file,omitempty"`
+
+	token string
 }
 
 type dawarichCfg struct {
@@ -60,6 +73,13 @@ func loadConfig(path string, env func(string) string) (*config, error) {
 	}
 	if k := env("E2EE_BRIDGE_DAWARICH_KEY"); k != "" {
 		c.Dawarich.APIKey = strings.TrimSpace(k)
+	}
+	switch c.Mode {
+	case "":
+	case "server":
+		return finishServerConfig(&c, env)
+	default:
+		return nil, errors.New(`config: mode must be "" or "server"`)
 	}
 	if err := validateBaseURL(c.Dawarich.BaseURL, "dawarich.base_url"); err != nil {
 		return nil, err
@@ -132,4 +152,45 @@ func (c *config) targetFor(userID string) (target, bool) {
 		return target{key: c.Dawarich.APIKey, label: "main"}, true
 	}
 	return target{}, false
+}
+
+func (c *config) serverMode() bool { return c.Mode == "server" }
+
+// finishServerConfig validates the server-device configuration. The ingest token
+// is the same secret the OpenFamily server was given (E2EE_SERVER_INGEST_TOKEN);
+// it comes from the environment or a file, never from the JSON itself.
+func finishServerConfig(c *config, env func(string) string) (*config, error) {
+	if err := validateBaseURL(c.Ingest.URL, "ingest.url"); err != nil {
+		return nil, err
+	}
+	c.Ingest.URL = strings.TrimRight(c.Ingest.URL, "/")
+	tok := strings.TrimSpace(env("E2EE_SERVER_INGEST_TOKEN"))
+	if tok == "" && c.Ingest.TokenFile != "" {
+		b, err := os.ReadFile(c.Ingest.TokenFile)
+		if err != nil {
+			return nil, fmt.Errorf("config: ingest.token_file: %w", err)
+		}
+		tok = strings.TrimSpace(string(b))
+	}
+	if len(tok) < 32 {
+		return nil, errors.New("config: the ingest token (E2EE_SERVER_INGEST_TOKEN or ingest.token_file) must be at least 32 characters")
+	}
+	c.Ingest.token = tok
+	if c.Since != "" {
+		t, err := time.Parse(time.RFC3339, c.Since)
+		if err != nil {
+			t, err = time.Parse("2006-01-02", c.Since)
+		}
+		if err != nil {
+			return nil, errors.New("config: since must be RFC3339 or YYYY-MM-DD")
+		}
+		c.since = t.UTC()
+	}
+	if c.PollSeconds == 0 {
+		c.PollSeconds = 15
+	}
+	if c.PollSeconds < 5 || c.PollSeconds > 3600 {
+		return nil, errors.New("config: poll_seconds must be 5..3600")
+	}
+	return c, nil
 }

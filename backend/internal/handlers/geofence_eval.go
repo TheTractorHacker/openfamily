@@ -107,7 +107,7 @@ func (s *Server) evaluateGeofences(ctx context.Context, userID string, lon, lat 
 	}
 	// A private circle's places are evaluated on the members' phones; the server
 	// holds no plaintext places for it and must not geofence it.
-	if s.circleIsPrivate(ctx, familyID) {
+	if s.circleBlocksPlaintext(ctx, familyID) {
 		return
 	}
 

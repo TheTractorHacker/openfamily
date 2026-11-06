@@ -152,3 +152,30 @@ root file system, state volume, passphrase as a Docker secret).
   export and the public Dawarich API; they have **not been verified against a live Dawarich**, nor has the whole bridge been run against a real OpenFamily server (tests use fakes with real cryptography).
 * Only one bridge process per state directory (no lock file).
 * The wire formats are not externally audited; see the E2EE design doc.
+
+## Server mode: the OpenFamily server as a trusted member
+
+`e2ee-bridge` can also be the **OpenFamily server's own device** (`enroll --kind server`, `"mode": "server"`
+in the config). Instead of Dawarich it hands the decrypted, verified positions to the OpenFamily API
+(`POST /internal/e2ee/ingest`, authenticated by `E2EE_SERVER_INGEST_TOKEN`, shared only with the API) so the server's map,
+history, geofencing and built-in Dawarich sync work for the circles whose members all consented. **Here, unlike
+the Dawarich mode above, running it next to the server is the point** and the server host can read those circles.
+Read "Trusted-server mode" in `docs/design/E2EE.md` first. It reads a circle only after it verified, against the key
+log, a phone-signed consent from every member of that circle.
+
+Enrollment with the compose service (profile `e2ee-server`; the key stays in the `e2ee_server_state` volume, never in Postgres):
+
+```
+export E2EE_SERVER_INGEST_TOKEN=$(openssl rand -hex 32)   # put it in .env; the API and the sidecar both read it
+docker compose --profile e2ee-server up -d api
+docker compose --profile e2ee-server run --rm -T e2ee-server-device enroll --kind server \
+    --server http://api:8080 --email you@example.org < password.txt
+# prints name "OpenFamily server" + fingerprint + REQUEST CODE; approve it on your phone
+# (Encryption keys > Approve a viewer or bridge), compare the digits, then:
+docker compose --profile e2ee-server run --rm e2ee-server-device enroll --approval <APPROVAL CODE>
+docker compose --profile e2ee-server up -d e2ee-server-device
+```
+
+Then in each circle every member opens *Encryption keys > circle > Trusted server* and allows it, and a circle admin
+taps *Give the server the circle key*. Revoke with `e2ee-bridge revoke` (or from a phone); delete the server's plaintext copies
+from the same app screen. Exit code 6 in this mode also covers a refused ingest token.

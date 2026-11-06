@@ -11,6 +11,7 @@ class Circle {
     this.expiresAt,
     this.e2eeMode = 'off',
     this.e2eeEpoch = 0,
+    this.e2eeServerMember = false,
   });
 
   final String id;
@@ -35,6 +36,10 @@ class Circle {
   /// "off" or "private" (end-to-end encrypted, docs/design/E2EE.md).
   final String e2eeMode;
   final int e2eeEpoch;
+
+  /// Private AND an approved, consented OpenFamily server device can read it
+  /// (trusted-server mode): the server, not only the members, can see positions.
+  final bool e2eeServerMember;
 
   /// True for a Private (end-to-end encrypted) circle.
   bool get isPrivate => e2eeMode == 'private';
@@ -61,6 +66,7 @@ class Circle {
           : null,
       e2eeMode: json['e2ee_mode'] == 'private' ? 'private' : 'off',
       e2eeEpoch: (json['e2ee_epoch'] as num?)?.toInt() ?? 0,
+      e2eeServerMember: json['e2ee_mode'] == 'private' && json['e2ee_server_member'] == true,
     );
   }
 
@@ -73,6 +79,7 @@ class Circle {
     DateTime? expiresAt,
     String? e2eeMode,
     int? e2eeEpoch,
+    bool? e2eeServerMember,
   }) {
     return Circle(
       id: id,
@@ -85,6 +92,7 @@ class Circle {
       expiresAt: expiresAt ?? this.expiresAt,
       e2eeMode: e2eeMode ?? this.e2eeMode,
       e2eeEpoch: e2eeEpoch ?? this.e2eeEpoch,
+      e2eeServerMember: e2eeServerMember ?? this.e2eeServerMember,
     );
   }
 }

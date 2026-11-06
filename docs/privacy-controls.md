@@ -34,6 +34,22 @@ served by this server, so an operator who modifies the web app could read what a
 logged-in member's viewer shows; see `docs/design/E2EE.md` ("Threat model of the
 web viewer"). Use the phone app if that matters.
 
+### Trusted-server mode
+
+If the owner enabled the optional trusted-server mode and **every member of a
+Private circle** allowed it on their phone, that circle is readable by the server:
+positions are ingested into the normal tables and the circle is treated like a
+normal circle for visibility (`e2ee_server_member`, derived from the phones'
+signed consents, never a toggle). `ADMIN_LOCATION_ACCESS` then governs it exactly
+like any normal circle (default `deny`; `family_admin` or `all` as you set it);
+nothing about that policy changed. The admin map shows only the positions the
+server decrypted, and every admin read is audited as before. A circle without an
+approved server device stays sealed and invisible to the admin map. Members can
+withdraw consent and delete the server's copies in the app (`Encryption keys >
+circle > Trusted server`); a circle admin can delete all copies
+(`DELETE /circles/{id}/e2ee/server-copies?scope=circle`). Retention
+(`LOCATION_RETENTION_DAYS` and each person's window) applies to the copies.
+
 ## Location history retention
 
 `LOCATION_RETENTION_DAYS` (default 90, in `docker-compose.yml` / `.env`) sets

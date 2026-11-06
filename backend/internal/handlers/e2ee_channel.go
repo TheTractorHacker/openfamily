@@ -144,7 +144,7 @@ func checkE2EEItem(it e2eeItemIn, currentEpoch int) ([]byte, string) {
 // circleModes reports how many live circles of the user are private and standard.
 func (s *Server) circleModes(ctx context.Context, userID string) (private, standard int, err error) {
 	err = s.Pool.QueryRow(ctx, `
-		SELECT count(*) FILTER (WHERE c.e2ee_mode = 'private'), count(*) FILTER (WHERE c.e2ee_mode <> 'private')
+		SELECT count(*) FILTER (WHERE e2ee_plaintext_blocked(c.id)), count(*) FILTER (WHERE NOT e2ee_plaintext_blocked(c.id))
 		FROM live_circle_members m JOIN circles c ON c.id = m.circle_id
 		WHERE m.user_id = $1`, userID).Scan(&private, &standard)
 	return
@@ -180,6 +180,23 @@ func (s *Server) circleIsPrivate(ctx context.Context, circleID string) bool {
 		return false
 	}
 	return mode == "private"
+}
+
+// circleBlocksPlaintext reports whether plaintext positions and places are
+// refused for the circle: it is private AND has no approved trusted server
+// member (see e2ee_server_member in migration 165). This, not circleIsPrivate,
+// is the phase-2 downgrade rule.
+func (s *Server) circleBlocksPlaintext(ctx context.Context, circleID string) bool {
+	if circleID == "" {
+		return false
+	}
+	var blocked bool
+	if err := s.Pool.QueryRow(ctx, `SELECT e2ee_plaintext_blocked($1::uuid)`, circleID).Scan(&blocked); err != nil {
+		// Fail closed on a malformed id or a database error: treat as protected
+		// only when the circle really is private.
+		return s.circleIsPrivate(ctx, circleID)
+	}
+	return blocked
 }
 
 // E2EEPostBatch accepts a batch of sealed items from one of the caller's sender
@@ -606,6 +623,11 @@ func (s *Server) E2EEPurgePlaintext(w http.ResponseWriter, r *http.Request) {
 		writeE2EECode(w, http.StatusConflict, "circle_not_private", "circle is not end-to-end encrypted")
 		return
 	}
+	if !s.circleBlocksPlaintext(ctx, m.CircleID) {
+		// A server-member circle keeps its server-side places: they are legitimate.
+		writeE2EECode(w, http.StatusConflict, "circle_readable_by_server", "this circle has a trusted server member; its server-side places are not legacy plaintext")
+		return
+	}
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to begin transaction")
@@ -638,7 +660,7 @@ func (s *Server) E2EEPurgePlaintext(w http.ResponseWriter, r *http.Request) {
 // place for that circle. Empty ids are ignored.
 func (s *Server) refuseIfPrivateCircle(w http.ResponseWriter, ctx context.Context, circleIDs ...string) bool {
 	for _, id := range circleIDs {
-		if id != "" && s.circleIsPrivate(ctx, id) {
+		if id != "" && s.circleBlocksPlaintext(ctx, id) {
 			writeE2EECode(w, http.StatusConflict, "e2ee_private_circle",
 				"this circle is end-to-end encrypted; places and positions are stored as encrypted items by the phones")
 			return true
@@ -652,6 +674,6 @@ func (s *Server) placePrivate(ctx context.Context, placeID string) bool {
 	var private bool
 	err := s.Pool.QueryRow(ctx, `
 		SELECT EXISTS (SELECT 1 FROM places p JOIN circles c ON c.id = COALESCE(p.circle_id, p.family_id)
-		               WHERE p.id::text = $1 AND c.e2ee_mode = 'private')`, placeID).Scan(&private)
+		               WHERE p.id::text = $1 AND e2ee_plaintext_blocked(c.id))`, placeID).Scan(&private)
 	return err == nil && private
 }

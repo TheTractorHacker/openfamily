@@ -137,11 +137,12 @@ type bridge struct {
 	api  *apiClient
 	cfg  *config
 	rs   *runState
-	sink *dawarichSink
+	sink pointSink
 	log  *slog.Logger
 	now  func() time.Time
 
-	cur      map[string]*circleState // newest state per circle
+	consents map[string]map[string]bool // server mode: verified consents per circle
+	cur      map[string]*circleState    // newest state per circle
 	keyRetry map[string]*keyRetry
 	pending  []point        // points collected while handling a page
 	resynced bool           // state already refreshed for this page
@@ -158,8 +159,12 @@ func newBridge(st *store, id *identity, api *apiClient, cfg *config, log *slog.L
 	if err != nil {
 		return nil, err
 	}
-	return &bridge{st: st, id: id, keys: keys, api: api, cfg: cfg, rs: rs, sink: newSink(cfg, log), log: log,
-		now: time.Now, cur: map[string]*circleState{}, keyRetry: map[string]*keyRetry{}}, nil
+	var sink pointSink = newSink(cfg, log)
+	if cfg.serverMode() {
+		sink = newServerSink(cfg, id.f.DeviceID, log)
+	}
+	return &bridge{st: st, id: id, keys: keys, api: api, cfg: cfg, rs: rs, sink: sink, log: log,
+		now: time.Now, cur: map[string]*circleState{}, keyRetry: map[string]*keyRetry{}, consents: map[string]map[string]bool{}}, nil
 }
 
 func (b *bridge) save() error { return b.st.saveRunState(b.rs) }
@@ -219,7 +224,7 @@ func (b *bridge) cycle(ctx context.Context) error {
 
 func fatal(err error) bool {
 	var le *logError
-	return errors.Is(err, errNoApproved) || errors.Is(err, errReauth) || errors.Is(err, errDawarichAuth) || errors.As(err, &le)
+	return errors.Is(err, errNoApproved) || errors.Is(err, errReauth) || errors.Is(err, errDawarichAuth) || errors.Is(err, errIngestAuth) || errors.As(err, &le)
 }
 
 // ---- transparency log
@@ -364,6 +369,25 @@ func (b *bridge) syncCircle(ctx context.Context, c circleOut) error {
 	if err := b.syncKeys(ctx, c.ID, st, false); err != nil {
 		return err
 	}
+	if b.cfg.serverMode() {
+		// The server device reads a circle only while EVERY member's phone has
+		// signed a consent for this key (verified here, not taken from the server).
+		var resp struct {
+			Consents []consentWire `json:"consents"`
+		}
+		if err := b.api.do(ctx, "GET", "/circles/"+c.ID+"/e2ee/server-member", nil, &resp); err != nil {
+			return err
+		}
+		ok := b.verifiedConsents(c.ID, st, resp.Consents)
+		b.consents[c.ID] = ok
+		if missing := consentsComplete(st, ok); len(missing) > 0 {
+			b.log.Info("server mode: waiting for member consent, circle not read", "circle", c.ID[:8], "missing", len(missing))
+			return nil
+		}
+		if len(ok) == 0 {
+			return nil
+		}
+	}
 	return b.pull(ctx, c.ID)
 }
 
@@ -415,6 +439,7 @@ const (
 	rDuplicate     reason = "duplicate"
 	rMalformed     reason = "malformed"
 	rNoKey         reason = "no_key"
+	rNoConsent     reason = "no_consent"
 	rUnknownSender reason = "unknown_sender"
 	rNotMember     reason = "sender_not_member"
 	rBadReg        reason = "sender_registration_invalid"
@@ -565,6 +590,9 @@ func (b *bridge) process(ctx context.Context, circle string, it wireItem) reason
 		}
 		return rNotMember
 	}
+	if b.cfg.serverMode() && !b.consents[circle][dev.UserID] {
+		return rNoConsent
+	}
 	edPub, err := base64.StdEncoding.DecodeString(dev.Ed25519Pub)
 	if err != nil {
 		return rBadReg
@@ -616,7 +644,7 @@ func (b *bridge) process(ctx context.Context, circle string, it wireItem) reason
 	}
 	b.rs.Recv.Dev[dk] = ds
 
-	if !b.collect(it.Purpose, dev.UserID, mem.Name, it.DeviceID, int64(tsMs), body) {
+	if !b.collect(circle, it.Purpose, dev.UserID, mem.Name, it.DeviceID, int64(tsMs), body) {
 		return rBadBody
 	}
 	return rOK
@@ -648,8 +676,11 @@ func okNum(p *float64) *float64 {
 // collect turns a verified body into points for the member's Dawarich account.
 // It returns false for an unusable body. A person without a mapping is skipped
 // (counted as a drop), not an error.
-func (b *bridge) collect(purpose, userID, memberName, device string, tsMs int64, body []byte) bool {
+func (b *bridge) collect(circle, purpose, userID, memberName, device string, tsMs int64, body []byte) bool {
 	tgt, mapped := b.cfg.targetFor(userID)
+	if b.cfg.serverMode() {
+		mapped = true
+	}
 	name := memberName
 	if name == "" {
 		name = "OpenFamily"
@@ -659,7 +690,7 @@ func (b *bridge) collect(purpose, userID, memberName, device string, tsMs int64,
 			b.rs.Stats.Dropped["unmapped_user"]++
 			return
 		}
-		b.pending = append(b.pending, point{tgt: tgt, name: name, device: device, tsMs: ts, lat: lat, lon: lon,
+		b.pending = append(b.pending, point{user: userID, circle: circle, kind: purpose, tgt: tgt, name: name, device: device, tsMs: ts, lat: lat, lon: lon,
 			acc: okNum(acc), alt: okNum(alt), spd: okNum(spd), batt: okNum(bat)})
 	}
 	switch purpose {
