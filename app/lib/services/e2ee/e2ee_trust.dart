@@ -149,7 +149,7 @@ Future<bool> verifyRegistration(DeviceKey d) async {
     // The fingerprint must really be the hash of the published keys.
     final Uint8List fp = await E2ee.fingerprint(d.edPub, d.xPub);
     if (!E2ee.constEq(fp, ref)) return false;
-    return E2ee.verify(d.registeredByPub, msg, d.registrationSignature);
+    return await E2ee.verify(d.registeredByPub, msg, d.registrationSignature);
   } catch (_) {
     return false;
   }
