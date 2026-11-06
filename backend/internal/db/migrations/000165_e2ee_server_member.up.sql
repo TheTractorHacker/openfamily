@@ -10,7 +10,7 @@
 --   * that key is active and approved (its registration was cross-signed by a
 --     phone key of its owner) and holds a wrap of the circle's CURRENT epoch
 --     (only a phone can produce a wrap);
---   * every live member that has an active phone key signed an explicit consent
+--   * every live member signed an explicit consent
 --     naming this circle and this server key (e2ee_server_consents).
 -- Revoking the key deletes its wraps (existing trigger), withdrawing any consent
 -- or removing a member changes the answer immediately. Idempotent.
@@ -76,12 +76,14 @@ CREATE OR REPLACE FUNCTION e2ee_server_member(circ UUID) RETURNS BOOLEAN AS $$
                         WHERE w.circle_id = c.id AND w.epoch = c.e2ee_epoch AND w.recipient_device_id = d.device_id)
            AND e2ee_device_approved(d.device_id, c.id)
            AND EXISTS (SELECT 1 FROM live_circle_members om WHERE om.circle_id = c.id AND om.user_id = d.user_id)
-           AND EXISTS (SELECT 1 FROM live_circle_members m JOIN device_keys k ON k.user_id = m.user_id
-                        WHERE m.circle_id = c.id AND k.kind = 'device' AND k.revoked_at IS NULL)
+           -- A pending key rotation (member left, key revoked, consent withdrawn) ends it
+           -- until a new epoch is published and the server key is wrapped again.
+           AND NOT c.e2ee_rekey_required
+           -- EVERY live member must have consented; a member without an active phone
+           -- key cannot, so such a circle is never a server member.
            AND NOT EXISTS (
                 SELECT 1 FROM live_circle_members m
                  WHERE m.circle_id = c.id
-                   AND EXISTS (SELECT 1 FROM device_keys k WHERE k.user_id = m.user_id AND k.kind = 'device' AND k.revoked_at IS NULL)
                    AND NOT EXISTS (
                         SELECT 1 FROM e2ee_server_consents sc
                           JOIN device_keys ak ON ak.device_id = sc.approver_device_id

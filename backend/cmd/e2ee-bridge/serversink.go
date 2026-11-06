@@ -199,17 +199,11 @@ func (b *bridge) verifiedConsents(circle string, st *circleState, wire []consent
 	return ok
 }
 
-// consentsComplete: every member that holds an active, approved phone key has a
-// verified consent. A circle that is not complete is not read at all.
+// consentsComplete: EVERY member of the circle has a verified consent (a member
+// without a phone key cannot consent, so the circle stays closed). A circle that is not complete is not read at all.
 func consentsComplete(st *circleState, ok map[string]bool) (missing []string) {
 	for _, m := range st.Members {
-		needs := false
-		for _, d := range m.Devices {
-			if d.Kind == "device" && d.RevokedAt == nil {
-				needs = true
-			}
-		}
-		if needs && !ok[m.UserID] {
+		if !ok[m.UserID] {
 			missing = append(missing, m.UserID)
 		}
 	}

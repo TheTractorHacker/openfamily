@@ -99,6 +99,17 @@ func (e *srvEnv) consentAll() {
 	e.consent("C", e.c, 200)
 }
 
+// rotate publishes epoch n (an admin phone), wrapping for the given phones and the
+// server key, which clears a pending rekey.
+func (e *srvEnv) rotate(n int, phones ...*tdev) {
+	e.t.Helper()
+	var ws []map[string]any
+	for _, d := range append(phones, e.s) {
+		ws = append(ws, mkWrap(e.t, e.circle, n, e.a, d, e.key))
+	}
+	e.mustCode("A", "POST", "/circles/"+e.circle+"/e2ee/epoch", epochBody(e.t, e2ee.ActEpoch, e.circle, n, e.a, ws...), 200)
+}
+
 func (e *srvEnv) serverMember() bool {
 	var v bool
 	_ = e.pool.QueryRow(context.Background(), `SELECT e2ee_server_member($1)`, e.circle).Scan(&v)
@@ -184,7 +195,9 @@ func TestServerMemberNeedsPinWrapAndEveryConsent(t *testing.T) {
 		t.Fatal("withdrawing a consent did not request a new key epoch")
 	}
 	e.consent("C", e.c, 200)
-	check("consent restored", true)
+	check("consent restored but the new key epoch is still pending", false)
+	e.rotate(2, e.a, e.b, e.c)
+	check("consent restored and new epoch published", true)
 }
 
 func TestServerMemberOneMissingConsentKeepsPhase2(t *testing.T) {
@@ -486,6 +499,7 @@ func TestServerIngestStopsWhenConsentWithdrawn(t *testing.T) {
 	}
 	// A member leaving also drops their consent (a rejoin must consent again).
 	e.consent("B", e.b, 200)
+	e.rotate(2, e.a, e.b, e.c)
 	if !e.serverMember() {
 		t.Fatal("not a server member again")
 	}
@@ -617,5 +631,123 @@ func TestServerMemberCircleKeepsItsPlacesOnPurgePlaintext(t *testing.T) {
 	_ = e.pool.QueryRow(context.Background(), `SELECT count(*) FROM places WHERE COALESCE(circle_id, family_id) = $1`, e.circle).Scan(&n)
 	if n != 1 {
 		t.Fatalf("places after purge attempt: %d", n)
+	}
+}
+
+// Every live member must consent, including one who holds no phone key yet.
+func TestServerMemberRequiresConsentOfEveryLiveMember(t *testing.T) {
+	e := readyEnv(t)
+	ctx := context.Background()
+	if _, err := e.pool.Exec(ctx, `UPDATE users SET family_id = $1, role = 'member' WHERE id = $2`, e.circle, e.ids["D"]); err != nil {
+		t.Fatal(err)
+	}
+	if e.serverMember() {
+		t.Fatal("a new member without any key or consent did not close the circle")
+	}
+	if c, _, raw := e.ingest(e.point("fix", e.b, time.Now(), 52.5, 13.4)); c != 409 {
+		t.Fatalf("ingest while a member has not consented: %d %s", c, raw)
+	}
+	e.mustCode("A", "POST", "/family/places", map[string]any{"name": "Home", "lat": 1, "lon": 2, "radius_meters": 100, "circle_id": e.circle}, 409)
+	e.mustCode("D", "POST", "/locations", map[string]any{"device_id": e.a.id, "lat": 52.1, "lon": 13.1}, 409)
+	// D registers a phone key and consents: open again.
+	d := newTDev(t, e.ids["D"])
+	e.register("D", d)
+	e.rotate(2, e.a, e.b, e.c, d)
+	if e.serverMember() {
+		t.Fatal("a member who has not consented yet")
+	}
+	e.mustCode("D", "PUT", "/circles/"+e.circle+"/e2ee/server-consent", map[string]any{
+		"server_device_id": e.s.id, "approver_device_id": d.id, "signature": consentSig(t, e.circle, d, d, e.s)}, 200)
+	if !e.serverMember() {
+		t.Fatal("not a server member after everyone consented and the epoch was published")
+	}
+}
+
+// A member leaving ends server-member status until a new epoch is published.
+func TestServerMemberEndsWhenAMemberLeavesUntilRekey(t *testing.T) {
+	e := readyEnv(t)
+	if _, err := e.pool.Exec(context.Background(), `DELETE FROM circle_members WHERE circle_id = $1 AND user_id = $2`, e.circle, e.ids["C"]); err != nil {
+		t.Fatal(err)
+	}
+	if e.serverMember() {
+		t.Fatal("still a server member while the key epoch is pending")
+	}
+	if c, _, _ := e.ingest(e.point("fix", e.b, time.Now(), 52.5, 13.4)); c != 409 {
+		t.Fatalf("ingest before rekey: %d", c)
+	}
+	e.rotate(2, e.a, e.b)
+	if !e.serverMember() {
+		t.Fatal("not a server member after the rekey")
+	}
+}
+
+func (e *srvEnv) userDevice(user string) string {
+	var id string
+	if err := e.pool.QueryRow(context.Background(), `SELECT id::text FROM devices WHERE user_id = $1 ORDER BY created_at LIMIT 1`, e.ids[user]).Scan(&id); err != nil {
+		e.t.Fatal(err)
+	}
+	return id
+}
+
+func (e *srvEnv) locAt(dev string, ts time.Time, lat float64, circle any) {
+	e.t.Helper()
+	if _, err := e.pool.Exec(context.Background(), `INSERT INTO locations (device_id, ts, geom, source, e2ee_circle_id)
+		VALUES ($1,$2, ST_SetSRID(ST_MakePoint(5, $3), 4326), 'x', $4)`, dev, ts, lat, circle); err != nil {
+		e.t.Fatal(err)
+	}
+}
+
+func (e *srvEnv) lastLat(user string) (float64, bool) {
+	var lat float64
+	if err := e.pool.QueryRow(context.Background(), `SELECT lat FROM member_positions WHERE user_id = $1`, e.ids[user]).Scan(&lat); err != nil {
+		return 0, false
+	}
+	return lat, true
+}
+
+func TestServerPurgeKeepsPositionsFromOtherSources(t *testing.T) {
+	e := readyEnv(t)
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	other := "99999999-9999-4999-8999-999999999999" // a second server-member circle's copy
+	// B: server copy of this circle is the newest point; an older point came from
+	// another server-member circle and an even older one from a plaintext circle.
+	e.ingest(e.point("fix", e.b, now, 10, 1))
+	dev := e.userDevice("B")
+	e.locAt(dev, now.Add(-time.Hour), 20, other)
+	e.locAt(dev, now.Add(-2*time.Hour), 30, nil)
+	e.mustCode("B", "DELETE", "/circles/"+e.circle+"/e2ee/server-copies", nil, 200)
+	if lat, ok := e.lastLat("B"); !ok || lat != 20 {
+		t.Fatalf("last position after purge = %v %v, want the other circle's 20", lat, ok)
+	}
+	var n int
+	_ = e.pool.QueryRow(context.Background(), `SELECT count(*) FROM locations WHERE device_id = $1 AND e2ee_circle_id IS NULL OR e2ee_circle_id = $2`, dev, other).Scan(&n)
+	if n != 2 {
+		t.Fatalf("other sources lost rows: %d", n)
+	}
+
+	// C: the position is the other circle's (newer than this circle's copy): untouched.
+	e.ingest(e.point("history", e.c, now.Add(-3*time.Hour), 40, 1))
+	devC := e.userDevice("C")
+	e.locAt(devC, now, 50, other)
+	if _, err := e.pool.Exec(context.Background(), `INSERT INTO member_positions (user_id, lat, lon, ts) VALUES ($1, 50, 5, $2)
+		ON CONFLICT (user_id) DO UPDATE SET lat = 50, ts = $2`, e.ids["C"], now); err != nil {
+		t.Fatal(err)
+	}
+	e.mustCode("C", "DELETE", "/circles/"+e.circle+"/e2ee/server-copies", nil, 200)
+	if lat, _ := e.lastLat("C"); lat != 50 {
+		t.Fatalf("a position from another circle was changed: %v", lat)
+	}
+
+	// A: a plaintext-circle position is the newest; the purge of an older server copy leaves it.
+	e.ingest(e.point("history", e.a, now.Add(-time.Hour), 60, 1))
+	devA := e.userDevice("A")
+	e.locAt(devA, now, 70, nil)
+	if _, err := e.pool.Exec(context.Background(), `INSERT INTO member_positions (user_id, lat, lon, ts) VALUES ($1, 70, 5, $2)
+		ON CONFLICT (user_id) DO UPDATE SET lat = 70, ts = $2`, e.ids["A"], now); err != nil {
+		t.Fatal(err)
+	}
+	e.mustCode("A", "DELETE", "/circles/"+e.circle+"/e2ee/server-copies?scope=circle", nil, 200)
+	if lat, _ := e.lastLat("A"); lat != 70 {
+		t.Fatalf("plaintext position was removed: %v", lat)
 	}
 }

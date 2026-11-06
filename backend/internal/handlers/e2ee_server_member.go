@@ -151,7 +151,6 @@ func (s *Server) verifyServerConsents(ctx context.Context, circleID string, dev 
 		                  WHERE sc.circle_id = m.circle_id AND sc.user_id = m.user_id AND sc.server_device_id = $2), '')
 		FROM live_circle_members m
 		WHERE m.circle_id = $1
-		  AND EXISTS (SELECT 1 FROM device_keys d WHERE d.user_id = m.user_id AND d.kind = 'device' AND d.revoked_at IS NULL)
 		ORDER BY m.user_id`, circleID, dev.DeviceID)
 	if err != nil {
 		return st, err
@@ -421,30 +420,79 @@ func (s *Server) E2EEPurgeServerCopies(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback(ctx)
-	tag, err := tx.Exec(ctx, `
+	rows, err := tx.Query(ctx, `
 		DELETE FROM locations l USING devices d
-		WHERE d.id = l.device_id AND l.e2ee_circle_id = $1 AND ($2 = 'circle' OR d.user_id = $3)`, m.CircleID, scope, uid)
+		WHERE d.id = l.device_id AND l.e2ee_circle_id = $1 AND ($2 = 'circle' OR d.user_id = $3)
+		RETURNING d.user_id::text, l.ts`, m.CircleID, scope, uid)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to purge")
 		return
 	}
-	// The last-known position of a person who has no ordinary (plaintext) circle can
-	// only have come from the server copy.
-	mp, err := tx.Exec(ctx, `
-		DELETE FROM member_positions mp
-		WHERE ($2 = 'circle' AND mp.user_id IN (SELECT user_id FROM circle_members WHERE circle_id = $1) OR mp.user_id = $3)
-		  AND NOT EXISTS (SELECT 1 FROM circle_members x JOIN circles c ON c.id = x.circle_id
-		                   WHERE x.user_id = mp.user_id AND c.e2ee_mode = 'off')`, m.CircleID, scope, uid)
-	if err != nil {
+	deleted := map[string][]time.Time{}
+	var nDeleted int64
+	for rows.Next() {
+		var u string
+		var ts time.Time
+		if err := rows.Scan(&u, &ts); err != nil {
+			rows.Close()
+			writeError(w, http.StatusInternalServerError, "failed to purge")
+			return
+		}
+		deleted[u] = append(deleted[u], ts)
+		nDeleted++
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to purge")
 		return
+	}
+	// A last-known position is touched only if it IS one of the purged points (same
+	// user, same instant). It is then recomputed from the newest remaining location
+	// of any source (another server-member circle, a plaintext circle), or removed
+	// when nothing remains. Every other position is left alone.
+	var repositioned, removed int64
+	for u, tss := range deleted {
+		var cur time.Time
+		if err := tx.QueryRow(ctx, `SELECT ts FROM member_positions WHERE user_id = $1`, u).Scan(&cur); err != nil {
+			continue
+		}
+		hit := false
+		for _, t := range tss {
+			if t.Equal(cur) {
+				hit = true
+			}
+		}
+		if !hit {
+			continue
+		}
+		tag, err := tx.Exec(ctx, `
+			UPDATE member_positions mp SET lat = n.lat, lon = n.lon, ts = n.ts, device_id = n.device_id,
+			       accuracy_meters = n.acc, speed_mps = n.spd, battery_pct = n.bat, heading_deg = NULL, motion_state = NULL
+			FROM (SELECT ST_Y(l.geom) AS lat, ST_X(l.geom) AS lon, l.ts, l.device_id, l.accuracy_meters AS acc,
+			             l.speed_mps AS spd, l.battery_pct AS bat
+			      FROM locations l JOIN devices d ON d.id = l.device_id
+			      WHERE d.user_id = $1 ORDER BY l.ts DESC LIMIT 1) n
+			WHERE mp.user_id = $1`, u)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to purge")
+			return
+		}
+		if tag.RowsAffected() > 0 {
+			repositioned++
+			continue
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM member_positions WHERE user_id = $1`, u); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to purge")
+			return
+		}
+		removed++
 	}
 	if err := tx.Commit(ctx); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to commit")
 		return
 	}
 	s.auditCircle(ctx, uid, m.CircleID, "e2ee.server_copies_purged", "scope "+scope, clientIP(r))
-	writeJSON(w, http.StatusOK, map[string]any{"locations_deleted": tag.RowsAffected(), "last_positions_deleted": mp.RowsAffected()})
+	writeJSON(w, http.StatusOK, map[string]any{"locations_deleted": nDeleted, "last_positions_deleted": removed, "last_positions_recomputed": repositioned})
 }
 
 // ----------------------------------------------------------- internal API

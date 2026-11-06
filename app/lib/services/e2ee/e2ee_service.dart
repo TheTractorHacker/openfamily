@@ -532,12 +532,10 @@ class E2eeService {
 
   // ------------------------------------------------ trusted-server mode
 
-  /// The members that must consent before the server may read the circle: every
-  /// member with an active phone key.
-  static List<String> membersNeedingConsent(CircleE2eeState st) => <String>[
-        for (final CircleE2eeMember m in st.members)
-          if (m.devices.any((DeviceKey d) => d.kind == 'device' && d.isActive)) m.userId
-      ];
+  /// The members that must consent before the server may read the circle: EVERY
+  /// member (one without a phone key cannot consent, so the circle stays closed).
+  static List<String> membersNeedingConsent(CircleE2eeState st) =>
+      <String>[for (final CircleE2eeMember m in st.members) m.userId];
 
   /// Which members' consents verify (signature by one of THEIR active phone keys,
   /// naming this circle, this person and this exact server key). The server's own
