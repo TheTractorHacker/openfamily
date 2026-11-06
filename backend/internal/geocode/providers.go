@@ -22,6 +22,9 @@ type Result struct {
 	Matched     string `json:"matched,omitempty"`
 	// Source is set for fallback providers ("nominatim", "census").
 	Source string `json:"source,omitempty"`
+	// Local is true when the hit came from the hard-filtered search around
+	// the caller's location (about 100 km).
+	Local bool `json:"local,omitempty"`
 }
 
 // Address is a normalized reverse-geocoding hit.
@@ -37,7 +40,7 @@ type Point struct{ Lat, Lon float64 }
 // provider turns normalized requests into upstream URLs and upstream bodies
 // into normalized results.
 type provider interface {
-	searchURL(base *url.URL, q string, bias *Point, limit int, lang string) string
+	searchURL(base *url.URL, q string, bias *Point, limit int, lang string, local bool) string
 	reverseURL(base *url.URL, p Point, lang string) string
 	parseSearch(body []byte) ([]Result, error)
 	parseReverse(body []byte) (*Address, error)
@@ -104,15 +107,19 @@ type photonCollection struct {
 	} `json:"features"`
 }
 
-func (photon) searchURL(base *url.URL, q string, bias *Point, limit int, lang string) string {
+func (photon) searchURL(base *url.URL, q string, bias *Point, limit int, lang string, local bool) string {
 	v := url.Values{"q": {q}, "limit": {strconv.Itoa(limit)}}
 	if bias != nil {
 		v.Set("lat", strconv.FormatFloat(bias.Lat, 'f', 3, 64))
 		v.Set("lon", strconv.FormatFloat(bias.Lon, 'f', 3, 64))
 		v.Set("location_bias_scale", photonBiasScale)
+		if local {
+			// Hard filter: only hits inside the box around the bias.
+			v.Set("bbox", localBox(bias))
+		}
 	}
 	if lang != "" {
-		v.Set("lang", lang)
+		v.Set("lang", photonLang(lang))
 	}
 	return withPath(base, "/api", v)
 }
@@ -124,7 +131,7 @@ func (photon) reverseURL(base *url.URL, p Point, lang string) string {
 		"limit": {"1"},
 	}
 	if lang != "" {
-		v.Set("lang", lang)
+		v.Set("lang", photonLang(lang))
 	}
 	return withPath(base, "/reverse", v)
 }
@@ -239,18 +246,52 @@ type nominatimItem struct {
 	Error string `json:"error"`
 }
 
-func (nominatim) searchURL(base *url.URL, q string, bias *Point, limit int, lang string) string {
+func (nominatim) searchURL(base *url.URL, q string, bias *Point, limit int, lang string, local bool) string {
 	v := url.Values{
 		"q": {q}, "format": {"jsonv2"}, "addressdetails": {"1"}, "limit": {strconv.Itoa(limit)},
 	}
 	if bias != nil {
 		// A soft bias: viewbox without bounded=1 only ranks nearby hits higher.
 		v.Set("viewbox", viewbox(bias))
+		if local {
+			v.Set("viewbox", localBox4(bias, localDelta, true))
+			v.Set("bounded", "1")
+		}
 	}
 	if lang != "" {
 		v.Set("accept-language", lang)
 	}
 	return withPath(base, "/search", v)
+}
+
+// localDelta is the half-width in degrees (~100 km) of the hard local filter.
+const localDelta = 0.9
+
+// localBox is Photon's bbox=minLon,minLat,maxLon,maxLat around b.
+func localBox(b *Point) string { return localBox4(b, localDelta, false) }
+
+func localBox4(b *Point, d float64, nominatimOrder bool) string {
+	f := func(v float64) string { return strconv.FormatFloat(v, 'f', 3, 64) }
+	minLon, maxLon := math.Max(-180, b.Lon-d), math.Min(180, b.Lon+d)
+	minLat, maxLat := math.Max(-90, b.Lat-d), math.Min(90, b.Lat+d)
+	if nominatimOrder { // viewbox=left,top,right,bottom
+		return f(minLon) + "," + f(maxLat) + "," + f(maxLon) + "," + f(minLat)
+	}
+	return f(minLon) + "," + f(minLat) + "," + f(maxLon) + "," + f(maxLat)
+}
+
+// photonLang maps a BCP-47-ish tag to a language Photon supports (de, en, fr,
+// it); anything else becomes en.
+func photonLang(tag string) string {
+	l := strings.ToLower(tag)
+	if i := strings.IndexAny(l, "-_"); i >= 0 {
+		l = l[:i]
+	}
+	switch l {
+	case "de", "en", "fr", "it":
+		return l
+	}
+	return "en"
 }
 
 func viewbox(bias *Point) string {

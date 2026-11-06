@@ -143,7 +143,7 @@ func TestLadderCachedPerAttemptAndPerUser(t *testing.T) {
 		t.Fatal("cached relaxed results lost their marking")
 	}
 	// The cached slice itself must not have been mutated into "approximate".
-	if v, ok := svc.cache.get("u1", "s:5:old 88 road, chester, arkansas"); !ok || v.([]Result)[0].Approximate {
+	if v, ok := svc.cache.get("u1", "s:5:old 88 road, chester, arkansas:en"); !ok || v.([]Result)[0].Approximate {
 		t.Fatal("cache holds marked copy")
 	}
 	svc.SearchWith(ctx, "u2", owner, SearchOptions{})

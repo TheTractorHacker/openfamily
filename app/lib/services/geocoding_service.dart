@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:ui' show PlatformDispatcher;
 
 import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
@@ -121,9 +122,21 @@ abstract class GeocodingBackend {
 /// coordinates go to YOUR server, which queries the configured provider (see
 /// docs/maps.md). Availability comes from `GET /config` `geocoder.enabled`.
 class ApiGeocodingBackend implements GeocodingBackend {
-  const ApiGeocodingBackend();
+  const ApiGeocodingBackend({this.languageCode});
 
   static const Duration _timeout = Duration(seconds: 8);
+
+  /// Overrides the device language (tests); null uses the device locale.
+  final String? languageCode;
+
+  /// Result language sent as `lang`, so names come back in the user's
+  /// language instead of the local script of far-away places.
+  String get _lang {
+    final String l =
+        (languageCode ?? PlatformDispatcher.instance.locale.languageCode)
+            .trim();
+    return RegExp(r'^[A-Za-z]{2,8}$').hasMatch(l) ? l.toLowerCase() : 'en';
+  }
 
   @override
   Future<List<GeocodeSuggestion>> suggest(
@@ -135,6 +148,7 @@ class ApiGeocodingBackend implements GeocodingBackend {
     final Map<String, String> q = <String, String>{
       'q': query.trim(),
       'limit': '$limit',
+      'lang': _lang,
       if (near != null) 'lat': near.latitude.toStringAsFixed(3),
       if (near != null) 'lon': near.longitude.toStringAsFixed(3),
       if (explicit) 'explicit': '1',
@@ -152,6 +166,7 @@ class ApiGeocodingBackend implements GeocodingBackend {
         () => ApiClient.get('/geocode/reverse', query: <String, String>{
           'lat': position.latitude.toStringAsFixed(5),
           'lon': position.longitude.toStringAsFixed(5),
+          'lang': _lang,
         }),
       );
       if (body is Map && body['address'] is String) {

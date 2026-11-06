@@ -299,7 +299,7 @@ func TestGeocodeLadderIsOneTokenAndMarksApproximate(t *testing.T) {
 		w.Write(geoFixture(t, "photon_empty.json"))
 	})
 	rec := geoCall(s.GeocodeSearch, "/geocode/search?q=14322+Old+88rd%2C+Chester+Ar&lat=35.31049&lon=-94.39051", geoUser)
-	if rec.Code != 200 || hits != 2 {
+	if rec.Code != 200 || hits != 3 { // local probe + 2 ladder steps
 		t.Fatalf("%d hits=%d", rec.Code, hits)
 	}
 	var body struct {
@@ -320,5 +320,35 @@ func TestGeocodeLadderIsOneTokenAndMarksApproximate(t *testing.T) {
 	}
 	if last != http.StatusTooManyRequests {
 		t.Fatalf("limiter last=%d (31st request must be refused)", last)
+	}
+}
+
+func TestGeocodeLangHandling(t *testing.T) {
+	var got []string
+	s := geoServer(t, "photon", func(w http.ResponseWriter, r *http.Request) {
+		got = append(got, r.URL.Query().Get("lang"))
+		w.Write(geoFixture(t, "photon_poi.json"))
+	})
+	call := func(target, accept string) int {
+		req := httptest.NewRequest(http.MethodGet, target, nil)
+		if accept != "" {
+			req.Header.Set("Accept-Language", accept)
+		}
+		req = req.WithContext(middleware.ContextWithClaims(req.Context(), testClaims(geoUser)))
+		rec := httptest.NewRecorder()
+		s.GeocodeSearch(rec, req)
+		return rec.Code
+	}
+	if call("/geocode/search?q=aaaa&lang=fr", "de") != 200 || got[len(got)-1] != "fr" {
+		t.Fatalf("lang param wins: %v", got)
+	}
+	if call("/geocode/search?q=bbbb", "de-DE,en;q=0.8") != 200 || got[len(got)-1] != "de" {
+		t.Fatalf("Accept-Language first tag: %v", got)
+	}
+	if call("/geocode/search?q=cccc", "") != 200 || got[len(got)-1] != "en" {
+		t.Fatalf("default en: %v", got)
+	}
+	if call("/geocode/search?q=dddd&lang=a%26b", "") != 400 {
+		t.Fatal("invalid lang must be 400")
 	}
 }

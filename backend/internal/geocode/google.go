@@ -209,20 +209,20 @@ func wantGoogle(q string, res []Result, explicit bool) bool {
 // googleSearch asks Google (or the 30-day cache). ran reports whether Google
 // data was used; cached that no paid request was made. Failures and an
 // exhausted cap yield no results and no error: free results still stand.
-func (s *Service) googleSearch(ctx context.Context, user, q string, b *Point, limit int) (res []Result, cached, ran bool) {
+func (s *Service) googleSearch(ctx context.Context, user, q string, b *Point, limit int, lang string) (res []Result, cached, ran bool) {
 	g := s.goog
 	address := strings.Join(parse(q).parts, ", ")
 	if address == "" {
 		address = q
 	}
-	key := "g:" + strconv.Itoa(limit) + ":" + NormalizeQuery(address) + biasKey(b)
+	key := "g:" + strconv.Itoa(limit) + ":" + NormalizeQuery(address) + biasKey(b) + ":" + lang
 	if v, ok := s.cache.get(user, key); ok {
 		return v.([]Result), true, true
 	}
 	if !g.take() {
 		return nil, false, false
 	}
-	body, err := doGet(ctx, s.googleClient, s.userAgent, g.searchURL(address, b, s.lang))
+	body, err := doGet(ctx, s.googleClient, s.userAgent, g.searchURL(address, b, lang))
 	if err != nil {
 		return nil, false, true
 	}

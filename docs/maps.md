@@ -102,7 +102,7 @@ Settings (server environment):
 | --- | --- |
 | `GEOCODER_URL` | Provider base URL. Unset = public Photon. **Set to empty to disable** (the app then hides search and the server answers 503). |
 | `GEOCODER_TYPE` | `photon` (default) or `nominatim`. |
-| `GEOCODER_LANG` | Optional result language, e.g. `en`. |
+| `GEOCODER_LANG` | Default result language when the app sends none (the app sends the device language as `lang`; the `Accept-Language` header is the next fallback; `en` if all are empty). Photon only supports `de`, `en`, `fr`, `it`, so other languages use `en` there; Nominatim and Google accept any. |
 | `GEOCODER_ALLOW_PRIVATE` | `true` to allow a loopback/private-network provider (self-hosted next to the API). Otherwise private and loopback targets are refused (SSRF guard), `http` is refused, redirects are never followed. |
 | `GEOCODER_FALLBACK_URL` | Nominatim-compatible provider asked only for **explicit** searches (the user pressed Search/Enter) that Photon could not match at house level. Unset = public `nominatim.openstreetmap.org`; empty disables. Same SSRF rules, no redirects, at most one request per second across all users (a request that would wait longer than about 2 s is answered "try again"). Never used while typing. |
 | `GEOCODER_CENSUS_ENABLED` | Default `true`. For explicit searches of US-looking street addresses that are still unmatched, also ask the US Census geocoder (`geocoding.geo.census.gov`, free, no key, house-number level by interpolating address ranges). |
@@ -116,6 +116,11 @@ without the house number, then just the locality. Hits from a relaxed attempt
 are marked `approximate` (`matched`: `street` or `locality`) and the app tells
 the user to drag the pin to the exact spot. The map centre or last known
 location is sent as a bias (rounded to about 100 m) so nearby places rank first.
+When a location is sent, search is **local first**: the server first asks the
+provider for matches inside a box of about 100 km around it (Photon `bbox`,
+Nominatim `viewbox` + `bounded=1`) and returns those when there are any; only
+when nothing local matches does it search worldwide (soft bias), with nearer
+results ordered first. Local results carry `"local": true`.
 
 **Extra third parties.** Because of the two fallbacks above, an address typed
 into an explicit search can also reach `nominatim.openstreetmap.org` (OSMF) and

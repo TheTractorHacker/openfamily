@@ -110,6 +110,18 @@ void main() {
     expect(row.height, greaterThanOrEqualTo(48));
   });
 
+  testWidgets('suggestions are searched near the pin (map center)', (
+    tester,
+  ) async {
+    enable();
+    fake.results = <GeocodeSuggestion>[kMainStreet];
+    await open(tester);
+    await tester.enterText(addressField(), 'Alma High');
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(fake.suggestNear, isNotEmpty);
+    expect(fake.suggestNear.last, _existing.position);
+  });
+
   testWidgets('choosing a suggestion moves the pin and fills the address', (
     tester,
   ) async {

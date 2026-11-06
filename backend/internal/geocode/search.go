@@ -3,8 +3,10 @@ package geocode
 import (
 	"context"
 	"errors"
+	"math"
 	"net/http"
 	"net/url"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -22,6 +24,9 @@ const (
 type SearchOptions struct {
 	Bias  *Point
 	Limit int
+	// Lang is the preferred result language (BCP-47-ish); empty uses the
+	// configured GEOCODER_LANG, then "en".
+	Lang string
 	// Explicit marks a user-submitted search (search icon / Enter). Only
 	// explicit searches may reach the fallback providers.
 	Explicit bool
@@ -58,9 +63,38 @@ func (s *Service) SearchWith(ctx context.Context, user, q string, o SearchOption
 
 	allCached := true
 	var firstErr error
+	lang := s.resolveLang(o.Lang)
 	var res []Result
+	if b != nil {
+		// Local-first: the full query with a hard ~100 km filter. Only when
+		// that finds nothing do we search the whole world (soft bias).
+		if cs := Candidates(q); len(cs) > 0 {
+			queries := []string{cs[0].Query}
+			if v := splitCompounds(cs[0].Query); v != cs[0].Query {
+				queries = append(queries, v) // "highschool" -> "high school"
+			}
+			for _, lq := range queries {
+				r, cached, err := s.photonAttempt(ctx, user, lq, b, limit, lang, true)
+				out.Attempts++
+				if err != nil {
+					break
+				}
+				if !cached {
+					allCached = false
+				}
+				if len(r) > 0 {
+					res = markRelaxed(r, cs[0].Relax)
+					break
+				}
+			}
+			// a local failure just falls through to the global search
+		}
+	}
 	for _, c := range Candidates(q) {
-		r, cached, err := s.photonAttempt(ctx, user, c.Query, b, limit)
+		if len(res) > 0 {
+			break
+		}
+		r, cached, err := s.photonAttempt(ctx, user, c.Query, b, limit, lang, false)
 		out.Attempts++
 		if err != nil {
 			firstErr = err
@@ -78,7 +112,7 @@ func (s *Service) SearchWith(ctx context.Context, user, q string, o SearchOption
 	// Nominatim's policy forbids autocomplete, so typing may reach only the
 	// Census geocoder, and only for a house-number address with a locality.
 	if s.fb != nil && s.needFallback(q, res) && (o.Explicit || len(parse(q).parts) >= 2 || (b != nil && looksUS(b) && hasHouseNumber(q))) {
-		fr, cached, ran, ferr := s.fallbackSearch(ctx, user, q, b, limit, !o.Explicit)
+		fr, cached, ran, ferr := s.fallbackSearch(ctx, user, q, b, limit, lang, !o.Explicit)
 		out.Fallback = ran
 		if ran && !cached {
 			allCached = false
@@ -92,7 +126,7 @@ func (s *Service) SearchWith(ctx context.Context, user, q string, o SearchOption
 		}
 	}
 	if s.goog != nil && wantGoogle(q, res, o.Explicit) {
-		gr, cached, ran := s.googleSearch(ctx, user, q, b, limit)
+		gr, cached, ran := s.googleSearch(ctx, user, q, b, limit, lang)
 		if ran && !cached {
 			allCached = false
 		}
@@ -106,6 +140,7 @@ func (s *Service) SearchWith(ctx context.Context, user, q string, o SearchOption
 	if len(res) == 0 && firstErr != nil {
 		return out, firstErr
 	}
+	res = rankByDistance(res, b)
 	if len(res) > limit {
 		res = res[:limit]
 	}
@@ -134,18 +169,57 @@ func markRelaxed(r []Result, relax string) []Result {
 	return out
 }
 
-func (s *Service) photonAttempt(ctx context.Context, user, q string, b *Point, limit int) ([]Result, bool, error) {
-	key := "s:" + strconv.Itoa(limit) + ":" + NormalizeQuery(q) + biasKey(b)
+var compoundRe = regexp.MustCompile(`(?i)\b(high|middle|elementary|primary|grade|pre)\s*school\b`)
+
+// splitCompounds spells "highschool" as "high school": OSM names use the
+// two-word form and Photon does not match the glued one.
+func splitCompounds(q string) string { return compoundRe.ReplaceAllString(q, "$1 school") }
+
+// rankByDistance keeps provider order but groups results into ~100 km distance
+// bands (nearest band first), so distance is the tie-breaker between hits of
+// similar relevance; exact (non-approximate) hits still come first.
+func rankByDistance(res []Result, b *Point) []Result {
+	if b == nil || len(res) < 2 {
+		return res
+	}
+	band := func(r Result) int { return int(distKm(*b, Point{r.Lat, r.Lon}) / 100) }
+	out := append([]Result(nil), res...)
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Approximate != out[j].Approximate {
+			return !out[i].Approximate
+		}
+		return band(out[i]) < band(out[j])
+	})
+	return out
+}
+
+func distKm(a, b Point) float64 {
+	const rad = math.Pi / 180
+	dLat, dLon := (b.Lat-a.Lat)*rad, (b.Lon-a.Lon)*rad
+	h := math.Sin(dLat/2)*math.Sin(dLat/2) + math.Cos(a.Lat*rad)*math.Cos(b.Lat*rad)*math.Sin(dLon/2)*math.Sin(dLon/2)
+	return 12742 * math.Asin(math.Sqrt(h))
+}
+
+func (s *Service) photonAttempt(ctx context.Context, user, q string, b *Point, limit int, lang string, local bool) ([]Result, bool, error) {
+	key := "s:" + strconv.Itoa(limit) + ":" + NormalizeQuery(q) + biasKey(b) + ":" + lang
+	if local {
+		key += ":local"
+	}
 	if v, ok := s.cache.get(user, key); ok {
 		return v.([]Result), true, nil
 	}
-	body, err := s.fetch(ctx, s.prov.searchURL(s.base, q, b, limit, s.lang))
+	body, err := s.fetch(ctx, s.prov.searchURL(s.base, q, b, limit, lang, local))
 	if err != nil {
 		return nil, false, err
 	}
 	res, perr := s.prov.parseSearch(body)
 	if perr != nil {
 		return nil, false, &Error{Kind: KindParse}
+	}
+	if local {
+		for i := range res {
+			res[i].Local = true
+		}
 	}
 	if len(res) > limit {
 		res = res[:limit]
@@ -302,7 +376,7 @@ func newFallbacks(s Settings, primary *url.URL, primaryIsNominatim bool) (*fallb
 // fallbackSearch asks Nominatim and then the US Census geocoder. ran reports
 // whether any fallback was actually consulted. Fallback failures never fail
 // the request on their own; a busy gate is reported only when nothing was found.
-func (s *Service) fallbackSearch(ctx context.Context, user, q string, b *Point, limit int, censusOnly bool) (res []Result, cached, ran bool, err error) {
+func (s *Service) fallbackSearch(ctx context.Context, user, q string, b *Point, limit int, lang string, censusOnly bool) (res []Result, cached, ran bool, err error) {
 	f := s.fb
 	p := parse(q)
 	number := hasHouseNumber(q)
@@ -311,7 +385,7 @@ func (s *Service) fallbackSearch(ctx context.Context, user, q string, b *Point, 
 	var busy bool
 
 	run := func(name string, g *gate, target string, parse func([]byte) ([]Result, error), post func([]Result) []Result) {
-		key := "f:" + name + ":" + strconv.Itoa(limit) + ":" + NormalizeQuery(target) + biasKey(b)
+		key := "f:" + name + ":" + strconv.Itoa(limit) + ":" + NormalizeQuery(target) + biasKey(b) + ":" + lang
 		if v, ok := s.cache.get(user, key); ok {
 			ran = true
 			res = append(res, v.([]Result)...)
@@ -346,9 +420,9 @@ func (s *Service) fallbackSearch(ctx context.Context, user, q string, b *Point, 
 		nom := nominatim{}
 		target := ""
 		if len(p.parts) >= 3 && number {
-			target = nom.structuredURL(f.nomBase, p.parts[0], p.parts[1], p.parts[len(p.parts)-1], p.usState != "", b, limit, s.lang)
+			target = nom.structuredURL(f.nomBase, p.parts[0], p.parts[1], p.parts[len(p.parts)-1], p.usState != "", b, limit, lang)
 		} else {
-			target = nom.searchURL(f.nomBase, strings.Join(p.parts, ", "), b, limit, s.lang)
+			target = nom.searchURL(f.nomBase, strings.Join(p.parts, ", "), b, limit, lang, false)
 		}
 		run("nominatim", f.nomGate, target, nom.parseSearch, func(r []Result) []Result {
 			for i := range r {

@@ -46,9 +46,28 @@ func parseCoord(raw string, limit float64) (float64, bool) {
 	return v, true
 }
 
+// requestLang resolves the result language: the lang query parameter (400 when
+// malformed), else the first Accept-Language tag, else "" (the service then
+// uses GEOCODER_LANG and finally "en").
+func requestLang(w http.ResponseWriter, r *http.Request) (string, bool) {
+	if l := strings.TrimSpace(r.URL.Query().Get("lang")); l != "" {
+		if !geocode.ValidLang(l) {
+			writeError(w, http.StatusBadRequest, "invalid lang")
+			return "", false
+		}
+		return l, true
+	}
+	first, _, _ := strings.Cut(r.Header.Get("Accept-Language"), ",")
+	first, _, _ = strings.Cut(first, ";")
+	if first = strings.TrimSpace(first); geocode.ValidLang(first) {
+		return first, true
+	}
+	return "", true
+}
+
 // GeocodeSearch proxies forward geocoding / autocomplete.
 //
-//	GET /geocode/search?q=&lat=&lon=&limit=[&explicit=1]
+//	GET /geocode/search?q=&lat=&lon=&limit=[&lang=][&explicit=1]
 //
 // PRIVACY: neither q nor lat/lon is ever logged; only status, count, cache
 // hit and latency are.
@@ -74,6 +93,10 @@ func (s *Server) GeocodeSearch(w http.ResponseWriter, r *http.Request) {
 		}
 		bias = &geocode.Point{Lat: lat, Lon: lon}
 	}
+	lang, ok := requestLang(w, r)
+	if !ok {
+		return
+	}
 	limit := 5
 	if l := qv.Get("limit"); l != "" {
 		n, err := strconv.Atoi(l)
@@ -92,7 +115,7 @@ func (s *Server) GeocodeSearch(w http.ResponseWriter, r *http.Request) {
 
 	start := time.Now()
 	resp, err := s.Geocoder.SearchWith(r.Context(), uid, q, geocode.SearchOptions{
-		Bias: bias, Limit: limit, Explicit: qv.Get("explicit") == "1",
+		Bias: bias, Limit: limit, Lang: lang, Explicit: qv.Get("explicit") == "1",
 	})
 	res := resp.Results
 	if err != nil {
@@ -121,8 +144,12 @@ func (s *Server) GeocodeReverse(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "lat/lon required and in range")
 		return
 	}
+	lang, ok := requestLang(w, r)
+	if !ok {
+		return
+	}
 	start := time.Now()
-	addr, _, err := s.Geocoder.Reverse(r.Context(), uid, geocode.Point{Lat: lat, Lon: lon})
+	addr, _, err := s.Geocoder.ReverseLang(r.Context(), uid, geocode.Point{Lat: lat, Lon: lon}, lang)
 	if err != nil {
 		s.geocodeFail(w, "reverse", start, err)
 		return

@@ -241,13 +241,44 @@ func (s *Service) Search(ctx context.Context, user, q string, bias *Point, limit
 // cache key and for what is sent upstream. A nil Address with nil error means
 // "no address found" (also cached).
 func (s *Service) Reverse(ctx context.Context, user string, p Point) (addr *Address, cached bool, err error) {
+	return s.ReverseLang(ctx, user, p, "")
+}
+
+// resolveLang picks the request language, then GEOCODER_LANG, then "en".
+func (s *Service) resolveLang(l string) string {
+	if l = strings.TrimSpace(l); l != "" {
+		return l
+	}
+	if s.lang != "" {
+		return s.lang
+	}
+	return "en"
+}
+
+// ValidLang reports whether l looks like a BCP-47-ish tag: letters and
+// hyphens only, at most 16 characters.
+func ValidLang(l string) bool {
+	if l == "" || len(l) > 16 {
+		return false
+	}
+	for _, r := range l {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r == '-') {
+			return false
+		}
+	}
+	return l[0] != '-'
+}
+
+// ReverseLang is Reverse with a preferred result language.
+func (s *Service) ReverseLang(ctx context.Context, user string, p Point, lang string) (addr *Address, cached bool, err error) {
+	lang = s.resolveLang(lang)
 	rp := Point{round(p.Lat, 4), round(p.Lon, 4)}
-	key := "r:" + strconv.FormatFloat(rp.Lat, 'f', 4, 64) + "," + strconv.FormatFloat(rp.Lon, 'f', 4, 64)
+	key := "r:" + strconv.FormatFloat(rp.Lat, 'f', 4, 64) + "," + strconv.FormatFloat(rp.Lon, 'f', 4, 64) + ":" + lang
 	if v, ok := s.cache.get(user, key); ok {
 		a, _ := v.(*Address)
 		return a, true, nil
 	}
-	body, err := s.fetch(ctx, s.prov.reverseURL(s.base, rp, s.lang))
+	body, err := s.fetch(ctx, s.prov.reverseURL(s.base, rp, lang))
 	if err != nil {
 		return nil, false, err
 	}
