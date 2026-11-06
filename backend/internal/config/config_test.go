@@ -114,3 +114,14 @@ func TestGeocoderFallbackDefaults(t *testing.T) {
 		t.Fatalf("%q %v", c.GeocoderFallbackURL, c.GeocoderCensusEnabled)
 	}
 }
+
+func TestLoadRequireAdminMFA(t *testing.T) {
+	t.Setenv("REQUIRE_ADMIN_MFA", "")
+	if Load().RequireAdminMFA {
+		t.Fatal("must default to off")
+	}
+	t.Setenv("REQUIRE_ADMIN_MFA", "true")
+	if !Load().RequireAdminMFA {
+		t.Fatal("REQUIRE_ADMIN_MFA=true not honoured")
+	}
+}

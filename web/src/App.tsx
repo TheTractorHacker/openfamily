@@ -17,6 +17,8 @@ import { BuildsPage } from './pages/BuildsPage'
 import { ActivityPage } from './pages/ActivityPage'
 import { BubblesPage } from './pages/BubblesPage'
 import { AuditPage } from './pages/AuditPage'
+import { AlertsPage } from './pages/AlertsPage'
+import { SystemPage } from './pages/SystemPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { CirclesPage } from './pages/CirclesPage'
 import { ShareLinksPage } from './pages/ShareLinksPage'
@@ -45,7 +47,8 @@ export default function App() {
   React.useEffect(() => subscribeAuth(force), [force])
 
   // Identity + capability flags for the signed-in account.
-  const { loading: meLoading, isPlatformAdmin } = useMe()
+  const { me, loading: meLoading, isPlatformAdmin } = useMe()
+  const adminMfaRequired = me?.admin_mfa_required === true
   const serverVersion = useServerVersion()
 
   // Hash-based routing.
@@ -101,7 +104,7 @@ export default function App() {
               </div>
             }
           >
-            {renderPage(route, email, logout, isPlatformAdmin)}
+            {renderPage(route, email, logout, isPlatformAdmin, adminMfaRequired)}
           </React.Suspense>
         )}
       </main>
@@ -114,9 +117,17 @@ function renderPage(
   email: string | null,
   logout: () => void,
   isPlatformAdmin: boolean,
+  adminMfaRequired: boolean,
 ): React.ReactNode {
   // Server-admin routes stay blocked for regular users, even via deep links.
   const adminOnly = ROUTES.find((r) => r.key === route)?.adminOnly ?? false
+  if (adminOnly && isPlatformAdmin && adminMfaRequired) {
+    return (
+      <div className="wb-page">
+        <AccessDenied message="This server requires two-factor authentication for administrators. Turn it on in the OpenFamily app (Settings, Security), then sign out and sign in again with your two-factor code to use the admin panel." />
+      </div>
+    )
+  }
   if (adminOnly && !isPlatformAdmin) {
     return (
       <div className="wb-page">
@@ -145,6 +156,10 @@ function renderPage(
       return <BubblesPage />
     case 'audit':
       return <AuditPage />
+    case 'alerts':
+      return <AlertsPage />
+    case 'system':
+      return <SystemPage />
     case 'builds':
       return <BuildsPage />
     case 'settings':

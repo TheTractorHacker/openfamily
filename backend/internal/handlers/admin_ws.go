@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/TheTractorHacker/openfamily/backend/internal/auth"
+	"github.com/TheTractorHacker/openfamily/backend/internal/middleware"
 	"github.com/TheTractorHacker/openfamily/backend/internal/models"
 	"github.com/coder/websocket"
 	"github.com/jackc/pgx/v5"
@@ -66,6 +67,18 @@ func (s *Server) AdminStream(w http.ResponseWriter, r *http.Request) {
 	if !platformAdmin {
 		http.Error(w, "platform admin required", http.StatusForbidden)
 		return
+	}
+	if s.RequireAdminMFA {
+		var totp bool
+		if err := s.Pool.QueryRow(r.Context(),
+			`SELECT totp_enabled FROM users WHERE id = $1`, claims.UserID).Scan(&totp); err != nil {
+			http.Error(w, "failed to verify two-factor status", http.StatusInternalServerError)
+			return
+		}
+		if !middleware.AdminMFASatisfied(totp, claims) {
+			http.Error(w, middleware.AdminMFARequiredMessage, http.StatusForbidden)
+			return
+		}
 	}
 
 	opts := &websocket.AcceptOptions{OriginPatterns: s.wsOriginPatterns()}
@@ -156,17 +169,19 @@ func (s *Server) AdminStream(w http.ResponseWriter, r *http.Request) {
 // opened with, and is still a platform admin.
 func (s *Server) adminStreamAuthorized(ctx context.Context, userID string, version int) (bool, error) {
 	var current int
-	var platformAdmin bool
+	var platformAdmin, totp bool
 	err := s.Pool.QueryRow(ctx,
-		`SELECT token_version, platform_admin FROM users WHERE id = $1`, userID,
-	).Scan(&current, &platformAdmin)
+		`SELECT token_version, platform_admin, totp_enabled FROM users WHERE id = $1`, userID,
+	).Scan(&current, &platformAdmin, &totp)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
 	if err != nil {
 		return false, err
 	}
-	return current == version && platformAdmin, nil
+	// The session's MFA claim was checked at upgrade; a later TOTP removal
+	// also ends the stream.
+	return current == version && platformAdmin && (!s.RequireAdminMFA || totp), nil
 }
 
 // adminMembersSnapshot returns every member across every family, each joined to

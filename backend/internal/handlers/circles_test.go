@@ -49,7 +49,7 @@ func newCircleEnv(t *testing.T) *circleEnv {
 	r.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			if uid := req.Header.Get("X-Test-User"); uid != "" {
-				req = req.WithContext(middleware.ContextWithClaims(req.Context(), &auth.Claims{UserID: uid}))
+				req = req.WithContext(middleware.ContextWithClaims(req.Context(), &auth.Claims{UserID: uid, AMR: req.Header.Get("X-Test-AMR")}))
 			}
 			next.ServeHTTP(w, req)
 		})

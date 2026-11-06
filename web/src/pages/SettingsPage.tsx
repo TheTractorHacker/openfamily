@@ -24,6 +24,7 @@ import { DawarichSettingsCard } from './DawarichSettingsCard'
 import { ThemeAccentCard } from './ThemeAccentCard'
 import { UnitsDefaultCard } from './UnitsDefaultCard'
 import { DomainSettingsCard } from './DomainSettingsCard'
+import { MapStyleCard } from './MapStyleCard'
 import './pages.css'
 import './SettingsPage.css'
 
@@ -341,6 +342,7 @@ export function SettingsPage({ email, onLogout }: SettingsPageProps) {
           {isPlatformAdmin && <TwilioSettingsCard />}
           {isPlatformAdmin && <ThemeAccentCard />}
           {isPlatformAdmin && <UnitsDefaultCard />}
+          {isPlatformAdmin && <MapStyleCard />}
           {isPlatformAdmin && <DawarichSettingsCard />}
 
           {/* Self-update lives here too: it restarts the server the panel is

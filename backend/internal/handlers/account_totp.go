@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/TheTractorHacker/openfamily/backend/internal/auth"
+	"github.com/TheTractorHacker/openfamily/backend/internal/models"
 	"github.com/TheTractorHacker/openfamily/backend/internal/middleware"
 )
 
@@ -143,7 +144,54 @@ func (s *Server) TOTPEnable(w http.ResponseWriter, r *http.Request) {
 		s.AuthLimit.Reset(failKey)
 	}
 	s.logAudit(r.Context(), claims.UserID, "", "auth.totp_enabled", "enabled TOTP", clientIP(r))
-	writeJSON(w, http.StatusOK, map[string]any{"enabled": true, "recovery_codes": codes})
+	resp := map[string]any{"enabled": true, "recovery_codes": codes}
+	// When two-factor is mandatory for admins, every session that existed
+	// before this moment never passed a challenge. End them all and hand the
+	// caller a fresh session marked as second-factor verified (the code they
+	// just entered is the challenge). Other clients must sign in again.
+	if s.RequireAdminMFA {
+		var platformAdmin bool
+		if err := s.Pool.QueryRow(r.Context(), `SELECT platform_admin FROM users WHERE id = $1`, claims.UserID).Scan(&platformAdmin); err == nil && platformAdmin {
+			if pair, ok := s.rekeyAdminSession(w, r, claims.UserID); ok {
+				resp["access_token"] = pair.AccessToken
+				resp["refresh_token"] = pair.RefreshToken
+				resp["token_type"] = pair.TokenType
+				resp["expires_in"] = pair.ExpiresIn
+			} else {
+				return
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// rekeyAdminSession invalidates every outstanding token and refresh session of
+// userID and returns a new pair carrying the TOTP method claim. It writes the
+// error response itself on failure.
+func (s *Server) rekeyAdminSession(w http.ResponseWriter, r *http.Request, userID string) (tokenPair, bool) {
+	var user models.User
+	err := s.Pool.QueryRow(r.Context(), `
+		UPDATE users SET token_version = token_version + 1, updated_at = now() WHERE id = $1
+		RETURNING id, family_id, email, name, role, totp_enabled, token_version, created_at, updated_at`, userID,
+	).Scan(&user.ID, &user.FamilyID, &user.Email, &user.Name, &user.Role,
+		&user.TOTPEnabled, &user.TokenVersion, &user.CreatedAt, &user.UpdatedAt)
+	if err == nil {
+		err = s.revokeAllSessions(r.Context(), userID)
+	}
+	var jti string
+	if err == nil {
+		jti, err = newTokenID()
+	}
+	if err == nil {
+		err = s.refreshSessions().Create(r.Context(), userID, jti, time.Now().Add(s.TM.RefreshTTL()))
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "two-factor enabled, but sessions could not be renewed; sign in again")
+		return tokenPair{}, false
+	}
+	s.dropUserSockets(userID)
+	s.tagSession(r, jti)
+	return s.mintTokens(w, user, jti, auth.AMRTOTP)
 }
 
 var errTOTPRace = errors.New("totp state changed")

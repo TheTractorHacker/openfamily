@@ -26,6 +26,10 @@ import type {
   AdminBubble,
   AdminPlace,
   AdminCircle,
+  AdminCircleMember,
+  AdminHealth,
+  AdminAlertPage,
+  MapStyleSettings,
   AdminShareLink,
   AdminSession,
   AuditPage,
@@ -684,5 +688,63 @@ export function updateAdminCircle(
 export function revokeAdminInvite(id: string): Promise<{ status: string }> {
   return request<{ status: string }>(`/api/admin/invites/${encodeURIComponent(id)}`, {
     method: 'DELETE',
+  })
+}
+
+// ---- Audit CSV export (platform admin) ----
+
+/** Downloads the audit log as CSV with the same filters as the viewer. */
+export function exportAuditCsv(query: Omit<AuditQuery, 'before_id' | 'limit'>): Promise<Blob> {
+  return request<Blob>(`/api/admin/audit/export${queryString({ ...query })}`, { binary: true, accept: 'text/csv' })
+}
+
+// ---- Circle members (platform admin) ----
+
+export function listAdminCircleMembers(circleId: string): Promise<AdminCircleMember[]> {
+  return request<AdminCircleMember[]>(`/api/admin/circles/${encodeURIComponent(circleId)}/members`)
+}
+
+export function removeAdminCircleMember(circleId: string, userId: string): Promise<{ status: string }> {
+  return request<{ status: string }>(
+    `/api/admin/circles/${encodeURIComponent(circleId)}/members/${encodeURIComponent(userId)}`,
+    { method: 'DELETE' },
+  )
+}
+
+// ---- System health (platform admin) ----
+
+export function getAdminHealth(): Promise<AdminHealth> {
+  return request<AdminHealth>('/api/admin/health')
+}
+
+// ---- Alerts and SOS (platform admin, no coordinates) ----
+
+export async function listAdminAlerts(query: {
+  status?: string
+  type?: string
+  before?: string
+  limit?: number
+}): Promise<AdminAlertPage> {
+  return request<AdminAlertPage>(`/api/admin/alerts${queryString({ ...query })}`)
+}
+
+// ---- Map style (platform admin) ----
+
+export function getMapStyleSettings(): Promise<MapStyleSettings> {
+  return request<MapStyleSettings>('/api/admin/settings/map-style')
+}
+
+export function saveMapStyleSettings(mapStyleUrl: string): Promise<MapStyleSettings> {
+  return request<MapStyleSettings>('/api/admin/settings/map-style', {
+    method: 'PUT',
+    body: { map_style_url: mapStyleUrl },
+  })
+}
+
+/** Checks a style URL (or the effective one when empty) without saving it. */
+export function testMapStyle(mapStyleUrl: string): Promise<{ status: string }> {
+  return request<{ status: string }>('/api/admin/settings/map-style/test', {
+    method: 'POST',
+    body: { map_style_url: mapStyleUrl },
   })
 }

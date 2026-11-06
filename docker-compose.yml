@@ -76,6 +76,8 @@ services:
       TILE_URL: ${TILE_URL:-}
       SATELLITE_TILE_URL: ${SATELLITE_TILE_URL:-}
       MAP_STYLE_URL: ${MAP_STYLE_URL:-}
+      # Refuse admin panel/API access to platform admins without TOTP.
+      REQUIRE_ADMIN_MFA: ${REQUIRE_ADMIN_MFA:-false}
       # Address search / automatic address detection for places. The server
       # proxies it, so phones never contact the provider. `-` (not `:-`) means
       # an explicitly EMPTY GEOCODER_URL disables the feature. See docs/maps.md.

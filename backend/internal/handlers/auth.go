@@ -208,7 +208,11 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 	s.tagSession(r, jti)
 	// Opportunistic cleanup of long-expired rows; never blocks login.
 	go func() { _ = s.refreshSessions().Purge(context.Background()) }()
-	s.issueTokens(w, user, jti)
+	amr := ""
+	if user.TOTPEnabled { // the challenge above was passed
+		amr = auth.AMRTOTP
+	}
+	s.issueTokens(w, user, jti, amr)
 }
 
 // Refresh rotates a refresh token into a new token pair.
@@ -275,7 +279,7 @@ func (s *Server) Refresh(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to rotate refresh token")
 		return
 	}
-	s.issueTokens(w, user, newJTI)
+	s.issueTokens(w, user, newJTI, claims.AMR)
 }
 
 // Logout bumps token_version so every outstanding access and refresh token
@@ -344,27 +348,37 @@ func (s *Server) rotateRefreshToken(ctx context.Context, userID, oldJTI string) 
 	return "", refreshRejected
 }
 
-func (s *Server) issueTokens(w http.ResponseWriter, user models.User, refreshJTI string) {
+func (s *Server) issueTokens(w http.ResponseWriter, user models.User, refreshJTI, amr string) {
+	pair, ok := s.mintTokens(w, user, refreshJTI, amr)
+	if !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, pair)
+}
+
+// mintTokens builds a token pair for a session with authentication method
+// amr, writing the error response itself when it fails.
+func (s *Server) mintTokens(w http.ResponseWriter, user models.User, refreshJTI, amr string) (tokenPair, bool) {
 	familyID := ""
 	if user.FamilyID != nil {
 		familyID = *user.FamilyID
 	}
-	access, err := s.TM.IssueAccess(user.ID, familyID, user.TokenVersion)
+	access, err := s.TM.IssueAccessAMR(user.ID, familyID, user.TokenVersion, amr)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to issue access token")
-		return
+		return tokenPair{}, false
 	}
-	refresh, err := s.TM.IssueRefreshWithID(user.ID, familyID, user.TokenVersion, refreshJTI)
+	refresh, err := s.TM.IssueRefreshWithIDAMR(user.ID, familyID, user.TokenVersion, refreshJTI, amr)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to issue refresh token")
-		return
+		return tokenPair{}, false
 	}
-	writeJSON(w, http.StatusOK, tokenPair{
+	return tokenPair{
 		AccessToken:  access,
 		RefreshToken: refresh,
 		TokenType:    "Bearer",
 		ExpiresIn:    int64(s.TM.AccessTTL() / time.Second),
-	})
+	}, true
 }
 
 func isUniqueViolation(err error) bool {

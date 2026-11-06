@@ -42,6 +42,8 @@ export interface Me extends Profile {
   phone?: string | null
   /** True when the account may use the server-admin surfaces (/api/admin/*). */
   platform_admin: boolean
+  /** True when two-factor is required for admins and this admin has none. */
+  admin_mfa_required?: boolean
   created_at?: string
   updated_at?: string
 }
@@ -362,4 +364,68 @@ export interface AdminBubble {
   created_at: string
   expires_at: string
   members: AdminBubbleMember[]
+}
+
+/** A member of a circle from GET /api/admin/circles/{id}/members (no coordinates). */
+export interface AdminCircleMember {
+  user_id: string
+  name: string
+  email: string
+  role: 'admin' | 'member'
+  sharing_enabled: boolean
+  joined_at: string
+}
+
+/** GET /api/admin/health. */
+export interface AdminHealth {
+  release_version: string
+  migration: { version: number; dirty: boolean }
+  database_bytes: number
+  backup: {
+    last_at: string | null
+    size_bytes: number | null
+    age_hours: number | null
+    status: 'ok' | 'stale' | 'missing'
+    stale_after_hours: number
+  }
+  recent_errors: { time: string; level: string; message: string }[]
+  warnings: string[]
+}
+
+export interface AdminAlertDelivery {
+  recipient: string
+  channel: string
+  state: 'queued' | 'sent' | 'delivered' | 'failed' | 'acknowledged'
+  error?: string
+  sent_at: string | null
+  delivered_at: string | null
+  acknowledged_at: string | null
+}
+
+/** An alert from GET /api/admin/alerts. Never carries coordinates or the note. */
+export interface AdminAlert {
+  id: string
+  type: string
+  status: 'active' | 'resolved'
+  sender_id: string
+  sender_name: string
+  family_name: string
+  has_location: boolean
+  created_at: string
+  resolved_at: string | null
+  deliveries: AdminAlertDelivery[]
+}
+
+export interface AdminAlertPage {
+  alerts: AdminAlert[]
+  next_before: string
+}
+
+export interface MapStyleSettings {
+  /** The admin-set style URL ("" when none is set). */
+  map_style_url: string
+  /** The MAP_STYLE_URL environment value. */
+  env_default: string
+  /** What /config serves right now ("" = built-in OpenFreeMap). */
+  effective: string
 }

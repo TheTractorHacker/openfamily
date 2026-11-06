@@ -13,6 +13,8 @@ export type RouteKey =
   | 'activity'
   | 'bubbles'
   | 'audit'
+  | 'alerts'
+  | 'system'
   | 'builds'
   | 'settings'
 
@@ -177,6 +179,36 @@ export const ROUTES: RouteDef[] = [
     icon: icon(
       <path
         d="M12 3 5 6v5.5c0 4.3 2.8 7.6 7 9.5 4.2-1.9 7-5.2 7-9.5V6l-7-3Zm-2.5 9 2 2 3.5-4"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    ),
+  },
+  {
+    key: 'alerts',
+    label: 'Alerts & SOS',
+    hash: '#/alerts',
+    adminOnly: true,
+    icon: icon(
+      <path
+        d="M12 4 3 19h18L12 4Zm0 5.5v4.5m0 2.5v.01"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    ),
+  },
+  {
+    key: 'system',
+    label: 'System health',
+    hash: '#/system',
+    adminOnly: true,
+    icon: icon(
+      <path
+        d="M4 13h3l2-5 4 10 2-5h5M4 5h16v14H4z"
         stroke="currentColor"
         strokeWidth="1.6"
         strokeLinecap="round"
