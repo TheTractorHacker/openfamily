@@ -4,14 +4,15 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"github.com/go-webauthn/webauthn/webauthn"
 	"net/http"
 	"sync"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/TheTractorHacker/openfamily/backend/internal/auth"
 	"github.com/TheTractorHacker/openfamily/backend/internal/geocode"
 	"github.com/TheTractorHacker/openfamily/backend/internal/push"
 	"github.com/TheTractorHacker/openfamily/backend/internal/sms"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // Server holds shared dependencies for all handlers.
@@ -19,6 +20,9 @@ type Server struct {
 	Pool *pgxpool.Pool
 	TM   *auth.TokenManager
 	Push push.Dispatcher
+
+	// WebAuthn is the passkey relying party (nil = passkeys disabled).
+	WebAuthn *webauthn.WebAuthn
 
 	// VerbosePush controls whether push notifications include the tracked
 	// user's name. When false (default), pushes name the place but omit the
@@ -64,7 +68,7 @@ type Server struct {
 	// TileURL and SatelliteTileURL are raster templates advertised on GET /config.
 	TileURL          string
 	SatelliteTileURL string
-	MapStyleURL string
+	MapStyleURL      string
 
 	// Geocoder is the optional address search/reverse proxy (nil = disabled,
 	// GET /geocode/* answer 503). See internal/geocode.

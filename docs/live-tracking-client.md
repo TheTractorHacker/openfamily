@@ -119,3 +119,20 @@ interval keep running). Any fix more than 60 m from the anchor, walking-or-faste
 speed, a moving activity state, a live boost or SOS leaves idle at once.
 Fixes without coordinates never count as stillness. The foreground reporter
 never uses it.
+
+## Battery comparison procedure (physical device only)
+
+Emulators cannot measure this. The adaptive policy (`tracking_cadence.dart`:
+still / walking / driving profiles, low-battery intervals at <= 15%, idle
+back-off after 10 minutes within 60 m) has no measured numbers yet; record
+them with this procedure and paste results here.
+
+1. Same phone, fully charged, screen off, same mobile network, battery saver
+   off, `adb shell dumpsys batterystats --reset` before each run.
+2. Run A, fixed interval: a build with `CadenceConfig` forced to the walking
+   profile (5 s GPS) for 8 hours of a normal day (home/commute/work).
+3. Run B, adaptive: the shipping build over the same route/schedule.
+4. After each: `adb bugreport` or `dumpsys batterystats --charged`; note
+   percentage drained, GPS wake time and number of `POST /locations`.
+5. Record freshness: the 95th percentile age of the last fix while moving
+   (must stay under ~10 s) and while still (under ~3 min).

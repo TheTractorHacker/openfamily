@@ -213,3 +213,15 @@ the person's location, so it shows in Crash reports and the admin activity
 feed. The sender can mark it false alarm (`POST /crashes/{id}/status`). A device
 report suppresses a server-heuristic report for the same moment (+-2 min).
 Emergency services are never contacted.
+
+### False-positive evidence (honest status)
+
+There is no field data yet. What exists: `app/test/services/driving/crash_detector_test.dart`
+replays synthetic traces that must NOT trigger (pothole at speed, phone dropped
+while driving/parked/walking/after stopping, hard braking without a spike, a
+spike with speed staying above the hold level, a slowdown only to 10 m/s, below
+20 km/h, stale GPS, a spike just under 4 g) and traces that must (60 km/h spike
+then stop). Every false alarm is cheap: it only starts the cancelable 30 s
+"I'm OK" countdown and sends nothing unless it expires. Before treating the
+thresholds as proven, record real drives with detection on and count
+countdowns per 100 hours driven.
