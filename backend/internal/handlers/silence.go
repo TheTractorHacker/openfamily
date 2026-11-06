@@ -139,7 +139,7 @@ func (s *Server) RunSilenceOnce(ctx context.Context, now time.Time) (int, error)
 		SELECT c.id::text, c.name, c.silence_alert_hours, u.id::text, u.name,
 		       GREATEST(COALESCE(rs.last_report_at, 'epoch'), COALESCE((SELECT max(d.last_seen) FROM devices d WHERE d.user_id = u.id), 'epoch'))
 		FROM circles c
-		JOIN circle_members m ON m.circle_id = c.id AND m.sharing_enabled
+		JOIN live_circle_members m ON m.circle_id = c.id AND m.sharing_enabled
 		JOIN users u ON u.id = m.user_id
 		LEFT JOIN member_report_state rs ON rs.user_id = u.id
 		LEFT JOIN silence_member_prefs p ON p.circle_id = c.id AND p.user_id = u.id
@@ -277,7 +277,7 @@ func (s *Server) reportHistory(ctx context.Context, users []string, now time.Tim
 // admins (minus the member) and the member, after quiet hours, the recipient's
 // category switch and per-member mutes.
 func (s *Server) silenceRecipients(ctx context.Context, c *silenceCandidate, now time.Time) (admins []string, self bool) {
-	rows, err := s.Pool.Query(ctx, `SELECT user_id::text FROM circle_members WHERE circle_id = $1 AND role = 'admin' AND user_id <> $2`, c.circleID, c.userID)
+	rows, err := s.Pool.Query(ctx, `SELECT user_id::text FROM live_circle_members WHERE circle_id = $1 AND role = 'admin' AND user_id <> $2`, c.circleID, c.userID)
 	if err != nil {
 		return nil, false
 	}

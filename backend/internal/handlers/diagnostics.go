@@ -165,7 +165,7 @@ func (s *Server) GetMyDiagnostics(w http.ResponseWriter, r *http.Request) {
 	}
 	crow, err := s.Pool.Query(ctx, `
 		SELECT c.id::text, c.name, c.e2ee_mode = 'private', c.silence_alert_hours
-		FROM circle_members m JOIN circles c ON c.id = m.circle_id
+		FROM live_circle_members m JOIN circles c ON c.id = m.circle_id
 		WHERE m.user_id = $1 ORDER BY c.name`, claims.UserID)
 	circs := []circleDiag{}
 	if err == nil {
@@ -226,7 +226,7 @@ func (s *Server) AdminFleetHealth(w http.ResponseWriter, r *http.Request) {
 		m := member{UserID: uid, Devices: byUser[uid]}
 		if err := s.Pool.QueryRow(ctx, `
 			SELECT u.name, u.email, NULLIF(rs.last_report_at, 'epoch'), rs.last_ws_at,
-			       EXISTS (SELECT 1 FROM circle_members cm JOIN circles c ON c.id = cm.circle_id
+			       EXISTS (SELECT 1 FROM live_circle_members cm JOIN circles c ON c.id = cm.circle_id
 			               WHERE cm.user_id = u.id AND c.e2ee_mode = 'private')
 			FROM users u LEFT JOIN member_report_state rs ON rs.user_id = u.id WHERE u.id = $1`, uid).
 			Scan(&m.Name, &m.Email, &m.LastReportAt, &m.LastWSAt, &m.Private); err != nil {

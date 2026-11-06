@@ -505,3 +505,48 @@ func TestSilenceAlertSettingsAuthorization(t *testing.T) {
 		t.Fatalf("test push: %d", code)
 	}
 }
+
+// Expired circles and removed members must never be alerted or listed as recipients.
+func TestSilenceIgnoresExpiredCirclesAndRemovedMembers(t *testing.T) {
+	fx := newAlertFixture(t)
+	ctx := context.Background()
+	if err := fx.srv.EnsureNotificationSchema(ctx); err != nil {
+		t.Fatal(err)
+	}
+	exec := func(q string, a ...any) {
+		t.Helper()
+		if _, err := fx.pool.Exec(ctx, q, a...); err != nil {
+			t.Fatalf("%v\n%s", err, q)
+		}
+	}
+	exec(`INSERT INTO devices (user_id, platform, unifiedpush_endpoint) VALUES ($1,'android','https://ntfy.example/a')`, fx.a)
+	now := time.Date(2026, 3, 10, 15, 0, 0, 0, time.UTC)
+	exec(`INSERT INTO member_report_hours (user_id, hour)
+		SELECT $1::uuid, ($2::timestamptz - make_interval(days => d)) - make_interval(hours => h)
+		FROM generate_series(1, 6) d, generate_series(0, 23) h ON CONFLICT DO NOTHING`, fx.b, now)
+	exec(`INSERT INTO member_report_state (user_id, last_report_at) VALUES ($1, $2)`, fx.b, now.Add(-10*time.Hour))
+	exec(`UPDATE circles SET silence_alert_hours = 8 WHERE id = $1`, fx.f1)
+
+	// Expired circle: nobody is alerted.
+	exec(`UPDATE circles SET expires_at = now() - interval '1 hour' WHERE id = $1`, fx.f1)
+	if n, err := fx.srv.RunSilenceOnce(ctx, now); err != nil || n != 0 {
+		t.Fatalf("expired circle alerted: %d %v", n, err)
+	}
+	exec(`UPDATE circles SET expires_at = NULL WHERE id = $1`, fx.f1)
+
+	// Removed admin is not a recipient (b is the silent member; a was removed).
+	exec(`DELETE FROM circle_members WHERE circle_id = $1 AND user_id = ANY($2::uuid[])`, fx.f1, []string{fx.a, fx.d})
+	before := len(capturedPushes(fx))
+	admins, _ := fx.srv.silenceRecipients(ctx, &silenceCandidate{circleID: fx.f1, userID: fx.b}, now)
+	if len(admins) != 0 {
+		t.Fatalf("removed admins listed as recipients: %v", admins)
+	}
+	// Removed member is never alerted about.
+	exec(`DELETE FROM circle_members WHERE circle_id = $1 AND user_id = $2`, fx.f1, fx.b)
+	if n, _ := fx.srv.RunSilenceOnce(ctx, now); n != 0 {
+		t.Fatalf("removed member alerted: %d", n)
+	}
+	if len(capturedPushes(fx)) != before {
+		t.Fatal("push sent for removed member/admin")
+	}
+}
