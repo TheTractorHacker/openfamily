@@ -407,16 +407,16 @@ test('sender not in the verified log is deferred, never accepted; revoked sender
 test('registration verdicts cannot be poisoned: same device_id and signature, different covered field', async () => {
   const { s, rep } = await synced()
   const good = findDevice(rep.state.members, s.w.B.deviceId).dev
-  assert.equal(authorizeSender(rep.logIndex, findDevice(rep.state.members, s.w.B.deviceId)), null)
+  assert.equal(authorizeSender(rep.logIndex, rep.state.members, findDevice(rep.state.members, s.w.B.deviceId)), null)
   const forged = structuredClone(rep.state.members)
   const f = findDevice(forged, s.w.B.deviceId)
   f.dev.x25519_pub = c.b64(s.w.A.x) // same device_id + registration_signature, another covered field
-  assert.notEqual(authorizeSender(rep.logIndex, f), null)
+  assert.notEqual(authorizeSender(rep.logIndex, rep.state.members, f), null)
   assert.equal(verifyRegistration(good), true)
   assert.equal(verifyRegistration(f.dev), false)
   // Order independence.
-  assert.notEqual(authorizeSender(rep.logIndex, f), null)
-  assert.equal(authorizeSender(rep.logIndex, findDevice(rep.state.members, s.w.B.deviceId)), null)
+  assert.notEqual(authorizeSender(rep.logIndex, rep.state.members, f), null)
+  assert.equal(authorizeSender(rep.logIndex, rep.state.members, findDevice(rep.state.members, s.w.B.deviceId)), null)
 })
 
 test('full-log sync keeps the pin rules: fork and rollback with a pinned head', async () => {
@@ -425,4 +425,129 @@ test('full-log sync keeps the pin rules: fork and rollback with a pinned head', 
   assert.ok((await syncLogFull(null, fetchPage)).check.ok)
   assert.equal((await syncLogFull({ seq: 2, hash: '11'.repeat(32) }, fetchPage)).check.problem, 'fork')
   assert.equal((await syncLogFull({ seq: 99, hash: '11'.repeat(32) }, fetchPage)).check.problem, 'rollback')
+})
+
+// ---------------------------------------------------------------- chain walk (key binding, revoke order)
+
+async function indexOfWorld(w) {
+  const r = await syncLogFull(null, async (after) => ({
+    entries: w.log.filter((e) => e.seq > after).slice(0, 500),
+    head: { seq: w.log.length, hash: w.log.at(-1).entry_hash },
+  }))
+  return r
+}
+const membersOf = (w, ...recs) => [{ user_id: USER_A, name: 'Alex', role: 'admin', devices: recs.map((r) => { const { _msg, _sig, _actor, ...x } = r; return x }) }]
+const asFound = (m, d) => ({ dev: m[0].devices.find((x) => x.device_id === d.device_id), member: m[0] })
+function revokeEntry(w, target, by) {
+  const fp = c.fingerprint(target.ed, target.x)
+  const msg = c.logActionMessage(3, USER_A, by.deviceId, { subjectId: target.deviceId, ref: fp })
+  w.appendLog(3, USER_A, by, { subject: target.deviceId, ref: fp, sig: ed25519.sign(msg, by.edSeed), msg })
+}
+
+test('chain walk: real flows (root phone, second phone, viewer vouched by a phone) are accepted', async () => {
+  const w = new World()
+  const a = w.register(w.A, { action: 1 })
+  const p2s = phone(3, USER_A, '33333333-3333-4333-8333-333333333333')
+  const p2 = w.register(p2s, { actor: w.A })
+  const vs = phone(4, USER_A, '44444444-4444-4444-8444-444444444444')
+  const v = w.register(vs, { actor: p2s, kind: 'web' })
+  const { check, index } = await indexOfWorld(w)
+  assert.ok(check.ok)
+  const m = membersOf(w, a, p2, v)
+  for (const d of [a, p2, v]) assert.equal(authorizeSender(index, m, asFound(m, d)), null)
+})
+
+test('chain walk: a second entry for a device signed with another key makes the whole log untrusted', async () => {
+  const w = new World()
+  w.register(w.A, { action: 1 })
+  const evil = phone(0xee, USER_A, w.A.deviceId) // same device id, other key
+  const x = phone(5, USER_A, '55555555-5555-4555-8555-555555555555')
+  const fp = c.fingerprint(x.ed, x.x)
+  const msg = c.logActionMessage(1, USER_A, w.A.deviceId, { subjectId: x.deviceId, ref: fp })
+  w.appendLog(1, USER_A, evil, { subject: x.deviceId, ref: fp, sig: ed25519.sign(msg, evil.edSeed), msg })
+  const r = await indexOfWorld(w)
+  assert.equal(r.check.ok, false)
+  assert.equal(r.check.problem, 'malformed')
+})
+
+test('chain walk: voucher id with a key the state does not list is refused', async () => {
+  const w = new World()
+  const a = w.register(w.A, { action: 1 })
+  const p2s = phone(3, USER_A, '33333333-3333-4333-8333-333333333333')
+  const p2 = w.register(p2s, { actor: w.A }) // listed with its real key, never signs afterwards
+  const evil = phone(0xee, USER_A, 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee')
+  const xs = phone(5, USER_A, '55555555-5555-4555-8555-555555555555')
+  // X claims to be vouched by p2's id but with the attacker's key (valid signature, logged).
+  const forged = deviceRecord(xs, { actor: { ...evil, deviceId: p2s.deviceId } })
+  w.devices.push(forged)
+  w.appendLog(1, USER_A, { ...evil, deviceId: p2s.deviceId }, { subject: xs.deviceId, ref: c.unhex(forged.fingerprint), sig: forged._sig, msg: forged._msg })
+  const { check, index } = await indexOfWorld(w)
+  assert.ok(check.ok) // p2 only signs once, so the log alone cannot tell
+  assert.ok(verifyRegistration(forged))
+  const m = membersOf(w, a, p2, forged)
+  assert.notEqual(authorizeSender(index, m, asFound(m, forged)), null)
+  assert.equal(index.chainLogged(forged, []), false) // and without the state: p2's own chain does not support that key
+})
+
+test('chain walk: root whose claimed key differs from the logged one is refused', async () => {
+  const w = new World()
+  const a = w.register(w.A, { action: 1 })
+  const { index } = await indexOfWorld(w)
+  const other = phone(0x42, USER_A, 'abababab-abab-4aba-8aba-abababababab')
+  const bad = { ...a, registered_by_ed25519_pub: c.b64(other.ed) }
+  assert.equal(index.chainLogged(bad, []), false)
+  const bad2 = { ...a, ed25519_pub: c.b64(other.ed) }
+  assert.equal(index.chainLogged(bad2, []), false)
+})
+
+test('chain walk: registration before the voucher revoke stays valid, after it is refused', async () => {
+  const w = new World()
+  w.register(w.A, { action: 1 })
+  const p2s = phone(3, USER_A, '33333333-3333-4333-8333-333333333333')
+  const p2 = w.register(p2s, { actor: w.A })
+  revokeEntry(w, w.A, w.A) // the first phone is revoked AFTER p2 was registered by it
+  const late = phone(6, USER_A, '66666666-6666-4666-8666-666666666666')
+  const lateRec = w.register(late, { actor: w.A }) // registered AFTER the revoke by the revoked key
+  const { check, index } = await indexOfWorld(w)
+  assert.ok(check.ok)
+  const m = membersOf(w, p2, lateRec)
+  assert.equal(authorizeSender(index, m, asFound(m, p2)), null)
+  assert.match(authorizeSender(index, m, asFound(m, lateRec)), /not in the verified log/)
+  // A chain through a log-revoked middle voucher.
+  const w2 = new World()
+  w2.register(w2.A, { action: 1 })
+  const midS = phone(3, USER_A, '33333333-3333-4333-8333-333333333333')
+  w2.register(midS, { actor: w2.A })
+  revokeEntry(w2, midS, w2.A)
+  const deepS = phone(4, USER_A, '44444444-4444-4444-8444-444444444444')
+  const deep = w2.register(deepS, { actor: midS })
+  const r2 = await indexOfWorld(w2)
+  const m2 = membersOf(w2, deep)
+  assert.notEqual(authorizeSender(r2.index, m2, asFound(m2, deep)), null)
+})
+
+test('a device revoked in the log is refused even if the state still lists it', async () => {
+  const w = new World()
+  w.register(w.A, { action: 1 })
+  const p2s = phone(3, USER_A, '33333333-3333-4333-8333-333333333333')
+  const p2 = w.register(p2s, { actor: w.A })
+  revokeEntry(w, p2s, w.A)
+  const { index } = await indexOfWorld(w)
+  const m = membersOf(w, p2)
+  assert.match(authorizeSender(index, m, asFound(m, p2)), /revoked/)
+})
+
+test('redacted entries are tolerated by the index but never count as proof of anything', async () => {
+  const w = new World()
+  const a = w.register(w.A, { action: 1 })
+  const p2s = phone(3, USER_A, '33333333-3333-4333-8333-333333333333')
+  const p2 = w.register(p2s, { actor: w.A })
+  // A hostile server could redact a revoke; the client cannot see it (documented limit), but the
+  // registration must still be positively present. Redacting the REGISTRATION itself denies trust.
+  const red = structuredClone(w.log)
+  red[1] = { seq: 2, prev_hash: red[1].prev_hash, entry_hash: red[1].entry_hash, redacted: true }
+  const r = await syncLogFull(null, async (after) => ({ entries: red.filter((e) => e.seq > after), head: { seq: red.length, hash: red.at(-1).entry_hash } }))
+  assert.ok(r.check.ok)
+  const m = membersOf(w, a, p2)
+  assert.notEqual(authorizeSender(r.index, m, asFound(m, p2)), null)
 })

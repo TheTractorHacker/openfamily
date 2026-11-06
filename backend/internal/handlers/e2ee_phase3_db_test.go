@@ -80,3 +80,28 @@ func TestE2EEViewerOfUnapprovedRootIsNotApproved(t *testing.T) {
 	e.mustCode("A", "POST", "/circles/"+e.circle+"/e2ee/wraps", map[string]any{"epoch": 1,
 		"wraps": []any{mkWrap(t, e.circle, 1, e.a, view, e.key)}}, 400)
 }
+
+// A verifier relies on seeing revocations of its co-members' devices: the log must
+// never redact a revoke entry of a person who shares a circle with the reader.
+func TestE2EELogNeverRedactsCoMemberRevokes(t *testing.T) {
+	e := newChanEnv(t)
+	web := newTDev(t, e.ids["B"])
+	e.mustCode("B", "POST", "/e2ee/devices", regBody(t, web, "web", e.b, e2ee.ActRegister, false), 201)
+	e.mustCode("B", "DELETE", "/e2ee/devices/"+web.id, simpleAction(t, e2ee.ActRevoke, e.b, "", 0, web.id, web.fp), 200)
+	for _, reader := range []string{"A", "C"} {
+		got := e.mustCode(reader, "GET", "/e2ee/log?after=0", nil, 200)
+		found := false
+		for _, raw := range got["entries"].([]any) {
+			en := raw.(map[string]any)
+			if en["subject_id"] == web.id && en["action"] == float64(e2ee.ActRevoke) {
+				found = true
+				if en["redacted"] == true || en["actor_ed25519_pub"] == nil || en["signature"] == nil {
+					t.Fatalf("%s: revoke entry of a co-member was redacted: %v", reader, en)
+				}
+			}
+		}
+		if !found {
+			t.Fatalf("%s: revoke entry not served", reader)
+		}
+	}
+}

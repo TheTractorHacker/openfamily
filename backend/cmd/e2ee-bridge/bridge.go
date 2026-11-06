@@ -542,7 +542,7 @@ func (b *bridge) process(ctx context.Context, circle string, it wireItem) reason
 		}
 		return rUnknownSender
 	}
-	if err := e2ee.AuthorizeSender(b.logIdx, dev, mem); err != nil {
+	if err := e2ee.AuthorizeSender(b.logIdx, st.Members, dev, mem); err != nil {
 		switch {
 		case errors.Is(err, e2ee.ErrNotInLog):
 			return rUnknownSender // may appear after the next log verification

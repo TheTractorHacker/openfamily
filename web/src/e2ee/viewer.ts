@@ -312,7 +312,7 @@ export class Receiver {
     }
     const { dev, member } = sender
     const idx = this.logIndex()
-    const why = authorizeSender(idx, sender)
+    const why = authorizeSender(idx, this.state().members, sender)
     if (why) {
       if (idx && why.includes('not in the verified log')) {
         this.deferredCount++

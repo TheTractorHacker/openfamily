@@ -422,14 +422,21 @@ type LogIndex struct {
 	hashes  map[int64][]byte
 	regs    map[string]LogEntry // subject device -> its registration entry
 	epochs  map[string]LogEntry // circle|epoch -> enable/epoch entry
-	revoked map[string]bool
+	revoked map[string]int64    // device -> sequence number of the first logged revoke
+	// actorKey is the one Ed25519 key each acting device id has used in the log.
+	// A log entry only proves "some key signed this"; binding it to the device id is
+	// what stops a forged voucher.
+	actorKey map[string]string
+	// conflict is set when one device id appears with two different keys (the log
+	// is then not trusted at all).
+	conflict string
 }
 
 // ErrNotInLog marks a key the verified log does not contain (yet).
 var ErrNotInLog = errors.New("e2ee: not in the verified log")
 
 func newLogIndex() *LogIndex {
-	return &LogIndex{hashes: map[int64][]byte{}, regs: map[string]LogEntry{}, epochs: map[string]LogEntry{}, revoked: map[string]bool{}}
+	return &LogIndex{hashes: map[int64][]byte{}, regs: map[string]LogEntry{}, epochs: map[string]LogEntry{}, revoked: map[string]int64{}, actorKey: map[string]string{}}
 }
 
 func (x *LogIndex) add(e LogEntry) {
@@ -439,6 +446,13 @@ func (x *LogIndex) add(e LogEntry) {
 	if e.Redacted || e.Action == nil {
 		return
 	}
+	if e.ActorDeviceID != nil && e.ActorPub != nil {
+		if k, ok := x.actorKey[*e.ActorDeviceID]; ok && k != *e.ActorPub && x.conflict == "" {
+			x.conflict = fmt.Sprintf("entry %d: device %s signs with a different key than before", e.Seq, *e.ActorDeviceID)
+		} else if !ok {
+			x.actorKey[*e.ActorDeviceID] = *e.ActorPub
+		}
+	}
 	switch byte(*e.Action) {
 	case ActEnable, ActEpoch:
 		if e.CircleID != nil && e.Epoch != nil {
@@ -446,11 +460,17 @@ func (x *LogIndex) add(e LogEntry) {
 		}
 	case ActRegister, ActRotate, ActRecovery, ActReset:
 		if e.SubjectID != nil {
-			x.regs[*e.SubjectID] = e
+			if _, dup := x.regs[*e.SubjectID]; dup && x.conflict == "" {
+				x.conflict = fmt.Sprintf("entry %d: device %s is registered twice", e.Seq, *e.SubjectID)
+			} else if !dup {
+				x.regs[*e.SubjectID] = e
+			}
 		}
 	case ActRevoke:
 		if e.SubjectID != nil {
-			x.revoked[*e.SubjectID] = true
+			if _, ok := x.revoked[*e.SubjectID]; !ok {
+				x.revoked[*e.SubjectID] = e.Seq
+			}
 		}
 	}
 }
@@ -461,9 +481,15 @@ func (x *LogIndex) add(e LogEntry) {
 func SyncLogFull(pinned *LogHead, fetch LogFetcher) (LogCheck, *LogIndex, error) {
 	idx := newLogIndex()
 	var all []LogEntry
+	seen := map[int64]bool{}
 	capture := func(after int64) ([]LogEntry, LogHead, error) {
 		es, h, err := fetch(after)
-		all = append(all, es...)
+		for _, e := range es { // pages overlap by one entry; index each sequence number once
+			if !seen[e.Seq] {
+				seen[e.Seq] = true
+				all = append(all, e)
+			}
+		}
 		return es, h, err
 	}
 	c, err := SyncLog(nil, capture)
@@ -472,6 +498,9 @@ func SyncLogFull(pinned *LogHead, fetch LogFetcher) (LogCheck, *LogIndex, error)
 	}
 	for _, e := range all {
 		idx.add(e)
+	}
+	if idx.conflict != "" {
+		return LogCheck{Problem: LogMalformed, Detail: idx.conflict}, nil, nil
 	}
 	if pinned != nil {
 		if c.NewHead.Seq < pinned.Seq {
@@ -485,7 +514,13 @@ func SyncLogFull(pinned *LogHead, fetch LogFetcher) (LogCheck, *LogIndex, error)
 }
 
 // Revoked reports whether the log revokes the device.
-func (x *LogIndex) Revoked(deviceID string) bool { return x != nil && x.revoked[deviceID] }
+func (x *LogIndex) Revoked(deviceID string) bool {
+	if x == nil {
+		return false
+	}
+	_, ok := x.revoked[deviceID]
+	return ok
+}
 
 // RegistrationLogged requires a log entry that matches every field of the
 // device's registration (user, actor, action, fingerprint, signature, actor key).
@@ -502,26 +537,60 @@ func (x *LogIndex) RegistrationLogged(d DeviceRecord) bool {
 }
 
 // ChainLogged follows the registration chain (voucher after voucher) up to a
-// self-registered root; every hop must be in the log.
-func (x *LogIndex) ChainLogged(d DeviceRecord) bool {
+// self-registered root. Strict rules, all fail closed:
+//   - every hop's registration is in the log, field for field;
+//   - each voucher's key as used in the hop (RegisteredByPub) is the key that
+//     device id has always signed with in the log, and equals the key the circle
+//     state lists for it when it is listed (so a forged "voucher" under a real
+//     device id but an attacker's key is refused);
+//   - a voucher revoked in the log BEFORE the vouched registration cannot mint
+//     devices (a registration that predates the revoke stays valid).
+func (x *LogIndex) ChainLogged(d DeviceRecord, members []CircleMember) bool {
+	if x == nil {
+		return false
+	}
+	if k, ok := x.actorKey[d.DeviceID]; ok && k != d.Ed25519Pub {
+		return false
+	}
 	cur := d
 	for depth := 0; depth < 16; depth++ {
 		if !x.RegistrationLogged(cur) {
 			return false
 		}
-		if cur.RegisteredByDeviceID == cur.DeviceID {
-			return true
+		regSeq := x.regs[cur.DeviceID].Seq
+		v := cur.RegisteredByDeviceID
+		k, ok := x.actorKey[v]
+		if !ok || k != cur.RegisteredByPub {
+			return false
 		}
-		e := x.regs[cur.RegisteredByDeviceID]
+		if v == cur.DeviceID {
+			if vd, _ := FindDevice(members, v); vd != nil && vd.Ed25519Pub != k {
+				return false
+			}
+			return true // self-registered root, anchored by its own key
+		}
+		// A non-root voucher's key is only known to be genuine from the circle state
+		// (its fingerprint binds that key). A voucher that is no longer listed counts
+		// only if it is itself a self-registered root, whose entry anchors its key.
+		if vd, _ := FindDevice(members, v); vd != nil {
+			if vd.Ed25519Pub != k {
+				return false
+			}
+		} else if re, ok := x.regs[v]; !ok || re.ActorDeviceID == nil || *re.ActorDeviceID != v {
+			return false
+		}
+		if r, revoked := x.revoked[v]; revoked && r < regSeq {
+			return false
+		}
+		e := x.regs[v]
 		if e.Action == nil || e.SubjectID == nil || e.UserID == nil || e.ActorDeviceID == nil || e.Ref == nil || e.Signature == nil || e.ActorPub == nil {
 			return false
 		}
-		// The voucher may no longer be active; its log entry is what counts.
-		cur = DeviceRecord{DeviceID: *e.SubjectID, UserID: *e.UserID, RegisteredByDeviceID: *e.ActorDeviceID,
-			RegistrationAction: *e.Action, Fingerprint: *e.Ref, RegistrationSignature: *e.Signature, RegisteredByPub: *e.ActorPub}
-		if cur.UserID != d.UserID {
+		if *e.UserID != d.UserID {
 			return false
 		}
+		cur = DeviceRecord{DeviceID: *e.SubjectID, UserID: *e.UserID, RegisteredByDeviceID: *e.ActorDeviceID,
+			RegistrationAction: *e.Action, Fingerprint: *e.Ref, RegistrationSignature: *e.Signature, RegisteredByPub: *e.ActorPub}
 	}
 	return false
 }
@@ -544,7 +613,7 @@ func (x *LogIndex) EpochLogged(circleID string, r EpochRecord) bool {
 }
 
 // usable: listed, active, approved, registration verifies and is chained in the log.
-func usable(idx *LogIndex, d *DeviceRecord) error {
+func usable(idx *LogIndex, members []CircleMember, d *DeviceRecord) error {
 	switch {
 	case d == nil:
 		return errors.New("device is not in the circle state")
@@ -556,7 +625,7 @@ func usable(idx *LogIndex, d *DeviceRecord) error {
 		return errors.New("device is not approved")
 	case !VerifyRegistration(*d):
 		return errors.New("device registration does not verify")
-	case !idx.ChainLogged(*d):
+	case !idx.ChainLogged(*d, members):
 		return fmt.Errorf("device registration: %w", ErrNotInLog)
 	}
 	return nil
@@ -564,14 +633,14 @@ func usable(idx *LogIndex, d *DeviceRecord) error {
 
 // AuthorizeSender checks that an item's sender device may speak for its member:
 // listed, owned by that member (the signed user id equals the member's), usable.
-func AuthorizeSender(idx *LogIndex, d *DeviceRecord, m *CircleMember) error {
+func AuthorizeSender(idx *LogIndex, members []CircleMember, d *DeviceRecord, m *CircleMember) error {
 	if d == nil || m == nil {
 		return errors.New("sender is not in the circle state")
 	}
 	if d.UserID != m.UserID {
 		return errors.New("device belongs to another user than the member it is listed under")
 	}
-	return usable(idx, d)
+	return usable(idx, members, d)
 }
 
 // AuthorizeWrap decides whether a wrap addressed to the caller may be opened:
@@ -596,7 +665,7 @@ func AuthorizeWrap(idx *LogIndex, members []CircleMember, circleID, recipientUse
 	if pm.Role != "admin" {
 		return errors.New("epoch publisher is not a circle admin")
 	}
-	if err := usable(idx, pd); err != nil {
+	if err := usable(idx, members, pd); err != nil {
 		return fmt.Errorf("epoch publisher: %w", err)
 	}
 	wd, wm := FindDevice(members, w.WrapperDeviceID)
@@ -606,7 +675,7 @@ func AuthorizeWrap(idx *LogIndex, members []CircleMember, circleID, recipientUse
 	if wd.Ed25519Pub != w.WrapperEd25519Pub || wd.UserID != wm.UserID {
 		return errors.New("wrapper key differs from the registered key")
 	}
-	if err := usable(idx, wd); err != nil {
+	if err := usable(idx, members, wd); err != nil {
 		return fmt.Errorf("wrapper: %w", err)
 	}
 	if wd.UserID != rec.PublisherUser && wd.UserID != recipientUserID {

@@ -292,17 +292,31 @@ export class LogIndex {
   hashes = new Map<number, string>()
   regs = new Map<string, LogEntry>()
   epochs = new Map<string, LogEntry>()
-  revoked = new Set<string>()
+  /** device -> sequence number of its first logged revoke */
+  revoked = new Map<string, number>()
+  /** The one Ed25519 key each acting device id has used in the log. */
+  actorKey = new Map<string, string>()
+  /** Set when one device id shows two different keys, or is registered twice (the log is then not trusted). */
+  conflict = ''
 
   add(e: LogEntry): void {
     this.hashes.set(e.seq, e.entry_hash)
     if (e.redacted || e.action === undefined) return
+    if (e.actor_device_id && e.actor_ed25519_pub) {
+      const k = this.actorKey.get(e.actor_device_id)
+      if (k === undefined) this.actorKey.set(e.actor_device_id, e.actor_ed25519_pub)
+      else if (k !== e.actor_ed25519_pub && !this.conflict) this.conflict = `entry ${e.seq}: device ${e.actor_device_id} signs with a different key than before`
+    }
     if (e.action === ACT.enable || e.action === ACT.epoch) {
       if (e.circle_id && e.epoch !== undefined) this.epochs.set(`${e.circle_id}|${e.epoch}`, e)
     } else if (e.action === ACT.register || e.action === ACT.rotate || e.action === ACT.recovery || e.action === ACT.reset) {
-      if (e.subject_id) this.regs.set(e.subject_id, e)
+      if (e.subject_id) {
+        if (this.regs.has(e.subject_id)) {
+          if (!this.conflict) this.conflict = `entry ${e.seq}: device ${e.subject_id} is registered twice`
+        } else this.regs.set(e.subject_id, e)
+      }
     } else if (e.action === ACT.revoke) {
-      if (e.subject_id) this.revoked.add(e.subject_id)
+      if (e.subject_id && !this.revoked.has(e.subject_id)) this.revoked.set(e.subject_id, e.seq)
     }
   }
 
@@ -319,12 +333,35 @@ export class LogIndex {
     )
   }
 
-  chainLogged(d: DeviceRecord): boolean {
+  /**
+   * Follows the voucher chain to a self-registered root. Fail-closed rules: every hop is in the
+   * log field for field; each voucher's key as used in the hop equals the key that device id has
+   * always signed with in the log and the key the circle state lists for it; a voucher revoked in
+   * the log BEFORE the vouched registration cannot mint devices (earlier registrations stay valid).
+   */
+  chainLogged(d: DeviceRecord, members: CircleMember[]): boolean {
+    const own = this.actorKey.get(d.device_id)
+    if (own !== undefined && own !== d.ed25519_pub) return false
     let cur = d
     for (let depth = 0; depth < 16; depth++) {
       if (!this.registrationLogged(cur)) return false
-      if (cur.registered_by_device_id === cur.device_id) return true
-      const e = this.regs.get(cur.registered_by_device_id)
+      const regSeq = this.regs.get(cur.device_id)!.seq
+      const v = cur.registered_by_device_id
+      const k = this.actorKey.get(v)
+      if (k === undefined || k !== cur.registered_by_ed25519_pub) return false
+      const listed = findDevice(members, v)
+      if (v === cur.device_id) {
+        if (listed && listed.dev.ed25519_pub !== k) return false
+        return true // self-registered root, anchored by its own key
+      }
+      // A non-root voucher's key is only known to be genuine from the circle state (its fingerprint
+      // binds that key). An unlisted voucher counts only if it is a self-registered root.
+      if (listed) {
+        if (listed.dev.ed25519_pub !== k) return false
+      } else if (this.regs.get(v)?.actor_device_id !== v) return false
+      const r = this.revoked.get(v)
+      if (r !== undefined && r < regSeq) return false
+      const e = this.regs.get(v)
       if (!e || e.user_id !== d.user_id) return false
       cur = {
         device_id: e.subject_id!,
@@ -372,14 +409,21 @@ function hexOf(b: Uint8Array): string {
 /** Verifies the whole log from entry 1 and indexes it; the pinned head still applies (rollback/fork). */
 export async function syncLogFull(pinned: LogHead | null, fetchPage: LogFetcher): Promise<{ check: LogCheck; index?: LogIndex }> {
   const all: LogEntry[] = []
+  const seen = new Set<number>()
   const c = await syncLog(null, async (after) => {
     const r = await fetchPage(after)
-    all.push(...r.entries)
+    for (const e of r.entries) {
+      if (!seen.has(e.seq)) {
+        seen.add(e.seq) // pages overlap by one entry; index each sequence number once
+        all.push(e)
+      }
+    }
     return r
   })
   if (!c.ok) return { check: c }
   const index = new LogIndex()
   for (const e of all) index.add(e)
+  if (index.conflict) return { check: bad('malformed', index.conflict) }
   if (pinned) {
     if (c.newHead!.seq < pinned.seq) return { check: bad('rollback', `the server log is shorter (${c.newHead!.seq}) than the one pinned (${pinned.seq})`) }
     const h = index.hashes.get(pinned.seq)
@@ -396,21 +440,21 @@ export function findDevice(members: CircleMember[], deviceId: string): { dev: De
   return null
 }
 
-function usable(idx: LogIndex | null, d: DeviceRecord): string | null {
+function usable(idx: LogIndex | null, members: CircleMember[], d: DeviceRecord): string | null {
   if (!idx) return 'no verified log'
   if (d.revoked_at || idx.revoked.has(d.device_id)) return 'device is revoked'
   if (d.kind === 'recovery') return 'recovery keys do not act in a circle'
   if (d.approved !== true) return 'device is not approved'
   if (!verifyRegistration(d)) return 'device registration does not verify'
-  if (!idx.chainLogged(d)) return 'device registration is not in the verified log'
+  if (!idx.chainLogged(d, members)) return 'device registration is not in the verified log'
   return null
 }
 
 /** Returns null when the sender may speak for the member, else the reason (fail closed). */
-export function authorizeSender(idx: LogIndex | null, found: { dev: DeviceRecord; member: CircleMember } | null): string | null {
+export function authorizeSender(idx: LogIndex | null, members: CircleMember[], found: { dev: DeviceRecord; member: CircleMember } | null): string | null {
   if (!found) return 'sender is not in the circle state'
   if (found.dev.user_id !== found.member.user_id) return 'device belongs to another user than the member it is listed under'
-  return usable(idx, found.dev)
+  return usable(idx, members, found.dev)
 }
 
 /** Returns null when a wrap addressed to us may be opened, else the reason (fail closed). */
@@ -430,12 +474,12 @@ export function authorizeWrap(
     return 'epoch publisher key differs from the registered key'
   }
   if (pub.member.role !== 'admin') return 'epoch publisher is not a circle admin'
-  const pr = usable(idx, pub.dev)
+  const pr = usable(idx, members, pub.dev)
   if (pr) return `epoch publisher: ${pr}`
   const wr = findDevice(members, w.wrapper_device_id)
   if (!wr) return 'wrapper is not in the circle state'
   if (wr.dev.ed25519_pub !== w.wrapper_ed25519_pub || wr.dev.user_id !== wr.member.user_id) return 'wrapper key differs from the registered key'
-  const wu = usable(idx, wr.dev)
+  const wu = usable(idx, members, wr.dev)
   if (wu) return `wrapper: ${wu}`
   if (wr.dev.user_id !== rec.publisher_user_id && wr.dev.user_id !== recipientUserId) {
     return "wrapper is neither the epoch publisher nor the recipient's own device"

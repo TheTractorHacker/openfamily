@@ -345,19 +345,290 @@ func TestOpenWrap(t *testing.T) {
 }
 
 func TestAuthorizeFailsClosedWithoutIndexOrDevice(t *testing.T) {
-	if err := AuthorizeSender(nil, nil, nil); err == nil {
+	if err := AuthorizeSender(nil, nil, nil, nil); err == nil {
 		t.Fatal("nil sender accepted")
 	}
 	d := &DeviceRecord{DeviceID: "x", UserID: "u1"}
-	if err := AuthorizeSender(nil, d, &CircleMember{UserID: "u2"}); err == nil {
+	if err := AuthorizeSender(nil, nil, d, &CircleMember{UserID: "u2"}); err == nil {
 		t.Fatal("user mismatch accepted")
 	}
 	ap := true
 	d2 := &DeviceRecord{DeviceID: "x", UserID: "u1", Approved: &ap}
-	if err := AuthorizeSender(nil, d2, &CircleMember{UserID: "u1"}); err == nil {
+	if err := AuthorizeSender(nil, nil, d2, &CircleMember{UserID: "u1"}); err == nil {
 		t.Fatal("accepted without a verified log")
 	}
 	if err := AuthorizeWrap(nil, nil, "c", "u", WrapRecord{}, &EpochRecord{}); err == nil {
 		t.Fatal("wrap accepted without a log index")
+	}
+}
+
+// ---- chain walk: key binding, revocation order, forged actor keys
+
+type tlog struct {
+	t       *testing.T
+	entries []LogEntry
+	prev    []byte
+	keys    map[string]ed25519.PrivateKey
+	recs    map[string]DeviceRecord
+}
+
+func newTLog(t *testing.T) *tlog {
+	return &tlog{t: t, prev: GenesisHash, keys: map[string]ed25519.PrivateKey{}, recs: map[string]DeviceRecord{}}
+}
+
+const tUser = "11111111-1111-4111-8111-111111111111"
+
+func tid(n byte) string { return fmt.Sprintf("%08x-0000-4000-8000-%012x", int(n), int(n)) }
+
+// add appends a signed entry. signer's private key signs; asDevice/asPub are what the entry CLAIMS.
+func (l *tlog) add(action byte, signer ed25519.PrivateKey, asDevice string, asPub []byte, subject string, ref []byte) {
+	msg, err := LogActionMessage(action, tUser, asDevice, "", subject, 0, ref)
+	if err != nil {
+		l.t.Fatal(err)
+	}
+	sig := ed25519.Sign(signer, msg)
+	seq := int64(len(l.entries) + 1)
+	h := LogEntryHash(l.prev, uint64(seq), msg, sig)
+	a, ep := int(action), 0
+	u, pub, sg, r := tUser, sb(asPub), sb(sig), hex.EncodeToString(ref)
+	l.entries = append(l.entries, LogEntry{Seq: seq, PrevHash: hex.EncodeToString(l.prev), EntryHash: hex.EncodeToString(h),
+		Action: &a, UserID: &u, ActorDeviceID: &asDevice, ActorPub: &pub, SubjectID: &subject, Epoch: &ep, Ref: &r, Signature: &sg})
+	l.prev = h
+}
+
+// device registers device n, vouched by voucher (0 = root).
+func (l *tlog) device(n, voucher byte) DeviceRecord {
+	seed := make([]byte, 32)
+	seed[0], seed[1] = n, 0x77
+	priv := ed25519.NewKeyFromSeed(seed)
+	ed := priv.Public().(ed25519.PublicKey)
+	x := make([]byte, 32)
+	x[0] = n
+	x[31] = 9
+	id := tid(n)
+	l.keys[id] = priv
+	fp, _ := Fingerprint(ed, x)
+	by, byPriv, byPub := id, priv, []byte(ed)
+	if voucher != 0 {
+		by = tid(voucher)
+		byPriv = l.keys[by]
+		byPub = byPriv.Public().(ed25519.PublicKey)
+	}
+	bind, _ := BindingMessage(tUser, id, ed, x)
+	msg, _ := LogActionMessage(ActRegister, tUser, by, "", id, 0, fp)
+	ap := true
+	rec := DeviceRecord{DeviceID: id, UserID: tUser, Kind: "device", Ed25519Pub: sb(ed), X25519Pub: sb(x),
+		Fingerprint: hex.EncodeToString(fp), Signature: sb(ed25519.Sign(priv, bind)), RegisteredByDeviceID: by,
+		RegisteredByPub: sb(byPub), RegistrationAction: int(ActRegister), RegistrationSignature: sb(ed25519.Sign(byPriv, msg)), Approved: &ap}
+	l.add(ActRegister, byPriv, by, byPub, id, fp)
+	l.recs[id] = rec
+	return rec
+}
+
+func (l *tlog) revoke(n, by byte) {
+	rec := l.recs[tid(n)]
+	fp, _ := hex.DecodeString(rec.Fingerprint)
+	k := l.keys[tid(by)]
+	l.add(ActRevoke, k, tid(by), k.Public().(ed25519.PublicKey), tid(n), fp)
+}
+
+func (l *tlog) index() (*LogIndex, LogCheck) {
+	head := l.entries[len(l.entries)-1]
+	hh, _ := hex.DecodeString(head.EntryHash)
+	c, idx, err := SyncLogFull(nil, func(after int64) ([]LogEntry, LogHead, error) {
+		var out []LogEntry
+		for _, e := range l.entries {
+			if e.Seq > after {
+				out = append(out, e)
+			}
+		}
+		return out, LogHead{Seq: head.Seq, Hash: hh}, nil
+	})
+	if err != nil {
+		l.t.Fatal(err)
+	}
+	return idx, c
+}
+
+func members(l *tlog, ids ...byte) []CircleMember {
+	m := CircleMember{UserID: tUser, Role: "admin"}
+	for _, n := range ids {
+		m.Devices = append(m.Devices, l.recs[tid(n)])
+	}
+	return []CircleMember{m}
+}
+
+func TestChainWalkRealFlows(t *testing.T) {
+	l := newTLog(t)
+	root := l.device(1, 0)   // first phone
+	phone2 := l.device(2, 1) // second phone vouched by the first
+	viewer := l.device(3, 2) // viewer vouched by phone 2
+	idx, c := l.index()
+	if !c.OK() {
+		t.Fatalf("honest log rejected: %v", c.Detail)
+	}
+	m := members(l, 1, 2, 3)
+	for _, d := range []DeviceRecord{root, phone2, viewer} {
+		d := d
+		if err := AuthorizeSender(idx, m, &d, &m[0]); err != nil {
+			t.Fatalf("honest device %s refused: %v", d.DeviceID, err)
+		}
+	}
+}
+
+func TestChainWalkRejectsVoucherWithForeignKey(t *testing.T) {
+	l := newTLog(t)
+	l.device(1, 0)
+	l.device(2, 1)
+	// An attacker signs a registration that CLAIMS to be vouched by device 1 but uses its own key.
+	evilSeed := make([]byte, 32)
+	evilSeed[0] = 0xEE
+	evil := ed25519.NewKeyFromSeed(evilSeed)
+	x := make([]byte, 32)
+	x[0] = 0x66
+	ed := ed25519.NewKeyFromSeed(append(make([]byte, 31), 0x55))
+	edPub := ed.Public().(ed25519.PublicKey)
+	fp, _ := Fingerprint(edPub, x)
+	id := tid(9)
+	bind, _ := BindingMessage(tUser, id, edPub, x)
+	msg, _ := LogActionMessage(ActRegister, tUser, tid(1), "", id, 0, fp)
+	ap := true
+	forged := DeviceRecord{DeviceID: id, UserID: tUser, Kind: "device", Ed25519Pub: sb(edPub), X25519Pub: sb(x), Fingerprint: hex.EncodeToString(fp),
+		Signature: sb(ed25519.Sign(ed, bind)), RegisteredByDeviceID: tid(1), RegisteredByPub: sb(evil.Public().(ed25519.PublicKey)),
+		RegistrationAction: int(ActRegister), RegistrationSignature: sb(ed25519.Sign(evil, msg)), Approved: &ap}
+	if !VerifyRegistration(forged) {
+		t.Fatal("test setup: the forged record is internally consistent")
+	}
+	l.add(ActRegister, evil, tid(1), evil.Public().(ed25519.PublicKey), id, fp)
+	l.recs[id] = forged
+	// The log itself is untrustworthy: device 1 signs with two keys.
+	if _, c := l.index(); c.OK() || c.Problem != LogMalformed {
+		t.Fatalf("log with a forged actor_pub was accepted: %v %s", c.Problem, c.Detail)
+	}
+}
+
+func TestChainWalkRejectsForgedVoucherNeverSeenSigning(t *testing.T) {
+	// The voucher id exists (listed in the state with its real key) but never signed anything
+	// in the log; the forged hop uses another key under its id. The state's key disagrees.
+	l := newTLog(t)
+	l.device(1, 0)
+	real := l.device(2, 1) // listed, real key; never acts as actor in the log
+	evil := ed25519.NewKeyFromSeed(append(make([]byte, 31), 0xEE))
+	x := make([]byte, 32)
+	ed := ed25519.NewKeyFromSeed(append(make([]byte, 31), 0x55))
+	edPub := ed.Public().(ed25519.PublicKey)
+	fp, _ := Fingerprint(edPub, x)
+	id := tid(9)
+	bind, _ := BindingMessage(tUser, id, edPub, x)
+	msg, _ := LogActionMessage(ActRegister, tUser, real.DeviceID, "", id, 0, fp)
+	ap := true
+	forged := DeviceRecord{DeviceID: id, UserID: tUser, Kind: "device", Ed25519Pub: sb(edPub), X25519Pub: sb(x), Fingerprint: hex.EncodeToString(fp),
+		Signature: sb(ed25519.Sign(ed, bind)), RegisteredByDeviceID: real.DeviceID, RegisteredByPub: sb(evil.Public().(ed25519.PublicKey)),
+		RegistrationAction: int(ActRegister), RegistrationSignature: sb(ed25519.Sign(evil, msg)), Approved: &ap}
+	l.add(ActRegister, evil, real.DeviceID, evil.Public().(ed25519.PublicKey), id, fp)
+	l.recs[id] = forged
+	idx, c := l.index()
+	if !c.OK() {
+		t.Fatalf("setup: log should verify (the voucher only appears once): %v", c.Detail)
+	}
+	m := members(l, 1, 2, 9)
+	if err := AuthorizeSender(idx, m, &forged, &m[0]); err == nil {
+		t.Fatal("device vouched by a forged voucher key accepted")
+	}
+	// Without the state listing the voucher, the forged key is the only evidence; the root hop still ties it:
+	// the voucher's own registration is vouched by device 1 and cannot supply the forged key.
+	if idx.ChainLogged(forged, nil) {
+		t.Fatal("chain accepted a voucher key that its registration chain does not support")
+	}
+}
+
+func TestChainWalkRootKeyMismatch(t *testing.T) {
+	l := newTLog(t)
+	root := l.device(1, 0)
+	idx, _ := l.index()
+	bad := root
+	other := ed25519.NewKeyFromSeed(append(make([]byte, 31), 0x42))
+	bad.RegisteredByPub = sb(other.Public().(ed25519.PublicKey))
+	if idx.ChainLogged(bad, nil) {
+		t.Fatal("root accepted with a key different from the logged one")
+	}
+	bad = root
+	bad.Ed25519Pub = sb(other.Public().(ed25519.PublicKey)) // state lists another key than the root signs with
+	if idx.ChainLogged(bad, nil) {
+		t.Fatal("root accepted although the listed key differs from its logged signing key")
+	}
+}
+
+func TestChainWalkRevocationOrder(t *testing.T) {
+	// Registration BEFORE the voucher's revoke stays valid.
+	l := newTLog(t)
+	l.device(1, 0)
+	w := l.device(2, 1)
+	l.revoke(1, 1)
+	idx, c := l.index()
+	if !c.OK() {
+		t.Fatal(c.Detail)
+	}
+	m := members(l, 2)
+	if err := AuthorizeSender(idx, m, &w, &m[0]); err != nil {
+		t.Fatalf("registration that predates the voucher's revoke refused: %v", err)
+	}
+	// Registration AFTER the voucher was revoked is refused (a revoked key cannot mint devices).
+	l2 := newTLog(t)
+	l2.device(1, 0)
+	l2.revoke(1, 1)
+	late := l2.device(3, 1)
+	idx2, c2 := l2.index()
+	if !c2.OK() {
+		t.Fatal(c2.Detail)
+	}
+	m2 := members(l2, 3)
+	if err := AuthorizeSender(idx2, m2, &late, &m2[0]); err == nil {
+		t.Fatal("device registered by an already revoked voucher accepted")
+	}
+	// A chain THROUGH a revoked middle voucher: W (by V) registered after V's revoke.
+	l3 := newTLog(t)
+	l3.device(1, 0)
+	l3.device(2, 1)
+	l3.revoke(2, 1)
+	deep := l3.device(4, 2)
+	idx3, _ := l3.index()
+	m3 := members(l3, 4)
+	if err := AuthorizeSender(idx3, m3, &deep, &m3[0]); err == nil {
+		t.Fatal("chain through a revoked voucher accepted")
+	}
+}
+
+func TestRevokedDeviceIsRefusedFromTheLog(t *testing.T) {
+	l := newTLog(t)
+	l.device(1, 0)
+	w := l.device(2, 1)
+	l.revoke(2, 1)
+	idx, _ := l.index()
+	m := members(l, 2) // a lying state still lists the revoked device
+	if err := AuthorizeSender(idx, m, &w, &m[0]); err == nil {
+		t.Fatal("log-revoked device accepted")
+	}
+}
+
+func TestSyncLogFullHandlesOverlappingPages(t *testing.T) {
+	l := newTLog(t)
+	l.device(1, 0)
+	for n := byte(2); n < 8; n++ {
+		l.device(n, 1)
+	}
+	head := l.entries[len(l.entries)-1]
+	hh, _ := hex.DecodeString(head.EntryHash)
+	c, idx, err := SyncLogFull(nil, func(after int64) ([]LogEntry, LogHead, error) {
+		var out []LogEntry
+		for _, e := range l.entries {
+			if e.Seq > after && len(out) < 3 { // small pages force the one-entry overlap
+				out = append(out, e)
+			}
+		}
+		return out, LogHead{Seq: head.Seq, Hash: hh}, nil
+	})
+	if err != nil || !c.OK() || idx == nil {
+		t.Fatalf("paged full sync: %v %v %s", err, c.Problem, c.Detail)
 	}
 }
