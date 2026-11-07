@@ -466,3 +466,13 @@ Done:
 * On-device processing wired: phone-only members' fixes feed `OnDeviceProcessor` (Phase 0 segmenter and weekly functions) and publish `trip`, `drive`, `week` items; `ResultStore` + `ProcessingSource` are the data-access layer for screens (server source, phone source, explicit placeholders).
 
 Open / not done (see also the report that accompanied this change): the server contract names in `lanes_wire.dart` and the fake must be aligned with the real server (paths, `key_line`, `caps`, statement JSON, `sk_wrapped_device_ids`, `policy_history`), including accepting purposes `trip`/`drive`/`week` with buckets 1024/4096/1024; SK is not part of recovery-phrase restore (a restored phone gets SK when an admin phone next wraps it); screens, dialogs and legacy trusted-server upgrade are Phases 6 and 7; battery/CPU of on-device processing is unmeasured; the on-device segmenter keeps its buffers in memory and is rebuilt from the local history (derived speeds) after a restart.
+
+## 19. Phases 6 and 7 status (screens; branch `feat/lanes-ui`)
+
+Screens (`app/lib/screens/`): `processing_screen.dart` (Circle > Encryption keys > Server processing: my switch "Let the server process my data" with the opt-out / opt-in dialogs of 10.3, members with `LaneChip`, delete copies), `processing_policy_screen.dart` (admin: assistance, `member_opt_out`, default for new members; read-only with the reason for everybody else), `legacy_upgrade_screen.dart` (admin upgrade of a legacy trusted-server circle, `POST .../processing-upgrade`, and `DELETE .../legacy-server-access`), `my_processing_screen.dart` (Settings > Privacy & Security > Where my data is processed). Seam: `app/lib/services/e2ee/processing_controller.dart`. All wording: `app/lib/widgets/processing_widgets.dart`.
+
+Data layer wired into the weekly summary and the trips list (`primary_lanes.dart`): server-assisted members from the server, phone-only members from their sealed result items, explicit "Waiting for X's phone" placeholder. The driving report screens are still gated as "not available in Private circles".
+
+The legacy "give the server the circle key" button is gone; `TrustedServerScreen` keeps consent withdrawal and copy deletion for legacy circles and points to the admin upgrade. The admin default only preselects a button; a pref is never signed without an explicit confirmation dialog.
+
+Web admin (Encryption keys page): per-circle policy badge and counts of members the server can read versus members who keep data on their phone. No control.

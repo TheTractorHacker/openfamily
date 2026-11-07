@@ -475,6 +475,67 @@ class LanesService {
     await refresh(circleId, force: true);
   }
 
+  /// Circle admin: upgrades a LEGACY trusted-server circle in one request: a new
+  /// circle key epoch that the server key does not get, plus the first server
+  /// line key generation and a signed policy (assistance on, members choose for
+  /// themselves, default phone). The server turns old consents into prefs. The
+  /// admin screen must have shown the plain warnings first. Refuses while a
+  /// member's app cannot read the server line ([LanesNotReady]).
+  Future<void> upgradeLegacy(String circleId) async {
+    final LocalIdentity me = (await service.identity())!;
+    final CircleLanes cur = await refresh(circleId, force: true);
+    final CircleE2eeState st = cur.state ?? await api.circleState(circleId);
+    final ProcessingServerState proc = cur.proc ?? await api.processingState(circleId);
+    if (!st.members.any((CircleE2eeMember m) => m.userId == me.userId && m.role == 'admin')) {
+      throw StateError('Only a circle admin can upgrade this circle.');
+    }
+    if (!proc.legacy) throw StateError('This circle is not in the old trusted-server mode.');
+    if (cur.serverKey == null) throw StateError('This server has no approved server key for this circle.');
+    final List<String> stale = <String>[
+      for (final CircleE2eeMember m in st.members)
+        if (m.devices.any((DeviceKey d) => d.kind == 'device' && d.approved == true && d.isActive && !d.supportsLanes)) (m.name.isEmpty ? m.userId : m.name)
+    ];
+    if (stale.isNotEmpty) throw LanesNotReady(stale);
+    final next = await service.prepareNextEpoch(circleId);
+    const int gen = 1;
+    final Uint8List key = await service.generateServerKey(circleId, state: st);
+    final Uint8List commitment = await E2ee.keyCommitmentLine(key, circleId, E2ee.lineServer, gen);
+    final List<Map<String, dynamic>> wraps = <Map<String, dynamic>>[
+      for (final DeviceKey k in await service.serverLineRecipients(st, me)) await service.wrapServerKeyTo(me, circleId, gen, key, k)
+    ];
+    final Uint8List nonce = E2ee.randomBytes(E2ee.processingNonceLen);
+    final Uint8List msg =
+        E2ee.processingPolicyMessage(circleId, me.userId, true, E2ee.linePhone, E2ee.optOutAllowed, gen, commitment, nonce);
+    final Uint8List ref = await E2ee.processingRef(msg);
+    final Uint8List logMsg = E2ee.logActionMessage(E2ee.actProcessingPolicy, me.userId, me.deviceId, circleId: circleId, epoch: gen, ref: ref);
+    final PolicyStatement stmt = PolicyStatement(
+        serverAssist: true,
+        defaultForNew: E2ee.linePhone,
+        memberOptOut: E2ee.optOutAllowed,
+        skGen: gen,
+        commitment: commitment,
+        nonce: nonce,
+        adminUserId: me.userId,
+        actorDeviceId: me.deviceId,
+        signature: await E2ee.sign(me.edSeed, msg));
+    await api.upgradeProcessing(circleId, <String, dynamic>{
+      ...next.body,
+      'policy': <String, dynamic>{
+        ...stmt.toJson(),
+        'log_signature': E2ee.b64(await E2ee.sign(me.edSeed, logMsg)),
+        'wraps': wraps,
+      },
+    });
+    await next.commit();
+    await service.storeServerKey(circleId, gen, key);
+    invalidateLog();
+    await refresh(circleId, force: true);
+  }
+
+  /// Circle admin, after an upgrade: ends the server's access to the OLD
+  /// phone-key epochs. Irreversible.
+  Future<void> endLegacyServerAccess(String circleId) => api.endLegacyServerAccess(circleId);
+
   /// Admin: new SK generation (same settings), after a member was removed or a key revoked.
   Future<void> rotateServerKey(String circleId) async {
     final CircleLanes cur = await refresh(circleId, force: true);

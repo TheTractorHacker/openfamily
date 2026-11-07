@@ -12,6 +12,9 @@ class Circle {
     this.e2eeMode = 'off',
     this.e2eeEpoch = 0,
     this.e2eeServerMember = false,
+    this.serverAssist = false,
+    this.memberOptOut = 'allowed',
+    this.myLaneServer = false,
   });
 
   final String id;
@@ -41,6 +44,14 @@ class Circle {
   /// (trusted-server mode): the server, not only the members, can see positions.
   final bool e2eeServerMember;
 
+  /// The server's CLAIM that the circle admin turned server assistance on (the phone
+  /// verifies the signed policy before relying on it). 'allowed' | 'required_server'.
+  final bool serverAssist;
+  final String memberOptOut;
+
+  /// The server's claim that the caller's data is processed by the server.
+  final bool myLaneServer;
+
   /// True for a Private (end-to-end encrypted) circle.
   bool get isPrivate => e2eeMode == 'private';
 
@@ -67,6 +78,9 @@ class Circle {
       e2eeMode: json['e2ee_mode'] == 'private' ? 'private' : 'off',
       e2eeEpoch: (json['e2ee_epoch'] as num?)?.toInt() ?? 0,
       e2eeServerMember: json['e2ee_mode'] == 'private' && json['e2ee_server_member'] == true,
+      serverAssist: json['e2ee_mode'] == 'private' && json['server_assist'] == true,
+      memberOptOut: json['member_opt_out'] == 'required_server' ? 'required_server' : 'allowed',
+      myLaneServer: json['e2ee_mode'] == 'private' && json['my_lane_server'] == true,
     );
   }
 
@@ -80,6 +94,9 @@ class Circle {
     String? e2eeMode,
     int? e2eeEpoch,
     bool? e2eeServerMember,
+    bool? serverAssist,
+    String? memberOptOut,
+    bool? myLaneServer,
   }) {
     return Circle(
       id: id,
@@ -93,6 +110,9 @@ class Circle {
       e2eeMode: e2eeMode ?? this.e2eeMode,
       e2eeEpoch: e2eeEpoch ?? this.e2eeEpoch,
       e2eeServerMember: e2eeServerMember ?? this.e2eeServerMember,
+      serverAssist: serverAssist ?? this.serverAssist,
+      memberOptOut: memberOptOut ?? this.memberOptOut,
+      myLaneServer: myLaneServer ?? this.myLaneServer,
     );
   }
 }

@@ -6,6 +6,7 @@
 
 import React from 'react'
 import { listE2eeKeys } from '../lib/api'
+import { lanesSummary } from '../lib/e2eeLanes'
 import type { E2eeAdminDevice } from '../lib/api'
 import { isAccessDenied, useAsync } from '../lib/useAsync'
 import { AccessDenied, Badge, Button, Card, EmptyState, ErrorState, Spinner } from '../components/primitives'
@@ -91,6 +92,12 @@ export function EncryptionKeysPage() {
       />
 
       <Section title="Circles">
+      <p className="wb-muted" data-testid="lanes-note">
+        Counts only. A circle admin decides whether server processing is available, and each member decides for their own data on their
+        phone; nothing on this page can change either. The server can read data of members who allow it (anyone with access to this
+        server or its backups can too). Members who keep data on their phone stay end-to-end encrypted and do not appear on the admin map,
+        in history or in exports.
+      </p>
       {circles.length === 0 ? (
         <EmptyState title="No private circles" description="Circles appear here once an admin turns on Private circle in the app." />
       ) : (
@@ -104,11 +111,16 @@ export function EncryptionKeysPage() {
                   <th>Epoch</th>
                   <th>Members</th>
                   <th>Wrapped keys (this epoch)</th>
+                  <th>Server processing</th>
+                  <th>Server can read</th>
+                  <th>Keeps data on phone</th>
                   <th>Last change</th>
                 </tr>
               </thead>
               <tbody>
-                {circles.map((c) => (
+                {circles.map((c) => {
+                  const lanes = lanesSummary(c)
+                  return (
                   <tr key={c.id}>
                     <td>{c.name}</td>
                     <td>
@@ -118,9 +130,17 @@ export function EncryptionKeysPage() {
                     <td>{c.epoch}</td>
                     <td>{c.members}</td>
                     <td>{c.wrapped_keys}</td>
+                    <td>
+                      <Badge tone={lanes.tone} title={lanes.policy}>
+                        {lanes.label}
+                      </Badge>
+                    </td>
+                    <td>{c.mode === 'private' ? lanes.serverAssisted : '—'}</td>
+                    <td>{c.mode === 'private' ? lanes.phoneOnly : '—'}</td>
                     <td>{whenText(c.updated_at)}</td>
                   </tr>
-                ))}
+                  )
+                })}
               </tbody>
             </table>
           </div>

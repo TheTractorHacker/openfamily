@@ -57,6 +57,14 @@ abstract class E2eeApi {
   /// POST wraps of a key line. [gen] is the SK generation for the server line.
   Future<int> submitLineWraps(String circleId, int line, int gen, List<Map<String, dynamic>> wraps) async =>
       throw UnsupportedError('processing lanes are not available');
+
+  /// POST .../processing-upgrade (circle admin, legacy trusted-server circles only).
+  Future<void> upgradeProcessing(String circleId, Map<String, dynamic> body) async =>
+      throw UnsupportedError('processing lanes are not available');
+
+  /// DELETE .../legacy-server-access (circle admin, after an upgrade). Irreversible.
+  Future<void> endLegacyServerAccess(String circleId) async =>
+      throw UnsupportedError('processing lanes are not available');
 }
 
 class ApiE2eeApi implements E2eeApi {
@@ -139,7 +147,7 @@ class ApiE2eeApi implements E2eeApi {
   @override
   Future<int> purgeServerCopies(String circleId, {bool wholeCircle = false}) async {
     final dynamic r = await ApiClient.delete('/circles/$circleId/e2ee/server-copies?scope=${wholeCircle ? 'circle' : 'mine'}');
-    return r is Map<String, dynamic> ? ((r['locations_deleted'] as num?)?.toInt() ?? 0) : 0;
+    return r is Map<String, dynamic> ? (((r['items_deleted'] ?? r['locations_deleted']) as num?)?.toInt() ?? 0) : 0;
   }
 
   @override
@@ -169,6 +177,13 @@ class ApiE2eeApi implements E2eeApi {
   @override
   Future<void> putProcessingPref(String circleId, Map<String, dynamic> body) =>
       ApiClient.put(LanesPaths.pref(circleId), body: body);
+
+  @override
+  Future<void> upgradeProcessing(String circleId, Map<String, dynamic> body) =>
+      ApiClient.post(LanesPaths.upgrade(circleId), body: body);
+
+  @override
+  Future<void> endLegacyServerAccess(String circleId) => ApiClient.delete(LanesPaths.legacyAccess(circleId));
 
   @override
   Future<int> submitLineWraps(String circleId, int line, int gen, List<Map<String, dynamic>> wraps) async {

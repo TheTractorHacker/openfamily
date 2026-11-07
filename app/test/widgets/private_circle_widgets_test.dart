@@ -84,8 +84,9 @@ void main() {
     testWidgets('private primary circle: explicit placeholder, no request is made', (WidgetTester t) async {
       PrivateRuntime.primaryPrivate.value = true;
       final _Api api = _Api();
-      await t.pumpWidget(_wrap(WeeklySummaryScreen(api: api)));
-      await t.pump();
+      // No lanes view (e.g. an old setup): the explicit placeholder, and the server is never asked.
+      await t.pumpWidget(_wrap(WeeklySummaryScreen(api: api, lanes: () async => null)));
+      await t.pumpAndSettle();
       expect(find.text('Weekly summary is not available in Private circles'), findsOneWidget);
       expect(api.calls, 0);
       expect(find.byType(CircularProgressIndicator), findsNothing);

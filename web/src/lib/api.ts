@@ -815,6 +815,12 @@ export interface E2eeAdminCircle {
   updated_at: string | null
   members: number
   wrapped_keys: number
+  // Processing lanes (counts only; this page cannot see or change any member's choice).
+  // Absent on a server that predates them.
+  server_assist?: boolean
+  members_server_assisted?: number
+  members_phone_only?: number
+  legacy_trusted_server?: boolean
 }
 
 export function listE2eeKeys(): Promise<{ devices: E2eeAdminDevice[]; circles: E2eeAdminCircle[] }> {
