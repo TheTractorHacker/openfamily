@@ -270,6 +270,12 @@ func TestBubbleExpiry(t *testing.T) {
 	if am, _ := l["about_me"].([]any); len(am) != 0 {
 		t.Fatalf("expired served: %v", l)
 	}
+	// Creating a Bubble sends the subject a background "created" push
+	// (go s.notifyBubbleSubject). Let it land before taking the baseline,
+	// otherwise on a loaded host it arrives after the snapshot and looks
+	// like an alert from the expired Bubble.
+	waitPushes(t, fx, 1)
+	time.Sleep(200 * time.Millisecond)
 	before := len(fx.pushTitles())
 	fx.srv.evaluateBubbles(ctx, fx.b, 5, 51.5, time.Now())
 	time.Sleep(100 * time.Millisecond)
