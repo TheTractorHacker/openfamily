@@ -9,6 +9,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../models/circle.dart';
 import '../api_client.dart';
+import '../processing/fix.dart';
+import '../processing/on_device_processor.dart';
+import '../processing/processing_source.dart';
 import '../push_service.dart';
 import 'e2ee_api.dart';
 import 'e2ee_app.dart';
@@ -17,6 +20,9 @@ import 'e2ee_models.dart';
 import 'e2ee_service.dart';
 import 'e2ee_trust.dart';
 import 'e2ee_vault.dart';
+import 'lanes_service.dart';
+import 'lanes_wire.dart';
+import 'lanes_store.dart';
 import 'private_channel.dart';
 import 'private_history.dart';
 import 'private_places.dart';
@@ -48,8 +54,8 @@ class PrefsChannelKv implements ChannelKv {
   Future<void> remove(String key) async => (await SharedPreferences.getInstance()).remove('$_p$key');
 }
 
-/// [ChannelKeys] over the phase-1 vault.
-class ServiceChannelKeys implements ChannelKeys {
+/// [ChannelKeys] and [ServerKeys] over the vault.
+class ServiceChannelKeys implements ChannelKeys, ServerKeys {
   ServiceChannelKeys(this.service);
   final E2eeService service;
 
@@ -61,6 +67,12 @@ class ServiceChannelKeys implements ChannelKeys {
     final List<int> e = await service.heldEpochs(circleId);
     return e.isEmpty ? 0 : e.last;
   }
+
+  @override
+  Future<Uint8List?> serverKey(String circleId, int gen) => service.serverKey(circleId, gen);
+
+  @override
+  Future<int> latestServerGen(String circleId) => service.latestServerGen(circleId);
 }
 
 /// [SenderDirectory] over the circle's E2EE state (members, their devices and
@@ -124,6 +136,7 @@ class HttpChannelApi implements ChannelApi {
     final dynamic r = await ApiClient.get('/circles/$circleId/e2ee/items', query: <String, String>{
       'after': '$after',
       'limit': '$limit',
+      LanesFields.keyLine: 'all', // absent = phone line only on the server
       if (purposes != null && purposes.isNotEmpty) 'purpose': purposes.join(','),
     });
     final Map<String, dynamic> m = r as Map<String, dynamic>;
@@ -220,11 +233,17 @@ class PrivateRuntime {
     Random? rng,
   })  : channel = channel ?? const HttpChannelApi(),
         _rng = rng ?? Random.secure() {
-    keys = ServiceChannelKeys(service);
+    final ServiceChannelKeys ck = ServiceChannelKeys(service);
+    keys = ck;
+    lanes = KvLaneSource(kv);
     this.directory = directory ?? StateSenderDirectory(api);
-    sealer = ChannelSealer(keys: keys, kv: kv, clock: clock);
+    sealer = ChannelSealer(keys: keys, kv: kv, clock: clock, lanes: lanes, serverKeys: ck);
     queue = SealedQueue(kv: kv, clock: clock);
-    receiver = ChannelReceiver(keys: keys, directory: this.directory, kv: kv, clock: clock);
+    receiver = ChannelReceiver(keys: keys, directory: this.directory, kv: kv, clock: clock, serverKeys: ck, lanes: lanes);
+    lanesService = LanesService(service: service, api: api, kv: kv, clock: clock, onLaneChanged: (String c) async {
+      await queue.reconcileLanes(lanes);
+    });
+    results = ResultStore(kv);
     sync = ChannelSync(api: this.channel, receiver: receiver, kv: kv);
     history = PrivateHistory(kv: kv, now: clock.now);
     chunker = HistoryChunker(kv: kv, now: clock.now);
@@ -263,6 +282,15 @@ class PrivateRuntime {
   final ChannelApi channel;
   final Random _rng;
   late final ChannelKeys keys;
+
+  /// Verified lane facts for the sealer, the queue and the receiver (persisted).
+  late final KvLaneSource lanes;
+
+  /// Verifies and changes lanes (policy, own pref, SK custody). Needs the session.
+  late final LanesService lanesService;
+
+  /// Result items (`trip`, `drive`, `week`) received from other members' phones.
+  late final ResultStore results;
   late final SenderDirectory directory;
   late final ChannelSealer sealer;
   late final SealedQueue queue;
@@ -433,6 +461,9 @@ class PrivateRuntime {
       final double? lat = (loc['lat'] as num?)?.toDouble(), lon = (loc['lon'] as num?)?.toDouble();
       final double? acc = (loc['accuracy_meters'] as num?)?.toDouble();
       for (final String circle in await privateCircles()) {
+        // A circle that requires server processing and this member has not consented to:
+        // nothing is sealed or sent for it (the server would refuse a phone-lane item anyway).
+        if (await lanes.store.status(circle) == LaneStatus.consentRequired) continue;
         final WireItem it = await sealer.seal(me, circle, ChannelPurpose.fix, body, at: ts);
         await queue.enqueue(it);
         if (lat != null && lon != null) {
@@ -442,6 +473,7 @@ class PrivateRuntime {
           await _evaluatePlaces(me, circle, lat, lon, ts, acc);
         }
       }
+      await _processOnDevice(me, loc, ts);
       // Batched, jittered upload: do not wake the radio for every fix.
       _scheduleFlush();
     } catch (_) {
@@ -464,9 +496,71 @@ class PrivateRuntime {
     try {
       final SenderIdentity? me = await _me();
       if (me == null) return 0;
-      return await queue.flush(channel, deviceFor: (_) => me.deviceId);
+      return await queue.flush(channel, deviceFor: (_) => me.deviceId, lanes: lanes);
     } catch (_) {
       return 0;
+    }
+  }
+
+  // ------------------------------------------------- on-device processing
+
+  OnDeviceProcessor? _processor;
+  bool _processorRestored = false;
+  Set<String> _resultCircles = <String>{};
+
+  /// Private circles in which this member is PHONE-ONLY (their own signed pref):
+  /// results for them are computed here and sealed in the phone lane. A circle
+  /// where the member is server-assisted gets none (the server computes), and a
+  /// circle awaiting required consent gets none (nothing is shared there).
+  Future<Set<String>> phoneOnlyCircles() async {
+    final Set<String> out = <String>{};
+    for (final String c in await privateCircles()) {
+      if (await lanes.store.status(c) == LaneStatus.consentRequired) continue;
+      if ((await lanes.ownLane(c)).line == E2ee.linePhone) out.add(c);
+    }
+    return out;
+  }
+
+  OnDeviceProcessor _proc(SenderIdentity me) => _processor ??= OnDeviceProcessor(
+        kv: kv,
+        userId: me.userId,
+        now: clock.now,
+        publish: (String kind, Map<String, dynamic> body) async {
+          // The circles are re-read per item: a lane change in between must never leak a phone result to a wrong lane
+          // (the sealer picks the lane itself, this only picks which circles get a copy).
+          for (final String c in _resultCircles) {
+            await queue.enqueue(await sealer.seal(me, c, kind, body));
+          }
+        },
+      );
+
+  Future<void> _processOnDevice(SenderIdentity me, Map<String, dynamic> loc, DateTime ts) async {
+    try {
+      final Set<String> circles = await phoneOnlyCircles();
+      if (circles.isEmpty) return;
+      _resultCircles = circles;
+      final OnDeviceProcessor p = _proc(me);
+      if (!_processorRestored) {
+        _processorRestored = true;
+        final List<TrackPoint> past = await trailFor(me.userId, ts.subtract(const Duration(hours: 6)), ts);
+        await p.restore(<Fix>[
+          for (final TrackPoint t in past)
+            if (t.tsMs < ts.millisecondsSinceEpoch)
+              Fix(tsUs: t.tsMs * 1000, lat: t.lat, lon: t.lon, accuracyM: t.accuracy ?? 0, deviceId: me.deviceId)
+        ]);
+      }
+      final double? lat = (loc['lat'] as num?)?.toDouble(), lon = (loc['lon'] as num?)?.toDouble();
+      if (lat == null || lon == null) return;
+      await p.onFix(Fix(
+          tsUs: ts.microsecondsSinceEpoch,
+          lat: lat,
+          lon: lon,
+          speedMps: (loc['speed_mps'] as num?)?.toDouble(),
+          accuracyM: (loc['accuracy_meters'] as num?)?.toDouble() ?? 0,
+          deviceId: me.deviceId));
+      await p.tickWeekly();
+    } catch (_) {
+      // Processing is best effort and must never disturb the location pipeline.
     }
   }
 
@@ -645,6 +739,11 @@ class PrivateRuntime {
     await tickPlaces();
     for (final String id in await privateCircles()) {
       try {
+        await lanesService.maintain(id);
+      } catch (_) {
+        // offline or an older server: the last verified lane facts stay in force
+      }
+      try {
         await catchUp(id);
       } catch (_) {
         // offline: the next resume or socket frame retries
@@ -759,6 +858,11 @@ class PrivateRuntime {
           final String who = nameOf?.call(r.userId) ?? 'Someone';
           await notify('OpenFamily', placeEventText(who, place, r.body['a'] == 'enter'));
         }
+      case ChannelPurpose.trip:
+      case ChannelPurpose.drive:
+      case ChannelPurpose.week:
+        // Figures a member's phone computed. Stored under the VERIFIED author.
+        await results.put(r);
       case ChannelPurpose.checkin:
         if (mine) return;
         final String who = nameOf?.call(r.userId) ?? 'Someone';

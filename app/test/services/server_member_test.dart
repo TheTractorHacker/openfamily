@@ -64,15 +64,18 @@ void main() {
     expect(() => alice.shareKeyWithServer(cid), throwsA(isA<StateError>()));
   });
 
-  test('after every member consented the publisher can give the server the key', () async {
+  test('even after every member consented the phone key (CK) is NEVER given to the server', () async {
     await alice.consentToServer(cid);
     await bob.consentToServer(cid);
     final CircleE2eeState st = await alice.api.circleState(cid);
     final ServerMemberState ss = await alice.api.serverMemberState(cid);
     expect((await alice.verifiedConsentUsers(st, ss, srvKey)).toSet(), <String>{uA, uB});
     expect(E2eeService.membersNeedingConsent(st).toSet(), <String>{uA, uB});
-    await alice.shareKeyWithServer(cid);
-    expect(server.circles[cid]!.wraps.containsKey('1/${srv.deviceId}'), isTrue);
+    // Phase 4 (PRIVACY_PROCESSING 5.4.1): the legacy action is gone, and a direct wrap is refused too.
+    expect(() => alice.shareKeyWithServer(cid), throwsA(isA<StateError>()));
+    final DeviceKey k = st.allDevices.firstWhere((DeviceKey d) => d.deviceId == srv.deviceId);
+    expect(() => alice.confirmWrap(cid, k), throwsA(isA<StateError>()));
+    expect(server.circles[cid]!.wraps.containsKey('1/${srv.deviceId}'), isFalse);
   });
 
   test('a withdrawn consent excludes the server key from the next epoch', () async {
@@ -85,11 +88,12 @@ void main() {
     expect(server.circles[cid]!.wraps.containsKey('2/${(await alice.identity())!.deviceId}'), isTrue);
   });
 
-  test('with everyone consenting the next epoch is wrapped for the server key too', () async {
+  test('with everyone consenting the next epoch is STILL not wrapped for the server key', () async {
     await alice.consentToServer(cid);
     await bob.consentToServer(cid);
     await alice.bumpEpoch(cid);
-    expect(server.circles[cid]!.wraps.containsKey('2/${srv.deviceId}'), isTrue);
+    expect(server.circles[cid]!.wraps.containsKey('2/${srv.deviceId}'), isFalse);
+    expect(server.circles[cid]!.wraps.values.any((WrapRecord w) => w.recipientDeviceId == srv.deviceId), isFalse);
   });
 
   test('forged or mis-bound consents do not count on the phone', () async {

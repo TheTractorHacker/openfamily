@@ -318,7 +318,7 @@ Future<LogCheck> verifyLogSlice({
 // --------------------------------------------------------------------------
 // Alarms
 
-enum AlarmKind { verifiedKeyChanged, keyChanged, userReset, epochByUnverified, logProblem, inviterMismatch }
+enum AlarmKind { verifiedKeyChanged, keyChanged, userReset, epochByUnverified, logProblem, inviterMismatch, serverKeyIsCircleKey }
 
 class E2eeAlarm {
   const E2eeAlarm(this.kind, this.title, this.body, {this.userId, this.circleId, this.seq});
@@ -329,6 +329,7 @@ class E2eeAlarm {
   final String? circleId;
   final int? seq;
   bool get severe =>
+      kind == AlarmKind.serverKeyIsCircleKey ||
       kind == AlarmKind.verifiedKeyChanged ||
       kind == AlarmKind.logProblem ||
       kind == AlarmKind.inviterMismatch;
