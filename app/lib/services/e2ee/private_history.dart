@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'private_channel.dart';
@@ -26,12 +27,22 @@ class TrackPoint {
 /// ciphertext, so the day view is built here from decrypted fixes and history
 /// chunks. Bounded per member and by age.
 class PrivateHistory {
-  PrivateHistory({required this.kv, this.maxPointsPerMember = 6000, this.window = const Duration(days: 7), DateTime Function()? now})
+  PrivateHistory({required this.kv, this.maxPointsPerMember = 6000, this.window = const Duration(days: 7), this.writeBehind, DateTime Function()? now})
       : _now = now ?? (() => DateTime.now().toUtc());
 
   final ChannelKv kv;
   final int maxPointsPerMember;
   final Duration window;
+
+  /// null: every [add] rewrites the member's stored track at once (the original behaviour).
+  /// Set: new points wait in memory and are merged into the stored track once per interval (or at
+  /// [flushAtPoints]), so a burst of 300 items rewrites a 6000-point track once instead of 300 times.
+  /// Reads ([range]) and [flush] always see the pending points. Call [flush] when the app is paused.
+  final Duration? writeBehind;
+  static const int flushAtPoints = 400;
+  final Map<String, ({String circle, String user, List<TrackPoint> pts})> _pending =
+      <String, ({String circle, String user, List<TrackPoint> pts})>{};
+  Timer? _timer;
   final DateTime Function() _now;
 
   String _key(String circleId, String userId) => 'hist/$circleId/$userId';
@@ -48,6 +59,40 @@ class PrivateHistory {
 
   /// Merges [points] (deduplicated by timestamp) and trims to the window / cap.
   Future<int> add(String circleId, String userId, Iterable<TrackPoint> points) async {
+    if (writeBehind == null) return _writeNow(circleId, userId, points);
+    final String k = _key(circleId, userId);
+    final entry = _pending.putIfAbsent(k, () => (circle: circleId, user: userId, pts: <TrackPoint>[]));
+    entry.pts.addAll(points);
+    if (entry.pts.length >= flushAtPoints) {
+      await _flushKey(k);
+    } else {
+      _timer ??= Timer(writeBehind!, () {
+        _timer = null;
+        unawaited(flush());
+      });
+    }
+    return points.length;
+  }
+
+  /// Number of points waiting in memory (diagnostics and tests).
+  int get pendingPoints => _pending.values.fold(0, (int a, e) => a + e.pts.length);
+
+  Future<void> _flushKey(String k) async {
+    final e = _pending.remove(k);
+    if (e == null || e.pts.isEmpty) return;
+    await _writeNow(e.circle, e.user, e.pts);
+  }
+
+  /// Writes everything that is waiting. Safe to call often.
+  Future<void> flush() async {
+    _timer?.cancel();
+    _timer = null;
+    for (final String k in _pending.keys.toList()) {
+      await _flushKey(k);
+    }
+  }
+
+  Future<int> _writeNow(String circleId, String userId, Iterable<TrackPoint> points) async {
     final Map<int, TrackPoint> byTs = <int, TrackPoint>{
       for (final TrackPoint p in await _load(circleId, userId)) p.tsMs: p,
     };
@@ -64,11 +109,15 @@ class PrivateHistory {
   }
 
   Future<List<TrackPoint>> range(String circleId, String userId, DateTime from, DateTime to) async {
+    await _flushKey(_key(circleId, userId));
     final int a = from.toUtc().millisecondsSinceEpoch, b = to.toUtc().millisecondsSinceEpoch;
     return (await _load(circleId, userId)).where((TrackPoint p) => p.tsMs >= a && p.tsMs < b).toList();
   }
 
-  Future<void> clear(String circleId, String userId) => kv.remove(_key(circleId, userId));
+  Future<void> clear(String circleId, String userId) async {
+    _pending.remove(_key(circleId, userId));
+    await kv.remove(_key(circleId, userId));
+  }
 }
 
 /// Collects this phone's own fixes and cuts them into sealed `history` chunks,

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../widgets/on_device_reports_tile.dart';
 
 import '../models/circle.dart';
 import '../services/circle_service.dart';
@@ -102,6 +103,7 @@ class _MyProcessingScreenState extends State<MyProcessingScreen> {
                         },
                       ),
                   ]),
+                  if (_rows.isNotEmpty) const OnDeviceReportsTile(),
                 ],
               ),
       ),

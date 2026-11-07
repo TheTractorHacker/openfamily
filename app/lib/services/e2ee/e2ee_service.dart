@@ -91,13 +91,16 @@ class LogSync {
 class E2eeService {
   E2eeService({
     required this.api,
-    required this.vault,
+    required E2eeVault vault,
     required this.trust,
     required this.userIdProvider,
-  });
+  }) : vault = TickVault(vault);
 
   final E2eeApi api;
-  final E2eeVault vault;
+
+  /// The vault. Every write/delete bumps [TickVault.tick], which is how remembered keys (see `ServiceChannelKeys`)
+  /// notice that a key or a newer epoch arrived.
+  final TickVault vault;
   final TrustStore trust;
   final Future<String> Function() userIdProvider;
 

@@ -157,7 +157,7 @@ class WaitingForPhoneCard extends StatelessWidget {
           Text('Waiting for $name\'s phone', style: AppType.body.copyWith(fontWeight: FontWeight.w700)),
           Text(
             '$name keeps data on their phone. Their phone has not shared a summary yet, for example because it is off or '
-            'has not moved.',
+            'has not moved. Driving reports need the server: turn on the server for this circle, or $name can enable phone reports.',
             style: AppType.secondary.copyWith(color: cs.onSurfaceVariant),
           ),
         ]),

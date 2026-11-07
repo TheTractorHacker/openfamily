@@ -57,10 +57,13 @@ String memberStatusLine(
   if (m.position == null) return DeliveryHints.hintFor(m.id) ?? 'No location yet';
   if (m.status == MemberStatus.stopped) {
     final String? why = DeliveryHints.hintFor(m.id);
-    if (why != null) return why;
     final DateTime? seen = m.lastSeen;
-    return seen == null
-        ? 'Updates stopped'
+    // The reason and, whenever any position was ever received, how old it is (never a blank).
+    if (why != null) return seen == null ? why : '$why · last seen ${lastSeenAgo(seen, DateTime.now())}';
+    if (seen == null) return 'Updates stopped';
+    // Older than a day a clock time alone is misleading ("3:12 pm" of which day?): say how long ago.
+    return DateTime.now().difference(seen) >= const Duration(hours: 24)
+        ? 'Updates stopped, last seen ${lastSeenAgo(seen, DateTime.now())}'
         : 'Updates stopped, last seen ${formatClock(seen.toLocal())}';
   }
   switch (m.movement) {
@@ -96,4 +99,13 @@ String? memberBatteryAlert(Member m) {
     return 'Battery ${m.batteryPercent}%';
   }
   return null;
+}
+
+/// "2 min ago", "1 h ago", "3 d ago": how old the last known position of a silent member is.
+String lastSeenAgo(DateTime seen, DateTime now) {
+  final Duration d = now.difference(seen);
+  if (d.inMinutes < 1) return 'just now';
+  if (d.inMinutes < 60) return '${d.inMinutes} min ago';
+  if (d.inHours < 24) return '${d.inHours} h ago';
+  return '${d.inDays} d ago';
 }

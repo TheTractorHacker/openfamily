@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'e2ee_crypto.dart';
 import 'e2ee_models.dart';
+import 'item_open_job.dart';
 import 'lanes_wire.dart';
 
 // Phase 2 of docs/design/E2EE.md: the encrypted channel of a Private circle.
@@ -55,7 +56,6 @@ Uint8List _i64(int v) {
   return d.buffer.asUint8List();
 }
 
-int _readI64(Uint8List b, int off) => ByteData.sublistView(b, off, off + 8).getUint64(0, Endian.big);
 
 /// The bytes the sender device signs.
 Uint8List itemSignedMessage({
@@ -248,6 +248,14 @@ class ReceivedItem {
   final DateTime ts;
   final Map<String, dynamic> body;
   final int? cursor;
+}
+
+/// Result of verifying one item of a batch: the item, or why it was refused.
+class ItemOutcome {
+  const ItemOutcome.ok(ReceivedItem this.item) : rejected = null;
+  const ItemOutcome.reject(ItemRejected this.rejected) : item = null;
+  final ReceivedItem? item;
+  final ItemRejected? rejected;
 }
 
 /// Why an incoming item was refused (never shown to the user as content).
@@ -556,6 +564,21 @@ class SealedQueue {
     return (ver: 0, w: '', items: <Map<String, dynamic>>[]);
   }
 
+  static final RegExp _headRe = RegExp(r'^\{"v":(\d+),"w":"([^"]*)"');
+
+  /// Only the version and writer id of the stored queue. They are the first two fields of the record we write, so
+  /// they are read with a pattern instead of decoding the whole (up to megabytes of) queue twice more per change.
+  /// Anything that does not look like our record falls back to the full read.
+  Future<({int ver, String w})> _head() async {
+    final String? raw = await kv.getFresh(_key);
+    if (raw != null) {
+      final Match? m = _headRe.firstMatch(raw);
+      if (m != null) return (ver: int.parse(m.group(1)!), w: m.group(2)!);
+    }
+    final snap = await _read();
+    return (ver: snap.ver, w: snap.w);
+  }
+
   /// Read-modify-write that survives a second writer (the background location
   /// isolate shares this store). SharedPreferences has no atomic compare-and-swap, so:
   /// read fresh, apply [op], look at the version again right before the write
@@ -571,11 +594,11 @@ class SealedQueue {
         for (int attempt = 0; attempt < 8; attempt++) {
           final snap = await _read();
           result = await op(snap.items);
-          final int cur = (await _read()).ver;
+          final int cur = (await _head()).ver;
           if (cur != snap.ver && attempt < 7) continue;
           final String w = '${_rng.nextInt(1 << 30)}-${clock.now().microsecondsSinceEpoch}';
           await kv.set(_key, jsonEncode(<String, dynamic>{'v': snap.ver + 1, 'w': w, 'i': snap.items}));
-          final back = await _read();
+          final back = await _head();
           if (back.ver == snap.ver + 1 && back.w == w) return result as T;
         }
         return result as T;
@@ -812,7 +835,11 @@ class ChannelReceiver {
     this.rollbackGrace = const Duration(minutes: 10),
     this.serverKeys,
     this.lanes,
+    this.runner = const InlineOpenRunner(),
   });
+
+  /// Where the heavy crypto of [processMany] runs (the app passes a worker isolate).
+  final OpenRunner runner;
 
   final ChannelKeys keys;
   final SenderDirectory directory;
@@ -858,166 +885,224 @@ class ChannelReceiver {
     return dev;
   }
 
+  /// Serialises batches: the replay window and rollback state are read, changed and written per batch.
+  Future<void> _procLock = Future<void>.value();
+
   /// Decrypts, authenticates and de-duplicates [item]. Throws [ItemRejected].
   /// A successful call records the item as seen (so a replay is a duplicate).
   Future<ReceivedItem> process(WireItem item) async {
-    if (!ChannelPurpose.all.contains(item.purpose) || item.seq <= 0 || item.epoch < 1) {
-      throw const ItemRejected(ItemRejection.malformed);
-    }
-    final Uint8List ct = item.ciphertext;
-    final PayloadHeader hdr;
-    try {
-      hdr = E2ee.parsePayloadHeader(ct); // unknown version or line: malformed (fail closed)
-    } catch (_) {
-      throw const ItemRejected(ItemRejection.malformed);
-    }
-    if (hdr.gen != item.epoch) throw const ItemRejected(ItemRejection.malformed);
-    final int line = hdr.line;
-    // A chat item on the server line is never valid (phone key line only).
-    if (item.purpose == ChannelPurpose.chat && line != E2ee.linePhone) throw const ItemRejected(ItemRejection.laneMismatch);
-    // The server's routing label must agree with the signed header.
-    if (item.declaredLine != null && item.declaredLine != line) throw const ItemRejected(ItemRejection.laneMismatch);
+    final ItemOutcome o = (await processMany(<WireItem>[item])).single;
+    if (o.rejected != null) throw o.rejected!;
+    return o.item!;
+  }
 
-    // Duplicate? (cheap check before any crypto)
-    final Set<int> win = await _window(item.circleId, item.deviceId);
-    if (win.contains(item.seq)) throw const ItemRejected(ItemRejection.duplicate);
-
-    // The key comes from the line in the signed header, never from anything else.
-    final Uint8List? key = line == E2ee.linePhone
-        ? await keys.circleKey(item.circleId, hdr.gen)
-        : await serverKeys?.serverKey(item.circleId, hdr.gen);
-    if (key == null) throw const ItemRejected(ItemRejection.noKey);
-
-    final int seq;
-    final int tsMs;
-    final Uint8List bodyBytes;
-    final DeviceKey dev;
-    if (hdr.version == E2ee.msgVersion) {
-      final Uint8List padded;
+  /// Verifies a whole batch (a catch-up page). The checks and their order are those of [process]; what changes is
+  /// the cost: keys and sender records are looked up once, the heavy crypto of all items runs in one hop to [runner]
+  /// (a worker isolate in the app) and the receiver state is written once per batch instead of once per item.
+  /// Results are in input order; a refused item is an outcome, not an exception.
+  Future<List<ItemOutcome>> processMany(List<WireItem> items) {
+    final Completer<List<ItemOutcome>> c = Completer<List<ItemOutcome>>();
+    _procLock = _procLock.then((_) async {
       try {
-        padded = await E2ee.open(key, item.circleId, item.deviceId, item.purpose, ct);
-      } on E2eeAuthException {
-        throw const ItemRejected(ItemRejection.badCipher);
-      } on E2eeFormatException {
-        throw const ItemRejected(ItemRejection.malformed);
+        c.complete(await _processBatch(items));
+      } catch (e, st) {
+        c.completeError(e, st);
       }
-      final Uint8List env;
+    });
+    return c.future;
+  }
+
+  Future<List<ItemOutcome>> _processBatch(List<WireItem> items) async {
+    final List<ItemOutcome?> outs = List<ItemOutcome?>.filled(items.length, null);
+    final Map<String, Set<int>> windows = <String, Set<int>>{};
+    final Set<String> dirtyWindows = <String>{};
+    final Map<String, int> ints = <String, int>{};
+    final Set<String> dirtyInts = <String>{};
+    final Map<String, String?> epochSeen = <String, String?>{};
+    final Map<String, Uint8List?> keyCache = <String, Uint8List?>{};
+
+    Future<int> getInt(String k) async => ints[k] ??= await _int(k);
+    void setInt(String k, int v) {
+      ints[k] = v;
+      dirtyInts.add(k);
+    }
+
+    // ---- stage 1: cheap checks, key and sender lookup (no crypto) ----------
+    final List<int> jobIndex = <int>[];
+    final List<OpenJob> jobs = <OpenJob>[];
+    final Map<int, (PayloadHeader, DeviceKey)> ctx = <int, (PayloadHeader, DeviceKey)>{};
+    for (int i = 0; i < items.length; i++) {
+      final WireItem item = items[i];
       try {
-        env = E2ee.unpad(padded);
-      } catch (_) {
-        throw const ItemRejected(ItemRejection.badPadding);
-      }
-      if (env.length < 1 + 8 + 8 + E2ee.sigLen || env[0] != 1) throw const ItemRejected(ItemRejection.badEnvelope);
-      seq = _readI64(env, 1);
-      tsMs = _readI64(env, 9);
-      final Uint8List sig = Uint8List.fromList(env.sublist(17, 17 + E2ee.sigLen));
-      bodyBytes = Uint8List.fromList(env.sublist(17 + E2ee.sigLen));
-      // The inner (signed) seq must be the one the server shows, or the server could renumber.
-      if (seq != item.seq) throw const ItemRejected(ItemRejection.badEnvelope);
-      // Sender must be a known, approved device of a member of this circle.
-      dev = await _sender(item);
-      _checkSender(dev, DateTime.fromMillisecondsSinceEpoch(tsMs, isUtc: true));
-      final bool ok = await E2ee.verify(
-          dev.edPub,
-          itemSignedMessage(
-              circleId: item.circleId, epoch: item.epoch, deviceId: item.deviceId, purpose: item.purpose, seq: seq, tsMs: tsMs, body: bodyBytes),
-          sig);
-      if (!ok) throw const ItemRejected(ItemRejection.badSignature);
-    } else {
-      // v2: line and generation are inside the signature and the AEAD AAD.
-      dev = await _sender(item);
-      if (dev.kind == 'recovery' || dev.approved != true) throw const ItemRejected(ItemRejection.senderNotMember);
-      final ItemV2 v;
-      try {
-        v = await E2ee.openItemV2(key, item.circleId, line, item.deviceId, dev.edPub, item.purpose, item.seq, ct);
-      } on E2eeAuthException catch (e) {
-        throw ItemRejected(e.message == 'bad item signature'
-            ? ItemRejection.badSignature
-            : (e.message == 'seq mismatch' ? ItemRejection.badEnvelope : ItemRejection.badCipher));
-      } on E2eeFormatException {
-        throw const ItemRejected(ItemRejection.malformed);
-      }
-      if (v.line != line || v.gen != hdr.gen) throw const ItemRejected(ItemRejection.laneMismatch);
-      seq = v.seq;
-      tsMs = v.tsMs;
-      bodyBytes = v.body;
-      _checkSender(dev, DateTime.fromMillisecondsSinceEpoch(tsMs, isUtc: true));
-    }
-    final DateTime ts = DateTime.fromMillisecondsSinceEpoch(tsMs, isUtc: true);
-
-    final DateTime now = clock.now();
-    if (ts.isAfter(now.add(maxSkew))) throw const ItemRejected(ItemRejection.clockSkew);
-
-    // ---- epoch / generation rollback, per key line ---------------------------
-    // 1. A device never goes back to an older generation: once a fresh item (higher seq than
-    //    anything seen) used generation G, a later-seq item with an older one is refused.
-    final int hw = await _int(_hwKey(item.circleId, item.deviceId));
-    final int devEpoch = await _int(_devEpochKey(item.circleId, item.deviceId, line));
-    if (seq > hw && hdr.gen < devEpoch) throw const ItemRejected(ItemRejection.epochRollback);
-    // 2. Circle-wide: once a newer generation has been seen for longer than the grace
-    //    period, an item sealed under an older one is refused unless it is backlog
-    //    (its signed time precedes the moment the newer one was first seen).
-    final String? seen = await kv.get(_epochSeenKey(item.circleId, line));
-    int maxEpoch = 0;
-    int maxSeenAtMs = 0;
-    if (seen != null && seen.contains(':')) {
-      maxEpoch = int.tryParse(seen.split(':')[0]) ?? 0;
-      maxSeenAtMs = int.tryParse(seen.split(':')[1]) ?? 0;
-    }
-    if (hdr.gen < maxEpoch) {
-      final bool backlog = tsMs < maxSeenAtMs;
-      final bool inGrace = now.millisecondsSinceEpoch - maxSeenAtMs < rollbackGrace.inMilliseconds;
-      if (!backlog && !inGrace) throw const ItemRejected(ItemRejection.epochRollback);
-    }
-
-    // ---- lane verdict (server line only): is the author's signed pref consistent? ----
-    LaneVerdict verdict = LaneVerdict.consistent;
-    if (line == E2ee.lineServer) {
-      verdict = LaneVerdict.flagged;
-      final LaneSource? l = lanes;
-      if (l != null) {
-        try {
-          if (await l.serverAssistOn(item.circleId)) {
-            verdict = E2ee.classifyItemLane(await l.prefsOf(item.circleId, dev.userId), line, tsMs);
-          }
-        } catch (_) {
-          verdict = LaneVerdict.flagged;
+        if (!ChannelPurpose.all.contains(item.purpose) || item.seq <= 0 || item.epoch < 1) {
+          throw const ItemRejected(ItemRejection.malformed);
         }
+        final Uint8List ct = item.ciphertext;
+        final PayloadHeader hdr;
+        try {
+          hdr = E2ee.parsePayloadHeader(ct); // unknown version or line: malformed (fail closed)
+        } catch (_) {
+          throw const ItemRejected(ItemRejection.malformed);
+        }
+        if (hdr.gen != item.epoch) throw const ItemRejected(ItemRejection.malformed);
+        final int line = hdr.line;
+        // A chat item on the server line is never valid (phone key line only).
+        if (item.purpose == ChannelPurpose.chat && line != E2ee.linePhone) throw const ItemRejected(ItemRejection.laneMismatch);
+        // The server's routing label must agree with the signed header.
+        if (item.declaredLine != null && item.declaredLine != line) throw const ItemRejected(ItemRejection.laneMismatch);
+
+        // Duplicate? (cheap check before any crypto)
+        final String wk = _winKey(item.circleId, item.deviceId);
+        final Set<int> win = windows[wk] ??= await _window(item.circleId, item.deviceId);
+        if (win.contains(item.seq)) throw const ItemRejected(ItemRejection.duplicate);
+
+        // The key comes from the line in the signed header, never from anything else.
+        final String kk = '${item.circleId}/$line/${hdr.gen}';
+        if (!keyCache.containsKey(kk)) {
+          keyCache[kk] = line == E2ee.linePhone
+              ? await keys.circleKey(item.circleId, hdr.gen)
+              : await serverKeys?.serverKey(item.circleId, hdr.gen);
+        }
+        final Uint8List? key = keyCache[kk];
+        if (key == null) throw const ItemRejected(ItemRejection.noKey);
+
+        final DeviceKey dev = await _sender(item);
+        // v2: sender approval is checked before any decryption.
+        if (hdr.version != E2ee.msgVersion && (dev.kind == 'recovery' || dev.approved != true)) {
+          throw const ItemRejected(ItemRejection.senderNotMember);
+        }
+        ctx[i] = (hdr, dev);
+        jobIndex.add(i);
+        jobs.add(OpenJob(
+            version: hdr.version, line: line, key: key, circleId: item.circleId, deviceId: item.deviceId,
+            purpose: item.purpose, seq: item.seq, ciphertext: ct, senderEdPub: dev.edPub));
+      } on ItemRejected catch (e) {
+        outs[i] = ItemOutcome.reject(e);
       }
     }
 
-    // ---- record state ------------------------------------------------------
-    if (hdr.gen > maxEpoch) {
-      await kv.set(_epochSeenKey(item.circleId, line), '${hdr.gen}:${now.millisecondsSinceEpoch}');
-    }
-    if (seq > hw) await kv.set(_hwKey(item.circleId, item.deviceId), '$seq');
-    if (hdr.gen > devEpoch) await kv.set(_devEpochKey(item.circleId, item.deviceId, line), '${hdr.gen}');
-    win.add(item.seq);
-    // keep the window bounded: only the newest 512 seqs
-    final List<int> sorted = win.toList()..sort();
-    final List<int> kept = sorted.length > 512 ? sorted.sublist(sorted.length - 512) : sorted;
-    await kv.set(_winKey(item.circleId, item.deviceId), kept.join(','));
+    // ---- stage 2: the heavy crypto, off the UI isolate ----------------------
+    final List<OpenOut> opened = await runner.run(jobs);
 
-    final Map<String, dynamic> body;
-    try {
-      final Object? decoded = jsonDecode(utf8.decode(bodyBytes));
-      if (decoded is! Map<String, dynamic>) throw const FormatException('not an object');
-      body = decoded;
-    } catch (_) {
-      throw const ItemRejected(ItemRejection.badEnvelope);
+    // ---- stage 3: state checks and bookkeeping, in order --------------------
+    for (int n = 0; n < jobIndex.length; n++) {
+      final int i = jobIndex[n];
+      final WireItem item = items[i];
+      final (PayloadHeader hdr, DeviceKey dev) = ctx[i]!;
+      final OpenOut o = opened[n];
+      try {
+        if (!o.ok) throw ItemRejected(o.reason);
+        final int line = hdr.line;
+        if (hdr.version != E2ee.msgVersion) {
+          if (o.line != line || o.gen != hdr.gen) throw const ItemRejected(ItemRejection.laneMismatch);
+        }
+        final int seq = o.seq;
+        final int tsMs = o.tsMs;
+        final DateTime ts = DateTime.fromMillisecondsSinceEpoch(tsMs, isUtc: true);
+        _checkSender(dev, ts);
+
+        final DateTime now = clock.now();
+        if (ts.isAfter(now.add(maxSkew))) throw const ItemRejected(ItemRejection.clockSkew);
+
+        // The same (device, seq) twice in one batch: the first one wins.
+        final String wk = _winKey(item.circleId, item.deviceId);
+        final Set<int> win = windows[wk]!;
+        if (win.contains(item.seq)) throw const ItemRejected(ItemRejection.duplicate);
+
+        // ---- epoch / generation rollback, per key line -----------------------
+        // 1. A device never goes back to an older generation: once a fresh item (higher seq than
+        //    anything seen) used generation G, a later-seq item with an older one is refused.
+        final String hwK = _hwKey(item.circleId, item.deviceId);
+        final String deK = _devEpochKey(item.circleId, item.deviceId, line);
+        final int hw = await getInt(hwK);
+        final int devEpoch = await getInt(deK);
+        if (seq > hw && hdr.gen < devEpoch) throw const ItemRejected(ItemRejection.epochRollback);
+        // 2. Circle-wide: once a newer generation has been seen for longer than the grace
+        //    period, an item sealed under an older one is refused unless it is backlog
+        //    (its signed time precedes the moment the newer one was first seen).
+        final String esK = _epochSeenKey(item.circleId, line);
+        if (!epochSeen.containsKey(esK)) epochSeen[esK] = await kv.get(esK);
+        final String? seen = epochSeen[esK];
+        int maxEpoch = 0;
+        int maxSeenAtMs = 0;
+        if (seen != null && seen.contains(':')) {
+          maxEpoch = int.tryParse(seen.split(':')[0]) ?? 0;
+          maxSeenAtMs = int.tryParse(seen.split(':')[1]) ?? 0;
+        }
+        if (hdr.gen < maxEpoch) {
+          final bool backlog = tsMs < maxSeenAtMs;
+          final bool inGrace = now.millisecondsSinceEpoch - maxSeenAtMs < rollbackGrace.inMilliseconds;
+          if (!backlog && !inGrace) throw const ItemRejected(ItemRejection.epochRollback);
+        }
+
+        // ---- lane verdict (server line only): is the author's signed pref consistent? ----
+        LaneVerdict verdict = LaneVerdict.consistent;
+        if (line == E2ee.lineServer) {
+          verdict = LaneVerdict.flagged;
+          final LaneSource? l = lanes;
+          if (l != null) {
+            try {
+              if (await l.serverAssistOn(item.circleId)) {
+                verdict = E2ee.classifyItemLane(await l.prefsOf(item.circleId, dev.userId), line, tsMs);
+              }
+            } catch (_) {
+              verdict = LaneVerdict.flagged;
+            }
+          }
+        }
+
+        // ---- record state ----------------------------------------------------
+        if (hdr.gen > maxEpoch) {
+          epochSeen[esK] = '${hdr.gen}:${now.millisecondsSinceEpoch}';
+          dirtyInts.add('\u0000$esK');
+        }
+        if (seq > hw) setInt(hwK, seq);
+        if (hdr.gen > devEpoch) setInt(deK, hdr.gen);
+        win.add(item.seq);
+        dirtyWindows.add(wk);
+
+        final Map<String, dynamic> body;
+        try {
+          final Object? decoded = jsonDecode(utf8.decode(o.body!));
+          if (decoded is! Map<String, dynamic>) throw const FormatException('not an object');
+          body = decoded;
+        } catch (_) {
+          throw const ItemRejected(ItemRejection.badEnvelope);
+        }
+
+        outs[i] = ItemOutcome.ok(ReceivedItem(
+            circleId: item.circleId,
+            deviceId: item.deviceId,
+            userId: dev.userId,
+            seq: seq,
+            purpose: item.purpose,
+            epoch: hdr.gen,
+            ts: ts,
+            body: body,
+            cursor: item.id,
+            line: line,
+            verdict: verdict));
+      } on ItemRejected catch (e) {
+        outs[i] = ItemOutcome.reject(e);
+      }
     }
-    return ReceivedItem(
-        circleId: item.circleId,
-        deviceId: item.deviceId,
-        userId: dev.userId,
-        seq: seq,
-        purpose: item.purpose,
-        epoch: hdr.gen,
-        ts: ts,
-        body: body,
-        cursor: item.id,
-        line: line,
-        verdict: verdict);
+
+    // ---- persist the receiver state once per batch ---------------------------
+    for (final String k in dirtyInts) {
+      if (k.startsWith('\u0000')) {
+        final String esK = k.substring(1);
+        await kv.set(esK, epochSeen[esK]!);
+      } else {
+        await kv.set(k, '${ints[k]}');
+      }
+    }
+    for (final String wk in dirtyWindows) {
+      // keep the window bounded: only the newest 512 seqs
+      final List<int> sorted = windows[wk]!.toList()..sort();
+      final List<int> kept = sorted.length > 512 ? sorted.sublist(sorted.length - 512) : sorted;
+      await kv.set(wk, kept.join(','));
+    }
+    return outs.cast<ItemOutcome>();
   }
 
   void _checkSender(DeviceKey dev, DateTime ts) {
@@ -1046,35 +1131,46 @@ class ChannelSync {
   /// Fetches everything new, oldest first. [onItem] is awaited per verified item; rejected items are
   /// counted (never rethrown) and the cursor still advances so one bad item cannot wedge the stream.
   /// The cursor is stored only after a page was handled, so a crash re-delivers (and dedupes).
-  Future<SyncStats> catchUp(String circleId, {required FutureOr<void> Function(ReceivedItem) onItem, List<String>? purposes, int maxPages = 50}) async {
+  Future<SyncStats> catchUp(String circleId,
+      {FutureOr<void> Function(ReceivedItem)? onItem,
+      FutureOr<void> Function(List<ReceivedItem>)? onBatch,
+      List<String>? purposes,
+      int maxPages = 50}) async {
+    assert(onItem != null || onBatch != null);
     int accepted = 0;
     final Map<ItemRejection, int> rejected = <ItemRejection, int>{};
+    Future<void> handle(List<WireItem> items, {required bool retrying}) async {
+      final List<ItemOutcome> outs = await receiver.processMany(items);
+      final List<ReceivedItem> good = <ReceivedItem>[];
+      for (int i = 0; i < items.length; i++) {
+        final ItemRejected? rej = outs[i].rejected;
+        if (rej == null) {
+          good.add(outs[i].item!);
+          continue;
+        }
+        if (!retrying) rejected[rej.reason] = (rejected[rej.reason] ?? 0) + 1;
+        if (_transient(rej.reason)) await _defer(circleId, items[i]);
+      }
+      if (onBatch != null) {
+        if (good.isNotEmpty) await onBatch(good);
+      } else {
+        for (final ReceivedItem r in good) {
+          await onItem!(r);
+        }
+      }
+      accepted += good.length;
+    }
+
     // Items that arrived before their key / sender record are retried first.
     final List<WireItem> retry = await _deferred(circleId);
     if (retry.isNotEmpty) {
       await kv.remove(_def(circleId));
-      for (final WireItem it in retry) {
-        try {
-          await onItem(await receiver.process(it));
-          accepted++;
-        } on ItemRejected catch (e) {
-          if (_transient(e.reason)) await _defer(circleId, it);
-        }
-      }
+      await handle(retry, retrying: true);
     }
     int after = await cursor(circleId);
     for (int page = 0; page < maxPages; page++) {
       final Page p = await api.pull(circleId, after, purposes: purposes);
-      for (final WireItem it in p.items) {
-        try {
-          final ReceivedItem r = await receiver.process(it);
-          await onItem(r);
-          accepted++;
-        } on ItemRejected catch (e) {
-          rejected[e.reason] = (rejected[e.reason] ?? 0) + 1;
-          if (_transient(e.reason)) await _defer(circleId, it);
-        }
-      }
+      await handle(p.items, retrying: false);
       if (p.nextCursor > after) {
         after = p.nextCursor;
         // Only advance the stored cursor when no purpose filter hides other items.

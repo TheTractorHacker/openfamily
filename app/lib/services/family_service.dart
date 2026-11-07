@@ -10,6 +10,7 @@ import '../models/member.dart';
 import '../models/place.dart';
 import 'alert_service.dart';
 import 'api_client.dart';
+import 'e2ee/last_positions.dart';
 import 'e2ee/private_runtime.dart';
 import 'bubble_service.dart';
 import 'chat_service.dart';
@@ -653,9 +654,19 @@ class FamilyService {
     _members = reconciled
         .map((Member m) => applyPlaceAddress(m, _places))
         .toList();
-    // Private circles carry no server positions: restore last-known ones.
+    // Private circles carry no server positions: put the last known one back at once (from memory, so the roster
+    // never flashes "No location yet" between a snapshot and the async replay), then replay for the rest.
+    _members = _members.map(_withLastKnown).toList();
     unawaited(PrivateRuntime.instance.replayLatest().catchError((Object _) {}));
     return _members;
+  }
+
+  /// A member the server sent without a position, but whose phone shared one with this phone before.
+  Member _withLastKnown(Member m) {
+    if (m.position != null || m.id.isEmpty) return m;
+    final LastPosition? p = PrivateRuntime.instance.lastKnown(m.id);
+    if (p == null) return m;
+    return applyPlaceAddress(memberFromLocationUpdate(m, p.toFrame()), _places);
   }
 
   bool _avatarMetadataChanged(Member before, Member after) {

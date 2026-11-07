@@ -245,6 +245,8 @@ class _MapScreenState extends State<MapScreen>
     PrivateRuntime.instance
       ..onMemberFrame = _familyService.applySealedLocation
       ..nameOf = _memberNameFor;
+    // Last known positions are read once, before the first roster, so a cold start is never blank.
+    unawaited(PrivateRuntime.instance.warmUp().catchError((Object _) {}));
     _selection.addListener(_onSelectionChanged);
     _connectivitySub =
         Connectivity().onConnectivityChanged.listen(_onConnectivityChanged);
@@ -609,6 +611,7 @@ class _MapScreenState extends State<MapScreen>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.paused) {
+      unawaited(PrivateRuntime.instance.flushStores().catchError((Object _) {}));
       _reporter.stop();
       _appResumed = false;
       _syncWatch();

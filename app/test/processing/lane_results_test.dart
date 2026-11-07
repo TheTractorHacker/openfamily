@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:openfamily/services/processing/on_device_setting.dart';
 import 'package:openfamily/models/circle.dart';
 import 'package:openfamily/services/e2ee/e2ee_crypto.dart';
 import 'package:openfamily/services/e2ee/e2ee_models.dart';
@@ -255,6 +256,9 @@ void main() {
           service: svc, api: server.client(user), kv: kv, clock: clock, channel: channel, directory: StateSenderDirectory(server.client(user)));
       rt.lanesService.logTtl = Duration.zero;
       rt.notify = (String t, String b) async {};
+      // On-device reports are opt-in (default off); these tests exercise the switched-on path, unbatched.
+      await OnDeviceReportsSetting.set(kv, true);
+      rt.onDeviceBatchEvery = Duration.zero;
       await svc.registerThisDevice();
       return (rt: rt, svc: svc, kv: kv);
     }

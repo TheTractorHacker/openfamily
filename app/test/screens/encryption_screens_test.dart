@@ -322,7 +322,7 @@ void main() {
       expect(server.activeOf(uA).where((DeviceKey k) => k.isRecovery).length, 1);
       expect(sec.calls.last, isFalse); // screenshots allowed again
       // The phrase is not on the phone: the vault holds only identity data.
-      final MemoryVault v = (alice.vault as MemoryVault);
+      final MemoryVault v = (alice.vault.inner as MemoryVault);
       for (final MapEntry<String, Uint8List> e in v.data.entries) {
         expect(String.fromCharCodes(e.value), isNot(contains(words.take(3).join(' '))));
       }

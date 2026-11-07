@@ -44,8 +44,8 @@ String memberDetailStatus(
   if (m.position == null) return DeliveryHints.hintFor(m.id, now: n) ?? 'No location yet';
   if (m.status == MemberStatus.stopped) {
     final String? why = DeliveryHints.hintFor(m.id, now: n);
-    if (why != null) return why;
     final DateTime? seen = m.lastSeen;
+    if (why != null) return seen == null ? why : '$why · last seen ${agoLabel(seen.toLocal(), n)}';
     return seen == null ? 'Updates stopped' : 'Last seen ${agoLabel(seen.toLocal(), n)}';
   }
   if (m.movement == MovementType.car) {

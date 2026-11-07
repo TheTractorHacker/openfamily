@@ -56,6 +56,36 @@ abstract class E2eeVault {
   Future<KeystoreStatus> status();
 }
 
+/// Wraps a vault and counts every change to it. Readers that remember keys compare [tick] to know when to look again.
+class TickVault implements E2eeVault {
+  TickVault(this.inner);
+  final E2eeVault inner;
+
+  /// Process-wide: bumped by any write or delete on any [TickVault].
+  static int tick = 0;
+
+  @override
+  Future<Uint8List?> read(String name) => inner.read(name);
+  @override
+  Future<void> write(String name, Uint8List value) async {
+    tick++;
+    await inner.write(name, value);
+    tick++;
+  }
+
+  @override
+  Future<void> delete(String name) async {
+    tick++;
+    await inner.delete(name);
+    tick++;
+  }
+
+  @override
+  Future<List<String>> names() => inner.names();
+  @override
+  Future<KeystoreStatus> status() => inner.status();
+}
+
 class MemoryVault implements E2eeVault {
   final Map<String, Uint8List> data = <String, Uint8List>{};
   @override

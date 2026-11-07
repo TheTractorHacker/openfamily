@@ -21,12 +21,15 @@ import 'e2ee_models.dart';
 import 'e2ee_service.dart';
 import 'e2ee_trust.dart';
 import 'e2ee_vault.dart';
+import 'item_open_job.dart';
 import 'lanes_service.dart';
 import 'lanes_wire.dart';
 import 'lanes_store.dart';
 import 'private_channel.dart';
 import 'private_store.dart';
 import 'private_history.dart';
+import 'last_positions.dart';
+import '../processing/on_device_setting.dart';
 import 'private_places.dart';
 import '../chat/chat_engine.dart';
 import '../chat/chat_store.dart';
@@ -84,24 +87,75 @@ class PrefsChannelKv implements ChannelKv {
 }
 
 /// [ChannelKeys] and [ServerKeys] over the vault.
+///
+/// A vault read is a Keystore decrypt behind a platform channel (and `heldEpochs` lists, i.e. decrypts, every vault
+/// entry), so the keys are remembered in memory for [ttl]. A key of a given (circle, epoch) never changes once stored;
+/// the "newest epoch" answers can, so they live for [latestTtl] only and [invalidate] drops them when keys were synced.
+/// Only found keys are remembered (a missing key is asked for again).
 class ServiceChannelKeys implements ChannelKeys, ServerKeys {
-  ServiceChannelKeys(this.service);
+  ServiceChannelKeys(this.service, {this.ttl = const Duration(minutes: 10), this.latestTtl = const Duration(seconds: 15), DateTime Function()? now})
+      : _now = now ?? DateTime.now;
   final E2eeService service;
+  final Duration ttl, latestTtl;
+  final DateTime Function() _now;
+  final Map<String, ({DateTime at, Uint8List key})> _keys = <String, ({DateTime at, Uint8List key})>{};
+  final Map<String, ({DateTime at, int v})> _latest = <String, ({DateTime at, int v})>{};
 
-  @override
-  Future<Uint8List?> circleKey(String circleId, int epoch) => service.circleKey(circleId, epoch);
+  /// Forget cached newest-epoch answers (and keys) of [circleId], or everything.
+  void invalidate([String? circleId]) {
+    if (circleId == null) {
+      _keys.clear();
+      _latest.clear();
+      return;
+    }
+    _keys.removeWhere((String k, _) => k.contains('/$circleId/'));
+    _latest.removeWhere((String k, _) => k.endsWith('/$circleId'));
+  }
 
-  @override
-  Future<int> latestEpoch(String circleId) async {
-    final List<int> e = await service.heldEpochs(circleId);
-    return e.isEmpty ? 0 : e.last;
+  int _seenTick = TickVault.tick;
+
+  /// Anything written to or removed from the vault since the last call (a new epoch, a rotation, a wipe) drops what is remembered.
+  void _checkTick() {
+    if (_seenTick == TickVault.tick) return;
+    _seenTick = TickVault.tick;
+    _keys.clear();
+    _latest.clear();
+  }
+
+  Future<Uint8List?> _cached(String name, Future<Uint8List?> Function() load) async {
+    _checkTick();
+    final ({DateTime at, Uint8List key})? c = _keys[name];
+    if (c != null && _now().difference(c.at) < ttl) return c.key;
+    final int t = TickVault.tick;
+    final Uint8List? k = await load();
+    if (k != null && t == TickVault.tick) _keys[name] = (at: _now(), key: k);
+    return k;
+  }
+
+  Future<int> _latestOf(String name, Future<int> Function() load) async {
+    _checkTick();
+    final ({DateTime at, int v})? c = _latest[name];
+    if (c != null && c.v > 0 && _now().difference(c.at) < latestTtl) return c.v;
+    final int t = TickVault.tick;
+    final int v = await load();
+    if (t == TickVault.tick) _latest[name] = (at: _now(), v: v);
+    return v;
   }
 
   @override
-  Future<Uint8List?> serverKey(String circleId, int gen) => service.serverKey(circleId, gen);
+  Future<Uint8List?> circleKey(String circleId, int epoch) => _cached('ck/$circleId/$epoch', () => service.circleKey(circleId, epoch));
 
   @override
-  Future<int> latestServerGen(String circleId) => service.latestServerGen(circleId);
+  Future<int> latestEpoch(String circleId) => _latestOf('ck/$circleId', () async {
+        final List<int> e = await service.heldEpochs(circleId);
+        return e.isEmpty ? 0 : e.last;
+      });
+
+  @override
+  Future<Uint8List?> serverKey(String circleId, int gen) => _cached('sk/$circleId/$gen', () => service.serverKey(circleId, gen));
+
+  @override
+  Future<int> latestServerGen(String circleId) => _latestOf('sk/$circleId', () => service.latestServerGen(circleId));
 }
 
 /// [SenderDirectory] over the circle's E2EE state (members, their devices and
@@ -297,15 +351,18 @@ class PrivateRuntime {
     SenderDirectory? directory,
     ChannelApi? channel,
     Random? rng,
+    this.opener = const InlineOpenRunner(),
+    Duration? historyWriteBehind = const Duration(seconds: 4),
   })  : channel = channel ?? const HttpChannelApi(),
         _rng = rng ?? Random.secure() {
     final ServiceChannelKeys ck = ServiceChannelKeys(service);
     keys = ck;
+    _keyCache = ck;
     lanes = KvLaneSource(kv);
     this.directory = directory ?? StateSenderDirectory(api);
     sealer = ChannelSealer(keys: keys, kv: kv, clock: clock, lanes: lanes, serverKeys: ck);
     queue = SealedQueue(kv: kv, clock: clock);
-    receiver = ChannelReceiver(keys: keys, directory: this.directory, kv: kv, clock: clock, serverKeys: ck, lanes: lanes);
+    receiver = ChannelReceiver(keys: keys, directory: this.directory, kv: kv, clock: clock, serverKeys: ck, lanes: lanes, runner: opener);
     lanesService = LanesService(service: service, api: api, kv: kv, clock: clock, onLaneChanged: (String c) async {
       await queue.reconcileLanes(lanes);
     });
@@ -320,7 +377,8 @@ class PrivateRuntime {
       }
       ..onChange = ChatEvents.handleEngineChange;
     sync = ChannelSync(api: this.channel, receiver: receiver, kv: kv);
-    history = PrivateHistory(kv: kv, now: clock.now);
+    history = PrivateHistory(kv: kv, now: clock.now, writeBehind: historyWriteBehind);
+    lastPositions = LastPositionBook(vault: service.vault);
     chunker = HistoryChunker(kv: kv, now: clock.now);
   }
 
@@ -342,13 +400,15 @@ class PrivateRuntime {
       kv: const PrefsChannelKv(),
       channel: IngestKeyChannelApi(apiBaseUrl, headers),
       directory: _NoDirectory(),
+      historyWriteBehind: null, // the headless isolate may be killed at any moment: write at once
     );
   }
 
   static PrivateRuntime? override;
   static PrivateRuntime? _instance;
   static PrivateRuntime get instance => override ??
-      (_instance ??= PrivateRuntime(service: E2eeApp.service, api: const ApiE2eeApi(), kv: const PrefsChannelKv()));
+      (_instance ??= PrivateRuntime(
+          service: E2eeApp.service, api: const ApiE2eeApi(), kv: const PrefsChannelKv(), opener: WorkerOpenRunner()));
 
   final E2eeService service;
   final E2eeApi api;
@@ -357,6 +417,13 @@ class PrivateRuntime {
   final ChannelApi channel;
   final Random _rng;
   late final ChannelKeys keys;
+  late final ServiceChannelKeys _keyCache;
+
+  /// Where the heavy crypto of received items runs (a worker isolate in the app, the calling isolate in tests).
+  final OpenRunner opener;
+
+  /// Forgets remembered keys (sign-out, account switch).
+  void forgetKeys() => _keyCache.invalidate();
 
   /// Verified lane facts for the sealer, the queue and the receiver (persisted).
   late final KvLaneSource lanes;
@@ -376,6 +443,9 @@ class PrivateRuntime {
   late final ChannelReceiver receiver;
   late final ChannelSync sync;
   late final PrivateHistory history;
+
+  /// The newest received position per member and circle, encrypted at rest in the vault.
+  late final LastPositionBook lastPositions;
   late final HistoryChunker chunker;
 
   final Map<String, PlaceBook> _books = <String, PlaceBook>{};
@@ -665,7 +735,9 @@ class PrivateRuntime {
       final int held = await keys.latestEpoch(circleId);
       final CircleE2eeState st = await api.circleState(circleId);
       if (!st.isPrivate || st.epoch <= held) return false;
-      return await service.syncCircleKeys(circleId) > 0;
+      final bool got = await service.syncCircleKeys(circleId) > 0;
+      _keyCache.invalidate(circleId);
+      return got;
     } catch (_) {
       return false;
     }
@@ -742,36 +814,86 @@ class PrivateRuntime {
         },
       );
 
+  /// Fixes waiting for the next on-device processing batch (only used while the opt-in switch is on).
+  final List<(Map<String, dynamic>, DateTime)> _procBacklog = <(Map<String, dynamic>, DateTime)>[];
+  DateTime? _procLast;
+  Timer? _procTimer;
+
+  /// Heavy processing runs in batches at most this often (the switch is off by default, see [OnDeviceReportsSetting]).
+  Duration onDeviceBatchEvery = const Duration(seconds: 60);
+
+  /// Extra gate for the heavy work (the app can return false while the phone is low on battery and not charging).
+  Future<bool> Function()? onDeviceAllowed;
+
   Future<void> _processOnDevice(SenderIdentity me, Map<String, dynamic> loc, DateTime ts) async {
     try {
+      // Off by default: a phone-only member's phone sends its fix and shows the map, nothing more.
+      if (!await OnDeviceReportsSetting.isOn(kv)) {
+        _procBacklog.clear();
+        return;
+      }
+      if ((await phoneOnlyCircles()).isEmpty) return;
+      _procBacklog.add((loc, ts));
+      if (_procBacklog.length > 600) _procBacklog.removeAt(0);
+      final DateTime? last = _procLast;
+      if (last != null && clock.now().difference(last) < onDeviceBatchEvery) {
+        _procTimer ??= Timer(onDeviceBatchEvery, () {
+          _procTimer = null;
+          unawaited(_drainProcessing(me));
+        });
+        return;
+      }
+      await _drainProcessing(me);
+    } catch (_) {
+      // Processing is best effort and must never disturb the location pipeline.
+    }
+  }
+
+  Future<void> _drainProcessing(SenderIdentity me) async {
+    try {
+      if (_procBacklog.isEmpty) return;
+      final Future<bool> Function()? gate = onDeviceAllowed;
+      if (gate != null && !await gate()) return; // try again with the next fix
       final Set<String> circles = await phoneOnlyCircles();
-      if (circles.isEmpty) return;
+      if (circles.isEmpty) {
+        _procBacklog.clear();
+        return;
+      }
       _resultCircles = circles;
       final OnDeviceProcessor p = _proc(me);
       try {
         p.phoneUseEnabled = await DrivingSettings.phoneUseEnabled(reload: false);
       } catch (_) {}
+      final List<(Map<String, dynamic>, DateTime)> batch = List<(Map<String, dynamic>, DateTime)>.of(_procBacklog);
+      _procBacklog.clear();
+      _procLast = clock.now();
       if (!_processorRestored) {
         _processorRestored = true;
-        final List<TrackPoint> past = await trailFor(me.userId, ts.subtract(const Duration(hours: 6)), ts);
+        final DateTime firstTs = batch.first.$2;
+        final List<TrackPoint> past = await trailFor(me.userId, firstTs.subtract(const Duration(hours: 6)), firstTs);
         await p.restore(<Fix>[
           for (final TrackPoint t in past)
-            if (t.tsMs < ts.millisecondsSinceEpoch)
+            if (t.tsMs < firstTs.millisecondsSinceEpoch)
               Fix(tsUs: t.tsMs * 1000, lat: t.lat, lon: t.lon, accuracyM: t.accuracy ?? 0, deviceId: me.deviceId)
         ]);
       }
-      final double? lat = (loc['lat'] as num?)?.toDouble(), lon = (loc['lon'] as num?)?.toDouble();
-      if (lat == null || lon == null) return;
-      await p.onFix(Fix(
-          tsUs: ts.microsecondsSinceEpoch,
-          lat: lat,
-          lon: lon,
-          speedMps: (loc['speed_mps'] as num?)?.toDouble(),
-          accuracyM: (loc['accuracy_meters'] as num?)?.toDouble() ?? 0,
-          deviceId: me.deviceId));
+      int n = 0;
+      for (final (Map<String, dynamic> loc, DateTime ts) in batch) {
+        final double? lat = (loc['lat'] as num?)?.toDouble(), lon = (loc['lon'] as num?)?.toDouble();
+        if (lat == null || lon == null) continue;
+        await p.onFix(Fix(
+            tsUs: ts.microsecondsSinceEpoch,
+            lat: lat,
+            lon: lon,
+            speedMps: (loc['speed_mps'] as num?)?.toDouble(),
+            accuracyM: (loc['accuracy_meters'] as num?)?.toDouble() ?? 0,
+            deviceId: me.deviceId));
+        if (++n % 20 == 0) await Future<void>.delayed(Duration.zero); // let frames through
+      }
       await p.tickWeekly();
+      _scheduleFlush();
     } catch (_) {
-      // Processing is best effort and must never disturb the location pipeline.
+      // best effort
     }
   }
 
@@ -957,6 +1079,7 @@ class PrivateRuntime {
   Future<void> _syncKeys(String circleId) async {
     try {
       await service.syncCircleKeys(circleId);
+      _keyCache.invalidate(circleId);
     } catch (_) {}
   }
 
@@ -1093,7 +1216,7 @@ class PrivateRuntime {
   /// Pulls and applies everything new for [circleId] (app open, push wake-up, reconnect).
   Future<SyncStats> catchUp(String circleId) async {
     await loadBook(circleId);
-    return sync.catchUp(circleId, onItem: _apply);
+    return sync.catchUp(circleId, onBatch: _applyBatch);
   }
 
   /// A member's decrypted track across all Private circles for [from, to).
@@ -1109,9 +1232,17 @@ class PrivateRuntime {
 
   String _usersKey(String circleId) => 'users/$circleId';
 
-  Future<void> _rememberUser(String circleId, String userId) async {
+  final Map<String, Set<String>> _knownUsers = <String, Set<String>>{};
+
+  Future<Set<String>> _usersOf(String circleId) async {
+    final Set<String>? have = _knownUsers[circleId];
+    if (have != null) return have;
     final String raw = await kv.get(_usersKey(circleId)) ?? '';
-    final Set<String> s = raw.isEmpty ? <String>{} : raw.split(',').toSet();
+    return _knownUsers[circleId] = raw.isEmpty ? <String>{} : raw.split(',').toSet();
+  }
+
+  Future<void> _rememberUser(String circleId, String userId) async {
+    final Set<String> s = await _usersOf(circleId);
     if (s.add(userId)) await kv.set(_usersKey(circleId), s.join(','));
   }
 
@@ -1121,50 +1252,88 @@ class PrivateRuntime {
   Future<void> replayLatest() async {
     final Set<String> privs = await privateCircles();
     if (privs.isEmpty) return; // standard users: no identity lookup, no request
+    await lastPositions.load();
     final SenderIdentity? me = await _me();
     for (final String circle in privs) {
-      final String raw = await kv.get(_usersKey(circle)) ?? '';
-      for (final String user in raw.isEmpty ? <String>[] : raw.split(',')) {
+      for (final String user in await _usersOf(circle)) {
         if (me != null && user == me.userId) continue;
-        final List<TrackPoint> pts = await history.range(
-            circle, user, clock.now().subtract(const Duration(days: 7)), clock.now().add(const Duration(days: 1)));
-        if (pts.isEmpty) continue;
-        final TrackPoint p = pts.last;
-        onMemberFrame?.call(<String, dynamic>{
-          'type': 'location', 'user_id': user, 'circle_id': circle, 'lat': p.lat, 'lon': p.lon,
-          'ts': DateTime.fromMillisecondsSinceEpoch(p.tsMs, isUtc: true).toIso8601String(),
-          'accuracy_meters': p.accuracy,
-        });
+        LastPosition? p = lastPositions.ofIn(circle, user);
+        if (p == null) {
+          // Seen before the last-position book existed: take the newest point of the stored track once.
+          final List<TrackPoint> pts = await history.range(
+              circle, user, clock.now().subtract(const Duration(days: 7)), clock.now().add(const Duration(days: 1)));
+          if (pts.isEmpty) continue;
+          final TrackPoint t = pts.last;
+          p = LastPosition(circleId: circle, userId: user, tsMs: t.tsMs, lat: t.lat, lon: t.lon, acc: t.accuracy);
+          lastPositions.note(p);
+        }
+        onMemberFrame?.call(p.toFrame());
       }
     }
   }
+
+  /// Applies a verified batch (one catch-up page). Fixes are grouped: one history write per member and ONE map
+  /// frame per member (their newest fix), instead of one of each per item. Everything else goes through [_apply].
+  Future<void> _applyBatch(List<ReceivedItem> items) async {
+    final SenderIdentity? me = await _me();
+    final List<ReceivedItem> fixes = <ReceivedItem>[];
+    for (final ReceivedItem r in items) {
+      if (r.purpose == ChannelPurpose.fix) {
+        fixes.add(r);
+      } else {
+        await _apply(r);
+      }
+    }
+    if (fixes.isNotEmpty) await _applyFixes(fixes, mineId: me?.userId);
+  }
+
+  Future<void> _applyFixes(List<ReceivedItem> fixes, {required String? mineId}) async {
+    final Map<String, List<ReceivedItem>> byMember = <String, List<ReceivedItem>>{};
+    for (final ReceivedItem r in fixes) {
+      final double? lat = (r.body['lat'] as num?)?.toDouble(), lon = (r.body['lon'] as num?)?.toDouble();
+      if (lat == null || lon == null || lat < -90 || lat > 90 || lon < -180 || lon > 180) continue;
+      byMember.putIfAbsent('${r.circleId}\u0000${r.userId}', () => <ReceivedItem>[]).add(r);
+    }
+    for (final List<ReceivedItem> group in byMember.values) {
+      final ReceivedItem first = group.first;
+      await history.add(first.circleId, first.userId, <TrackPoint>[
+        for (final ReceivedItem r in group)
+          TrackPoint(r.ts.millisecondsSinceEpoch, (r.body['lat'] as num).toDouble(), (r.body['lon'] as num).toDouble(), (r.body['acc'] as num?)?.toDouble())
+      ]);
+      if (mineId != null && first.userId == mineId) continue;
+      await _rememberUser(first.circleId, first.userId);
+      ReceivedItem newest = group.first;
+      for (final ReceivedItem r in group) {
+        if (r.ts.isAfter(newest.ts)) newest = r;
+      }
+      final Map<String, dynamic> b = newest.body;
+      final LastPosition pos = LastPosition(
+          circleId: newest.circleId, userId: newest.userId, tsMs: newest.ts.millisecondsSinceEpoch,
+          lat: (b['lat'] as num).toDouble(), lon: (b['lon'] as num).toDouble(), acc: (b['acc'] as num?)?.toDouble(),
+          bat: b['bat'] as num?, spd: b['spd'] as num?, hdg: b['hdg'] as num?, mo: b['mo'] as String?);
+      lastPositions.note(pos);
+      onMemberFrame?.call(pos.toFrame(heardAt: clock.now()));
+    }
+  }
+
+  /// Writes everything held in memory (call when the app goes to the background).
+  Future<void> flushStores() async {
+    await history.flush();
+    await lastPositions.flush();
+  }
+
+  /// Loads the remembered last positions (cheap, once). Call early so the first roster is not blank.
+  Future<void> warmUp() => lastPositions.load();
+
+  /// The last position ever received for [userId] in any Private circle (null: none yet or not loaded).
+  LastPosition? lastKnown(String userId) => lastPositions.loaded ? lastPositions.of(userId) : null;
 
   Future<void> _apply(ReceivedItem r) async {
     final SenderIdentity? me = await _me();
     final bool mine = me != null && r.userId == me.userId;
     switch (r.purpose) {
       case ChannelPurpose.fix:
-        final double? lat = (r.body['lat'] as num?)?.toDouble(), lon = (r.body['lon'] as num?)?.toDouble();
-        if (lat == null || lon == null || lat < -90 || lat > 90 || lon < -180 || lon > 180) return;
-        await history.add(r.circleId, r.userId, <TrackPoint>[
-          TrackPoint(r.ts.millisecondsSinceEpoch, lat, lon, (r.body['acc'] as num?)?.toDouble())
-        ]);
-        if (mine) return;
-        await _rememberUser(r.circleId, r.userId);
-        onMemberFrame?.call(<String, dynamic>{
-          'type': 'location',
-          'user_id': r.userId,
-          'circle_id': r.circleId,
-          'lat': lat,
-          'lon': lon,
-          'ts': r.ts.toIso8601String(),
-          'last_seen_at': clock.now().toIso8601String(),
-          'battery_pct': r.body['bat'],
-          'speed_mps': r.body['spd'],
-          'heading_deg': r.body['hdg'],
-          'motion_state': r.body['mo'],
-          'accuracy_meters': r.body['acc'],
-        });
+        await _applyFixes(<ReceivedItem>[r], mineId: me?.userId);
       case ChannelPurpose.history:
         await history.add(r.circleId, r.userId, HistoryChunker.parse(r.body));
         if (!mine) await _rememberUser(r.circleId, r.userId);
@@ -1200,6 +1369,7 @@ class PrivateRuntime {
         if (la != null && lo != null && la >= -90 && la <= 90 && lo >= -180 && lo <= 180) {
           await history.add(r.circleId, r.userId, <TrackPoint>[TrackPoint(r.ts.millisecondsSinceEpoch, la, lo)]);
           await _rememberUser(r.circleId, r.userId);
+          lastPositions.note(LastPosition(circleId: r.circleId, userId: r.userId, tsMs: r.ts.millisecondsSinceEpoch, lat: la, lon: lo));
           onMemberFrame?.call(<String, dynamic>{
             'type': 'location', 'user_id': r.userId, 'circle_id': r.circleId, 'lat': la, 'lon': lo,
             'ts': r.ts.toIso8601String(), 'last_seen_at': clock.now().toIso8601String(),
