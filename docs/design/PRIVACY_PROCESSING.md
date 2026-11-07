@@ -604,3 +604,72 @@ Tests: `handlers/e2ee_dawarich_lanes_db_test.go` (planted rows: Dawarich, histor
 * Phone-key wraps in circles with server processing: a bridge (`service` key) never receives a phone-key epoch wrap, only the server key, because `e2ee-bridge` reads the server line only. A web viewer gets one only after the owner confirms a dedicated warning for that circle; other members see "X has a web viewer" on the Server processing screen. Bulk wraps (`wrapHeldKeysTo`) go to phones and the recovery identity only.
 * Queue: stored as a versioned record with read-back checks (SharedPreferences has no atomic compare-and-swap, so two isolates can still race in a very narrow window; items are idempotent by (circle, device, seq)). Lane facts are always read fresh in the sealer and flush path. Relay rejections `legacy_epoch_closed` and `bad_epoch` keep the item and trigger a key sync (an item sealed under a closed epoch cannot be re-sealed, it is dropped after 20 failed tries); `required_server` is surfaced to the user as "not delivered".
 * iOS backups: the sensitive stores (trails and buffers, the sealed queue, lane facts and pref history, results, sequence numbers, cursors, places) are NOT in SharedPreferences on iOS. `PrefsChannelKv` stores them as one file per key in `Application Support/openfamily-private`, written as temp file + rename in the same directory. Swift (`PrivateStoreDirectory.prepare`, called through the `app.openfamily/store` channel, which is registered for the headless background engine too) creates that directory on every engine start, sets `isExcludedFromBackup` on the DIRECTORY and reads it back. The result goes to Diagnostics; if it cannot be confirmed the store still works and Diagnostics says "backup exclusion NOT confirmed". Old SharedPreferences keys are copied once (never over newer file data), verified, then deleted. A flag on the SharedPreferences plist was rejected: NSUserDefaults rewrites the file atomically and the flag is lost. Android keeps SharedPreferences (`allowBackup=false`).
+
+## 21. Deployment profiles and one-tap server add
+
+Status: **implemented on branch `feat/serveradd`** (migration `000240_deployment_profile`). Owner request: a non-technical family that runs its own server must be able to add the server to a circle with one guided button ("Add server to this circle", "compare the code", "OK"), and the server must then be able to store and process location (metrics, driving reports, history). This section decides how the profile of the server changes the defaults and the warnings, what is and is not protected at rest, and the exact flow. It adds NO new cryptography: every signature, key line and purge rule of sections 5 to 20 is unchanged.
+
+### 21.1 Decision: a server-wide DEPLOYMENT PROFILE
+
+One value for the whole server, chosen once in the admin web (Settings, first-run checklist) and readable by the apps:
+
+| Profile | Meaning | Default lane for new members the app suggests | Wording |
+|---|---|---|---|
+| `home` | The server runs on hardware the family owns (NAS, mini PC, Raspberry Pi in the house). | `server`, with one tap | "The server at your home will be able to see this circle's locations so it can build trips, driving reports and history." Doc recommends full-disk encryption of the machine. |
+| `cloud` | A VPS or hosted server run by a company (Hetzner, DigitalOcean, a managed host...). | `phone` stays the default. The admin can still add the server, deliberately. | Extra warning: "This server is rented. The company that runs the machine could read what the server can read." At-rest protection (21.3) is offered. |
+| *unset* | Nobody chose yet. | Same as `cloud`. | Same as `cloud`, plus "the server owner has not said where the server runs". |
+
+**Unset is `cloud`, on purpose.** The alternative (unset means `home`) would let an owner who never opened the page, running on a VPS, get one-tap server processing preselected. The price of the careful default is one extra decision for home users, which the install flow and the first-run checklist ask for explicitly (`DEPLOYMENT_PROFILE` in `.env.example`; `scripts/setup.sh` asks). The profile is never inferred from IP addresses or hostnames: guessing wrong in the unsafe direction is the failure we want to avoid.
+
+Where it is stored and read:
+
+* `DEPLOYMENT_PROFILE=home|cloud` (environment) seeds a fresh install. The admin's choice in the web (table `server_profile`, migration `000240`) wins over the environment, so the page is the single source of truth after setup. `validate-config` warns when it is unset and errors when it is not `home` or `cloud`.
+* Choosing `home` in the admin API needs `confirm_home: true` (a deliberate tick: "this server runs on hardware I own"). Every change is audit-logged (`admin.deployment_profile_changed`).
+* **The profile is advice and a default. It is not consent.** It cannot sign, cannot add a wrap, cannot turn assistance on, and the server never writes a pref for anyone. Home with no server key enrolled still preselects the phone lane (`recommended_lane` is `server` only when `effective = home` AND a server key is pinned).
+
+Exposure:
+
+| Route | Who | Fields added |
+|---|---|---|
+| `GET` / `PUT /api/admin/settings/deployment-profile` | platform admin | `profile` (`home`, `cloud`, or `""`), `effective` (`home` or `cloud`), `source` (`admin`, `env`, `unset`), `recommended_lane`, `server_device` (`device_id`, `label`, `fingerprint`, `short`, `digits`), `token_configured`, `server_pinned`, `at_rest` (what is sealed, `locations_encrypted: false`), `backups` (last run and whether it was encrypted), `setup_dismissed`, `circles_with_server`. PUT body: `{profile, confirm_home}` and/or `{dismiss_setup}`. |
+| `GET /e2ee/server-device` (signed-in user, existing route) | every user | `deployment_profile`, `profile_effective`, `recommended_lane`, `data_at_rest_key`. Chosen over `/compat` and the circle response because the apps already call it and it is the same object that carries the pinned server key. Old servers do not send these fields: the app then treats the profile as unknown and uses the careful `cloud` wording. Old apps ignore them. |
+
+### 21.2 The one-tap flow (app)
+
+One 3-step sheet, "Add server to this circle", reachable from the circle screen and from the "create private circle" and invite flows. It reuses `ProcessingController` and `LanesService`; it adds no protocol.
+
+1. **Add the server.** Two plain sentences chosen by profile (home / cloud / unknown) about what the server will see and what stays on phones.
+2. **Check the code.** The server key's `short` fingerprint (4 groups of 4 characters, 64 bits, the existing `ShortFingerprint`) is shown large, with a "show the full code" expander (the 12 groups of 5 digits). The admin web shows the same groups and a QR code of the full fingerprint. The user taps "The code is the same" or "It is different". 64 bits is a glance check, not a safeguard against a targeted attacker who can brute-force a colliding key (about 2^64 work); the full 12-group code is one tap away and is what `setLane` compares byte for byte (`confirmServerFingerprintHex` must equal the verified pinned key's fingerprint, unchanged from section 18). A mismatch stops the flow in red: nothing is signed.
+3. **OK.** One action that does exactly what the lanes protocol needs: circle admin with the policy off: publish the policy (assistance on, `default_for_new` = the profile's recommended lane, `member_opt_out = allowed`), then sign their own `lane = server` pref. Circle admin with the policy already on, or a normal member with the policy on: sign their own `lane = server` pref. A normal member with the policy off: the sheet explains that the circle admin must add the server first (nobody else can). Nothing here lets an admin opt anyone else in; every other member is asked on their own phone (the existing sheet and the join flow).
+
+Edge cases the sheet handles with its own text: server key not enrolled (explains, points at `/docs/server-setup`); fingerprint mismatch; already added (shows "Server added" and offers **Remove server**); old apps in the circle (`LanesNotReady` -> "update these members' apps first", unchanged 409 rule of 18.2c); removing the server = `setLane(phone, deleteCopies: ask)` with the purge semantics of section 18.1 (own copies deleted if the member chooses; admin can also turn assistance off for everyone, which purges as before).
+
+### 21.3 At-rest protection: what is feasible, honestly
+
+Threat modelled here (new): **a hosting provider, or anyone with a stolen disk, volume snapshot or SQL dump, reading the database files while the server is not under their control.** Out of scope for this feature: a root attacker on the running machine (they can read process memory and the key), the circle's own members, and a compelled operator.
+
+**Full column encryption of locations is NOT feasible in this codebase**, and is not implemented:
+
+* `locations.geom`, `member_positions`, trips and history are queried by PostGIS and TimescaleDB inside SQL: geofence checks (`ST_DWithin` against places), arrival detection, "nearby", history maps, trip detection and the weekly summary all need plaintext coordinates in the database engine. Timescale compression and continuous aggregates do the same. Encrypting these columns would remove the server-side features the owner wants the server for. Searchable or order-preserving encryption would leak the data it protects and is not available in PostGIS.
+* So **while the server is running with the lane `server`, the database holds plaintext positions**, and a database administrator on that machine reads them. This is the design (section 4, "Private, server-assisted"), and the profile only changes how clearly the app says it.
+
+What IS implemented (and tested):
+
+1. **Envelope-encrypted secrets** (`backend/internal/atrest`). A random data key (DEK, AES-256-GCM) seals specific secret columns: `sms_settings.auth_token` (the Twilio token) and `ha_integrations.webhook_secret`. The DEK is stored in `at_rest_keys` only wrapped by a key derived (HKDF-SHA256) from `OPENFAMILY_DATA_KEY` (or `OPENFAMILY_DATA_KEY_FILE`), which is never stored. Each value is bound to its column (AAD = `table.column`), so a sealed value cannot be moved. Plaintext legacy values still read and are sealed at start-up. **The server refuses to start** if the DEK exists but the key is missing or wrong, so a protected box can never silently fall back to writing plaintext. Rotation of the operator key: `server data-key rewrap NEW_KEY` (instant, the DEK does not change). Losing the key means these secrets are unrecoverable (re-enter the SMS token); the positions are not affected. Documented backup rule: keep the key outside the server (password manager, printed), never in the same backup as the database dump.
+   Already sealed before this work, with a key derived from `JWT_SECRET`: TOTP secrets, Dawarich API keys, backup S3 credentials. They are unchanged.
+2. **Backups are encrypted** (`backend/internal/backup`, age X25519 or passphrase). That already existed, so no new backup code was written; the admin card now shows whether the last backup run was encrypted, and the cloud profile text says that an unencrypted backup on a rented machine defeats the point.
+3. **Disk encryption is a recommendation, not a feature**: `docs/server-setup.md` says "turn on full-disk encryption (LUKS, FileVault, BitLocker, or the provider's encrypted volume)". The server cannot see the disk, so the admin page shows `disk_encryption_known: false` and never claims it.
+
+Still plaintext in the database while running (state this in any product text): `locations` (including geom, speed, heading), `member_positions`, trips and driving reports, history, place names and geofences for server-lane circles; push tokens and UnifiedPush endpoints; chat metadata. Push tokens were considered for sealing and left out: they are only useful with the push provider's own credentials, they are compared and re-read in many SQL paths, and the gain for a stolen-disk attacker is a notification spam capability, not data.
+
+The sidecar's server private key (`SK` side, volume `e2ee_server_state`) is separate from the database: it is stored 0600 and can be passphrase-protected (`E2EE_BRIDGE_PASSPHRASE`), but a passphrase placed in the same compose environment protects only against someone who gets the volume without the environment. This is unchanged and is called out in `docs/server-setup.md`.
+
+### 21.4 First-run setup checklist (admin web)
+
+A "Server setup" card at the top of Settings (platform admin only, dismissible, shown again by "Show setup help"): (1) the admin account exists (it does, you are signed in), (2) pick the profile, (3) enroll the server key, (4) compare the server key with the phones (4 groups, 12 groups of digits, a QR of the full fingerprint), (5) install the apps and create the first circle. Step 3 is a documented copy-paste command run on the host, not a button: enrollment needs the sidecar process, which holds the server's private key in its own volume and must be approved by a phone ("Approve a viewer or bridge"); running it inside the API container would put the server's private key next to the database credentials and defeat the point of the separate process. The sidecar is an optional compose service (`COMPOSE_PROFILES=e2ee-server`) and the card shows the exact commands. The card detects completion from state (`token_configured`, `server_pinned`, profile set).
+
+### 21.5 What this section does NOT change
+
+* No server-side consent, no server-side signing, no new key line. The server-lane pref, the policy and the purge rules are as in sections 5 to 20.
+* Old apps keep working: they ignore the new fields; the lanes 409 rules still apply.
+* `trusted_server_default` (v0.21 recommendation flag) stays as an advanced switch for the legacy trusted-server mode; the profile card links to it and does not replace its API.

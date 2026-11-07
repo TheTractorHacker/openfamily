@@ -1,0 +1,20 @@
+.wb-ss-steps { list-style: none; margin: 12px 0; padding: 0; display: grid; gap: 14px; }
+.wb-ss-steps > li { display: flex; gap: 12px; align-items: flex-start; opacity: 0.75; }
+.wb-ss-steps > li.wb-ss-next { opacity: 1; }
+.wb-ss-steps > li.wb-ss-done { opacity: 0.6; }
+.wb-ss-mark { flex: none; width: 26px; height: 26px; border-radius: 50%; border: 1.5px solid currentColor; display: grid; place-items: center; font-size: 13px; }
+.wb-ss-done .wb-ss-mark { background: var(--wb-success, #1a7f4b); border-color: transparent; color: #fff; }
+.wb-ss-body { display: grid; gap: 6px; min-width: 0; flex: 1; }
+.wb-ss-choice { display: flex; gap: 8px; align-items: flex-start; margin: 6px 0; }
+.wb-ss-confirm { margin-left: 22px; }
+.wb-ss-profile { display: grid; gap: 4px; }
+.wb-ss-list { margin: 6px 0; padding-left: 18px; display: grid; gap: 4px; }
+.wb-ss-cmd { margin: 6px 0; }
+.wb-ss-cmd-head { display: flex; justify-content: space-between; align-items: center; font-size: 13px; }
+.wb-ss-cmd pre { margin: 4px 0 0; padding: 8px; overflow-x: auto; border-radius: 6px; background: rgba(127,127,127,0.12); font-size: 12px; white-space: pre-wrap; word-break: break-all; }
+.wb-ss-field { display: grid; gap: 4px; font-size: 13px; max-width: 360px; }
+.wb-ss-words { display: flex; flex-wrap: wrap; gap: 10px; font-family: ui-monospace, monospace; font-size: 28px; font-weight: 700; letter-spacing: 0.04em; }
+.wb-ss-digits { font-family: ui-monospace, monospace; font-size: 15px; word-spacing: 0.3em; }
+.wb-ss-qr { width: 176px; height: 176px; margin: 8px 0; background: #fff; padding: 4px; border-radius: 6px; }
+.wb-ss-qr svg { width: 100%; height: 100%; }
+.wb-ss-adv { margin-top: 12px; }

@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/TheTractorHacker/openfamily/backend/internal/atrest"
 	"github.com/TheTractorHacker/openfamily/backend/internal/auth"
 	"github.com/TheTractorHacker/openfamily/backend/internal/backupsettings"
 	"github.com/TheTractorHacker/openfamily/backend/internal/config"
@@ -37,6 +38,10 @@ func main() {
 	cfg := config.Load()
 	if len(os.Args) > 1 && os.Args[1] == "validate-config" {
 		os.Exit(runValidateConfig(os.Stdout, cfg))
+	}
+
+	if len(os.Args) > 1 && os.Args[1] == "data-key" {
+		os.Exit(runDataKey(cfg, os.Args[2:]))
 	}
 
 	if len(os.Args) > 1 && (os.Args[1] == "e2ee-fingerprints" || os.Args[1] == "e2ee-log-head") {
@@ -69,6 +74,21 @@ func main() {
 		os.Exit(1)
 	}
 	defer pool.Close()
+
+	// At-rest protection of a few secret columns (docs/design/PRIVACY_PROCESSING.md
+	// section 21). Refuses to start when protection was turned on earlier and the
+	// key is now missing or wrong, so secrets are never silently written unprotected.
+	if st, err := atrest.Load(ctx, pool); err != nil {
+		slog.Error("data protection key problem", "err", err)
+		os.Exit(1)
+	} else if st.Active {
+		if n, err := atrest.SealExisting(ctx, pool); err != nil {
+			slog.Error("could not protect existing secrets", "err", err)
+			os.Exit(1)
+		} else if n > 0 {
+			slog.Info("protected existing secrets", "count", n)
+		}
+	}
 
 	mid.IngestKeyTTL = cfg.IngestKeyTTL
 	tm := auth.NewTokenManager(cfg.JWTSecret, cfg.AccessTokenTTL, cfg.RefreshTokenTTL)
@@ -580,6 +600,8 @@ func main() {
 		r.Put("/api/admin/settings/theme", srv.AdminPutTheme)
 		r.Get("/api/admin/settings/e2ee-trusted-default", srv.AdminGetTrustedServerDefault)
 		r.Put("/api/admin/settings/e2ee-trusted-default", srv.AdminPutTrustedServerDefault)
+		r.Get("/api/admin/settings/deployment-profile", srv.AdminGetDeploymentProfile)
+		r.Put("/api/admin/settings/deployment-profile", srv.AdminPutDeploymentProfile)
 		r.Get("/api/admin/settings/dawarich", srv.AdminGetDawarich)
 		r.Put("/api/admin/settings/dawarich", srv.AdminPutDawarich)
 		r.Delete("/api/admin/settings/dawarich", srv.AdminDeleteDawarich)

@@ -2,6 +2,7 @@
 // 401 with a single refresh attempt, and normalizes errors into ApiResult.
 
 import { clearTokens, getAccessToken, getRefreshToken, setTokens } from './auth'
+import type { DeploymentState, ProfileChoice } from './deploymentProfile'
 import type { HaCircleChoice, HaEventKind, HaScope, HaToken } from './haTypes'
 import type {
   AdminInvite,
@@ -901,4 +902,22 @@ export function getAdminCompat(): Promise<AdminCompat> {
 /** Sets the minimum-version override ("" clears it) and/or write enforcement. */
 export function saveAdminCompat(body: { min_supported_override?: string; enforce_writes?: boolean }): Promise<AdminCompat> {
   return request<AdminCompat>('/api/admin/compat', { method: 'PUT', body })
+}
+
+export function getDeploymentProfile(): Promise<DeploymentState> {
+  return request<DeploymentState>('/api/admin/settings/deployment-profile')
+}
+
+export function setDeploymentProfile(profile: ProfileChoice, confirmHome: boolean): Promise<DeploymentState> {
+  return request<DeploymentState>('/api/admin/settings/deployment-profile', {
+    method: 'PUT',
+    body: { profile, confirm_home: confirmHome },
+  })
+}
+
+export function dismissServerSetup(dismiss: boolean): Promise<DeploymentState> {
+  return request<DeploymentState>('/api/admin/settings/deployment-profile', {
+    method: 'PUT',
+    body: { dismiss_setup: dismiss },
+  })
 }

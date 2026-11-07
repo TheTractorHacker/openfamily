@@ -63,6 +63,17 @@ func validateConfig(cfg config.Config) []finding {
 			}
 		}
 	}
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("DEPLOYMENT_PROFILE"))) {
+	case "home":
+	case "cloud":
+		if strings.TrimSpace(os.Getenv("OPENFAMILY_DATA_KEY")) == "" && strings.TrimSpace(os.Getenv("OPENFAMILY_DATA_KEY_FILE")) == "" {
+			add("warning", "OPENFAMILY_DATA_KEY", "DEPLOYMENT_PROFILE=cloud but no data key is set, so stored secrets (SMS token, webhook secrets) are not encrypted in the database", "Generate one with: openssl rand -base64 32, set OPENFAMILY_DATA_KEY, and keep a copy outside the server.")
+		}
+	case "":
+		add("warning", "DEPLOYMENT_PROFILE", "not set; the server is treated as a hosted (cloud) server until the admin chooses a profile in Settings", "Set DEPLOYMENT_PROFILE=home (hardware you own) or cloud (VPS or hosted).")
+	default:
+		add("error", "DEPLOYMENT_PROFILE", "must be home or cloud", "Set DEPLOYMENT_PROFILE=home or DEPLOYMENT_PROFILE=cloud.")
+	}
 	if cfg.InsecureHTTP {
 		add("warning", "INSECURE_HTTP", "cleartext HTTP is enabled; location data is not encrypted in transit", "Put TLS in front (docker compose --profile proxy) and unset INSECURE_HTTP.")
 	}

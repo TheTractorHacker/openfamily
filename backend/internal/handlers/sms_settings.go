@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/TheTractorHacker/openfamily/backend/internal/atrest"
 	"github.com/TheTractorHacker/openfamily/backend/internal/middleware"
 	"github.com/TheTractorHacker/openfamily/backend/internal/sms"
 )
@@ -95,7 +96,22 @@ func (s *Server) readSMSSettings(ctx context.Context) (sms.Settings, bool, error
 	if err != nil {
 		return sms.Settings{}, false, err
 	}
+	// Sealed when OPENFAMILY_DATA_KEY is configured; plaintext on older rows.
+	tok, oerr := atrest.Open(smsTokenLabel, row.AuthToken)
+	if oerr != nil {
+		return sms.Settings{}, false, oerr
+	}
+	row.AuthToken = tok
 	return row, true, nil
+}
+
+const smsTokenLabel = "sms_settings.auth_token"
+
+func sealSMSToken(v string) string {
+	if out, err := atrest.Seal(smsTokenLabel, v); err == nil {
+		return out
+	}
+	return v
 }
 
 func smsSettingsJSON(effective sms.Settings, fromSettings bool) smsSettingsResponse {
@@ -200,7 +216,7 @@ func (s *Server) AdminPutSMSSettings(w http.ResponseWriter, r *http.Request) {
 			from_number = EXCLUDED.from_number,
 			public_base_url = EXCLUDED.public_base_url,
 			updated_at = now()`,
-		stored.AccountSID, stored.AuthToken, stored.From, stored.PublicBaseURL)
+		stored.AccountSID, sealSMSToken(stored.AuthToken), stored.From, stored.PublicBaseURL)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to save SMS settings")
 		return

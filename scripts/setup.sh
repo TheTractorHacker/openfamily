@@ -35,6 +35,15 @@ PLATFORM_ADMIN_EMAIL="${PLATFORM_ADMIN_EMAIL:-}"
 ask SITE_ADDRESS "Public address (domain such as openfamily.example.com, or :80 for plain HTTP on a trusted network)" ":80"
 ask PLATFORM_ADMIN_EMAIL "Platform admin email (creates the first admin account)" ""
 
+# Where does the server run? Never guessed: an unanswered question stays empty and
+# the server then behaves as a hosted (cloud) server until the admin chooses in Settings.
+DEPLOYMENT_PROFILE="${DEPLOYMENT_PROFILE:-}"
+ask DEPLOYMENT_PROFILE "Does this server run on hardware you own at home (type: home) or on a rented/hosted server such as a VPS (type: cloud)" "cloud"
+case "$DEPLOYMENT_PROFILE" in
+  home|cloud) ;;
+  *) echo "error: DEPLOYMENT_PROFILE must be home or cloud" >&2; exit 1;;
+esac
+
 for v in SITE_ADDRESS PLATFORM_ADMIN_EMAIL; do
   case "${!v}" in *[[:space:]\'\"\$\`\\]*)
     echo "error: $v must not contain whitespace, quotes, \$, backticks or backslashes" >&2; exit 1;;
@@ -65,6 +74,13 @@ umask 077
     echo "DB_SSL_DISABLE_OK=true"
   fi
   echo "COMPOSE_PROFILES=$profiles"
+  echo "# home = hardware you own; cloud = VPS / hosted. Can be changed later in the admin Settings."
+  echo "DEPLOYMENT_PROFILE=$DEPLOYMENT_PROFILE"
+  if [ "$DEPLOYMENT_PROFILE" = cloud ]; then
+    echo "# Seals stored secrets in the database. COPY THIS LINE TO A PASSWORD MANAGER NOW: once used,"
+    echo "# the server will not start without it. See docs/server-setup.md."
+    echo "OPENFAMILY_DATA_KEY=$(rand_hex 32)"
+  fi
   if [ -n "$PLATFORM_ADMIN_EMAIL" ]; then
     echo "PLATFORM_ADMIN_EMAIL=$PLATFORM_ADMIN_EMAIL"
     echo "PLATFORM_ADMIN_PASSWORD=$ADMIN_PASSWORD"
@@ -78,6 +94,11 @@ if [ -n "$PLATFORM_ADMIN_EMAIL" ]; then
   echo "Password:     $ADMIN_PASSWORD   (also stored in .env; change it after first login)"
   echo
 fi
+if [ "$DEPLOYMENT_PROFILE" = cloud ]; then
+  echo "IMPORTANT: .env contains OPENFAMILY_DATA_KEY. Copy it to a password manager now."
+  echo "           A copy that lives only on this server is lost together with the server."
+  echo
+fi
 echo "Next steps:"
 echo "  docker compose up -d"
 if [ "$app_env" = production ]; then
@@ -86,4 +107,5 @@ if [ "$app_env" = production ]; then
 else
   echo "  Admin panel: http://localhost:8080/admin/ (or http://$SITE_ADDRESS/admin/ with COMPOSE_PROFILES=proxy)"
 fi
+echo "  Then open Settings > Server setup in the admin panel: it walks you through adding the server to your circle."
 echo "  Back up regularly: ./scripts/backup.sh     Upgrade: ./scripts/upgrade.sh"
