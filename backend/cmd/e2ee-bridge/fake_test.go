@@ -136,6 +136,7 @@ type fakeOF struct {
 	proc      func() any       // GET .../e2ee/processing (nil: 404, an older server)
 	skWraps   []e2ee.SKWrap    // GET .../e2ee/wraps?key_line=server
 	pending   []map[string]any // GET .../e2ee/pending?key_line=server
+	hiddenWraps []e2ee.SKWrap // shown only to key_line=all (a hostile server withholding them from the filtered request)
 	serverDev any              // GET /e2ee/server-device
 
 	swapApprover *tdev // when set, the registration response names this key as the approver's
@@ -245,6 +246,15 @@ func (f *fakeOF) serve(w http.ResponseWriter, r *http.Request) {
 		jw(w, 200, map[string]any{"circle_id": f.circle, "pending": append([]map[string]any{}, f.pending...)})
 	case path == "/e2ee/server-device":
 		jw(w, 200, f.serverDev)
+	case path == "/circles/"+f.circle+"/e2ee/wraps" && r.URL.Query().Get("key_line") == "all":
+		f.hits["wraps-line-all"]++
+		out := []e2ee.SKWrap{}
+		for _, sw := range append(append([]e2ee.SKWrap{}, f.skWraps...), f.hiddenWraps...) {
+			if sw.RecipientDeviceID == r.URL.Query().Get("device_id") {
+				out = append(out, sw)
+			}
+		}
+		jw(w, 200, map[string]any{"circle_id": f.circle, "wraps": out})
 	case path == "/circles/"+f.circle+"/e2ee/wraps" && r.URL.Query().Get("key_line") == "server":
 		f.hits["wraps-line-server"]++
 		out := []e2ee.SKWrap{}

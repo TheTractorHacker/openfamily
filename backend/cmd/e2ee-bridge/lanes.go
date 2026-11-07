@@ -189,6 +189,9 @@ func (b *bridge) syncLanes(ctx context.Context, circle string, st *circleState, 
 		}
 	}
 	b.lanes[circle] = lanes
+	if err := b.auditKeys(ctx, circle, st, proc); err != nil {
+		return err
+	}
 	if err := b.syncSK(ctx, circle, st, proc, vp); err != nil {
 		return err
 	}
@@ -246,6 +249,48 @@ func (b *bridge) policyForGen(circle string, st *circleState, proc *processingRe
 		}
 	}
 	return best
+}
+
+// auditKeys runs EVERY cycle, also when an SK is already held:
+//   - it lists ALL wraps addressed to this device (key_line=all, no filter a hostile server could
+//     honour selectively). A phone-line (CK) wrap is a violation: alarm, exit 7. Tolerated only for
+//     a Dawarich bridge (its owner may have given it a CK; it never uses it in a lanes circle) and,
+//     in a legacy-upgraded circle, for CK epochs this device already held before the upgrade;
+//   - it re-compares every held SK with the CK epoch commitments of the circle state (a CK epoch
+//     published later with the SK's bytes) and with any CK it holds: a hit is an alarm.
+func (b *bridge) auditKeys(ctx context.Context, circle string, st *circleState, proc *processingResp) error {
+	var resp struct {
+		Wraps []e2ee.SKWrap `json:"wraps"`
+	}
+	if err := b.api.do(ctx, "GET", "/circles/"+circle+"/e2ee/wraps?key_line=all&device_id="+url.QueryEscape(b.id.f.DeviceID), nil, &resp); err != nil {
+		return err
+	}
+	for _, w := range resp.Wraps {
+		if w.KeyLine == "server" || w.RecipientDeviceID != b.id.f.DeviceID {
+			continue
+		}
+		switch {
+		case !b.cfg.serverMode():
+			b.log.Warn("lanes: a circle-key (CK) wrap is addressed to this bridge; it is ignored in a lanes circle", "circle", circle[:8], "epoch", w.Epoch)
+		case proc.Legacy.Active && b.keys.get(circle, w.Epoch) != nil:
+			// an old phone-key epoch this device held before the upgrade (never used here)
+		default:
+			b.rs.Stats.Rejected["ck_wrap_offered"]++
+			return &alarmError{fmt.Sprintf("the server lists a circle-key (phone line, line %q) wrap addressed to this server device in circle %s (epoch %d). This key must only ever hold the server key. Revoke this key and investigate the server and any admin phone that wrapped CK to a server-kind key.", w.KeyLine, circle[:8], w.Epoch)}
+		}
+	}
+	ck := b.ckKeys(circle)
+	for _, gen := range b.keys.epochs(skID(circle)) {
+		sk := b.keys.get(skID(circle), gen)
+		if sk == nil {
+			continue
+		}
+		if err := e2ee.CheckSKIndependent(sk, circle, ck, st.Epochs); err != nil {
+			b.rs.Stats.Rejected["sk_equals_ck"]++
+			return &alarmError{fmt.Sprintf("circle %s held server key generation %d: %v. Stopping; the key is no longer trusted.", circle[:8], gen, err)}
+		}
+	}
+	return nil
 }
 
 // syncSK fetches and verifies the server-line wraps addressed to this device.

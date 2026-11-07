@@ -226,6 +226,15 @@ When the verified policy has server assistance **on**:
   `locations` table, which never holds a phone-lane member's points (test:
   `handlers/e2ee_dawarich_lanes_db_test.go`).
 
+**Every cycle** (not only while waiting for the key) the device also (a) lists ALL wraps addressed to it with
+`key_line=all` and treats any phone-line (CK) wrap as the alarm above (the Dawarich bridge only warns and ignores it;
+in an upgraded legacy circle only CK epochs it already held are tolerated), and (b) re-compares every held SK with all CK
+epoch commitments of the verified circle state, so a CK epoch published later with the SK's bytes also triggers the alarm.
+
+**Service keys in lanes circles.** The Dawarich bridge needs only SK there. The phone app no longer wraps CK to service
+keys by default (ADR 5.4 rule 4), so "no CK wrap present" is the normal case and the bridge works with the server line
+alone. Only the old CK flow (circle without a policy, or policy off) still needs a CK wrap from the owner's phone.
+
 Upgraded legacy circles: the old phone-key epochs stay with the server until the admin calls
 `DELETE /circles/{id}/e2ee/legacy-server-access`; this sidecar never uses them (it only asks for the server line),
 and a converted legacy consent is honoured only while the member has signed no newer statement.
