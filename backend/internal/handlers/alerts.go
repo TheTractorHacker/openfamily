@@ -134,6 +134,9 @@ type alertRequest struct {
 	Note string   `json:"note"`
 	Lat  *float64 `json:"lat"`
 	Lon  *float64 `json:"lon"`
+	// ClientID is chosen by the phone and makes a replay of a queued request
+	// idempotent (docs/design/OFFLINE_RESILIENCE.md). Optional.
+	ClientID string `json:"client_id"`
 }
 
 // decodeAlertRequest parses and validates an alert body: note length, and
@@ -155,6 +158,20 @@ func decodeAlertRequest(r *http.Request) (req alertRequest, note, errMsg string)
 	return req, note, ""
 }
 
+// priorAlert returns the caller's alert stored under clientID, if any.
+func (s *Server) priorAlert(r *http.Request, userID, clientID string) (alertJSON, bool) {
+	var a alertRow
+	err := s.Pool.QueryRow(r.Context(), `
+		SELECT id, type, status, lat, lon, COALESCE(note, ''), created_at
+		FROM alerts WHERE user_id = $1 AND client_id = $2`, userID, clientID,
+	).Scan(&a.ID, &a.Type, &a.Status, &a.Lat, &a.Lon, &a.Note, &a.CreatedAt)
+	if err != nil {
+		return alertJSON{}, false
+	}
+	return alertJSON{ID: a.ID, Type: a.Type, Status: a.Status, Lat: a.Lat, Lon: a.Lon, Note: a.Note, CreatedAt: a.CreatedAt,
+		Message: alertNotifiedMessage}, true
+}
+
 func (s *Server) postAlert(w http.ResponseWriter, r *http.Request, typ string, includeContacts bool) {
 	claims := middleware.ClaimsFromContext(r.Context())
 	if claims == nil {
@@ -169,6 +186,24 @@ func (s *Server) postAlert(w http.ResponseWriter, r *http.Request, typ string, i
 	if familyID == "" {
 		writeError(w, http.StatusNotFound, "no family")
 		return
+	}
+	req, note, errMsg := decodeAlertRequest(r)
+	if errMsg != "" {
+		writeError(w, http.StatusBadRequest, errMsg)
+		return
+	}
+	if !validClientID(req.ClientID) {
+		writeError(w, http.StatusBadRequest, "invalid client_id")
+		return
+	}
+	// A replay of a request the server already stored (the first answer was lost
+	// on a bad connection) returns that alert: no second fan-out, no second
+	// push or SMS, and it does not count against the cooldown.
+	if req.ClientID != "" {
+		if prior, ok := s.priorAlert(r, claims.UserID, req.ClientID); ok {
+			writeJSON(w, http.StatusOK, prior)
+			return
+		}
 	}
 	cfg := s.alertLimits()
 	window := cfg.CheckInCooldown
@@ -195,12 +230,6 @@ func (s *Server) postAlert(w http.ResponseWriter, r *http.Request, typ string, i
 			writeError(w, http.StatusTooManyRequests, "your family has sent too many check-ins or help requests in the last hour")
 			return
 		}
-	}
-
-	req, note, errMsg := decodeAlertRequest(r)
-	if errMsg != "" {
-		writeError(w, http.StatusBadRequest, errMsg)
-		return
 	}
 
 	lat, lon := req.Lat, req.Lon
@@ -233,11 +262,19 @@ func (s *Server) postAlert(w http.ResponseWriter, r *http.Request, typ string, i
 
 	var a alertRow
 	err = s.Pool.QueryRow(r.Context(), `
-		INSERT INTO alerts (user_id, family_id, type, status, lat, lon, note, share_token, share_expires_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		INSERT INTO alerts (user_id, family_id, type, status, lat, lon, note, share_token, share_expires_at, client_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NULLIF($10, ''))
+		ON CONFLICT (user_id, client_id) WHERE client_id IS NOT NULL DO NOTHING
 		RETURNING id, user_id, family_id, type, status, lat, lon, note, share_token, created_at`,
-		claims.UserID, familyID, typ, alertStatusActive, lat, lon, note, token, time.Now().Add(cfg.ShareTTL),
+		claims.UserID, familyID, typ, alertStatusActive, lat, lon, note, token, time.Now().Add(cfg.ShareTTL), req.ClientID,
 	).Scan(&a.ID, &a.UserID, &a.FamilyID, &a.Type, &a.Status, &a.Lat, &a.Lon, &a.Note, &a.ShareToken, &a.CreatedAt)
+	if err == pgx.ErrNoRows && req.ClientID != "" {
+		// Lost a race with an identical replay: that one already did the work.
+		if prior, ok := s.priorAlert(r, claims.UserID, req.ClientID); ok {
+			writeJSON(w, http.StatusOK, prior)
+			return
+		}
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create alert")
 		return
