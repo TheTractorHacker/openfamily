@@ -156,6 +156,9 @@ func (s *Server) ListChatMessages(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"messages": out, "next_before": next, "readers": s.chatReaders(r.Context(), m.CircleID),
+		// encrypted: new messages of this circle travel sealed; what is listed here
+		// is plaintext history from before the circle turned private.
+		"encrypted": s.circleIsPrivate(r.Context(), m.CircleID),
 	})
 }
 
@@ -163,6 +166,9 @@ func (s *Server) ListChatMessages(w http.ResponseWriter, r *http.Request) {
 func (s *Server) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	uid, m, ok := s.requireCircleMember(w, r)
 	if !ok {
+		return
+	}
+	if s.refusePlaintextChat(w, r.Context(), m.CircleID) {
 		return
 	}
 	var req struct {
@@ -200,6 +206,22 @@ func (s *Server) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	s.storeAndFanOutChat(w, r, m.CircleID, uid, body, nil, "", req.ClientID)
 }
 
+// refusePlaintextChat answers 409 `chat_encrypted` when the circle is private:
+// chat there travels sealed between the phones (docs/design/E2EE_CHAT.md) and
+// the server accepts no new plaintext message, edit or photo. The wording tells
+// an old app what to do instead of failing silently.
+func (s *Server) refusePlaintextChat(w http.ResponseWriter, ctx context.Context, circleID string) bool {
+	if !s.circleIsPrivate(ctx, circleID) {
+		return false
+	}
+	msg := "Chat in this circle is end-to-end encrypted. Update OpenFamily to send and read new messages."
+	if compatSupports(ctx, "chat_e2ee") {
+		msg = "Chat in this circle is end-to-end encrypted; the app sends it through the encrypted channel."
+	}
+	writeE2EECode(w, http.StatusConflict, "chat_encrypted", msg)
+	return true
+}
+
 func validClientID(id string) bool {
 	return utf8.RuneCountInString(id) <= 64 && utf8.ValidString(id) && !strings.ContainsRune(id, 0)
 }
@@ -227,6 +249,9 @@ func validChatBody(w http.ResponseWriter, raw string) (string, bool) {
 func (s *Server) EditChatMessage(w http.ResponseWriter, r *http.Request) {
 	uid, m, ok := s.requireCircleMember(w, r)
 	if !ok {
+		return
+	}
+	if s.refusePlaintextChat(w, r.Context(), m.CircleID) {
 		return
 	}
 	id := chi.URLParam(r, "msgId")
@@ -366,6 +391,8 @@ func (s *Server) MarkChatRead(w http.ResponseWriter, r *http.Request) {
 	}
 	var req struct {
 		Seq *int64 `json:"seq"`
+		// ItemID is the read position in a private circle: a relay item id.
+		ItemID *int64 `json:"item_id"`
 	}
 	if r.ContentLength != 0 {
 		r.Body = http.MaxBytesReader(w, r.Body, 1<<10)
@@ -373,6 +400,19 @@ func (s *Server) MarkChatRead(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "invalid request body")
 			return
 		}
+	}
+	if req.ItemID != nil && s.circleIsPrivate(r.Context(), m.CircleID) {
+		// Metadata only: a cursor over item ids, clamped to the newest chat item.
+		if _, err := s.Pool.Exec(r.Context(), `
+			INSERT INTO chat_reads (circle_id, user_id, e2ee_item_id)
+			SELECT $1, $2, LEAST($3::bigint, COALESCE((SELECT MAX(id) FROM e2ee_items WHERE circle_id = $1 AND purpose = 'chat'), 0))
+			ON CONFLICT (circle_id, user_id) DO UPDATE SET e2ee_item_id = GREATEST(chat_reads.e2ee_item_id, EXCLUDED.e2ee_item_id)`,
+			m.CircleID, uid, *req.ItemID); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to mark read")
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return
 	}
 	// Clamp to the newest message in this circle so a client cannot bank
 	// future messages as read.
@@ -414,6 +454,11 @@ func (s *Server) ChatUnread(w http.ResponseWriter, r *http.Request) {
 		       (SELECT COUNT(*) FROM chat_messages x
 		        WHERE x.circle_id = cm.circle_id AND x.sender_id <> $1
 		          AND x.seq > COALESCE(r.last_seq, 0))
+		       + (SELECT COUNT(*) FROM e2ee_items i
+		          WHERE i.circle_id = cm.circle_id AND i.purpose = 'chat'
+		            AND i.id > COALESCE(r.e2ee_item_id, 0)
+		            AND (i.expires_at IS NULL OR i.expires_at > now())
+		            AND i.device_id NOT IN (SELECT device_id FROM device_keys WHERE user_id = $1))
 		FROM live_circle_members cm
 		LEFT JOIN chat_reads r ON r.circle_id = cm.circle_id AND r.user_id = cm.user_id
 		WHERE cm.user_id = $1`, uid)
@@ -565,6 +610,9 @@ func (s *Server) SendChatPhoto(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if s.refusePlaintextChat(w, r.Context(), m.CircleID) {
+		return
+	}
 	declared, err := avatarContentType(r.Header.Get("Content-Type"))
 	if err != nil {
 		writeError(w, http.StatusUnsupportedMediaType, "photo must be image/jpeg or image/png")
@@ -648,4 +696,22 @@ func (s *Server) GetChatPhoto(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writePrivateAvatar(w, data, ct)
+}
+
+// DeleteChatPlaintextHistory removes every plaintext chat message (and photo)
+// of a circle. Circle admins only. It is the clean-up after a circle turned
+// private: the old messages stay readable "sent before encryption" until an
+// admin deletes them. DELETE /circles/{id}/chat/history
+func (s *Server) DeleteChatPlaintextHistory(w http.ResponseWriter, r *http.Request) {
+	uid, m, ok := s.requireCircleAdmin(w, r)
+	if !ok {
+		return
+	}
+	tag, err := s.Pool.Exec(r.Context(), `DELETE FROM chat_messages WHERE circle_id = $1`, m.CircleID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete history")
+		return
+	}
+	s.auditCircle(r.Context(), uid, m.CircleID, "chat.history_deleted", "plaintext messages "+strconv.FormatInt(tag.RowsAffected(), 10), clientIP(r))
+	writeJSON(w, http.StatusOK, map[string]any{"deleted": tag.RowsAffected()})
 }

@@ -205,6 +205,17 @@ func TestLanesMigrationIdempotentAndDown(t *testing.T) {
 			t.Fatalf("up migration is not idempotent (run %d): %v", i+2, err)
 		}
 	}
+	// Migration 250 redefines e2ee_item_guard; re-apply it (twice: idempotent) so the
+	// shared test database keeps the current function.
+	up250, err := os.ReadFile("../db/migrations/000250_chat_e2ee.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if _, err := e.pool.Exec(context.Background(), string(up250)); err != nil {
+			t.Fatalf("250 up is not idempotent (run %d): %v", i+2, err)
+		}
+	}
 	if after := e.count(`SELECT count(*) FROM e2ee_processing_pref`); after != before {
 		t.Fatalf("prefs changed by re-running the migration: %d -> %d", before, after)
 	}
@@ -236,6 +247,13 @@ func TestLanesMigrationIdempotentAndDown(t *testing.T) {
 		if _, err := tx.Exec(context.Background(), q); err != nil {
 			t.Fatalf("%s: %v", q, err)
 		}
+	}
+	down250, err := os.ReadFile("../db/migrations/000250_chat_e2ee.down.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(context.Background(), string(down250)); err != nil {
+		t.Fatalf("250 down migration: %v", err)
 	}
 	if _, err := tx.Exec(context.Background(), string(down)); err != nil {
 		t.Fatalf("down migration: %v", err)
@@ -796,11 +814,11 @@ func TestPurgeScopeMineAndCircleLeavePhoneLineAlone(t *testing.T) {
 	now := time.Now()
 	e.ingest(e.point("history", e.a, now.Add(-time.Hour), 1, 2), e.point("history", e.b, now.Add(-time.Hour), 3, 4))
 	e.post("B", e.b, e.circle, 201, e.sealV2(e.b, e.serverLine(), 1, 1, "history"), e.sealV2(e.b, e.phoneLine(), 1, 2, "history"),
-		e.sealV2(e.b, e.serverLine(), 1, 3, "chat"), e.sealV2(e.b, e.serverLine(), 1, 4, "place"), e.sealV2(e.b, e.serverLine(), 1, 5, "checkin"))
+		e.sealV2(e.b, e.serverLine(), 1, 3, "event"), e.sealV2(e.b, e.serverLine(), 1, 4, "place"), e.sealV2(e.b, e.serverLine(), 1, 5, "checkin"))
 	e.post("A", e.a, e.circle, 201, e.sealV2(e.a, e.serverLine(), 1, 1, "history"), e.sealV2(e.a, e.phoneLine(), 1, 2, "history"))
-	e.post("A", e.a, e.circle, 201, e.sealV2(e.a, e.serverLine(), 1, 3, "chat"), e.sealV2(e.a, e.serverLine(), 1, 4, "place"))
+	e.post("A", e.a, e.circle, 201, e.sealV2(e.a, e.serverLine(), 1, 3, "event"), e.sealV2(e.a, e.serverLine(), 1, 4, "place"))
 	m := e.mustCode("B", "DELETE", "/circles/"+e.circle+"/e2ee/server-copies", nil, 200)
-	// scope=mine removes ALL of B's own server-line items (history, chat, place, checkin).
+	// scope=mine removes ALL of B's own server-line items (history, event, place, checkin).
 	if m["locations_deleted"].(float64) != 1 || m["items_deleted"].(float64) != 4 {
 		t.Fatalf("scope=mine: %v", m)
 	}
@@ -814,10 +832,10 @@ func TestPurgeScopeMineAndCircleLeavePhoneLineAlone(t *testing.T) {
 		t.Fatal("scope=mine left server-readable items of the author")
 	}
 	e.mustCode("B", "DELETE", "/circles/"+e.circle+"/e2ee/server-copies?scope=circle", nil, 403)
-	e.post("B", e.b, e.circle, 201, e.sealV2(e.b, e.serverLine(), 1, 8, "chat"), e.sealV2(e.b, e.serverLine(), 1, 9, "history"))
+	e.post("B", e.b, e.circle, 201, e.sealV2(e.b, e.serverLine(), 1, 8, "event"), e.sealV2(e.b, e.serverLine(), 1, 9, "history"))
 	m = e.mustCode("A", "DELETE", "/circles/"+e.circle+"/e2ee/server-copies?scope=circle", nil, 200)
-	// The admin purge removes B's trail (history) but NOT B's shared chat item; A's own go (3).
-	if e.count(`SELECT count(*) FROM e2ee_items WHERE circle_id = $1 AND device_id = $2 AND key_line = 'server' AND purpose = 'chat'`, e.circle, e.b.id) != 1 ||
+	// The admin purge removes B's trail (history) but NOT B's shared event item; A's own go (3).
+	if e.count(`SELECT count(*) FROM e2ee_items WHERE circle_id = $1 AND device_id = $2 AND key_line = 'server' AND purpose = 'event'`, e.circle, e.b.id) != 1 ||
 		e.count(`SELECT count(*) FROM e2ee_items WHERE circle_id = $1 AND device_id = $2 AND key_line = 'server' AND purpose = 'history'`, e.circle, e.b.id) != 0 {
 		t.Fatal("admin scope=circle must delete others' trail only, keeping their shared items")
 	}
@@ -1008,14 +1026,14 @@ func (e *srvEnv) seedCopies(user string, d *tdev, now time.Time) {
 	if c, m, raw := e.ingest(e.point("history", d, now.Add(-time.Hour), 40.1, -80.1), e.point("fix", d, now, 40.2, -80.2)); c != 200 || m["stored"].(float64) != 2 {
 		e.t.Fatalf("seed: %d %s", c, raw)
 	}
-	e.post(user, d, e.circle, 201, e.sealV2(d, e.serverLine(), 1, 71, "history"), e.sealV2(d, e.serverLine(), 1, 72, "fix"), e.sealV2(d, e.serverLine(), 1, 73, "chat"))
+	e.post(user, d, e.circle, 201, e.sealV2(d, e.serverLine(), 1, 71, "history"), e.sealV2(d, e.serverLine(), 1, 72, "fix"), e.sealV2(d, e.serverLine(), 1, 73, "event"))
 }
 
 func (e *srvEnv) copiesOf(user string, d *tdev) (locs, pos, trail, shared int) {
 	locs = e.count(`SELECT count(*) FROM locations l JOIN devices dv ON dv.id = l.device_id WHERE dv.user_id = $1 AND l.e2ee_circle_id = $2`, e.ids[user], e.circle)
 	pos = e.count(`SELECT count(*) FROM member_positions WHERE user_id = $1 AND lat <> 10`, e.ids[user])
 	trail = e.count(`SELECT count(*) FROM e2ee_items WHERE circle_id = $1 AND device_id = $2 AND key_line = 'server' AND purpose IN ('fix','history')`, e.circle, d.id)
-	shared = e.count(`SELECT count(*) FROM e2ee_items WHERE circle_id = $1 AND device_id = $2 AND key_line = 'server' AND purpose = 'chat'`, e.circle, d.id)
+	shared = e.count(`SELECT count(*) FROM e2ee_items WHERE circle_id = $1 AND device_id = $2 AND key_line = 'server' AND purpose = 'event'`, e.circle, d.id)
 	return
 }
 

@@ -4,6 +4,9 @@ import 'package:flutter/foundation.dart';
 
 import '../models/chat_message.dart';
 import 'api_client.dart';
+import 'chat/chat_engine.dart';
+import 'chat/chat_store.dart';
+import 'chat/encrypted_chat_service.dart';
 
 /// A chat failure already worded for the user.
 class ChatException implements Exception {
@@ -35,7 +38,7 @@ ChatException describeChatError(Object error) {
 /// Chat operations used by the chat screen. Abstract so widget tests can
 /// supply a fake.
 abstract class ChatService {
-  static ChatService instance = ApiChatService();
+  static ChatService instance = RoutingChatService(plain: ApiChatService());
 
   Future<String> myUserId();
   Future<ChatPage> messages(String circleId,
@@ -61,6 +64,46 @@ abstract class ChatService {
 
   /// Unread counts per circle id.
   Future<Map<String, int>> unread();
+}
+
+/// Extra operations of encrypted chat. A service that does not implement this
+/// (plaintext chat, test fakes) behaves as before.
+abstract class ChatProtection {
+  /// How the chat of this circle is protected and what the screen should say
+  /// about it. Plaintext chat answers "not encrypted".
+  Future<ChatCircleInfo> info(String circleId);
+
+  /// Sends a failed message again (encrypted chat).
+  Future<void> retry(String circleId, String messageId);
+
+  /// Deletes the plaintext messages written before the circle turned private
+  /// (circle admins). Returns how many were removed.
+  Future<int> deleteLegacyHistory(String circleId);
+}
+
+/// The protection operations of [s], or null for plaintext services and fakes.
+ChatProtection? protectionOf(ChatService s) => s is ChatProtection ? s as ChatProtection : null;
+
+/// What the chat screen shows about the protection of one circle's chat.
+class ChatCircleInfo {
+  const ChatCircleInfo({
+    this.encrypted = false,
+    this.waitingForKey = false,
+    this.outdatedMembers = const <String>[],
+    this.hasLegacyHistory = false,
+  });
+
+  /// New messages are sealed phone to phone.
+  final bool encrypted;
+
+  /// No circle key reached this phone yet: sending and reading wait for it.
+  final bool waitingForKey;
+
+  /// Members whose app cannot read encrypted chat yet.
+  final List<String> outdatedMembers;
+
+  /// Old plaintext messages from before encryption are still on the server.
+  final bool hasLegacyHistory;
 }
 
 class ApiChatService implements ChatService {
@@ -195,6 +238,25 @@ class ChatEvents {
   /// it missed.
   static Stream<void> get reconnects => _reconnects.stream;
   static void notifyReconnected() => _reconnects.add(null);
+
+  /// A change of the encrypted chat (applied locally after decrypting).
+  static void handleEngineChange(ChatChange change, String authorName, String me) {
+    switch (change.kind) {
+      case ChatChangeKind.added:
+        final StoredChat m = change.message!;
+        _incoming.add(chatMessageFromStored(m, change.circleId, authorName, mine: m.author == me));
+        if (m.author != me && change.circleId != viewingCircleId) unawaited(refreshUnread());
+      case ChatChangeKind.delivered:
+        final StoredChat m = change.message!;
+        _edits.add(chatMessageFromStored(m, change.circleId, authorName, mine: m.author == me));
+      case ChatChangeKind.edited:
+        final StoredChat m = change.message!;
+        _edits.add(chatMessageFromStored(m, change.circleId, authorName, mine: m.author == me));
+      case ChatChangeKind.deleted:
+        _deletes.add((change.circleId, change.key));
+        unawaited(refreshUnread());
+    }
+  }
 
   static bool handleEditFrame(Map<String, dynamic> frame) {
     final Object? raw = frame['message'];

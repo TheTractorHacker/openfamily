@@ -39,6 +39,7 @@ var Features = map[string]string{
 	"private_channel":     "0.16.0", // sealed location channel
 	"trusted_server_mode": "0.18.0", // server as an approved E2EE member
 	"processing_lanes":    "0.22.0", // per-member privacy lanes: key-log actions 10/11, server key line
+	"chat_e2ee":           "0.23.0", // chat sealed phone to phone in Private circles
 }
 
 // Version is a parsed x.y.z app version. Pre-release and build suffixes are

@@ -32,12 +32,13 @@ import (
 
 const (
 	capLanes2         = "lanes2"
+	capChat2          = "chat2" // understands encrypted chat (docs/design/E2EE_CHAT.md)
 	processingOpsHour = 60
 	upgradeOpsHour    = 10
 	maxStatementsOut  = 30
 )
 
-var knownCaps = map[string]bool{capLanes2: true}
+var knownCaps = map[string]bool{capLanes2: true, capChat2: true}
 
 // cleanCaps keeps only known capability names (sorted, unique, at most 8).
 func cleanCaps(in []string) []string {

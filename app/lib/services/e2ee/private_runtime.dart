@@ -28,6 +28,9 @@ import 'private_channel.dart';
 import 'private_store.dart';
 import 'private_history.dart';
 import 'private_places.dart';
+import '../chat/chat_engine.dart';
+import '../chat/chat_store.dart';
+import '../chat_service.dart' show ChatEvents;
 
 /// SharedPreferences-backed [ChannelKv]. The queue, cursors, sequence numbers,
 /// dedupe windows and the on-device history live here. Everything stored is
@@ -307,6 +310,15 @@ class PrivateRuntime {
       await queue.reconcileLanes(lanes);
     });
     results = ResultStore(kv);
+    chatStore = ChatStore(kv: kv, now: clock.now);
+    chat = ChatEngine(store: chatStore, directory: StateChatDirectory(api), now: clock.now)
+      ..notify = (String t, String b) {
+        return notify(t, b);
+      }
+      ..isViewing = (String c) {
+        return ChatEvents.viewingCircleId == c;
+      }
+      ..onChange = ChatEvents.handleEngineChange;
     sync = ChannelSync(api: this.channel, receiver: receiver, kv: kv);
     history = PrivateHistory(kv: kv, now: clock.now);
     chunker = HistoryChunker(kv: kv, now: clock.now);
@@ -354,6 +366,10 @@ class PrivateRuntime {
 
   /// Result items (`trip`, `drive`, `week`) received from other members' phones.
   late final ResultStore results;
+
+  /// Local encrypted-chat history and the engine that applies `chat` items.
+  late final ChatStore chatStore;
+  late final ChatEngine chat;
   late final SenderDirectory directory;
   late final ChannelSealer sealer;
   late final SealedQueue queue;
@@ -766,6 +782,19 @@ class PrivateRuntime {
     await queue.enqueue(it);
   }
 
+  /// Seals [body] and puts it in the upload queue WITHOUT flushing (the caller
+  /// records its own bookkeeping first, then calls [flush]).
+  Future<({WireItem item, String userId})> queueSealed(String circleId, String purpose, Map<String, dynamic> body, {DateTime? at}) async {
+    final SenderIdentity? me = await _me();
+    if (me == null) throw const ItemRejected(ItemRejection.noKey);
+    final WireItem it = await sealer.seal(me, circleId, purpose, body, at: at);
+    await queue.enqueue(it);
+    return (item: it, userId: me.userId);
+  }
+
+  /// This account's user id, or null before a key exists.
+  Future<String?> myUserId() async => (await _me())?.userId;
+
   /// Seals an arbitrary item (check-in/SOS position, place, event).
   Future<void> sendItem(String circleId, String purpose, Map<String, dynamic> body, {bool flushNow = true}) async {
     final SenderIdentity? me = await _me();
@@ -931,6 +960,21 @@ class PrivateRuntime {
     } catch (_) {}
   }
 
+  /// Tells the server what this app understands, once per phone key, so a key
+  /// registered by an older build is also known to read encrypted chat.
+  Future<void> _declareCaps() async {
+    try {
+      final LocalIdentity? id = await service.identity();
+      if (id == null) return;
+      final String want = '${id.deviceId}:${E2eeService.capabilities.join(',')}';
+      if (await kv.get('caps/declared') == want) return;
+      await api.putCaps(id.deviceId, E2eeService.capabilities);
+      await kv.set('caps/declared', want);
+    } catch (_) {
+      // offline or an older server: tried again at the next app start
+    }
+  }
+
   Future<void> _retryOptOuts() async {
     try {
       for (final String c in await privateCircles()) {
@@ -950,6 +994,7 @@ class PrivateRuntime {
       await ensureKeys(id);
       unawaited(wrapForWaitingDevices(id));
     }
+    unawaited(_declareCaps());
     await drainParked();
     // A circle that just turned Private, or one this phone has not sent anything to for a while: send the last
     // position now, so the first view of the others is not empty.
@@ -1145,6 +1190,8 @@ class PrivateRuntime {
       case ChannelPurpose.week:
         // Figures a member's phone computed. Stored under the VERIFIED author.
         await results.put(r);
+      case ChannelPurpose.chat:
+        await chat.apply(r, me: me?.userId ?? '');
       case ChannelPurpose.checkin:
         if (mine) return;
         final String who = nameOf?.call(r.userId) ?? 'Someone';

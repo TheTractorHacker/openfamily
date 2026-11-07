@@ -272,6 +272,9 @@ class FakeE2eeClient implements E2eeApi {
   }
 
   @override
+  Future<void> putCaps(String deviceId, List<String> caps) async {}
+
+  @override
   Future<int> purgeServerCopies(String circleId, {bool wholeCircle = false}) async {
     s.circles[circleId]!.serverPurges.add(wholeCircle ? 'circle' : 'mine');
     return 3;

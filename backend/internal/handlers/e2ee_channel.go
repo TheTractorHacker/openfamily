@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/TheTractorHacker/openfamily/backend/internal/circles"
 	"github.com/TheTractorHacker/openfamily/backend/internal/config"
@@ -50,7 +51,7 @@ const (
 // Live fixes, events and check-ins are tiny; places are a few KiB; a history
 // chunk may be up to the Pad limit (65535 bytes of payload).
 var e2eeMaxBucket = map[string]int{
-	"fix": 1024, "event": 1024, "checkin": 1024, "chat": 4096, "place": 4096, "history": 69632,
+	"fix": 1024, "event": 1024, "checkin": 1024, "chat": 8192, "place": 4096, "history": 69632,
 	// phone-computed results (ADR 8.4), retained like history
 	"trip": 1024, "drive": 4096, "week": 1024,
 }
@@ -58,6 +59,15 @@ var e2eeMaxBucket = map[string]int{
 // e2eeWakePurposes are the purposes that trigger a content-free wake-up push.
 // Live fixes are not pushed (the stream carries them while a phone is open).
 var e2eeWakePurposes = map[string]bool{"event": true, "checkin": true, "chat": true}
+
+// e2eeChatTTL is how long the relay keeps sealed chat. Longer than live
+// location; phones keep their own history. E2EE_CHAT_TTL_DAYS overrides (1..365).
+func e2eeChatTTL() time.Duration {
+	if v, err := strconv.Atoi(strings.TrimSpace(os.Getenv("E2EE_CHAT_TTL_DAYS"))); err == nil && v >= 1 && v <= 365 {
+		return time.Duration(v) * 24 * time.Hour
+	}
+	return 30 * 24 * time.Hour
+}
 
 // e2eeLiveTTL is the lifetime of live-window ciphertext (fix, event).
 // E2EE_LIVE_TTL_HOURS overrides it (1..720).
@@ -244,6 +254,11 @@ func checkE2EEItemLine(it e2eeItemIn, c itemCircle, laneServer, devLanes2 bool) 
 	if it.Seq <= 0 || it.Seq >= 1<<53 {
 		return nil, 0, "bad_seq"
 	}
+	// Chat is sealed under the phone key only and never leaves the phones' key
+	// line, even when the author's lane is "server" (docs/design/E2EE_CHAT.md).
+	if it.Purpose == "chat" && it.KeyLine == "server" {
+		return nil, 0, "chat_phone_only"
+	}
 	if it.Epoch < 1 || (it.KeyLine != "server" && it.Epoch > c.Epoch) {
 		return nil, 0, "bad_epoch"
 	}
@@ -282,6 +297,9 @@ func checkE2EEItemLine(it e2eeItemIn, c itemCircle, laneServer, devLanes2 bool) 
 	if h.Line != declared || int(h.Gen) != it.Epoch || it.Epoch < 1 {
 		return nil, 0, "bad_header"
 	}
+	if it.Purpose == "chat" && declared != e2ee.LinePhone {
+		return nil, 0, "chat_phone_only"
+	}
 	if declared == e2ee.LineServer {
 		// Server line: policy on, a generation that exists, an app that declared
 		// the capability, and an author whose OWN verified lane is server.
@@ -307,7 +325,7 @@ func checkE2EEItemLine(it e2eeItemIn, c itemCircle, laneServer, devLanes2 bool) 
 	}
 	// Check-ins (SOS) and events are exempt: help requests must never be blocked
 	// by a consent or server-key problem.
-	if c.OptOut == "required_server" && !laneServer && it.Purpose != "checkin" && it.Purpose != "event" {
+	if c.OptOut == "required_server" && !laneServer && it.Purpose != "checkin" && it.Purpose != "event" && it.Purpose != "chat" {
 		// The owner decision of ADR 16.1: the server does not relay phone-lane
 		// items from members of a required_server circle.
 		return nil, 0, "required_server"
@@ -434,7 +452,10 @@ func (s *Server) E2EEPostBatch(w http.ResponseWriter, r *http.Request) {
 		case "fix", "event":
 			t := now.Add(e2eeLiveTTL())
 			expires = &t
-		case "history", "checkin", "chat", "trip", "drive", "week":
+		case "chat":
+			t := now.Add(e2eeChatTTL())
+			expires = &t
+		case "history", "checkin", "trip", "drive", "week":
 			d := retentionDays
 			if it.Purpose != "history" {
 				d = int(checkinRetention / (24 * time.Hour))
@@ -453,6 +474,11 @@ func (s *Server) E2EEPostBatch(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		if err != nil {
+			var pe *pgconn.PgError
+			if errors.As(err, &pe) {
+				// Code and constraint only: never the row (it holds ciphertext) and never a payload.
+				slog.Warn("e2ee item insert failed", "code", pe.Code, "constraint", pe.ConstraintName, "message", pe.Message)
+			}
 			writeError(w, http.StatusInternalServerError, "failed to store items")
 			return
 		}
@@ -487,6 +513,12 @@ func (s *Server) E2EEPostBatch(w http.ResponseWriter, r *http.Request) {
 // for event-like purposes, sends a content-free wake-up push. The push says only
 // that something is waiting in a circle: no person, place or position.
 func (s *Server) fanOutE2EEItems(circleID, senderID string, items []e2eeItemOut, wake bool) {
+	chatWake := false
+	for _, it := range items {
+		if it.Purpose == "chat" {
+			chatWake = true
+		}
+	}
 	if s.hub != nil {
 		for _, it := range items {
 			b, err := json.Marshal(it)
@@ -499,7 +531,11 @@ func (s *Server) fanOutE2EEItems(circleID, senderID string, items []e2eeItemOut,
 	if !wake || s.Push == nil {
 		return
 	}
-	if s.LocationLimit != nil && !s.LocationLimit.Allow("e2eewake:"+circleID, 1, e2eeWakeEvery) {
+	wakeEvery := e2eeWakeEvery
+	if chatWake {
+		wakeEvery = 2 * time.Second // a chat reply should not wait for the 10 s location window
+	}
+	if s.LocationLimit != nil && !s.LocationLimit.Allow("e2eewake:"+circleID, 1, wakeEvery) {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -733,6 +769,9 @@ func (s *Server) PurgeE2EEItems(ctx context.Context) (int64, error) {
 	tag, err := s.Pool.Exec(ctx, `DELETE FROM e2ee_items WHERE expires_at IS NOT NULL AND expires_at < now()`)
 	if err != nil {
 		return 0, err
+	}
+	if _, err := s.Pool.Exec(ctx, `DELETE FROM e2ee_blobs WHERE expires_at < now()`); err != nil {
+		return tag.RowsAffected(), err
 	}
 	return tag.RowsAffected(), nil
 }

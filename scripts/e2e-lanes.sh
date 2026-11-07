@@ -39,7 +39,10 @@ cleanup() {
   docker run --rm -v "$ROOT:/r" "$GO_IMG" chown -R "$(id -u):$(id -g)" /r/app /r/backend /r/scripts /r/docs >/dev/null 2>&1 || true
   [ $rc -ne 0 ] && echo "e2e-lanes: FAILED (rc=$rc); server log: $WORK/api.log" >&2
   [ $rc -eq 0 ] && [ "${E2E_KEEP:-0}" != 1 ] && rm -rf "$WORK"
-  exit $rc
+  if [ -f "$WORK/api.log" ] && grep -E 'xyzzy-secret|plugh-secret|quux-secret' "$WORK/api.log" >/dev/null 2>&1; then
+  echo "e2e-lanes: a chat message text appears in the server log" >&2; rc=1
+fi
+exit $rc
 }
 trap cleanup EXIT
 
@@ -95,5 +98,8 @@ set -e
 docker logs "$API" >"$WORK/api.log" 2>&1 || true
 if [ -f "$WORK/api.log" ] && grep -E '41\.31[45]' "$WORK/api.log" >/dev/null 2>&1; then
   echo "e2e-lanes: a phone-line coordinate appears in the server log" >&2; rc=1
+fi
+if [ -f "$WORK/api.log" ] && grep -E 'xyzzy-secret|plugh-secret|quux-secret' "$WORK/api.log" >/dev/null 2>&1; then
+  echo "e2e-lanes: a chat message text appears in the server log" >&2; rc=1
 fi
 exit $rc

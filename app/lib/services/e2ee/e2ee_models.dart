@@ -60,6 +60,7 @@ class DeviceKey {
   final List<String> caps;
 
   bool get supportsLanes => caps.contains(kCapLanes);
+  bool get supportsChat => caps.contains(kCapChat);
 
   bool get isRecovery => kind == 'recovery';
   bool get isActive => revokedAt == null;
@@ -93,6 +94,9 @@ class DeviceKey {
 
 /// Capability string of the processing-lanes format (v2 items, SK wraps).
 const String kCapLanes = 'lanes2';
+
+/// Capability string of encrypted chat (docs/design/E2EE_CHAT.md).
+const String kCapChat = 'chat2';
 
 class CircleE2eeMember {
   const CircleE2eeMember({
