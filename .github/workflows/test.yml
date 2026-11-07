@@ -146,3 +146,53 @@ jobs:
             echo "::endgroup::"
           fi
           exit $rc
+
+  # Apple Watch app (app/ios/OrbitlyWatch). A SEPARATE job on purpose, so a
+  # failure is visible and is not mixed up with the iPhone app job above.
+  #
+  # NON-BLOCKING for now (continue-on-error): the watch app and its Xcode target
+  # were written without a Mac and have never been compiled. Once this job is
+  # green on main, remove `continue-on-error` and make it a required check.
+  # If the watch target breaks the iPhone build, remove it with
+  # `python3 scripts/ios-watch-target.py disable` (docs/design/WATCH_APPS_APPLE.md).
+  watchos:
+    runs-on: macos-15
+    continue-on-error: true
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - name: Xcode project consistency (every object id defined)
+        working-directory: .
+        run: python3 scripts/ios-watch-target.py check
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          channel: stable
+          flutter-version: '3.47.0'
+          cache: true
+      - name: Dependencies (writes Flutter/Generated.xcconfig used for the watch version)
+        run: flutter pub get
+      - name: Prepare the iOS project (config only)
+        run: flutter build ios --config-only --no-codesign
+      - name: Lint watch plists
+        run: plutil -lint ios/OrbitlyWatch/Info.plist ios/OrbitlyWatch/PrivacyInfo.xcprivacy ios/Runner/Info.plist
+      - name: Show available SDKs
+        run: xcodebuild -showsdks | grep -i watch || true
+      - name: Build the watch app for the watchOS Simulator (unsigned)
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project ios/Runner.xcodeproj \
+            -scheme OrbitlyWatch \
+            -destination 'generic/platform=watchOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            | tail -80
+      - name: Build the iPhone app with the watch app embedded (unsigned, simulator)
+        run: flutter build ios --simulator --no-codesign --debug
+      - name: The watch app is inside the iPhone app
+        run: |
+          set -euo pipefail
+          ls build/ios/iphonesimulator/Runner.app/Watch
+          test -f build/ios/iphonesimulator/Runner.app/Watch/OrbitlyWatch.app/Info.plist

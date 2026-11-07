@@ -32,6 +32,7 @@ import 'services/map_style_preference.dart';
 import 'services/theme_preference.dart';
 import 'services/tile_config.dart';
 import 'services/token_storage.dart';
+import 'services/watch/watch_bridge_ios.dart';
 import 'theme/app_theme.dart';
 import 'widgets/biometric_app_lock.dart';
 import 'widgets/dot_grid.dart';
@@ -68,6 +69,8 @@ Future<void> main() async {
     ]),
   );
   UnitsSync.install();
+  // Apple Watch link (iPhone only; a no-op everywhere else).
+  unawaited(WatchBridgeIos.instance.start());
   runApp(const OpenFamilyApp());
 }
 

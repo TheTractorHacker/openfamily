@@ -3,6 +3,7 @@ import 'background_location_service.dart';
 import 'biometric_service.dart';
 import 'place_service.dart';
 import 'widget_snapshot.dart';
+import 'watch/watch_bridge_ios.dart';
 import 'token_storage.dart';
 
 /// Thrown when the backend requires a TOTP code (2FA) to complete login.
@@ -118,6 +119,8 @@ class AuthService {
     PlaceService.invalidateCache();
     // No family names may linger on the home-screen widget after sign-out.
     await HomeWidgetService.clear();
+    // Nor on a paired Apple Watch.
+    await WatchBridgeIos.instance.clear();
   }
 
   static Future<void> _loginAndPersist({

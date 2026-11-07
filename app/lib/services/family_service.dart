@@ -22,6 +22,7 @@ import 'place_service.dart';
 import 'server_config.dart';
 import 'token_storage.dart';
 import 'widget_snapshot.dart';
+import 'watch/watch_bridge_ios.dart';
 
 /// The caller's family summary from `GET /family`.
 class FamilyInfo {
@@ -110,6 +111,7 @@ class FamilyService {
     _coalesceTimer = null;
     PerfMonitor.instance.recordWsUiUpdate();
     HomeWidgetService.update(_members);
+    WatchBridgeIos.instance.onRoster(_members, userId: _userId, circleId: _circleId);
     onMembersChanged?.call(_members);
   }
 
@@ -123,6 +125,7 @@ class FamilyService {
     }
     PerfMonitor.instance.recordWsUiUpdate();
     HomeWidgetService.update(_members);
+    WatchBridgeIos.instance.onRoster(_members, userId: _userId, circleId: _circleId);
     onMembersChanged?.call(_members);
     _coalesceTimer = Timer(uiCoalesceWindow, _onCoalesceWindowEnd);
   }

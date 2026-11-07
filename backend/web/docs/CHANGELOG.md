@@ -10,6 +10,14 @@ for the **last 5 minor versions** of the app (see
 [API compatibility](api-compat.md)), so you can update the server first and
 the phones afterwards.
 
+## Unreleased
+
+- **Apple Watch app (watchOS 9 or newer).** See your circle on your wrist (name, where, how long
+  ago, battery), a distance and direction arrow, SOS with press-and-hold and a cancellable
+  countdown, I'm OK, pause or resume sharing, quick replies and alerts. Your iPhone keeps your
+  sign-in and keys; the watch only shows what it is sent. New under **Settings, Watch**. This
+  part is new and was not yet tried on a real watch.
+
 ## v0.24.1 (2026-11-08)
 
 - Build fix: the v0.24.0 release files were not produced because of a file-name

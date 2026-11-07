@@ -5,7 +5,8 @@
     {"id": "family", "title": "For your circle", "description": "Using the app day to day, in plain words.",
      "items": ["user/create-a-circle.md", "user/invite-and-join.md", "user/locations-and-map.md", "user/places.md",
                "user/driving-reports.md", "user/chat.md", "user/privacy-modes.md", "user/safety-and-check-ins.md",
-               "user/sharing-links.md", "user/members-and-devices.md", "user/battery-and-permissions.md"]},
+               "user/sharing-links.md", "user/members-and-devices.md", "user/battery-and-permissions.md",
+               "user/watch-apple.md"]},
     {"id": "admin", "title": "Running your server", "description": "Install, update, back up and look after your own server.",
      "items": ["admin/install.md", "admin/first-run.md", "admin/https-and-domain.md", "admin/updates.md",
                "admin/backups.md", "admin/notifications.md", "admin/integrations.md", "admin/deployment-profile.md",
@@ -13,6 +14,6 @@
                "self-hosting.md", "custom-domain.md", "backup-restore.md", "android-install-and-updates.md"]},
     {"id": "developers", "title": "For developers", "description": "How it is built, the API and the compatibility rules.",
      "items": ["developers/architecture.md", "developers/api.md", "developers/compatibility.md", "developers/build.md",
-               "developers/screenshots.md", "developers/naming.md", "api-compat.md"]}
+               "developers/screenshots.md", "developers/naming.md", "developers/apple-watch.md", "api-compat.md"]}
   ]
 }

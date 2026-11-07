@@ -67,11 +67,22 @@ jobs:
           test -d "$APP"
           # Prove it really is unsigned: no embedded provisioning profile.
           if [ -e "$APP/embedded.mobileprovision" ]; then echo "unexpected provisioning profile"; exit 1; fi
+          # The Apple Watch app (app/ios/OrbitlyWatch) rides inside the iPhone app
+          # bundle as Runner.app/Watch/OrbitlyWatch.app; `cp -R` below carries it.
+          # When the project has the watch target it MUST be there, otherwise the
+          # IPA would silently ship without it.
+          if grep -q AB1C0DE0 ios/Runner.xcodeproj/project.pbxproj; then
+            test -f "$APP/Watch/OrbitlyWatch.app/Info.plist" || { echo "watch app missing from $APP/Watch"; exit 1; }
+            if [ -e "$APP/Watch/OrbitlyWatch.app/embedded.mobileprovision" ]; then echo "unexpected provisioning profile in the watch app"; exit 1; fi
+          fi
           rm -rf ../dist _ipa && mkdir -p ../dist _ipa/Payload
           cp -R "$APP" _ipa/Payload/Runner.app
           OUT="$PWD/../dist/orbitly-$V-unsigned.ipa"
           (cd _ipa && zip -qry "$OUT" Payload)
           unzip -l "$OUT" | grep -q 'Payload/Runner.app/Info.plist'
+          if grep -q AB1C0DE0 ios/Runner.xcodeproj/project.pbxproj; then
+            unzip -l "$OUT" | grep -q 'Payload/Runner.app/Watch/OrbitlyWatch.app/Info.plist'
+          fi
           (cd ../dist && shasum -a 256 "orbitly-$V-unsigned.ipa" | tee "orbitly-$V-unsigned.ipa.sha256")
           codesign -dv "$APP" 2>&1 | head -5 || true
 

@@ -73,6 +73,11 @@
 	     stop Flutter from also pushing the URL path onto the Navigator. -->
 	<key>FlutterDeepLinkingEnabled</key>
 	<false/>
+	<!-- Handoff from the Apple Watch app (OrbitlyWatch/PersonViews.swift). -->
+	<key>NSUserActivityTypes</key>
+	<array>
+		<string>app.openfamily.watch.person</string>
+	</array>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>location</string>

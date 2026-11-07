@@ -28,6 +28,7 @@ public App Store, free-account sideloading) are in the table at the end.
 | Universal Links file | backend `GET /.well-known/apple-app-site-association` (env `IOS_TEAM_ID`, `IOS_BUNDLE_ID`) | Go tests pass |
 | Release workflow | `.github/workflows/ios-release.yml` (gated by `IOS_RELEASE_ENABLED`) | never run |
 | Export options template | `app/ios/ExportOptions.plist` | template, never used |
+| Apple Watch app (SwiftUI, embedded in the iPhone app; companion model) | `app/ios/OrbitlyWatch/`, `Runner/WatchBridge.swift`, [WATCH_APPS_APPLE.md](WATCH_APPS_APPLE.md) | written, never compiled; own non-blocking CI job `watchos`; TestFlight leaves it out until `IOS_WATCH_ENABLED=true`; kill switch `scripts/ios-watch-target.py disable` |
 | Xcode unit tests (key logic, link filter) | `app/ios/RunnerTests/RunnerTests.swift` | never run; run by `test.yml` job `ios` on the macOS runner |
 
 ## Feature table: what works on iPhone

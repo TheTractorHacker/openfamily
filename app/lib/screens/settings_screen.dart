@@ -28,6 +28,7 @@ import 'diagnostics_screen.dart';
 import 'driving_detection_screen.dart';
 import 'families_screen.dart';
 import 'server_config_screen.dart';
+import 'watch_apple_screen.dart';
 import 'welcome_screen.dart';
 import 'notification_settings_screen.dart';
 import 'onboarding_screen.dart';
@@ -563,6 +564,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   setState(() => _widgetShowFamily = v);
                   HomeWidgetService.setEnabled(v);
                 },
+              ),
+            if (PlatformFeatures.isIOS)
+              DsListRow(
+                leading: DsListRow.iconTile(context, Icons.watch_outlined),
+                title: 'Watch',
+                subtitle: 'Apple Watch: people, SOS and check-in on your wrist',
+                chevron: true,
+                onTap: () => push(const WatchAppleScreen()),
               ),
             if (BatteryOptimizationService.isSupported)
               DsListRow(
