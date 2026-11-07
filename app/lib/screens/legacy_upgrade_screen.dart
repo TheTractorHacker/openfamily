@@ -155,10 +155,10 @@ class _LegacyUpgradeScreenState extends State<LegacyUpgradeScreen> {
           const SizedBox(height: AppSpace.sm),
           DsPillButton(key: const Key('upgrade-run'), label: 'Upgrade circle', icon: Icons.upgrade, onPressed: canRun ? _upgrade : null),
         ],
-        if (!s.legacy && s.iAmAdmin) ...<Widget>[
+        if (!s.legacy && s.iAmAdmin && s.legacyAccessOpen) ...<Widget>[
           const DsSectionHeader('Old data', padding: EdgeInsets.fromLTRB(0, AppSpace.xl, 0, AppSpace.xs)),
           const Text(
-              'Only for circles that were upgraded from the old mode: the server can still open data from before the upgrade. '
+              'This circle was upgraded from the old mode, and the server can still open data from before the upgrade. '
               'You can end that once it has processed what you need.',
               style: AppType.secondary),
           const SizedBox(height: AppSpace.sm),

@@ -35,16 +35,10 @@ abstract class E2eeApi {
   // Paths and field names live in lanes_wire.dart.
   Future<ProcessingServerState> processingState(String circleId) async => ProcessingServerState.off;
 
-  /// GET .../processing/policy. Null when none was ever published.
-  Future<PolicyStatement?> getProcessingPolicy(String circleId) async => null;
-
   /// PUT .../processing/policy (circle admin). [body] = statement fields,
   /// `log_signature`, and for a new SK generation `sk_wraps` ({gen, wraps}).
   Future<void> putProcessingPolicy(String circleId, Map<String, dynamic> body) async =>
       throw UnsupportedError('processing lanes are not available');
-
-  /// GET .../processing/pref (the caller's own).
-  Future<PrefStatement?> getProcessingPref(String circleId) async => null;
 
   /// PUT .../processing/pref (own pref only; no endpoint writes another user's).
   Future<void> putProcessingPref(String circleId, Map<String, dynamic> body) async =>
@@ -159,20 +153,8 @@ class ApiE2eeApi implements E2eeApi {
       (await ApiClient.get(LanesPaths.state(circleId))) as Map<String, dynamic>);
 
   @override
-  Future<PolicyStatement?> getProcessingPolicy(String circleId) async {
-    final dynamic r = await ApiClient.get(LanesPaths.policy(circleId));
-    return PolicyStatement.tryParse(r is Map<String, dynamic> ? (r['policy'] ?? r) : null);
-  }
-
-  @override
   Future<void> putProcessingPolicy(String circleId, Map<String, dynamic> body) =>
       ApiClient.put(LanesPaths.policy(circleId), body: body);
-
-  @override
-  Future<PrefStatement?> getProcessingPref(String circleId) async {
-    final dynamic r = await ApiClient.get(LanesPaths.pref(circleId));
-    return PrefStatement.tryParse(r is Map<String, dynamic> ? (r['pref'] ?? r) : null);
-  }
 
   @override
   Future<void> putProcessingPref(String circleId, Map<String, dynamic> body) =>

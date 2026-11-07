@@ -42,6 +42,7 @@ class ProcessingSnapshot {
     required this.members,
     required this.iAmAdmin,
     this.legacy = false,
+    this.legacyAccessOpen = false,
     this.serverKeyShort,
     this.serverKeyDigits,
     this.serverKeyFingerprint,
@@ -57,6 +58,9 @@ class ProcessingSnapshot {
 
   /// Still in the old trusted-server mode (the server key holds the circle key of some epochs).
   final bool legacy;
+
+  /// An upgraded circle whose server key still opens the old data (an admin can end that).
+  final bool legacyAccessOpen;
 
   /// The pinned server key, null when the circle has no valid one.
   final String? serverKeyShort;
@@ -135,6 +139,7 @@ class LanesProcessingController implements ProcessingController {
       members: members,
       iAmAdmin: byId[me]?.role == 'admin',
       legacy: cl.proc?.legacy ?? false,
+      legacyAccessOpen: cl.proc?.legacyAccessOpen ?? false,
       serverKeyShort: sk?.short,
       serverKeyDigits: sk?.digits,
       serverKeyFingerprint: sk?.fingerprint,

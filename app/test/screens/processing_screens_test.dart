@@ -344,13 +344,27 @@ void main() {
     });
 
     testWidgets('after the upgrade the admin can end the server\'s access to old data, with confirmation', (t) async {
-      final FakeProcessingController c = FakeProcessingController(FakeProcessingController.snapshot());
+      final FakeProcessingController c = FakeProcessingController(FakeProcessingController.snapshot(legacyAccessOpen: true));
       await pumpScreen(t, LegacyUpgradeScreen(circle: adminCircle, controller: c));
       await tapKey(t, 'upgrade-end-legacy');
       expect(c.calls, isNot(contains('end-legacy')));
       await t.tap(find.text('End access'));
       await t.pumpAndSettle();
       expect(c.calls, contains('end-legacy'));
+    });
+  });
+
+  group('LegacyUpgradeScreen old-data button', () {
+    testWidgets('not shown when the server does not report open legacy access', (t) async {
+      final FakeProcessingController c = FakeProcessingController(FakeProcessingController.snapshot());
+      await pumpScreen(t, LegacyUpgradeScreen(circle: adminCircle, controller: c));
+      expect(find.byKey(const Key('upgrade-end-legacy')), findsNothing);
+    });
+
+    testWidgets('not shown to a member even when access is open', (t) async {
+      final FakeProcessingController c = FakeProcessingController(FakeProcessingController.snapshot(me: pB, admin: false, legacyAccessOpen: true), me: pB);
+      await pumpScreen(t, LegacyUpgradeScreen(circle: memberCircle, controller: c));
+      expect(find.byKey(const Key('upgrade-end-legacy')), findsNothing);
     });
   });
 
