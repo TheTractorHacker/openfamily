@@ -1,11 +1,25 @@
+import 'dart:async';
+
 import '../models/emergency_contact.dart';
+import 'offline/offline_cache.dart';
+import 'offline/offline_errors.dart';
 import 'api_client.dart';
 
 /// Client for `GET/POST/DELETE /me/contacts`.
 class EmergencyContactService {
   /// Fetches the caller's emergency contacts.
   Future<List<EmergencyContact>> list() async {
-    final dynamic data = await ApiClient.get('/me/contacts');
+    dynamic data;
+    try {
+      data = await ApiClient.get('/me/contacts');
+      unawaited(OfflineCache.instance.write('emergency-contacts', data));
+    } catch (e) {
+      // Offline: the SOS "text my contacts" fallback needs their numbers on the phone.
+      if (!isOfflineError(e)) rethrow;
+      final CacheEntry? c = await OfflineCache.instance.read('emergency-contacts');
+      if (c == null) rethrow;
+      data = c.data;
+    }
     if (data is! List) {
       throw const ApiException(0, 'Unexpected contacts response.');
     }

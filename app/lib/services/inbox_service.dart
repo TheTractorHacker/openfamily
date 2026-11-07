@@ -4,6 +4,8 @@ import 'package:flutter/foundation.dart';
 
 import '../models/inbox.dart';
 import 'api_client.dart';
+import 'offline/offline_cache.dart';
+import 'offline/offline_errors.dart';
 import 'sharing_service.dart';
 
 /// Loads the received check-ins and live shares. Screens take one so tests can
@@ -19,7 +21,17 @@ class ApiInboxService implements InboxService {
 
   /// Check-ins other people sent to the caller (newest first).
   static Future<List<Map<String, dynamic>>> _receivedCheckIns() async {
-    final dynamic r = await ApiClient.get('/checkins');
+    dynamic r;
+    try {
+      r = await ApiClient.get('/checkins');
+      unawaited(OfflineCache.instance.write('checkins', r));
+    } catch (e) {
+      // Notifications already received stay readable when the server is down.
+      if (!isOfflineError(e)) rethrow;
+      final CacheEntry? c = await OfflineCache.instance.read('checkins');
+      if (c == null) rethrow;
+      r = c.data;
+    }
     final Object? v = r is Map<String, dynamic> ? r['checkins'] : null;
     return v is List
         ? <Map<String, dynamic>>[
@@ -33,7 +45,11 @@ class ApiInboxService implements InboxService {
   Future<List<InboxItem>> load() async {
     final List<Object> r = await Future.wait<Object>(<Future<Object>>[
       _receivedCheckIns(),
-      _sharing.liveShares(),
+      // Live shares are only valid while they run; offline there is simply none to show.
+      _sharing.liveShares().catchError((Object e) {
+        if (isOfflineError(e)) return const LiveShares();
+        throw e;
+      }),
     ]);
     final List<Map<String, dynamic>> checkIns = r[0] as List<Map<String, dynamic>>;
     final LiveShares shares = r[1] as LiveShares;

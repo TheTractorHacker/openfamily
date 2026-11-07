@@ -7,6 +7,7 @@ import 'e2ee_crypto.dart';
 import 'e2ee_models.dart';
 import 'item_open_job.dart';
 import 'lanes_wire.dart';
+import '../offline/offline_errors.dart';
 
 // Phase 2 of docs/design/E2EE.md: the encrypted channel of a Private circle.
 //
@@ -613,14 +614,23 @@ class SealedQueue {
         _prune(l);
       });
 
+  /// What the queue may never drop to make room or for age: things a person did on purpose
+  /// (check-ins incl. SOS positions, chat) and the places/events that change state for others.
+  static bool _kept(Map<String, dynamic> m) {
+    final Object? p = m['p'];
+    return p == ChannelPurpose.checkin || p == ChannelPurpose.chat || p == ChannelPurpose.place || p == ChannelPurpose.event;
+  }
+
   void _prune(List<Map<String, dynamic>> l) {
     final int cut = clock.now().subtract(maxAge).millisecondsSinceEpoch;
-    l.removeWhere((Map<String, dynamic> m) =>
-        (m['q'] as int) < cut && m['p'] != ChannelPurpose.place && m['p'] != ChannelPurpose.event);
+    l.removeWhere((Map<String, dynamic> m) => (m['q'] as int) < cut && !_kept(m));
     while (l.length > maxItems) {
-      // Drop the oldest live fix first; keep events, places and check-ins longest.
+      // Drop the oldest live fix first, then the oldest other droppable item (history, results).
+      // Check-ins, chat, places and events are never displaced: the queue may exceed the cap
+      // by those instead of losing something a person wrote.
       int idx = l.indexWhere((Map<String, dynamic> m) => m['p'] == ChannelPurpose.fix);
-      if (idx < 0) idx = 0;
+      if (idx < 0) idx = l.indexWhere((Map<String, dynamic> m) => !_kept(m));
+      if (idx < 0) break;
       l.removeAt(idx);
     }
   }
@@ -674,9 +684,11 @@ class SealedQueue {
         await noteUndelivered(circle, 'http_${e.message}');
         await _remove(batch, <int>{for (final WireItem i in items) i.seq});
         continue;
-      } catch (_) {
-        await _bump(batch);
-        return delivered; // offline or server trouble: keep everything, try later
+      } catch (e) {
+        // Offline or server trouble (5xx): keep everything, try later. A server that is down does not make
+        // the items bad, so only an answer that is not a connection problem counts against the batch.
+        if (!isOfflineError(e)) await _bump(batch);
+        return delivered;
       }
       final Set<int> done = <int>{};
       bool needSync = false;
@@ -790,8 +802,9 @@ class SealedQueue {
         for (final Map<String, dynamic> m in l) {
           if (keys.contains('${m['c']}/${m['d']}/${m['s']}')) m['n'] = ((m['n'] as int?) ?? 0) + 1;
         }
-        // A batch that failed this many times is poison: drop it so it cannot pin the queue.
-        l.removeWhere((Map<String, dynamic> m) => ((m['n'] as int?) ?? 0) >= 20);
+        // Items that keep failing are dropped only if they are expendable (live fixes, history, results): a
+        // 5xx storm must never eat a sealed check-in or chat message. Those wait for the server.
+        l.removeWhere((Map<String, dynamic> m) => ((m['n'] as int?) ?? 0) >= 20 && !_kept(m));
       });
 
   Future<void> clear() => _mutate((List<Map<String, dynamic>> l) async => l.clear());

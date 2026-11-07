@@ -5,6 +5,9 @@ import '../models/alert.dart';
 import '../services/alert_service.dart';
 import '../services/api_client.dart';
 import '../services/e2ee/private_runtime.dart';
+import '../services/offline/offline_queue.dart';
+import '../services/offline/offline_sync.dart';
+import '../services/offline/server_reachability.dart';
 import 'alert_status_screen.dart';
 import '../services/location_service.dart';
 import '../theme/app_theme.dart';
@@ -28,6 +31,7 @@ class _HelpAlertScreenState extends State<HelpAlertScreen> {
   String? _error;
   double? _lat;
   double? _lon;
+  String? _clientId;
 
   @override
   void initState() {
@@ -56,9 +60,30 @@ class _HelpAlertScreenState extends State<HelpAlertScreen> {
         body['lat'] = _lat;
         body['lon'] = _lon;
       }
-      final dynamic response =
-          await ApiClient.post('/alerts/help', body: body);
+      // One id per screen: pressing again after "saved" can never create a second alert.
+      _clientId ??= 'help-${DateTime.now().microsecondsSinceEpoch}';
       unawaited(PrivateRuntime.instance.sealAlertPosition('help', body['lat'] as double?, body['lon'] as double?));
+      final Submitted result = await OfflineQueue.instance.submit(
+        QueuedItem(
+          id: _clientId!,
+          kind: QueueKind.checkin,
+          method: 'POST',
+          path: '/alerts/help',
+          body: <String, dynamic>{...body, 'client_id': _clientId},
+        ),
+        serverKnownDown: () => ServerReachability.instance.unreachable,
+      );
+      if (result.queued) {
+        unawaited(OfflineSync.refreshPending());
+        if (!mounted) return;
+        setState(() {
+          _sending = false;
+          _error = 'Not sent yet. Your phone cannot reach the server, so the help alert is saved on this '
+              'phone and goes out by itself when the connection is back. For an emergency, call emergency services.';
+        });
+        return;
+      }
+      final dynamic response = result.response;
       if (response is Map && response['id'] is String) {
         _alertId = response['id'] as String;
       }

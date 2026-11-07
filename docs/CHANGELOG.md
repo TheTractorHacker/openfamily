@@ -10,6 +10,21 @@ for the **last 5 minor versions** of the app (see
 [API compatibility](api-compat.md)), so you can update the server first and
 the phones afterwards.
 
+## Unreleased
+
+- **Orbitly keeps working when the server is down.** The app remembers the last people, positions
+  (with their real age), places, circles, chat and notifications and shows them at once, with a
+  small bar: "Server unreachable. Showing last known. Will sync when it is back." (and Try again).
+  Chat messages, check-ins, Help alerts and SOS written meanwhile are saved on the phone and sent in
+  order, once, when the server is back. An SOS that cannot be delivered says "SOS not sent yet", keeps
+  trying and offers to text your emergency contacts from your own messages app. New movement of other
+  people still needs a server. See "When the server is down".
+- Fixes: a long outage no longer discards the queued location points or queued Private circle
+  messages and check-ins; the app opens within 4 seconds on a dead network and never signs you out
+  because of a network error; Diagnostics counts every waiting update.
+- Server: SOS, Help alerts and check-ins accept an optional `client_id` so a replay after a lost
+  answer is stored once (database migration 340).
+
 ## v0.24.1 (2026-11-08)
 
 - Build fix: the v0.24.0 release files were not produced because of a file-name

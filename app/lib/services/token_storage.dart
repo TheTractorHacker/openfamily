@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'background_credential_store.dart';
 import 'biometric_service.dart';
 import 'location_outbox.dart';
+import 'offline/offline_sync.dart';
 import 'server_config.dart';
 import 'session_diary.dart';
 import 'session_gate.dart';
@@ -374,6 +375,9 @@ class TokenStorage {
     // pin the queue (mixed-device batches are rejected server-side), so the
     // cache lifecycle is tied to the session it was created in.
     await attempt(LocationOutbox.clear);
+    // Same for the local-first snapshot and the store-and-forward queue (docs/design/OFFLINE_RESILIENCE.md):
+    // they belong to the account that created them.
+    await attempt(OfflineSync.clearAll);
 
     try {
       final List<String?> remaining = <String?>[

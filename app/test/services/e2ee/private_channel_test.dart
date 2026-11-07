@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:openfamily/services/e2ee/e2ee_crypto.dart';
 import 'package:openfamily/services/e2ee/e2ee_models.dart';
+import 'package:openfamily/services/api_client.dart';
 import 'package:openfamily/services/e2ee/private_channel.dart';
 
 // Phase-2 channel: seal/verify round trip against the Go vector, sender
@@ -68,11 +69,15 @@ class FakeServer implements ChannelApi {
   final List<WireItem> items = <WireItem>[];
   bool offline = false;
   bool permanent = false;
+
+  /// Thrown by every post while set (a 5xx storm, a timeout ...).
+  Object? failWith;
   int posts = 0;
   @override
   Future<List<BatchResult>> postBatch(String circleId, String deviceId, List<WireItem> batch) async {
     posts++;
     if (offline) throw StateError('offline');
+    if (failWith != null) throw failWith!;
     if (permanent) throw const PermanentUploadError('409');
     final List<BatchResult> out = <BatchResult>[];
     for (final WireItem i in batch) {
@@ -379,6 +384,48 @@ void main() {
       await aged.enqueue(await sealFix(a));
       final List<WireItem> left = await aged.peek();
       expect(left.map((WireItem i) => i.purpose).toList(), <String>['event', 'fix']);
+    });
+
+    test('a 5xx storm never eats queued items: nothing is dropped, everything arrives once afterwards', () async {
+      final FakeServer srv = FakeServer();
+      final SealedQueue q = SealedQueue(kv: senderKv, clock: clock);
+      await q.enqueue(await sealFix(a, purpose: 'checkin'));
+      await q.enqueue(await sealFix(a, purpose: 'chat'));
+      await q.enqueue(await sealFix(a));
+      srv.failWith = const ApiException(503, 'bad gateway');
+      for (int i = 0; i < 60; i++) {
+        expect(await q.flush(srv, deviceFor: (_) => a.deviceId), 0);
+      }
+      expect(await q.length(), 3, reason: '60 failed flushes used to drop the whole batch after 20');
+      srv.failWith = null;
+      expect(await q.flush(srv, deviceFor: (_) => a.deviceId), 3);
+      expect(srv.items.map((WireItem i) => i.purpose).toList(), <String>['checkin', 'chat', 'fix']);
+      expect(srv.items.map((WireItem i) => i.seq).toList(), <int>[1, 2, 3]);
+    });
+
+    test('check-ins and chat are never dropped for age or to make room; fixes go first', () async {
+      final SealedQueue q = SealedQueue(kv: senderKv, clock: clock, maxItems: 3);
+      await q.enqueue(await sealFix(a, purpose: 'checkin'));
+      await q.enqueue(await sealFix(a, purpose: 'chat'));
+      for (int i = 0; i < 4; i++) {
+        await q.enqueue(await sealFix(a));
+      }
+      List<WireItem> left = await q.peek();
+      expect(left.where((WireItem i) => i.purpose == 'checkin').length, 1);
+      expect(left.where((WireItem i) => i.purpose == 'chat').length, 1);
+      expect(left.length, 3);
+      for (int i = 0; i < 5; i++) {
+        await q.enqueue(await sealFix(a, purpose: 'chat'));
+      }
+      left = await q.peek();
+      expect(left.where((WireItem i) => i.purpose == 'chat').length, 6, reason: 'over the cap rather than losing a message');
+      // Three days offline: the old fix expires, the messages stay.
+      clock.t = clock.t.add(const Duration(days: 3));
+      await q.enqueue(await sealFix(a, purpose: 'chat'));
+      left = await q.peek();
+      expect(left.where((WireItem i) => i.purpose == 'fix'), isEmpty);
+      expect(left.where((WireItem i) => i.purpose == 'chat').length, 7);
+      expect(left.where((WireItem i) => i.purpose == 'checkin').length, 1);
     });
 
     test('items sealed under epoch 1 flush fine after the circle moved to epoch 2', () async {

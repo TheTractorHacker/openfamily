@@ -11,7 +11,7 @@ import '../services/battery_optimization_service.dart';
 import '../services/diagnostics/diag_model.dart';
 import '../services/diagnostics/diagnostics_probe.dart';
 import '../services/diagnostics/diagnostics_reporter.dart';
-import '../services/location_outbox.dart';
+import '../services/offline/offline_sync.dart';
 import '../services/location_sharing_service.dart';
 import '../services/permission_service.dart';
 import '../theme/app_theme.dart';
@@ -113,7 +113,7 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> with WidgetsBindi
         ApiClient.onSessionExpired?.call();
       case DiagFixKind.sendQueue:
         setState(() => _busy = true);
-        await LocationOutbox.drain(send: sendOutboxBatchViaApi);
+        await OfflineSync.flushAll();
         await _run();
       case DiagFixKind.openPushSettings:
         _push(const NotificationSettingsScreen());
