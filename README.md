@@ -431,8 +431,8 @@ It refuses to run with uncommitted changes, backs up the database to
 (printing the restore command) if the new version does not come up. See
 [docs/self-hosting.md](docs/self-hosting.md#upgrades-and-backups). Scheduled, encrypted
 backups to any S3-compatible bucket (AWS S3, Backblaze B2, Wasabi, Cloudflare R2, MinIO),
-with retention and a *Back up now* button in the admin System page, are an opt-in compose
-profile: see [docs/backup-restore.md](docs/backup-restore.md#s3-and-scheduled-backups).
+with retention, a *Back up now* button and an S3/encryption/schedule settings form in the admin
+System page, are an opt-in compose profile: see [docs/backup-restore.md](docs/backup-restore.md#s3-and-scheduled-backups).
 
 ## Self-hosting map tiles
 

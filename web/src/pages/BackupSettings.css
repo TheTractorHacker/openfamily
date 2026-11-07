@@ -1,0 +1,46 @@
+/* System page: Backup settings form */
+.wb-bkf { display: flex; flex-direction: column; gap: var(--space-4); }
+.wb-bkf code { font-family: var(--font-mono); font-size: 0.92em; overflow-wrap: anywhere; }
+.wb-bkf-group { border: 0; margin: 0; padding: 0; min-width: 0; display: flex; flex-direction: column; gap: var(--space-4); }
+.wb-bkf-group:disabled { opacity: 0.85; }
+.wb-bkf-legend { padding: 0; margin-bottom: var(--space-3); font-size: var(--font-lg); font-weight: 600; color: var(--text); }
+.wb-bkf-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4) var(--space-5); align-items: start; }
+.wb-bkf-grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.wb-bkf-field { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+.wb-bkf-wide { grid-column: 1 / -1; }
+.wb-bkf-field .wb-label { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.wb-bkf-src { font-size: var(--font-xs); font-weight: 400; color: var(--text-faint); }
+.wb-bkf-hint { margin: 0; font-size: var(--font-xs); line-height: 1.5; color: var(--text-muted); }
+.wb-bkf-inline { margin-left: var(--space-2); }
+.wb-bkf-err { margin: 0; font-size: var(--font-xs); line-height: 1.5; color: var(--status-red-fg); }
+.wb-bkf .wb-input.is-invalid { border-color: var(--status-red); }
+.wb-bkf .wb-input:disabled { background: var(--surface-soft); color: var(--text-muted); cursor: not-allowed; }
+.wb-bkf-area { height: auto; min-height: 64px; padding-top: var(--space-2); font-family: var(--font-mono); font-size: var(--font-sm); resize: vertical; }
+.wb-bkf-toggles { gap: var(--space-3); }
+.wb-bkf-toggle { display: flex; align-items: flex-start; gap: var(--space-3); cursor: pointer; position: relative; }
+.wb-bkf-toggle.is-disabled { cursor: not-allowed; opacity: 0.7; }
+.wb-bkf-toggle input { position: absolute; opacity: 0; width: 36px; height: 20px; margin: 0; cursor: inherit; }
+.wb-bkf-toggle-track { flex: none; width: 36px; height: 20px; border-radius: 999px; background: var(--border-strong); position: relative; transition: background 0.15s; }
+.wb-bkf-toggle-track::after { content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--surface); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3); transition: transform 0.15s; }
+.wb-bkf-toggle input:checked + .wb-bkf-toggle-track { background: var(--accent-dark); }
+.wb-bkf-toggle input:checked + .wb-bkf-toggle-track::after { transform: translateX(16px); }
+.wb-bkf-toggle input:focus-visible + .wb-bkf-toggle-track { outline: 2px solid var(--ring); outline-offset: 2px; }
+.wb-bkf-toggle-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.wb-bkf-toggle-label { font-size: var(--font-md); font-weight: 500; color: var(--text); }
+.wb-bkf-credrow { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
+.wb-bkf-credrow .wb-input { flex: 1 1 220px; min-width: 0; }
+.wb-bkf-keybox { display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-4); border: 1px dashed var(--status-red-border); border-radius: var(--radius-md); background: var(--surface-soft); }
+.wb-bkf-secret { display: block; padding: var(--space-3); border-radius: var(--radius-xs); background: var(--surface); border: 1px solid var(--border); font-size: var(--font-sm); word-break: break-all; user-select: all; }
+.wb-bkf-keyactions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.wb-bkf-check { display: flex; align-items: center; gap: var(--space-2); font-size: var(--font-sm); font-weight: 600; color: var(--text); }
+.wb-bkf-link { align-self: flex-start; background: none; border: 0; padding: 0; font: inherit; font-size: var(--font-sm); color: var(--text-muted); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.wb-bkf-link:hover { color: var(--text); }
+.wb-bkf-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--space-3); position: sticky; bottom: 0; padding: var(--space-3) 0; background: linear-gradient(to top, var(--paper) 70%, transparent); }
+.wb-bkf-state { margin-right: auto; font-size: var(--font-sm); color: var(--text-muted); }
+.wb-bkf-state.is-dirty { color: var(--status-orange-fg); font-weight: 600; }
+@media (max-width: 720px) {
+  .wb-bkf-grid, .wb-bkf-grid-4 { grid-template-columns: 1fr; }
+  .wb-bkf-grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .wb-bkf-actions .wb-btn { flex: 1 1 auto; }
+  .wb-bkf-state { flex-basis: 100%; }
+}

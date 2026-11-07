@@ -11,8 +11,10 @@
 # restores into a scratch database via scripts/verify-backup.sh --from-s3 and
 # compares row counts. Negative cases: wrong key, tampered object, plain-http
 # endpoint without the insecure flag, wrong secret (must not leak into output).
-# Also exercises retention (dry-run and real; newest always kept) and the
-# daemon's admin-request queue (backup_requests).
+# Also exercises retention (dry-run and real; newest always kept), the
+# daemon's admin-request queue (backup_requests), and settings saved the way the
+# admin UI saves them (sealed credentials in backup_settings) being applied by
+# a running service with no S3 environment and no restart.
 #
 # Usage: scripts/backup-restore.test.sh      (needs docker; ~3-5 min)
 # Env:   BACKUP_IMAGE  use this prebuilt backup image instead of building one
@@ -25,9 +27,11 @@ src="openfamily-brtest-src-$$"
 net="openfamily-brtest-net-$$"
 minio="openfamily-brtest-minio-$$"
 daemon="openfamily-brtest-daemon-$$"
+daemon2="openfamily-brtest-daemon2-$$"
+daemon2="openfamily-brtest-daemon2-$$"
 work="$(mktemp -d)"
 cleanup() {
-  docker rm -f "$src" "$minio" "$daemon" >/dev/null 2>&1 || true
+  docker rm -f "$src" "$minio" "$daemon" "$daemon2" "$daemon2" >/dev/null 2>&1 || true
   docker network rm "$net" >/dev/null 2>&1 || true
   # MinIO wrote files as another uid; remove them from inside a container.
   [ -d "$work/minio-data" ] && [ -n "${image:-}" ] && docker run --rm --user 0 --entrypoint rm -v "$work:/w" "$image" -rf /w/minio-data >/dev/null 2>&1 || true
@@ -186,4 +190,40 @@ done
   || { echo "FAIL: no heartbeat" >&2; exit 1; }
 if sq -At -c "SELECT config::text FROM backup_agent" | grep -q "$sk\|$ak"; then echo "FAIL: credentials published in backup_agent" >&2; exit 1; fi
 if docker logs "$daemon" 2>&1 | grep -q "$sk\|AGE-SECRET-KEY"; then echo "FAIL: secret in daemon logs" >&2; exit 1; fi
+echo "--- UI-saved settings: the running service picks them up (no env S3 config, no restart)"
+docker rm -f "$daemon" >/dev/null
+settings_key="$(openssl rand -hex 16)"
+docker run -d --name "$daemon2" --network "$net" --user "$(id -u):$(id -g)" --tmpfs /work:mode=1777 -e BACKUP_WORK_DIR=/work \
+  -e DATABASE_URL="$dburl" -e BACKUP_SETTINGS_KEY="$settings_key" -e BACKUP_POLL_SECONDS=2 "$image" daemon >/dev/null
+for _ in $(seq 1 30); do
+  [ "$(sq -At -c "SELECT count(*) FROM backup_agent WHERE config->'destinations' = '[]'::jsonb")" = "1" ] && break; sleep 1
+done
+[ "$(sq -At -c "SELECT count(*) FROM backup_agent WHERE config->'destinations' = '[]'::jsonb")" = "1" ] \
+  || { echo "FAIL: daemon should start with no destination" >&2; docker logs "$daemon2" >&2; exit 1; }
+printf '{"s3_enabled":true,"endpoint":"http://%s:9000","region":"us-east-1","bucket":"%s","prefix":"uibk","path_style":true,"insecure":true,"allow_private":true,"local_enabled":false,"age_recipients":["%s"],"schedule":"0 0 1 1 *","timezone":"UTC","keep_daily":7,"keep_weekly":4,"keep_monthly":6,"stale_hours":36}' \
+  "$minio" "$bucket" "$pub" |
+  docker run --rm -i --network "$net" -e DATABASE_URL="$dburl" -e BACKUP_SETTINGS_KEY="$settings_key" \
+    -e BACKUP_IMPORT_ACCESS_KEY_ID="$ak" -e BACKUP_IMPORT_SECRET_ACCESS_KEY="$sk" "$image" settings-import
+for _ in $(seq 1 30); do
+  [ "$(sq -At -c "SELECT count(*) FROM backup_agent WHERE config->'destinations'->0->>'kind' = 's3'")" = "1" ] && break; sleep 1
+done
+[ "$(sq -At -c "SELECT count(*) FROM backup_agent WHERE config->'destinations'->0->>'kind' = 's3'")" = "1" ] \
+  || { echo "FAIL: service did not apply the saved settings" >&2; docker logs "$daemon2" >&2; exit 1; }
+if [ "$(sq -At -c "SELECT position(convert_to('$sk','UTF8') in credentials_enc) FROM backup_settings")" != "0" ]; then
+  echo "FAIL: the S3 secret is stored in clear text" >&2; exit 1; fi
+sq -c "INSERT INTO backup_requests (kind) VALUES ('test_s3')" >/dev/null
+for _ in $(seq 1 60); do
+  st="$(sq -At -c "SELECT status FROM backup_requests ORDER BY id DESC LIMIT 1")"; [ "$st" = "done" ] || [ "$st" = "failed" ] && break; sleep 1
+done
+[ "$st" = "done" ] || { echo "FAIL: test_s3 with UI settings ended as '$st'" >&2; docker logs "$daemon2" >&2; exit 1; }
+sq -c "INSERT INTO backup_requests (kind) VALUES ('backup')" >/dev/null
+for _ in $(seq 1 90); do
+  st="$(sq -At -c "SELECT status FROM backup_requests ORDER BY id DESC LIMIT 1")"; [ "$st" = "done" ] || [ "$st" = "failed" ] && break; sleep 1
+done
+[ "$st" = "done" ] || { echo "FAIL: backup with UI settings ended as '$st'" >&2; docker logs "$daemon2" >&2; exit 1; }
+[ "$(sq -At -c "SELECT count(*) FROM backup_runs WHERE trigger='manual' AND destination='s3' AND status='success' AND object_key LIKE '%/uibk/%'")" = "1" ] \
+  || { echo "FAIL: UI-configured backup not recorded under the saved prefix" >&2; exit 1; }
+n="$(bk -e BACKUP_S3_PREFIX=uibk "$image" list | grep -c '^s3')"; [ "$n" -ge 1 ] || { echo "FAIL: nothing stored under the UI prefix" >&2; exit 1; }
+if sq -At -c "SELECT config::text FROM backup_agent" | grep -q "$sk\|$ak"; then echo "FAIL: credentials in heartbeat" >&2; exit 1; fi
+if docker logs "$daemon2" 2>&1 | grep -q "$sk\|AGE-SECRET-KEY"; then echo "FAIL: secret in daemon logs" >&2; exit 1; fi
 echo "backup-restore test PASSED"

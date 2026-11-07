@@ -129,6 +129,9 @@ type Server struct {
 	// BackupStaleHours is how old the newest successful backup may be before the
 	// health page warns (config: BACKUP_STALE_HOURS, default 36).
 	BackupStaleHours int
+	// BackupSettingsKey seals the S3 credentials saved from the admin UI
+	// (HKDF of BACKUP_SETTINGS_KEY, else of JWT_SECRET). Nil disables saving them.
+	BackupSettingsKey []byte
 
 	// backupLimit rate-limits the admin "back up now" / "test S3" actions.
 	backupOnce  sync.Once

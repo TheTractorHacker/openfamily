@@ -77,7 +77,9 @@ services:
       DRIVING_RAPID_ACCEL_MPS2: ${DRIVING_RAPID_ACCEL_MPS2:-}
       INSECURE_HTTP: ${INSECURE_HTTP:-false}
       # Admin System page warns when the newest successful backup is older than this.
-      BACKUP_STALE_HOURS: ${BACKUP_STALE_HOURS:-36}
+      BACKUP_STALE_HOURS: ${BACKUP_STALE_HOURS:-}
+      # Key secret for S3 credentials saved from the admin UI (default: derived from JWT_SECRET).
+      BACKUP_SETTINGS_KEY: ${BACKUP_SETTINGS_KEY:-}
       # Trusted-server mode (profile e2ee-server). Empty = the mode does not exist
       # for this server and Private circles keep the strict phase-2 behaviour.
       # Generate once: openssl rand -hex 32  (>= 32 characters; shared with the
@@ -295,13 +297,17 @@ services:
       DATABASE_URL: "${DATABASE_URL:-postgres://${POSTGRES_USER:-openfamily}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is not set - run ./scripts/setup.sh to generate .env}@postgres:5432/${POSTGRES_DB:-openfamily}?sslmode=${DB_SSLMODE:-disable}}"
       BACKUP_WORK_DIR: /work
       TZ: ${BACKUP_TZ:-UTC}
-      BACKUP_TZ: ${BACKUP_TZ:-UTC}
-      BACKUP_SCHEDULE: ${BACKUP_SCHEDULE:-15 3 * * *}
+      BACKUP_TZ: ${BACKUP_TZ:-}
+      BACKUP_SCHEDULE: ${BACKUP_SCHEDULE:-}
+      # Settings left EMPTY here can be set in the admin UI (Backups card); a value set
+      # here pins the setting (read-only in the UI). Built-in defaults apply otherwise.
+      BACKUP_SETTINGS_KEY: ${BACKUP_SETTINGS_KEY:-${JWT_SECRET}}
+      BACKUP_POLL_SECONDS: ${BACKUP_POLL_SECONDS:-}
       BACKUP_RUN_ON_START: ${BACKUP_RUN_ON_START:-false}
       BACKUP_LOCAL_DIR: ${BACKUP_LOCAL_DIR:-}
-      BACKUP_KEEP_DAILY: ${BACKUP_KEEP_DAILY:-7}
-      BACKUP_KEEP_WEEKLY: ${BACKUP_KEEP_WEEKLY:-4}
-      BACKUP_KEEP_MONTHLY: ${BACKUP_KEEP_MONTHLY:-6}
+      BACKUP_KEEP_DAILY: ${BACKUP_KEEP_DAILY:-}
+      BACKUP_KEEP_WEEKLY: ${BACKUP_KEEP_WEEKLY:-}
+      BACKUP_KEEP_MONTHLY: ${BACKUP_KEEP_MONTHLY:-}
       BACKUP_RETENTION_DRY_RUN: ${BACKUP_RETENTION_DRY_RUN:-false}
       BACKUP_AGE_RECIPIENT: ${BACKUP_AGE_RECIPIENT:-}
       BACKUP_AGE_PASSPHRASE_FILE: ${BACKUP_AGE_PASSPHRASE_FILE:-}
@@ -309,10 +315,11 @@ services:
       BACKUP_S3_ENDPOINT: ${BACKUP_S3_ENDPOINT:-}
       BACKUP_S3_REGION: ${BACKUP_S3_REGION:-}
       BACKUP_S3_BUCKET: ${BACKUP_S3_BUCKET:-}
-      BACKUP_S3_PREFIX: ${BACKUP_S3_PREFIX:-openfamily}
-      BACKUP_S3_PATH_STYLE: ${BACKUP_S3_PATH_STYLE:-false}
+      BACKUP_S3_PREFIX: ${BACKUP_S3_PREFIX:-}
+      BACKUP_S3_PATH_STYLE: ${BACKUP_S3_PATH_STYLE:-}
       BACKUP_S3_STORAGE_CLASS: ${BACKUP_S3_STORAGE_CLASS:-}
-      BACKUP_S3_INSECURE: ${BACKUP_S3_INSECURE:-false}
+      BACKUP_S3_INSECURE: ${BACKUP_S3_INSECURE:-}
+      BACKUP_S3_ALLOW_PRIVATE: ${BACKUP_S3_ALLOW_PRIVATE:-}
       BACKUP_S3_ACCESS_KEY_ID: ${BACKUP_S3_ACCESS_KEY_ID:-}
       BACKUP_S3_SECRET_ACCESS_KEY: ${BACKUP_S3_SECRET_ACCESS_KEY:-}
       BACKUP_S3_ACCESS_KEY_ID_FILE: ${BACKUP_S3_ACCESS_KEY_ID_FILE:-}

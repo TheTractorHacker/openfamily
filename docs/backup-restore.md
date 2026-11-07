@@ -90,7 +90,56 @@ Properties:
   secrets, scrubbed from every error, log line, run record and API response,
   and are never available to the API container.
 
-### Quick start
+### Quick start 1: in the admin panel (recommended)
+
+1. Start the service once (it needs no S3 settings to start):
+   `docker compose --profile backup up -d --build backup`. Add `backup` to
+   `COMPOSE_PROFILES` in `.env` so it survives `docker compose up -d`.
+2. Open **System health > Backups > Settings**.
+3. **Destinations:** switch on *S3-compatible storage* and fill endpoint
+   (empty for AWS), region, bucket, folder, and the access key id and secret.
+   The secret is write-only: after saving, the page only shows *Set ...ABCD* with
+   *Replace* and *Clear*. Switch on *Local disk* as well if you want copies on this machine.
+4. **Encryption:** press *Generate key pair*. The pair is created in your
+   browser; the page shows the private key once with *Copy* and *Download*, you
+   confirm you stored it, and only the public key is filled in. The server never
+   sees or stores the private key. **If you lose it, no backup can be restored.**
+5. **Schedule** (daily time or cron, plus time zone) and **Retention**, then
+   *Test connection* (writes, reads and deletes a small object using the values
+   in the form, saved or not) and *Save settings*. The backup service applies
+   saved settings within a few seconds without a restart.
+6. Press *Back up now*, then do a restore drill (below).
+
+How settings are combined: **environment variables win**. A setting present in
+the `backup` service's environment (`.env`) is *pinned*: the form shows it
+read-only with a "Set by environment" badge. Everything the environment leaves
+empty comes from the UI, then from built-in defaults. Every field shows whether
+its value is from the environment, saved in the UI, or the default.
+
+**Where the secret lives, honestly.** The S3 key id and secret are stored in the
+`backup_settings` table, encrypted with AES-256-GCM under a key derived (HKDF-SHA256,
+label `openfamily/backup-settings/v1`) from `BACKUP_SETTINGS_KEY`, or from
+`JWT_SECRET` if you do not set it. A database dump or a stolen backup of the
+database alone therefore does not reveal the key. But the API and the backup
+service both need that secret to read it, so **anyone who has both the database
+and the server environment can decrypt it**, exactly as they could read a
+`BACKUP_S3_SECRET_ACCESS_KEY` from `.env`. Set a dedicated `BACKUP_SETTINGS_KEY`
+(`openssl rand -hex 32`) if you want it independent of `JWT_SECRET`; changing
+`JWT_SECRET` or this value later makes saved credentials unreadable (the UI says
+so; enter them again). Use a bucket key scoped to the backup folder.
+
+**Disaster recovery needs the key outside the database.** Credentials saved in
+the UI live in the database you would be restoring. Keep a copy of the S3 key in
+your password manager (or in `.env` as `BACKUP_S3_*`) so `restore.sh --from-s3`
+works on a fresh machine.
+
+**Network policy.** Endpoints must be https unless *Allow plain HTTP* is on.
+Link-local and cloud-metadata addresses (169.254.0.0/16, fd00:ec2::254, ...) are
+always refused, checked again on every connection after DNS resolution.
+Loopback and private (LAN) addresses are refused unless *Allow private network
+address* is on, because a MinIO on your LAN is a legitimate target.
+
+### Quick start 2: with environment variables
 
 1. **Create the key pair on your own computer** (not on the server):
 
@@ -134,6 +183,10 @@ Properties:
 
 ### Configuration reference
 
+Every variable is optional if you use the admin panel. A variable you set here
+overrides, and locks, the matching field in the UI. Leave it empty to manage it
+in the UI.
+
 | Variable | Default | Meaning |
 |---|---|---|
 | `BACKUP_SCHEDULE` | `15 3 * * *` | 5-field cron (`min hour dom month dow`; `*`, lists, ranges, `*/n`). |
@@ -150,6 +203,8 @@ Properties:
 | `BACKUP_LOCAL_DIR` / `BACKUP_LOCAL_PATH` | | In-container dir (use `/backups`) / host dir (default `./backups`). The container runs as `BACKUP_UID:BACKUP_GID` (default 1000:1000); it must be able to write the host dir. |
 | `BACKUP_KEEP_DAILY` / `_WEEKLY` / `_MONTHLY` | `7` / `4` / `6` | Retention. `0` disables a tier; all three `0` keeps everything. |
 | `BACKUP_RETENTION_DRY_RUN` | `false` | Log what would be deleted, delete nothing. |
+| `BACKUP_S3_ALLOW_PRIVATE` | `true` for env endpoints | Allow loopback/LAN endpoints. Link-local/metadata addresses are always refused. |
+| `BACKUP_SETTINGS_KEY` | `JWT_SECRET` | Secret the UI-saved S3 credentials are encrypted under (HKDF). Same value must reach the API and the backup service (compose does this). |
 | `BACKUP_STALE_HOURS` | `36` | The System page raises a warning when the newest *successful* backup is older. |
 | `BACKUP_WORK_SIZE` | `4g` | Size of the RAM-backed staging area for the encrypted dump. Raise it above your compressed dump size. |
 
@@ -337,6 +392,24 @@ Assumptions and what was checked, with the residual risks stated plainly:
   `BACKUP_S3_INSECURE` is explicit and shown in no UI. Custom CA bundles are
   not supported: a MinIO with a private CA should be reached over a trusted
   network with the insecure flag, or fronted by a publicly trusted certificate.
+- *UI-saved credentials.* Sealed with AES-256-GCM (random nonce, AAD bound to the
+  column) under an HKDF-derived key; never returned by any endpoint (GET reports
+  presence and the last four characters of the key id), never in audit entries
+  (only changed field names, e.g. `credentials(replaced)`), never in error text, the
+  heartbeat or logs. Residual risks: (1) an attacker with database AND server
+  environment reads them; (2) the transient "test unsaved values" request stores
+  the sealed form in `backup_requests.payload_enc` until the service finishes it
+  (then it is nulled; a crashed run is nulled at the next start); (3) the browser
+  holds the typed secret in memory until saved, and a malicious browser extension
+  could read it; (4) any platform admin can *replace* the destination, so a
+  compromised admin account can redirect future backups to a bucket it controls
+  (they stay encrypted to your public key, but it can also swap the public key:
+  review `admin.backup.settings` audit entries and keep admin MFA on).
+  Environment-pinned fields cannot be changed this way.
+- *SSRF.* The S3 endpoint is attacker-controllable by a platform admin, so the
+  service refuses link-local/metadata addresses always, and private addresses
+  unless allowed, at save time and at dial time (defeating DNS rebinding). The
+  connection test only writes and deletes one object under the configured prefix.
 - *Admin API abuse.* The buttons only enqueue a fixed action, cannot change
   destinations or keys, and are rate limited, serialized and audited.
 - *Clock.* S3 request signing needs the host clock within about 15 minutes.

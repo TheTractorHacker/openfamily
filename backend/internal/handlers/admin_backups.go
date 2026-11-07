@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -32,9 +33,15 @@ func (s *Server) backupLimiter() *sms.Limiter {
 	return s.backupLimit
 }
 
-func (s *Server) backupStaleAfter() time.Duration {
+// backupStaleAfter: BACKUP_STALE_HOURS (environment) wins, then the value saved
+// in the admin UI, then 36 hours.
+func (s *Server) backupStaleAfter(ctx context.Context) time.Duration {
 	if s.BackupStaleHours > 0 {
 		return time.Duration(s.BackupStaleHours) * time.Hour
+	}
+	var h *int
+	if err := s.Pool.QueryRow(ctx, `SELECT (settings->>'stale_hours')::int FROM backup_settings WHERE id = 1`).Scan(&h); err == nil && h != nil && *h > 0 {
+		return time.Duration(*h) * time.Hour
 	}
 	return 36 * time.Hour
 }
@@ -100,7 +107,7 @@ func (s *Server) AdminGetBackups(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	out := adminBackupsOut{StaleAfterHours: int(s.backupStaleAfter() / time.Hour), Recent: []backupRunOut{}, Failing: []backupRunOut{}}
+	out := adminBackupsOut{StaleAfterHours: int(s.backupStaleAfter(r.Context()) / time.Hour), Recent: []backupRunOut{}, Failing: []backupRunOut{}}
 
 	var a backupAgentOut
 	err := s.Pool.QueryRow(ctx, `SELECT heartbeat_at, started_at, version, next_run_at, config FROM backup_agent WHERE id = 1`).
@@ -180,6 +187,8 @@ func (s *Server) AdminBackupTestS3(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) enqueueBackupRequest(w http.ResponseWriter, r *http.Request, kind string, perHour int, action, detail string) {
+	var payload []byte
+	var hasPayload bool
 	claims := middleware.ClaimsFromContext(r.Context())
 	if claims == nil {
 		writeError(w, http.StatusUnauthorized, "unauthenticated")
@@ -203,6 +212,16 @@ func (s *Server) enqueueBackupRequest(w http.ResponseWriter, r *http.Request, ki
 		return
 	}
 	if kind == "test_s3" {
+		// Optional body: the unsaved form values to test (sealed, never logged).
+		if r.ContentLength != 0 {
+			p, ok := s.sealTestPayload(w, r)
+			if !ok {
+				return
+			}
+			payload, hasPayload = p, true
+		}
+	}
+	if kind == "test_s3" && !hasPayload {
 		var c struct {
 			Destinations []struct {
 				Kind string `json:"kind"`
@@ -220,13 +239,13 @@ func (s *Server) enqueueBackupRequest(w http.ResponseWriter, r *http.Request, ki
 		}
 	}
 	// Expire requests a dead service left open, then allow only one at a time.
-	_, _ = s.Pool.Exec(ctx, `UPDATE backup_requests SET status = 'failed', finished_at = now(), message = 'Timed out waiting for the backup service.'
+	_, _ = s.Pool.Exec(ctx, `UPDATE backup_requests SET status = 'failed', finished_at = now(), payload_enc = NULL, message = 'Timed out waiting for the backup service.'
 		WHERE status IN ('pending','running') AND requested_at < now() - $1::interval`, fmt.Sprintf("%d seconds", int(backupRequestStale.Seconds())))
 	var id int64
 	err = s.Pool.QueryRow(ctx, `
-		INSERT INTO backup_requests (kind, requested_by)
-		SELECT $1, $2 WHERE NOT EXISTS (SELECT 1 FROM backup_requests WHERE status IN ('pending','running'))
-		RETURNING id`, kind, claims.UserID).Scan(&id)
+		INSERT INTO backup_requests (kind, requested_by, payload_enc)
+		SELECT $1, $2, $3 WHERE NOT EXISTS (SELECT 1 FROM backup_requests WHERE status IN ('pending','running'))
+		RETURNING id`, kind, claims.UserID, payload).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, http.StatusConflict, "another backup request is still in progress")
 		return

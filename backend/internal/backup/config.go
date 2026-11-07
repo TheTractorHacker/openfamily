@@ -9,11 +9,14 @@ package backup
 import (
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/TheTractorHacker/openfamily/backend/internal/backupsettings"
 )
 
 // S3Config describes one S3-compatible destination. Secrets live only here and
@@ -28,6 +31,7 @@ type S3Config struct {
 	PathStyle    bool
 	StorageClass string
 	Insecure     bool // allow plain HTTP (local MinIO only)
+	AllowPrivate bool // allow loopback/RFC1918 endpoints (link-local is always refused)
 }
 
 // Retention is the keep-N-daily/M-weekly/K-monthly policy. All zero keeps
@@ -51,6 +55,11 @@ type Config struct {
 	WorkDir          string
 	RunOnStart       bool
 	Version          string
+
+	// EnvPublic / EnvSecrets describe which settings the real environment pins
+	// (values only for non-secret ones). Filled by ResolveConfig.
+	EnvPublic  map[string]string
+	EnvSecrets []string
 }
 
 // Summary is the non-secret view shown in the admin panel.
@@ -60,6 +69,15 @@ type Summary struct {
 	Schedule     string               `json:"schedule"`
 	Timezone     string               `json:"timezone"`
 	Retention    RetentionSummary     `json:"retention"`
+	// Env lists the non-secret settings pinned by the service environment
+	// (read-only in the UI); EnvSecrets only names pinned secrets, never values.
+	Env        map[string]string `json:"env"`
+	EnvSecrets []string          `json:"env_secrets"`
+	// SettingsError is set when the saved UI settings could not be applied (the
+	// previous configuration stays active). Scrubbed of secrets.
+	SettingsError string `json:"settings_error,omitempty"`
+	// SettingsUpdatedAt is the UI settings version this service is running.
+	SettingsUpdatedAt *time.Time `json:"settings_updated_at,omitempty"`
 }
 
 type DestinationSummary struct {
@@ -190,10 +208,12 @@ func LoadConfig(getenv func(string) string) (*Config, error) {
 			Endpoint:     strings.TrimSpace(getenv("BACKUP_S3_ENDPOINT")),
 			Region:       strings.TrimSpace(getenv("BACKUP_S3_REGION")),
 			Bucket:       bucket,
-			Prefix:       strings.Trim(strings.TrimSpace(getenv("BACKUP_S3_PREFIX")), "/"),
+			Prefix:       strings.Trim(strings.TrimSpace(prefixOrDefault(getenv("BACKUP_S3_PREFIX"))), "/"),
 			PathStyle:    envBool(getenv, "BACKUP_S3_PATH_STYLE", false),
 			StorageClass: strings.TrimSpace(getenv("BACKUP_S3_STORAGE_CLASS")),
 			Insecure:     envBool(getenv, "BACKUP_S3_INSECURE", false),
+			// Operator-supplied (environment) endpoints may be on the LAN; the UI sets this explicitly.
+			AllowPrivate: envBool(getenv, "BACKUP_S3_ALLOW_PRIVATE", true),
 		}
 		if s.AccessKeyID, e = secretEnv(getenv, "BACKUP_S3_ACCESS_KEY_ID"); e != nil {
 			return nil, e
@@ -204,8 +224,16 @@ func LoadConfig(getenv func(string) string) (*Config, error) {
 		if s.AccessKeyID == "" || s.SecretKey == "" {
 			return nil, errors.New("BACKUP_S3_ACCESS_KEY_ID and BACKUP_S3_SECRET_ACCESS_KEY (or their _FILE variants) are required when BACKUP_S3_BUCKET is set")
 		}
-		if _, _, err := s.hostAndTLS(); err != nil {
+		host, _, err := s.hostAndTLS()
+		if err != nil {
 			return nil, err
+		}
+		h := host
+		if hh, _, e := net.SplitHostPort(host); e == nil {
+			h = hh
+		}
+		if err := backupsettings.CheckHost(strings.Trim(h, "[]"), s.AllowPrivate); err != nil {
+			return nil, fmt.Errorf("BACKUP_S3_ENDPOINT: %w", err)
 		}
 		if !c.encrypted() && !c.AllowUnencrypted {
 			return nil, errors.New("refusing to upload an unencrypted database dump to S3: set BACKUP_AGE_RECIPIENT (recommended) or BACKUP_AGE_PASSPHRASE_FILE, or BACKUP_ALLOW_UNENCRYPTED=true")
@@ -282,6 +310,13 @@ func (c *Config) Summary() Summary {
 	}
 	_, mode, _ := newEncryptor(c)
 	s.Encryption = mode
+	s.Env, s.EnvSecrets = c.EnvPublic, c.EnvSecrets
+	if s.Env == nil {
+		s.Env = map[string]string{}
+	}
+	if s.EnvSecrets == nil {
+		s.EnvSecrets = []string{}
+	}
 	s.Retention = RetentionSummary{Daily: c.Retention.Daily, Weekly: c.Retention.Weekly, Monthly: c.Retention.Monthly, DryRun: c.Retention.DryRun}
 	return s
 }
@@ -304,4 +339,11 @@ func dbPassword(u string) string {
 		return pw
 	}
 	return ""
+}
+
+func prefixOrDefault(p string) string {
+	if strings.TrimSpace(p) == "" {
+		return "openfamily"
+	}
+	return p
 }

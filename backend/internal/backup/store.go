@@ -4,15 +4,19 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/tls"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/TheTractorHacker/openfamily/backend/internal/backupsettings"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 )
@@ -184,7 +188,14 @@ func NewS3Store(cfg *S3Config) (*S3Store, error) {
 	if cfg.PathStyle {
 		lookup = minio.BucketLookupPath
 	}
+	// Every connection is re-checked after DNS resolution: link-local/metadata
+	// addresses are always refused, private ones unless allowed.
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.DialContext = (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second,
+		Control: backupsettings.GuardedDialControl(cfg.AllowPrivate)}).DialContext
+	tr.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12}
 	cl, err := minio.New(host, &minio.Options{
+		Transport:    tr,
 		Creds:        credentials.NewStaticV4(cfg.AccessKeyID, cfg.SecretKey, ""),
 		Secure:       secure,
 		Region:       cfg.Region,

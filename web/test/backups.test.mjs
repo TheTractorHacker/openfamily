@@ -37,3 +37,34 @@ test('warnings expose the command to run', () => {
   assert.equal(splitWarning('Run ./scripts/backup.sh now').command, './scripts/backup.sh')
   assert.equal(splitWarning('The last successful backup is more than 36 hours old.').command, undefined)
 })
+
+import { cronToDaily, dailyToCron, validateForm, parseRecipients } from '../src/lib/backups.ts'
+
+test('daily time <-> cron', () => {
+  assert.equal(cronToDaily('15 3 * * *'), '03:15')
+  assert.equal(cronToDaily('0 */2 * * *'), null)
+  assert.equal(cronToDaily('61 3 * * *'), null)
+  assert.equal(dailyToCron('03:15'), '15 3 * * *')
+  assert.equal(dailyToCron('25:00'), null)
+})
+
+const base = {
+  s3_enabled: true, endpoint: '', region: '', bucket: 'my-bucket', prefix: 'openfamily', path_style: false, storage_class: '',
+  insecure: false, allow_private: false, local_enabled: false, age_recipients: [], schedule: '15 3 * * *', timezone: 'UTC',
+  keep_daily: 7, keep_weekly: 4, keep_monthly: 6, stale_hours: 36,
+}
+
+test('client validation mirrors the server rules', () => {
+  assert.deepEqual(validateForm(base, new Set()), {})
+  assert.ok(validateForm({ ...base, bucket: 'X' }, new Set()).bucket)
+  assert.ok(validateForm({ ...base, endpoint: 'http://minio:9000' }, new Set()).endpoint)
+  assert.deepEqual(validateForm({ ...base, endpoint: 'http://minio:9000', insecure: true }, new Set()), {})
+  assert.ok(validateForm({ ...base, endpoint: 'https://u:p@host' }, new Set()).endpoint)
+  assert.match(validateForm({ ...base, age_recipients: ['AGE-SECRET-KEY-1ABC'] }, new Set()).age_recipients, /PRIVATE/)
+  assert.ok(validateForm({ ...base, age_recipients: ['nope'] }, new Set()).age_recipients)
+  assert.ok(validateForm({ ...base, schedule: 'daily' }, new Set()).schedule)
+  assert.ok(validateForm({ ...base, keep_daily: -1 }, new Set()).keep_daily)
+  // Pinned fields are not validated client-side (they cannot be edited).
+  assert.deepEqual(validateForm({ ...base, bucket: 'X' }, new Set(['bucket'])), {})
+  assert.deepEqual(parseRecipients('a, b\nc'), ['a', 'b', 'c'])
+})

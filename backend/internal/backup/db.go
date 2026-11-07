@@ -50,14 +50,15 @@ func (d *DBRecorder) Heartbeat(ctx context.Context, version string, next *time.T
 
 // Request is a queued admin action.
 type Request struct {
-	ID   int64
-	Kind string
+	ID      int64
+	Kind    string
+	Payload []byte // encrypted; test_s3 with unsaved form values
 }
 
 // FailStale marks requests left running by a previous process as failed.
 func (d *DBRecorder) FailStale(ctx context.Context) error {
 	_, err := d.Pool.Exec(ctx, `
-		UPDATE backup_requests SET status = 'failed', finished_at = now(), message = 'The backup service restarted before finishing this request.'
+		UPDATE backup_requests SET status = 'failed', finished_at = now(), payload_enc = NULL, message = 'The backup service restarted before finishing this request.'
 		WHERE status = 'running'`)
 	return err
 }
@@ -68,7 +69,7 @@ func (d *DBRecorder) Claim(ctx context.Context) (*Request, error) {
 	err := d.Pool.QueryRow(ctx, `
 		UPDATE backup_requests SET status = 'running', started_at = now()
 		WHERE id = (SELECT id FROM backup_requests WHERE status = 'pending' ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED)
-		RETURNING id, kind`).Scan(&q.ID, &q.Kind)
+		RETURNING id, kind, payload_enc`).Scan(&q.ID, &q.Kind, &q.Payload)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -83,6 +84,6 @@ func (d *DBRecorder) Finish(ctx context.Context, id int64, ok bool, msg string) 
 	if !ok {
 		st = "failed"
 	}
-	_, err := d.Pool.Exec(ctx, `UPDATE backup_requests SET status = $2, finished_at = now(), message = $3 WHERE id = $1`, id, st, msg)
+	_, err := d.Pool.Exec(ctx, `UPDATE backup_requests SET status = $2, finished_at = now(), message = $3, payload_enc = NULL WHERE id = $1`, id, st, msg)
 	return err
 }

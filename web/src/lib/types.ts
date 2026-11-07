@@ -520,3 +520,52 @@ export interface AdminBackups {
   recent: BackupRun[]
   request: BackupRequest | null
 }
+
+/** Non-secret, UI-editable backup settings (GET/PUT /api/admin/backups/settings). */
+export interface BackupSettingsValues {
+  s3_enabled: boolean
+  endpoint: string
+  region: string
+  bucket: string
+  prefix: string
+  path_style: boolean
+  storage_class: string
+  insecure: boolean
+  allow_private: boolean
+  local_enabled: boolean
+  age_recipients: string[]
+  schedule: string
+  timezone: string
+  keep_daily: number
+  keep_weekly: number
+  keep_monthly: number
+  stale_hours: number
+}
+
+export interface BackupSettingsResponse {
+  values: BackupSettingsValues
+  /** Field name -> where the effective value comes from. */
+  sources: Record<string, 'env' | 'ui' | 'default'>
+  /** Fields set by the server environment: read-only in the UI. */
+  pinned: string[]
+  /** Credentials are write-only: only presence and a hint are ever returned. */
+  credentials: {
+    access_key_set: boolean
+    access_key_hint: string
+    secret_set: boolean
+    source: 'env' | 'ui' | 'none'
+    pinned: boolean
+    unreadable: boolean
+  }
+  updated_at: string | null
+  agent_reporting: boolean
+  settings_error?: string
+  key_configured: boolean
+}
+
+export interface BackupSettingsSubmit {
+  settings: BackupSettingsValues
+  access_key_id?: string
+  secret_access_key?: string
+  clear_credentials?: boolean
+}

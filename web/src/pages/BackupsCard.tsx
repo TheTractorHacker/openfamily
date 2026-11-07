@@ -17,6 +17,7 @@ import {
 import { Badge, Button, Card, Spinner } from '../components/primitives'
 import { Alert, CopyCommand, KeyValueList, Section } from '../components/patterns'
 import { formatBytes, formatRelativeTime } from '../lib/format'
+import { BackupSettings } from './BackupSettings'
 import './BackupsCard.css'
 
 const SETUP_COMMAND = 'docker compose --profile backup up -d backup'
@@ -39,6 +40,7 @@ function when(iso: string | null | undefined) {
 export function BackupsCard({ onChanged }: { onChanged?: () => void }) {
   const q = useAsync(getAdminBackups, [])
   const [busy, setBusy] = React.useState<'backup' | 'test_s3' | null>(null)
+  const [editing, setEditing] = React.useState(false)
   const [actionError, setActionError] = React.useState<string | null>(null)
   const d = q.data
   const inflight = busy !== null || (d ? requestInFlight(d) : false)
@@ -78,7 +80,10 @@ export function BackupsCard({ onChanged }: { onChanged?: () => void }) {
 
   const actions = (
     <>
-      {hasS3 && (
+      <Button variant={editing ? 'primary' : 'secondary'} size="sm" aria-expanded={editing} onClick={() => setEditing(!editing)}>
+        {editing ? 'Hide settings' : 'Settings'}
+      </Button>
+      {hasS3 && !editing && (
         <Button
           variant="secondary"
           size="sm"
@@ -104,7 +109,7 @@ export function BackupsCard({ onChanged }: { onChanged?: () => void }) {
     <Section
       title="Backups"
       description="Scheduled, encrypted database backups to local disk and/or an S3-compatible bucket."
-      actions={agent ? actions : undefined}
+      actions={d ? actions : undefined}
     >
       {q.loading && !d ? (
         <div className="wb-page-loading">
@@ -161,6 +166,8 @@ export function BackupsCard({ onChanged }: { onChanged?: () => void }) {
               {f.error ?? 'No error was recorded.'} <span className="wb-kv-note">{formatRelativeTime(f.at)}</span>
             </Alert>
           ))}
+
+          {editing && <BackupSettings onChanged={q.refetch} />}
 
           <Card>
             <KeyValueList

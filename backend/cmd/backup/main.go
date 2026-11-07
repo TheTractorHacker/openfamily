@@ -15,6 +15,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -27,6 +28,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/TheTractorHacker/openfamily/backend/internal/backup"
+	"github.com/TheTractorHacker/openfamily/backend/internal/backupsettings"
 
 	_ "time/tzdata"
 )
@@ -61,32 +63,54 @@ func main() {
 			return os.Getenv(k)
 		}
 	}
-	cfg, err := backup.LoadConfig(getenv)
+	key := backup.SettingsKey(os.Getenv)
+
+	// Settings saved in the admin UI live in the database; the environment
+	// still wins for anything it sets. `fetch` (disaster recovery) must work
+	// without a database, so it uses the environment only.
+	var pool *pgxpool.Pool
+	var stored *backupsettings.Stored
+	needDB := cmd == "daemon" || cmd == "run"
+	if cmd != "fetch" && os.Getenv("DATABASE_URL") != "" {
+		p, err := pgxpool.New(ctx, os.Getenv("DATABASE_URL"))
+		if err == nil {
+			c, cancel := context.WithTimeout(ctx, 10*time.Second)
+			stored, err = backupsettings.Load(c, p, key)
+			cancel()
+			if err == nil {
+				pool = p
+			} else {
+				p.Close()
+			}
+		}
+		if pool == nil && needDB {
+			fatal(fmt.Errorf("cannot reach the database"))
+		}
+	}
+	if pool != nil {
+		defer pool.Close()
+	}
+	if stored != nil && stored.HasCreds && stored.CredsErr != nil {
+		fmt.Fprintln(os.Stderr, "warning:", stored.CredsErr)
+	}
+	cfg, err := backup.ResolveConfig(getenv, stored)
+	if err != nil && stored != nil && stored.Exists && cmd == "daemon" {
+		// Bad saved settings must not crash-loop the service: start on the
+		// environment alone; the daemon reports the problem to the admin panel.
+		fmt.Fprintln(os.Stderr, "warning: saved settings not applied:", backup.Scrub(err.Error(), nil))
+		cfg, err = backup.ResolveConfig(getenv, nil)
+	}
 	if err != nil {
 		fatal(err)
 	}
-	var stores []backup.Store
-	if cfg.LocalDir != "" {
-		stores = append(stores, &backup.DirStore{Dir: cfg.LocalDir})
-	}
-	if cfg.S3 != nil {
-		s, err := backup.NewS3Store(cfg.S3)
-		if err != nil {
-			fatal(err)
-		}
-		stores = append(stores, s)
+	stores, err := backup.BuildStores(cfg)
+	if err != nil {
+		fatal(err)
 	}
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	runner := &backup.Runner{Cfg: cfg, Stores: stores, Log: log, DumpCmd: os.Getenv("BACKUP_PG_DUMP")}
-
-	needDB := cmd == "daemon" || cmd == "run"
 	var rec *backup.DBRecorder
 	if needDB {
-		pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
-		if err != nil {
-			fatal(fmt.Errorf("database: %s", backup.Scrub(err.Error(), cfg.DatabaseSecrets())))
-		}
-		defer pool.Close()
 		rec = &backup.DBRecorder{Pool: pool}
 		runner.Rec = rec
 	}
@@ -94,7 +118,7 @@ func main() {
 	switch cmd {
 	case "daemon":
 		cr, _ := backup.ParseCron(cfg.Schedule)
-		a := &backup.Agent{Runner: runner, DB: rec, Cron: cr}
+		a := &backup.Agent{Runner: runner, DB: rec, Cron: cr, Getenv: os.Getenv, Key: key}
 		if n, err := strconv.Atoi(os.Getenv("BACKUP_POLL_SECONDS")); err == nil && n > 0 && n <= 300 {
 			a.Poll = time.Duration(n) * time.Second
 		}
@@ -132,6 +156,30 @@ func main() {
 			return
 		}
 		fatal(fmt.Errorf("no S3 destination configured"))
+	case "settings-import":
+		// Headless equivalent of the admin UI form: JSON settings on stdin,
+		// credentials from BACKUP_IMPORT_ACCESS_KEY_ID / BACKUP_IMPORT_SECRET_ACCESS_KEY.
+		if pool == nil || key == nil {
+			fatal(fmt.Errorf("needs DATABASE_URL and BACKUP_SETTINGS_KEY"))
+		}
+		st := backupsettings.Defaults()
+		if err := json.NewDecoder(os.Stdin).Decode(&st); err != nil {
+			fatal(fmt.Errorf("settings JSON: %v", err))
+		}
+		if errs := backupsettings.ValidateSettings(&st); len(errs) > 0 {
+			fatal(fmt.Errorf("invalid settings: %v", errs))
+		}
+		var cr *backupsettings.Credentials
+		if id := os.Getenv("BACKUP_IMPORT_ACCESS_KEY_ID"); id != "" {
+			cr = &backupsettings.Credentials{AccessKeyID: id, SecretKey: os.Getenv("BACKUP_IMPORT_SECRET_ACCESS_KEY")}
+			if errs := backupsettings.ValidateCredentials(*cr); len(errs) > 0 {
+				fatal(fmt.Errorf("invalid credentials: %v", errs))
+			}
+		}
+		if err := backupsettings.Save(ctx, pool, key, st, cr, false, ""); err != nil {
+			fatal(err)
+		}
+		fmt.Println("settings saved")
 	case "list":
 		for _, st := range stores {
 			es, _, err := backup.ListBackups(ctx, st)

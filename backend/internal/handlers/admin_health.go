@@ -84,7 +84,7 @@ func (s *Server) AdminHealth(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to read backups")
 		return
 	}
-	out.Backup = backupHealth(last, size, time.Now(), s.backupStaleAfter())
+	out.Backup = backupHealth(last, size, time.Now(), s.backupStaleAfter(ctx))
 	if dest != nil {
 		out.Backup.Destination, out.Backup.Encrypted = *dest, enc
 	}

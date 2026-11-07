@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/TheTractorHacker/openfamily/backend/internal/auth"
+	"github.com/TheTractorHacker/openfamily/backend/internal/backupsettings"
 	"github.com/TheTractorHacker/openfamily/backend/internal/config"
 	"github.com/TheTractorHacker/openfamily/backend/internal/db"
 	"github.com/TheTractorHacker/openfamily/backend/internal/geocode"
@@ -144,6 +145,15 @@ func main() {
 	srv.BuildVersion = config.BuildVersion()
 	if v, err := strconv.Atoi(os.Getenv("BACKUP_STALE_HOURS")); err == nil && v > 0 && v <= 24*365 {
 		srv.BackupStaleHours = v
+	}
+	{
+		secret := os.Getenv("BACKUP_SETTINGS_KEY")
+		if secret == "" {
+			secret = cfg.JWTSecret
+		}
+		if k, err := backupsettings.DeriveKey(secret); err == nil {
+			srv.BackupSettingsKey = k
+		}
 	}
 	// A managed server (one with a configured platform admin) closes open
 	// registration: new users must present an invite code.
@@ -566,6 +576,8 @@ func main() {
 		r.Get("/api/admin/backups", srv.AdminGetBackups)
 		r.Post("/api/admin/backups/run", srv.AdminBackupRun)
 		r.Post("/api/admin/backups/test-s3", srv.AdminBackupTestS3)
+		r.Get("/api/admin/backups/settings", srv.AdminGetBackupSettings)
+		r.Put("/api/admin/backups/settings", srv.AdminPutBackupSettings)
 	})
 
 	// Admin web panel (embedded static SPA) at /admin/*, served public. The page

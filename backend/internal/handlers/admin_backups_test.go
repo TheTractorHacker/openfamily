@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/TheTractorHacker/openfamily/backend/internal/backupsettings"
 	"github.com/TheTractorHacker/openfamily/backend/internal/middleware"
 )
 
@@ -23,7 +24,12 @@ func backupsEnv(t *testing.T) *circleEnv {
 		r.Post("/api/admin/backups/run", e.srv.AdminBackupRun)
 		r.Post("/api/admin/backups/test-s3", e.srv.AdminBackupTestS3)
 		r.Get("/api/admin/health", e.srv.AdminHealth)
+		r.Get("/api/admin/backups/settings", e.srv.AdminGetBackupSettings)
+		r.Put("/api/admin/backups/settings", e.srv.AdminPutBackupSettings)
 	})
+	if k, err := backupsettings.DeriveKey("test-settings-secret-0123456789"); err == nil {
+		e.srv.BackupSettingsKey = k
+	}
 	ctx := context.Background()
 	if _, err := e.pool.Exec(ctx, `UPDATE users SET platform_admin = true WHERE id = $1`, e.ids["A"]); err != nil {
 		t.Fatal(err)
@@ -32,6 +38,8 @@ func backupsEnv(t *testing.T) *circleEnv {
 		_, _ = e.pool.Exec(ctx, `DELETE FROM backup_requests`)
 		_, _ = e.pool.Exec(ctx, `DELETE FROM backup_agent`)
 		_, _ = e.pool.Exec(ctx, `DELETE FROM backup_runs`)
+		_, _ = e.pool.Exec(ctx, `DELETE FROM backup_settings`)
+		_, _ = e.pool.Exec(ctx, `DELETE FROM audit_log WHERE action LIKE 'admin.backup.%'`)
 	}
 	clean()
 	t.Cleanup(clean)

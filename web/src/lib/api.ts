@@ -29,6 +29,8 @@ import type {
   AdminCircle,
   AdminCircleMember,
   AdminBackups,
+  BackupSettingsResponse,
+  BackupSettingsSubmit,
   AdminHealth,
   AdminAlertPage,
   MapStyleSettings,
@@ -43,9 +45,12 @@ const AUTH_BASE = '/auth'
 
 export class ApiError extends Error {
   status: number
-  constructor(status: number, message: string) {
+  /** Per-field validation messages from the server, when it sent them. */
+  fields?: Record<string, string>
+  constructor(status: number, message: string, fields?: Record<string, string>) {
     super(message)
     this.status = status
+    this.fields = fields
     this.name = 'ApiError'
   }
 }
@@ -164,8 +169,12 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
 
   if (!res.ok) {
     let message = res.statusText || 'Request failed'
+    let fields: Record<string, string> | undefined
     try {
       const body = await res.json()
+      if (body && typeof body === 'object' && 'fields' in body && body.fields && typeof body.fields === 'object') {
+        fields = body.fields as Record<string, string>
+      }
       if (body && typeof body === 'object' && 'message' in body) {
         message = String((body as { message: unknown }).message)
       } else if (body && typeof body === 'object' && 'error' in body) {
@@ -174,7 +183,7 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
     } catch {
       // non-JSON error body — keep statusText
     }
-    throw new ApiError(res.status, message)
+    throw new ApiError(res.status, message, fields)
   }
 
   if (res.status === 204) return undefined as unknown as T
@@ -735,8 +744,17 @@ export function runBackupNow(): Promise<{ id: number; status: string }> {
 }
 
 /** Queues an S3 write/read/delete probe on the backup service. */
-export function testBackupS3(): Promise<{ id: number; status: string }> {
-  return request<{ id: number; status: string }>('/api/admin/backups/test-s3', { method: 'POST' })
+export function testBackupS3(form?: BackupSettingsSubmit): Promise<{ id: number; status: string }> {
+  return request<{ id: number; status: string }>('/api/admin/backups/test-s3', { method: 'POST', body: form })
+}
+
+export function getBackupSettings(): Promise<BackupSettingsResponse> {
+  return request<BackupSettingsResponse>('/api/admin/backups/settings')
+}
+
+/** Saves the form. Credentials are write-only: omit them to keep the stored ones. */
+export function putBackupSettings(form: BackupSettingsSubmit): Promise<BackupSettingsResponse> {
+  return request<BackupSettingsResponse>('/api/admin/backups/settings', { method: 'PUT', body: form })
 }
 
 // ---- Alerts and SOS (platform admin, no coordinates) ----
