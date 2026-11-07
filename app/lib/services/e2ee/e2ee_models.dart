@@ -381,7 +381,11 @@ class ServerProfile {
     this.dataAtRestKey = false,
     this.enabled = false,
     this.device,
+    this.builtin = false,
   });
+
+  /// The server is its own device (no separate sidecar to set up).
+  final bool builtin;
 
   /// False when the server sent no profile fields (an older server).
   final bool known;
@@ -401,7 +405,8 @@ class ServerProfile {
   final ServerDeviceInfo? device;
 
   bool get isHome => effective == 'home';
-  bool get serverRecommended => isHome && recommendedLane == 'server';
+  /// The server recommends its own lane (a key is enrolled and the server runs at home, or the admin chose it).
+  bool get serverRecommended => recommendedLane == 'server';
 
   static const ServerProfile unknown = ServerProfile();
 
@@ -415,6 +420,38 @@ class ServerProfile {
       dataAtRestKey: j['data_at_rest_key'] == true,
       enabled: j['enabled'] == true,
       device: ServerDeviceInfo.fromJson(j['device']),
+      builtin: j['builtin'] == true,
+    );
+  }
+}
+
+/// "Your server wants to join": the built-in server device waiting for a phone to approve its key
+/// (GET /e2ee/server-join).
+class ServerJoinInfo {
+  const ServerJoinInfo({this.builtin = false, this.waiting = false, this.canApprove = false, this.requestCode = '', this.deviceId = '', this.short = '', this.digits = '', this.state = ''});
+  final bool builtin;
+  final bool waiting;
+  final bool canApprove;
+  final String requestCode;
+  final String deviceId;
+  final String short;
+  final String digits;
+  final String state;
+
+  static const ServerJoinInfo none = ServerJoinInfo();
+
+  factory ServerJoinInfo.fromJson(Map<String, dynamic> j) {
+    final Object? r = j['request'];
+    final Map<String, dynamic> req = r is Map<String, dynamic> ? r : const <String, dynamic>{};
+    return ServerJoinInfo(
+      builtin: j['builtin'] == true,
+      waiting: j['waiting'] == true,
+      canApprove: j['can_approve'] == true,
+      requestCode: (req['request_code'] as String?) ?? '',
+      deviceId: (req['device_id'] as String?) ?? (j['device_id'] as String?) ?? '',
+      short: (req['short'] as String?) ?? (j['short'] as String?) ?? '',
+      digits: (req['digits'] as String?) ?? (j['digits'] as String?) ?? '',
+      state: (j['state'] as String?) ?? '',
     );
   }
 }

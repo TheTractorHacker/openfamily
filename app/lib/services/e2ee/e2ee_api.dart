@@ -39,6 +39,9 @@ abstract class E2eeApi {
 
   /// Deployment profile and the pinned server key (GET /e2ee/server-device). Older servers: [ServerProfile.unknown].
   Future<ServerProfile> serverProfile() async => ServerProfile.unknown;
+  /// The built-in server device's join request. Older servers: [ServerJoinInfo.none].
+  Future<ServerJoinInfo> serverJoin() async => ServerJoinInfo.none;
+  Future<void> approveServerJoin(Map<String, dynamic> body) async => throw UnsupportedError('the server cannot join from the app');
   Future<void> deleteServerConsent(String circleId) async {}
   Future<int> purgeServerCopies(String circleId, {bool wholeCircle = false}) async => 0;
 
@@ -159,6 +162,19 @@ class ApiE2eeApi implements E2eeApi {
     final dynamic r = await ApiClient.get('/e2ee/server-device');
     return r is Map<String, dynamic> ? ServerProfile.fromJson(r) : ServerProfile.unknown;
   }
+
+  @override
+  Future<ServerJoinInfo> serverJoin() async {
+    try {
+      final dynamic r = await ApiClient.get('/e2ee/server-join');
+      return r is Map<String, dynamic> ? ServerJoinInfo.fromJson(r) : ServerJoinInfo.none;
+    } catch (_) {
+      return ServerJoinInfo.none;
+    }
+  }
+
+  @override
+  Future<void> approveServerJoin(Map<String, dynamic> body) => ApiClient.post('/e2ee/server-join/approve', body: body);
 
   @override
   Future<void> putServerConsent(String circleId, Map<String, dynamic> body) =>

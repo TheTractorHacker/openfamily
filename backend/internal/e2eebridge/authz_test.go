@@ -1,4 +1,4 @@
-package main
+package e2eebridge
 
 import (
 	"context"

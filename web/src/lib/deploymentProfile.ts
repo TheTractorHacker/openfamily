@@ -23,6 +23,19 @@ export type DeploymentState = {
   }
   backups?: { last_run_at: string; last_status: string; last_encrypted: boolean }
   docs_path: string
+  /** The API's own server device (absent on older servers or with the separate sidecar). */
+  builtin?: {
+    state: 'waiting_for_approval' | 'running' | 'idle' | 'stopped' | 'error'
+    state_detail?: string
+    registered: boolean
+    short: string
+    digits: string
+    fingerprint: string
+    sealed: boolean
+    last_sync?: string
+  }
+  server_device_builtin?: boolean
+  private_circles_without_server?: number
 }
 
 /** One sentence per profile, in the words a family uses. */
@@ -49,21 +62,38 @@ export function cloudWarnings(s: Pick<DeploymentState, 'effective' | 'at_rest' |
 
 export type SetupStep = { key: string; title: string; done: boolean; detail: string }
 
-/** The five first-run steps. Step 1 is true by definition (you are signed in). */
+/** True when the server is enrolled (built-in or sidecar) and its key is pinned. */
+export function serverApproved(s: DeploymentState | null): boolean {
+  return !!s && s.server_pinned
+}
+
+/** The three first-run steps. Each completes from server state, not from clicks. */
 export function setupSteps(s: DeploymentState | null): SetupStep[] {
   const chosen = !!s && s.profile !== ''
-  const enrolled = !!s && s.token_configured && s.server_pinned
   return [
-    { key: 'admin', title: 'Admin account', done: true, detail: 'You are signed in as the server admin.' },
-    { key: 'profile', title: 'Where does the server run?', done: chosen, detail: 'Home or rented. This sets what the app suggests.' },
-    { key: 'enroll', title: 'Give the server its key', done: enrolled, detail: 'One-time commands on the machine that runs the server.' },
-    { key: 'verify', title: 'Compare the key on a phone', done: !!s && s.server_pinned && (s.circles_with_server ?? 0) > 0, detail: 'The same four groups must show on the phone.' },
-    { key: 'apps', title: 'Install the apps and invite family', done: !!s && (s.circles_with_server ?? 0) > 0, detail: 'Download the app, create a circle, tap Add server.' },
+    { key: 'profile', title: 'Pick where the server runs', done: chosen, detail: 'At home or rented. This sets what the app suggests.' },
+    {
+      key: 'approve',
+      title: 'Approve on your phone',
+      done: serverApproved(s),
+      detail: 'Your phone asks "Your server wants to join". Check the code matches and tap Approve.',
+    },
+    {
+      key: 'apps',
+      title: 'Install the apps and invite family',
+      done: !!s && (s.circles_with_server ?? 0) > 0,
+      detail: 'Download the app, create a circle and share the invite code.',
+    },
   ]
 }
 
 export function setupComplete(s: DeploymentState | null): boolean {
   return setupSteps(s).every((x) => x.done)
+}
+
+/** The server is up and doing the processing: show the green state instead of the steps. */
+export function serverProcessing(s: DeploymentState | null): boolean {
+  return setupComplete(s)
 }
 
 /** Show the checklist for a new install until it is finished or dismissed. */
@@ -76,7 +106,7 @@ export function qrText(digits: string): string {
   return 'OpenFamily server key\n' + digits
 }
 
-/** The documented sidecar enrollment, as copy-paste lines (see docker-compose.yml). */
+/** The documented sidecar enrollment (Details > advanced; not part of the main flow), as copy-paste lines (see docker-compose.yml). */
 export function enrollCommands(email: string): { token: string; request: string; approve: string; start: string } {
   const who = email.trim() === '' ? 'you@example.org' : email.trim()
   return {

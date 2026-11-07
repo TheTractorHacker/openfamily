@@ -1,4 +1,4 @@
-package main
+package e2eebridge
 
 // On-disk state: a 0700 directory with 0600 files, written atomically. Secrets
 // (identity seed, circle keys, refresh token) are optionally sealed with a

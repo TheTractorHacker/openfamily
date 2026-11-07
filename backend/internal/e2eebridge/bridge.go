@@ -1,4 +1,4 @@
-package main
+package e2eebridge
 
 // The bridge engine: key sync, log verification, sender authorisation, item
 // verification (the phone's ChannelReceiver policy) and hand-over to Dawarich.
@@ -158,6 +158,9 @@ type bridge struct {
 	active      int                        // circles read (either flow) in this cycle
 	offSeen     bool                       // a circle whose server key we held turned its policy off
 	lastMissing map[string]string          // circle -> last missing-wrap report (log only on change)
+
+	onCycle func(active int) // optional: called after every successful cycle (built-in server device)
+	quiet   bool             // built-in device: "policy off everywhere" is normal, not an error
 }
 
 func newBridge(st *store, id *identity, api *apiClient, cfg *config, log *slog.Logger) (*bridge, error) {

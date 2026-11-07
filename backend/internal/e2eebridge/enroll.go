@@ -1,4 +1,4 @@
-package main
+package e2eebridge
 
 import (
 	"bufio"
@@ -223,37 +223,7 @@ func (a *app) cmdEnroll(ctx context.Context, o enrollOpts) error {
 	if err != nil {
 		return err
 	}
-	sig, _ := base64.StdEncoding.DecodeString(ap.S)
-	std := base64.StdEncoding.EncodeToString
-	bind, err := e2ee.BindingMessage(userID, id.f.DeviceID, id.edPub, id.xPub)
-	if err != nil {
-		return err
-	}
-	req := map[string]any{
-		"device_id": id.f.DeviceID, "kind": id.kind(), "ed25519_pub": std(id.edPub), "x25519_pub": std(id.xPub),
-		"signature": std(ed25519.Sign(id.edPriv, bind)), "label": truncRunes(id.f.Name, 60),
-		"actor_device_id": ap.A, "log_signature": std(sig), "reset": false, "can_upload": false,
-	}
-	var rec e2ee.DeviceRecord
-	if err := c.do(ctx, http.MethodPost, "/e2ee/devices", req, &rec); err != nil {
-		var ae *apiError
-		if errors.As(err, &ae) && ae.Status == http.StatusBadRequest {
-			return fmt.Errorf("%w\nThe approval code does not match this request (wrong phone, wrong request code, or the code was made for another bridge).", err)
-		}
-		return err
-	}
-	if rec.DeviceID != id.f.DeviceID || rec.Fingerprint != fmt.Sprintf("%x", id.fp) || !e2ee.VerifyRegistration(rec) {
-		return errors.New("the server's record of this bridge does not match its keys; not trusting it")
-	}
-	// Pin the approving phone's key: it is bound to the signature the user carried here.
-	anchor, err := e2ee.PinApprover(rec, id.f.DeviceID, ap.A, sig)
-	if err != nil {
-		return err
-	}
-	id.f.ApproverEdPub = anchor.EdPub
-	id.f.RegisteredAt = time.Now().UTC().Format(time.RFC3339)
-	id.f.ApprovedBy = ap.A
-	if err := a.st.saveIdentity(id); err != nil {
+	if err := a.st.registerApproved(ctx, id, c, userID, ap); err != nil {
 		return err
 	}
 	if id.kind() == "server" {
@@ -308,5 +278,45 @@ func (a *app) cmdRevoke(ctx context.Context, o enrollOpts) error {
 	a.st.remove(fileSession)
 	fmt.Fprintln(o.out, "Revoked. The server deleted this key's wraps and flagged the circle for a new key epoch")
 	fmt.Fprintln(o.out, "(an admin phone rotates it). Local circle keys and the login session were deleted.")
+	return nil
+}
+
+// registerApproved registers id with the API as userID's device using the
+// phone's approval, verifies the server's record and pins the approver. Shared by
+// the command line and the API's built-in server device.
+func (st *store) registerApproved(ctx context.Context, id *identity, c *apiClient, userID string, ap approvalCode) error {
+	sig, _ := base64.StdEncoding.DecodeString(ap.S)
+	std := base64.StdEncoding.EncodeToString
+	bind, err := e2ee.BindingMessage(userID, id.f.DeviceID, id.edPub, id.xPub)
+	if err != nil {
+		return err
+	}
+	req := map[string]any{
+		"device_id": id.f.DeviceID, "kind": id.kind(), "ed25519_pub": std(id.edPub), "x25519_pub": std(id.xPub),
+		"signature": std(ed25519.Sign(id.edPriv, bind)), "label": truncRunes(id.f.Name, 60),
+		"actor_device_id": ap.A, "log_signature": std(sig), "reset": false, "can_upload": false,
+	}
+	var rec e2ee.DeviceRecord
+	if err := c.do(ctx, http.MethodPost, "/e2ee/devices", req, &rec); err != nil {
+		var ae *apiError
+		if errors.As(err, &ae) && ae.Status == http.StatusBadRequest {
+			return fmt.Errorf("%w\nThe approval code does not match this request (wrong phone, wrong request code, or the code was made for another bridge).", err)
+		}
+		return err
+	}
+	if rec.DeviceID != id.f.DeviceID || rec.Fingerprint != fmt.Sprintf("%x", id.fp) || !e2ee.VerifyRegistration(rec) {
+		return errors.New("the server's record of this bridge does not match its keys; not trusting it")
+	}
+	// Pin the approving phone's key: it is bound to the signature the user carried here.
+	anchor, err := e2ee.PinApprover(rec, id.f.DeviceID, ap.A, sig)
+	if err != nil {
+		return err
+	}
+	id.f.ApproverEdPub = anchor.EdPub
+	id.f.RegisteredAt = time.Now().UTC().Format(time.RFC3339)
+	id.f.ApprovedBy = ap.A
+	if err := st.saveIdentity(id); err != nil {
+		return err
+	}
 	return nil
 }

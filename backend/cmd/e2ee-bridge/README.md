@@ -1,5 +1,10 @@
 # e2ee-bridge: Private circles to your own Dawarich
 
+> **Do you need this?** Usually not. Since the release that adds the built-in server device, the OpenFamily server creates and
+> runs its own server key (`OPENFAMILY_SERVER_DEVICE`, volume `server_device`) and a phone approves it with one tap, see
+> `docs/server-setup.md`. This standalone sidecar stays supported for the Dawarich bridge and for operators who want the server key in a
+> separate container (set `E2EE_SERVER_INGEST_TOKEN`, which switches the built-in device off). The code is shared, in `backend/internal/e2eebridge`.
+
 `e2ee-bridge` exports the positions of **Private (end-to-end encrypted)** OpenFamily
 circles to your own [Dawarich](https://dawarich.app) without the OpenFamily server
 ever seeing a plaintext coordinate. (The built-in Dawarich export cannot work for a

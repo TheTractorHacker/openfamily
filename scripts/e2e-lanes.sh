@@ -46,6 +46,13 @@ exit $rc
 }
 trap cleanup EXIT
 
+# E2E_BUILTIN=1: no sidecar and no ingest token anywhere; the API is its own server device (docs/testing/E2E_LANES.md).
+if [ "${E2E_BUILTIN:-0}" = 1 ]; then
+  SERVER_ENV="-e OPENFAMILY_SERVER_DEVICE=builtin -e OPENFAMILY_SERVER_DEVICE_DIR=/tmp/server-device"
+  INGEST_TOKEN=""
+else
+  SERVER_ENV="-e E2EE_SERVER_INGEST_TOKEN=$INGEST_TOKEN"
+fi
 E2E_REUSED=0
 if docker ps --format '{{.Names}}' | grep -qx "$API"; then E2E_REUSED=1; else
 echo "== building server, e2ee-bridge, probe"
@@ -60,7 +67,7 @@ rm -rf "$ROOT/backend/cmd/_e2eprobe"
 echo "== starting database ($DB)"
 docker run -d --name "$DB" --network host -e POSTGRES_PASSWORD="$DB_PASS" -e POSTGRES_DB=openfamily \
   -e PGPORT="$DB_PORT" "$DB_IMG" -c fsync=off -c synchronous_commit=off -c full_page_writes=off -c port="$DB_PORT" >/dev/null
-for _ in $(seq 1 120); do
+for _ in $(seq 1 "${E2E_DB_WAIT:-120}"); do
   docker exec "$DB" psql -h 127.0.0.1 -p "$DB_PORT" -U postgres -d openfamily -tAc 'select 1' >/dev/null 2>&1 && break
   sleep 1
 done
@@ -70,7 +77,7 @@ echo "== starting server ($API)"
 docker run -d --name "$API" --network host -v "$WORK/bin:/bin-e2e:ro" \
   -e HTTP_ADDR="127.0.0.1:$API_PORT" -e DATABASE_URL="$DB_URL" -e JWT_SECRET="$JWT_SECRET" \
   -e APP_ENV=development -e INSECURE_HTTP=true -e ACCESS_TOKEN_TTL=24h -e GEOCODER_URL= -e GEOCODER_FALLBACK_URL= \
-  -e E2EE_SERVER_INGEST_TOKEN="$INGEST_TOKEN" -e ADMIN_LOCATION_ACCESS=false \
+  -e ADMIN_LOCATION_ACCESS=false $SERVER_ENV \
   "$GO_IMG" /bin-e2e/server >/dev/null
 for _ in $(seq 1 90); do
   curl -fsS "http://127.0.0.1:$API_PORT/healthz" >/dev/null 2>&1 && break

@@ -122,6 +122,24 @@ void main() {
     expect(svc.calls.single, endsWith(':-'));
   });
 
+  testWidgets('new circles are Normal unless Private is chosen; both choices are explained', (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(800, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final FakeCircleService svc = FakeCircleService();
+    await tester.pumpWidget(_app(CircleCreateScreen(service: svc)));
+    expect(find.textContaining('Normal (recommended)'), findsOneWidget);
+    expect(find.textContaining('maps, history and driving reports just work'), findsOneWidget);
+    expect(find.textContaining('Only phones can read locations; the server keeps nothing readable'), findsOneWidget);
+    expect(find.byKey(const Key('mode-normal')), findsOneWidget);
+    final Icon normalIcon = tester.widget<Icon>(find.descendant(of: find.byKey(const Key('mode-normal')), matching: find.byType(Icon)));
+    expect(normalIcon.icon, Icons.radio_button_checked);
+    await tester.tap(find.byKey(const Key('mode-private')));
+    await tester.pump();
+    final Icon privIcon = tester.widget<Icon>(find.descendant(of: find.byKey(const Key('mode-private')), matching: find.byType(Icon)));
+    expect(privIcon.icon, Icons.radio_button_checked);
+  });
+
   testWidgets('admin can extend and end a temporary circle; member cannot',
       (WidgetTester tester) async {
     final FakeCircleService svc = FakeCircleService();

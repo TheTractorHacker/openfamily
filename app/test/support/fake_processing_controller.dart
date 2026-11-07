@@ -1,5 +1,5 @@
 import 'package:openfamily/services/e2ee/e2ee_crypto.dart';
-import 'package:openfamily/services/e2ee/e2ee_models.dart' show ServerProfile;
+import 'package:openfamily/services/e2ee/e2ee_models.dart' show ServerProfile, ServerJoinInfo;
 import 'package:openfamily/services/e2ee/lanes_service.dart' show LanesNotReady;
 import 'package:openfamily/services/e2ee/lanes_store.dart';
 import 'package:openfamily/services/e2ee/processing_controller.dart';
@@ -119,4 +119,21 @@ class FakeProcessingController implements ProcessingController {
 
   @override
   Future<ServerProfile> serverProfile() async => profile;
+
+  /// What GET /e2ee/server-join answers; tests set it to simulate "your server wants to join".
+  ServerJoinInfo join = ServerJoinInfo.none;
+
+  /// Approving makes the snapshot show an approved server key (as the real server does after it pinned itself).
+  @override
+  Future<ServerJoinInfo> serverJoin() async => join;
+
+  @override
+  Future<void> approveServerJoin() async {
+    _maybeFail();
+    calls.add('approve-server-join');
+    join = ServerJoinInfo.none;
+    onServerApproved?.call();
+  }
+
+  void Function()? onServerApproved;
 }

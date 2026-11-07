@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../models/circle.dart';
+import '../services/e2ee/e2ee_app.dart';
+import '../services/e2ee/e2ee_service.dart';
+import '../services/e2ee/private_runtime.dart';
 import '../services/circle_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/circle_widgets.dart';
@@ -31,6 +34,9 @@ class _CircleCreateScreenState extends State<CircleCreateScreen> {
   bool _busy = false;
   bool _temporary = false;
 
+  /// Normal (server keeps locations) is the default; Private is a deliberate choice.
+  bool _private = false;
+
   /// Lifetime of a temporary circle in hours (24h / 3 days / 1 week / custom).
   int _hours = 24;
   bool _custom = false;
@@ -56,7 +62,22 @@ class _CircleCreateScreenState extends State<CircleCreateScreen> {
     try {
       final Circle c = await _service.createCircle(name, _icon,
           durationHours: _temporary ? _hours : null);
-      if (mounted) Navigator.of(context).pop(c);
+      Circle result = c;
+      if (_private && widget.service == null) {
+        try {
+          final E2eeService svc = E2eeApp.service;
+          if (await svc.identity() == null) await svc.registerThisDevice(label: 'This phone');
+          await svc.enableCircle(c.id);
+          await PrivateRuntime.instance.setCircles(await _service.listCircles());
+          result = c.copyWith(e2eeMode: 'private');
+        } catch (_) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                content: Text('The circle was created in normal mode. You can make it private later in the circle settings.')));
+          }
+        }
+      }
+      if (mounted) Navigator.of(context).pop(result);
     } on SessionExpiredException {
       rethrow;
     } catch (e) {
@@ -66,6 +87,21 @@ class _CircleCreateScreenState extends State<CircleCreateScreen> {
         _error = describeCircleError(e).message;
       });
     }
+  }
+
+  Widget _modeTile({required Key key, required bool selected, required String title, required String body, required VoidCallback onTap}) {
+    return Semantics(
+      inMutuallyExclusiveGroup: true,
+      selected: selected,
+      child: ListTile(
+        key: key,
+        contentPadding: EdgeInsets.zero,
+        leading: Icon(selected ? Icons.radio_button_checked : Icons.radio_button_unchecked),
+        title: Text(title),
+        subtitle: Text(body),
+        onTap: _busy ? null : onTap,
+      ),
+    );
   }
 
   @override
@@ -123,6 +159,22 @@ class _CircleCreateScreenState extends State<CircleCreateScreen> {
                 ),
               ),
           ],
+        ),
+        const SizedBox(height: AppSpace.lg),
+        const DsSectionHeader('Who can see locations', padding: EdgeInsets.only(bottom: AppSpace.sm)),
+        _modeTile(
+          key: const Key('mode-normal'),
+          selected: !_private,
+          title: 'Normal (recommended)',
+          body: 'Your server keeps locations so maps, history and driving reports just work.',
+          onTap: () => setState(() => _private = false),
+        ),
+        _modeTile(
+          key: const Key('mode-private'),
+          selected: _private,
+          title: 'Private',
+          body: 'Only phones can read locations; the server keeps nothing readable. No driving reports unless you turn on phone reports (uses more battery) or later let the server help.',
+          onTap: () => setState(() => _private = true),
         ),
         const SizedBox(height: AppSpace.lg),
         DsRowGroup(

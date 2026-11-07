@@ -1,4 +1,4 @@
-package main
+package e2eebridge
 
 // Processing lanes (docs/design/PRIVACY_PROCESSING.md, sections 5.4, 8.9, 14 phase 3).
 //

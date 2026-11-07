@@ -7,6 +7,8 @@ import '../services/e2ee/e2ee_crypto.dart';
 import '../services/e2ee/lanes_service.dart' show LanesNotReady;
 import '../services/e2ee/processing_controller.dart';
 import '../theme/app_theme.dart';
+import '../services/server_config.dart';
+import 'server_prompts.dart' show updateMessageText;
 
 /// "Add server to this circle": one guided sheet, three steps (add, check the
 /// code, OK). Logic lives in [AddServerFlow]; this file is text and layout.
@@ -107,7 +109,7 @@ class _AddServerSheetState extends State<AddServerSheet> {
         builder: (BuildContext ctx, StateSetter set) => AlertDialog(
           title: const Text('Remove the server?'),
           content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[
-            const Text('Your location will stay on your phone only. Trips, driving reports and history for you will then be worked out on your phone, which can use more battery.'),
+            const Text('Your location will be shared privately, encrypted from phone to phone. The server will no longer keep your history, trips or driving reports; you get no reports unless you turn on phone reports (uses more battery).'),
             CheckboxListTile(
               key: const Key('add-server-remove-delete'),
               contentPadding: EdgeInsets.zero,
@@ -237,6 +239,9 @@ class _AddServerSheetState extends State<AddServerSheet> {
         return <Widget>[
           _title('Some people need to update the app'),
           _p('Before the server can be added, these people need the newest OpenFamily app: ${p.names.join(', ')}.', key: const Key('add-server-update')),
+          _p('Message to send them:'),
+          SelectableText(updateMessageText(ServerConfig.instance.apiBaseUrl), key: const Key('add-server-update-message')),
+          const SizedBox(height: AppSpace.md),
           _close(),
         ];
       case AddServerState.alreadyAdded:
@@ -251,6 +256,14 @@ class _AddServerSheetState extends State<AddServerSheet> {
           ],
           _close(),
         ];
+      case AddServerState.serverWaiting:
+        return <Widget>[
+          _title('Your server wants to join'),
+          _p('The server is asking to join and a server administrator has to approve it on their phone (Settings > Server setup, or any circle > Add server). Ask them, then check again.',
+              key: const Key('add-server-waiting')),
+          Row(children: <Widget>[TextButton(key: const Key('add-server-retry'), onPressed: _load, child: const Text('Check again')), _close()]),
+        ];
+      case AddServerState.approveServer:
       case AddServerState.ready:
         break;
     }
@@ -258,7 +271,7 @@ class _AddServerSheetState extends State<AddServerSheet> {
       return <Widget>[
         _title('Server added'),
         _p(p.adminTurnsOn
-            ? 'The server is on for this circle and for you. Everyone else is asked on their own phone and can say no.'
+            ? 'The server is on for this circle and for you. Now ask each other member to open the app and tap "Use the server". Nobody is switched on for them, and they can say no.'
             : 'The server now works with your location in this circle.', key: const Key('add-server-success')),
         FilledButton(key: const Key('add-server-finish'), onPressed: () => Navigator.of(context).pop(true), child: const Text('Done')),
       ];
@@ -277,7 +290,8 @@ class _AddServerSheetState extends State<AddServerSheet> {
     switch (_step) {
       case 1:
         return <Widget>[
-          _title('Step 1 of 3: add the server'),
+          _title(p.state == AddServerState.approveServer ? 'Your server wants to join' : 'Step 1 of 3: use the server (recommended)'),
+          if (p.state == AddServerState.approveServer) _p('This server is asking to join your circle as its own device, so it can keep maps, history and driving reports for people who choose it. Only you can approve it, and only after you compare its code.', key: const Key('add-server-join-intro')),
           _p(addServerExplanation(p.profile), key: const Key('add-server-explain')),
           Row(children: <Widget>[
             FilledButton(key: const Key('add-server-next'), onPressed: () => setState(() => _step = 2), child: const Text('Next')),
@@ -304,7 +318,7 @@ class _AddServerSheetState extends State<AddServerSheet> {
         return <Widget>[
           _title('Step 3 of 3: OK'),
           _p(p.adminTurnsOn
-              ? 'Tapping OK turns the server on for this circle and for you. Other members are asked on their own phones; nobody is added for them.'
+              ? 'Tapping OK ${p.state == AddServerState.approveServer ? 'approves the server and ' : ''}turns the server on for this circle and for you. Other members are asked on their own phones; nobody is added for them.'
               : 'Tapping OK lets the server work with your location in this circle. You can remove it again at any time.', key: const Key('add-server-confirm-text')),
           if (_error != null) _p(_error!, key: const Key('add-server-error'), color: cs.error),
           FilledButton(key: const Key('add-server-ok'), onPressed: _busy ? null : _ok, child: _busy ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('OK')),

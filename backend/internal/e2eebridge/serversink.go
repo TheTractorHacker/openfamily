@@ -1,4 +1,4 @@
-package main
+package e2eebridge
 
 // Server mode (docs/design/E2EE.md, "Trusted-server mode"): the bridge is the
 // OpenFamily server's own approved device. It verifies and decrypts exactly like

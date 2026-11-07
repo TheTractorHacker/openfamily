@@ -5,6 +5,7 @@ import {
   enrollCommands,
   profileSummary,
   qrText,
+  serverProcessing,
   setupComplete,
   setupSteps,
   showSetupCard,
@@ -25,9 +26,10 @@ const base = {
   docs_path: '/docs/server-setup',
 }
 
-test('a fresh install shows the checklist with only the admin step done', () => {
+test('a fresh install shows the three-step checklist with nothing done', () => {
   const steps = setupSteps(base)
-  assert.deepEqual(steps.map((s) => s.done), [true, false, false, false, false])
+  assert.deepEqual(steps.map((s) => s.key), ['profile', 'approve', 'apps'])
+  assert.deepEqual(steps.map((s) => s.done), [false, false, false])
   assert.equal(showSetupCard(base), true)
   assert.equal(showSetupCard(null), false)
 })
@@ -35,9 +37,10 @@ test('a fresh install shows the checklist with only the admin step done', () => 
 test('steps complete from server state, not from clicks', () => {
   const s = { ...base, profile: 'home', effective: 'home', token_configured: true, server_pinned: true, circles_with_server: 1 }
   assert.equal(setupComplete(s), true)
+  assert.equal(serverProcessing(s), true)
   assert.equal(showSetupCard(s), false)
   const half = { ...base, profile: 'cloud', token_configured: true, server_pinned: true }
-  assert.deepEqual(setupSteps(half).map((x) => x.done), [true, true, true, false, false])
+  assert.deepEqual(setupSteps(half).map((x) => x.done), [true, true, false])
 })
 
 test('a dismissed checklist stays hidden', () => {

@@ -1,4 +1,4 @@
-package main
+package e2eebridge
 
 // Dawarich delivery. The mapping matches backend/internal/handlers/dawarich.go:
 // POST {base}/api/v1/points with Bearer auth and

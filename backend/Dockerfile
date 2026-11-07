@@ -61,7 +61,7 @@ RUN sh /usr/local/bin/distrust-compromised-cas && update-ca-certificates --fresh
 COPY --from=build /out/server /usr/local/bin/server
 # Run as an unprivileged user; /data/apk is the (volume-backed) APK cache.
 RUN adduser -D -H -u 10001 openfamily \
- && mkdir -p /data/apk && chown -R openfamily /data
+ && mkdir -p /data/apk /data/server-device && chmod 700 /data/server-device && chown -R openfamily /data
 USER 10001
 EXPOSE 8080
 ENTRYPOINT ["server"]

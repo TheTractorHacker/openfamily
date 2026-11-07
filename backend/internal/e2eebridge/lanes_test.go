@@ -1,4 +1,4 @@
-package main
+package e2eebridge
 
 // Phase 3 (processing lanes): the server-device sidecar and the Dawarich bridge in
 // lanes circles. The world is built from the Phase 1 vectors
@@ -113,7 +113,7 @@ type lanesWorld struct {
 
 func newLanesWorld(t *testing.T, kind string) *lanesWorld {
 	t.Helper()
-	raw, err := os.ReadFile("../../internal/e2ee/testdata/lanes.json")
+	raw, err := os.ReadFile("../e2ee/testdata/lanes.json")
 	if err != nil {
 		t.Fatal(err)
 	}

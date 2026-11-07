@@ -30,6 +30,10 @@ type Server struct {
 	// the user's name ("Mom arrived at School").
 	VerbosePush bool
 
+	// ServerDevice is the API's built-in server device (nil: not used, the
+	// optional sidecar enrolls instead). See docs/design/PRIVACY_PROCESSING.md section 22.
+	ServerDevice ServerDeviceHost
+
 	// AdminLocationAccess permits platform admins to read member locations
 	// (SEC-007). False by default: admin endpoints then redact positions or
 	// return 403, and the denial is audit-logged.

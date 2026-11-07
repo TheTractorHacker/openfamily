@@ -1,4 +1,4 @@
-package main
+package e2eebridge
 
 // OpenFamily API client: login/refresh with a rotating refresh token that is
 // persisted atomically after every rotation (access tokens live in memory only),
@@ -107,6 +107,11 @@ type apiClient struct {
 	access  string
 	refresh string
 	onRot   func(newRefresh string) error // persists the rotated refresh token
+	// mint, when set, replaces the refresh-token login: the API's built-in server
+	// device asks its host process for a short-lived access token.
+	mint func(ctx context.Context) (string, error)
+	// onStatus, when set, hears about every non-2xx answer (built-in device logging).
+	onStatus func(method, path string, status int)
 }
 
 func newAPIClient(base string, refresh string, onRotate func(string) error) *apiClient {
@@ -142,6 +147,9 @@ func (c *apiClient) send(ctx context.Context, method, path string, body []byte, 
 		}
 		var retryAfter time.Duration
 		resp, err := c.http.Do(req)
+		if err == nil && c.onStatus != nil && (resp.StatusCode < 200 || resp.StatusCode >= 300) {
+			c.onStatus(method, path, resp.StatusCode)
+		}
 		if err == nil {
 			data, rerr := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
 			resp.Body.Close()
@@ -214,6 +222,14 @@ func (c *apiClient) refreshAccess(ctx context.Context, stale string) error {
 	defer c.mu.Unlock()
 	if stale != "" && c.access != stale && c.access != "" {
 		return nil // someone else refreshed meanwhile
+	}
+	if c.mint != nil {
+		tok, err := c.mint(ctx)
+		if err != nil {
+			return err
+		}
+		c.access = tok
+		return nil
 	}
 	if c.refresh == "" {
 		return errReauth
