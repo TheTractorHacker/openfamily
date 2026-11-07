@@ -217,11 +217,13 @@ class ApiClient {
     String? pushToken,
     String? unifiedpushEndpoint,
     String? appVersion,
+    String? installId,
   }) async {
     final Map<String, dynamic> body = <String, dynamic>{
       'platform': platform,
       'name': name,
     };
+    if (installId != null && installId.isNotEmpty) body['install_id'] = installId;
     if (pushToken != null) body['push_token'] = pushToken;
     if (unifiedpushEndpoint != null) {
       body['unifiedpush_endpoint'] = unifiedpushEndpoint;

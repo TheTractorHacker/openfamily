@@ -164,16 +164,18 @@ func DeviceIDHeader(r *http.Request) string {
 	return v
 }
 
-// TouchDeviceVersion stores the app version on the caller's device: the one
-// named by deviceID (only if it belongs to userID), else the user's most
-// recently seen device of that platform. It never writes a coordinate.
+// TouchDeviceVersion stores the app version on the device named by deviceID,
+// and only if that device belongs to userID. Without a valid X-Device-Id
+// nothing is written: guessing "the most recently seen device" stamped the new
+// version onto a different phone of the same user. It never writes a
+// coordinate. platform is kept for the signature only.
 func TouchDeviceVersion(ctx context.Context, pool *pgxpool.Pool, userID, deviceID, platform, version string) error {
+	if deviceID == "" {
+		return nil
+	}
 	_, err := pool.Exec(ctx, `
-		UPDATE devices SET app_version = $4
-		WHERE app_version IS DISTINCT FROM $4 AND user_id = $1 AND id = (
-		  CASE WHEN $2 <> '' THEN (SELECT id FROM devices WHERE id = NULLIF($2,'')::uuid AND user_id = $1)
-		       ELSE (SELECT id FROM devices WHERE user_id = $1 AND platform = $3
-		             ORDER BY last_seen DESC NULLS LAST, created_at DESC LIMIT 1) END)`,
-		userID, deviceID, platform, version)
+		UPDATE devices SET app_version = $3
+		WHERE id = $2::uuid AND user_id = $1 AND app_version IS DISTINCT FROM $3`,
+		userID, deviceID, version)
 	return err
 }
