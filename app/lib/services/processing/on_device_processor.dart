@@ -44,6 +44,9 @@ class OnDeviceProcessor {
   final EventParams eventParams;
   final int keepDays;
 
+  /// Whether this member switched phone-use detection on; only then is a phone-use count (even 0) published.
+  bool phoneUseEnabled = false;
+
   /// Largest JSON of a `drive` body (the sealed item must fit its 4096 byte bucket).
   final int maxDriveJsonBytes;
 
@@ -158,7 +161,7 @@ class OnDeviceProcessor {
       for (final _StoredTrip t in st.trips.values)
         for (final (String, int) e in t.events) DrivingEvent(kind: e.$1, startedAtUs: e.$2, endedAtUs: e.$2, magnitude: 0, lat: 0, lon: 0)
     ];
-    return WeekResult.compute(ts, es, weekStartUs);
+    return WeekResult.compute(ts, es, weekStartUs, phoneUseEnabled: phoneUseEnabled);
   }
 
   static int _weekStartUs(int us) {

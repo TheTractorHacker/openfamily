@@ -206,7 +206,7 @@ class _WeeklySummaryScreenState extends State<WeeklySummaryScreen> {
         hardBrake: f.hardBrake,
         rapidAccel: f.rapidAccel,
         speeding: f.speeding,
-        phoneUse: f.phoneUse > 0 ? f.phoneUse : null,
+        phoneUse: f.phoneUse,
         score: f.score,
       );
 
