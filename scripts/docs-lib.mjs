@@ -9,7 +9,7 @@ export const OUT = path.join(ROOT, 'backend', 'web', 'docs')
 
 // Folders that are not shipped inside the server (kept on GitHub only).
 export const EXCLUDE_DIRS = new Set(['audits'])
-export const SHIP_EXT = new Set(['.md', '.png', '.webp', '.jpg', '.jpeg', '.json'])
+export const SHIP_EXT = new Set(['.md', '.png', '.webp', '.jpg', '.jpeg', '.svg', '.json'])
 
 /** GitHub-style heading slug. Keep in step with web/src/lib/markdown.ts. */
 export function slugify(text) {
@@ -90,4 +90,34 @@ export function titleOf(src, fallback) {
 export function latestRelease(changelog) {
   const m = /^## (v\d+\.\d+\.\d+)/m.exec(changelog)
   return m ? m[1] : ''
+}
+
+/**
+ * The one-line summary of a page: the first paragraph under the "# Title"
+ * heading, as plain text (null when the page starts with a list, table, image
+ * or code instead). Used in search results and on the category cards.
+ */
+export function summaryOf(src) {
+  const lines = src.replace(/\r\n?/g, '\n').split('\n')
+  let i = lines.findIndex((l) => /^#\s+\S/.test(l))
+  if (i < 0) return null
+  i++
+  while (i < lines.length && !lines[i].trim()) i++
+  const buf = []
+  while (i < lines.length && lines[i].trim() && !/^(#{1,6}\s|\s*>|\s*```|\s*~~~|\s*\||\s*[-*+]\s|\s*\d+[.)]\s|!\[|<)/.test(lines[i])) buf.push(lines[i++].trim())
+  if (!buf.length) return null
+  return buf
+    .join(' ')
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/[`*_]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+/** Shortens a summary to about `max` characters at a word boundary. */
+export function clip(text, max = 200) {
+  if (text.length <= max) return text
+  const cut = text.slice(0, max)
+  return cut.slice(0, cut.lastIndexOf(' ') > 80 ? cut.lastIndexOf(' ') : max).replace(/[,;:\s]+$/, '') + '…'
 }

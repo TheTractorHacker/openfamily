@@ -1,5 +1,7 @@
 # Invite people and join a circle
 
+How a circle admin invites family or friends with a code or link, and how they join from the app.
+
 ## Inviting (circle admins)
 
 1. Open the circle and tap **Invite**.

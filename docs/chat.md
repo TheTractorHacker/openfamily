@@ -1,7 +1,9 @@
 # Family chat
 
 Per-circle text chat. Every circle member can read and post; nobody else can
-(a non-member gets 404, the same as an unknown circle).
+(a non-member gets 404, the same as an unknown circle). This page describes the
+readable (Normal circle) chat; in a Private circle chat is end-to-end encrypted,
+see [Encrypted chat](design/E2EE_CHAT.md).
 
 ## API
 

@@ -1,5 +1,7 @@
 # Credits and license
 
+Orbitly is a free, open-source fork of OpenFamily, licensed AGPL-3.0; who built it, what it is based on and where to get the source.
+
 ## Where Orbitly comes from
 
 **Orbitly is a substantially extended fork of

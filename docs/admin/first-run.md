@@ -1,5 +1,7 @@
 # First run: your first sign-in and your first circle
 
+Your first sign-in to the admin web: registration is closed, turn on two-step sign-in, create the first circle and check the settings that matter.
+
 1. Open the admin web and sign in. Because you set an admin email during setup,
    **open registration is closed**: new people need an invite code.
 

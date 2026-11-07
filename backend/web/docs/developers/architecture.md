@@ -1,5 +1,7 @@
 # Architecture
 
+How Orbitly is put together: the Flutter app, the Go server, Postgres, the admin web and how they talk to each other.
+
 ```
  phone (Flutter app)  --HTTPS/WebSocket-->  Caddy (optional)  -->  api (Go, one binary)  --> Postgres + TimescaleDB
  browser (admin web)  ------------------------------------------>  embedded SPA + /api/admin/*
