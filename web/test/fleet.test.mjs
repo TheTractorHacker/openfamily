@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { deviceFindings, memberHealth, summarize } from '../src/lib/fleet.ts'
+import { bestVersion, deviceFindings, memberHealth, reportNote, summarize } from '../src/lib/fleet.ts'
 
 const NOW = Date.parse('2026-03-10T15:00:00Z')
 const ago = (h) => new Date(NOW - h * 3_600_000).toISOString()
@@ -52,4 +52,22 @@ test('summary counts members, phones without push and queued points', () => {
   assert.equal(s.bad, 1)
   assert.equal(s.noPush, 1)
   assert.equal(s.pendingPoints, 7)
+})
+
+test('a private-circle phone with a recent encrypted update is not quiet', () => {
+  const quiet = dev({ last_seen: ago(30) })
+  assert.equal(memberHealth(member([quiet], { in_private_circle: true, last_activity_at: ago(0.05) }), NOW), 'ok')
+  assert.equal(memberHealth(member([quiet], { in_private_circle: false, last_activity_at: ago(0.05) }), NOW), 'bad')
+})
+
+test('app version falls back to what the server last saw when the device row is stale', () => {
+  assert.equal(bestVersion(dev({ app_version: '0.1.0', client_version: '0.23.0' })), '0.23.0')
+  assert.equal(bestVersion(dev({ app_version: '0.21.1', client_version: '0.23.0' })), '0.21.1')
+  assert.equal(bestVersion(dev({ app_version: '', client_version: undefined })), 'Unknown')
+})
+
+test('missing health report is explained precisely', () => {
+  assert.equal(reportNote(dev()), '')
+  assert.match(reportNote(dev({ diag_reported_at: null, app_version: '0.23.0' })), /open the app/)
+  assert.match(reportNote(dev({ diag_reported_at: null, app_version: '0.12.0' })), /older than/)
 })

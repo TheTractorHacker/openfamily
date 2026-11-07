@@ -499,6 +499,10 @@ func (s *Server) E2EEPostBatch(w http.ResponseWriter, r *http.Request) {
 
 	if len(stored) > 0 {
 		s.noteReport(ctx, uid, time.Now())
+		if kind != "server" {
+			// Genuine accepted upload from a phone key only (never a poll).
+			s.touchPrivateLiveness(r, uid)
+		}
 		circleID, sender := m.CircleID, uid
 		postCommitRunner.Submit(func() { s.fanOutE2EEItems(circleID, sender, stored, wake) })
 	}

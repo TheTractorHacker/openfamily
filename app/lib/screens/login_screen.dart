@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../services/api_client.dart';
 import '../services/auth_service.dart';
 import '../services/device_service.dart';
+import '../services/diagnostics/diagnostics_reporter.dart';
 import '../services/push_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/ds/ds.dart';
@@ -90,6 +93,7 @@ class _LoginScreenState extends State<LoginScreen> {
     // Auth succeeded; register the device (best-effort, non-blocking).
     try {
       await DeviceService.ensureRegistered();
+      unawaited(DiagnosticsAutoReport.maybeReport(force: true));
       await PushService.sync();
     } on SessionExpiredException {
       // Session expired during device registration; the app root already

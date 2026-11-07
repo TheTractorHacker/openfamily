@@ -114,6 +114,9 @@ type diagDevice struct {
 	NotifPermission string     `json:"notif_permission"`
 	BGService       *bool      `json:"bg_service"`
 	DiagReportedAt  *time.Time `json:"diag_reported_at"`
+	// ClientVersion is the newest app version seen for this user on this
+	// platform (app_client_versions); the fallback when AppVersion is stale.
+	ClientVersion string `json:"client_version,omitempty"`
 }
 
 const diagDeviceSelect = `
@@ -219,6 +222,11 @@ func (s *Server) AdminFleetHealth(w http.ResponseWriter, r *http.Request) {
 		LastReportAt *time.Time   `json:"last_report_at"`
 		LastWSAt     *time.Time   `json:"last_ws_at"`
 		Private      bool         `json:"in_private_circle"`
+		// LastActivityAt is the newest sign of life: the later of last_report_at,
+		// last_ws_at, any device's last_seen and the last encrypted update
+		// received. Private phones only show up through the last two.
+		LastActivityAt *time.Time `json:"last_activity_at"`
+		LastPrivateAt  *time.Time `json:"last_private_update_at"`
 		Devices      []diagDevice `json:"devices"`
 	}
 	out := []member{}
@@ -231,6 +239,28 @@ func (s *Server) AdminFleetHealth(w http.ResponseWriter, r *http.Request) {
 			FROM users u LEFT JOIN member_report_state rs ON rs.user_id = u.id WHERE u.id = $1`, uid).
 			Scan(&m.Name, &m.Email, &m.LastReportAt, &m.LastWSAt, &m.Private); err != nil {
 			continue
+		}
+		_ = s.Pool.QueryRow(ctx, `
+			SELECT max(i.received_at) FROM e2ee_items i JOIN device_keys k ON k.device_id = i.device_id
+			WHERE k.user_id = $1`, uid).Scan(&m.LastPrivateAt)
+		m.LastActivityAt = latestTime(m.LastReportAt, m.LastWSAt, m.LastPrivateAt)
+		for _, d := range m.Devices {
+			m.LastActivityAt = latestTime(m.LastActivityAt, d.LastSeen)
+		}
+		cv := map[string]string{}
+		if vr, err := s.Pool.Query(ctx, `
+			SELECT DISTINCT ON (platform) platform, app_version FROM app_client_versions
+			WHERE user_id = $1 ORDER BY platform, last_seen DESC`, uid); err == nil {
+			for vr.Next() {
+				var p, v string
+				if vr.Scan(&p, &v) == nil {
+					cv[p] = v
+				}
+			}
+			vr.Close()
+		}
+		for i := range m.Devices {
+			m.Devices[i].ClientVersion = cv[m.Devices[i].Platform]
 		}
 		out = append(out, m)
 	}
@@ -258,4 +288,15 @@ func (s *Server) SendTestPush(w http.ResponseWriter, r *http.Request) {
 	sent, failed := s.pushUsersRender(ctx, []string{claims.UserID}, fixedRender(
 		"OpenFamily test alert", "If you can read this, alerts reach this phone."))
 	writeJSON(w, http.StatusOK, map[string]int{"sent": sent, "failed": failed})
+}
+
+// latestTime returns the latest non-nil time, or nil.
+func latestTime(ts ...*time.Time) *time.Time {
+	var best *time.Time
+	for _, t := range ts {
+		if t != nil && (best == nil || t.After(*best)) {
+			best = t
+		}
+	}
+	return best
 }

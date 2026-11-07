@@ -9,6 +9,7 @@ import 'screens/join_circle_screen.dart';
 import 'screens/server_config_screen.dart';
 import 'screens/sign_up_screen.dart';
 import 'screens/diagnostics_screen.dart';
+import 'services/diagnostics/diagnostics_reporter.dart';
 import 'screens/weekly_summary_screen.dart';
 import 'screens/welcome_screen.dart';
 import 'services/accent_preference.dart';
@@ -239,6 +240,7 @@ class _SessionGateState extends State<_SessionGate> {
       case SessionGateResult.valid:
       case SessionGateResult.unreachable:
         unawaited(UnitsSync.pull());
+        unawaited(DiagnosticsAutoReport.maybeReport());
         // Unreachable (offline/5xx): keep the session and open the map; the
         // individual API calls surface connectivity errors on their own.
         return _GateResult.hasSession;

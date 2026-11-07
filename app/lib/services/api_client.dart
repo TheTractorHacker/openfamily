@@ -669,6 +669,10 @@ class ApiClient {
       final String? token = await TokenStorage.readAccessToken();
       if (token != null) {
         headers['Authorization'] = 'Bearer $token';
+        // Lets the server attribute this request to this phone (app version,
+        // liveness of Private-circle phones). Checked against the account.
+        final String? deviceId = await TokenStorage.readDeviceId();
+        if (deviceId != null && deviceId.isNotEmpty) headers['X-Device-Id'] = deviceId;
       }
     }
 

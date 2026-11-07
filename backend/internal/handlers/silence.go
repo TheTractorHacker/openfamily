@@ -137,7 +137,10 @@ func (s *Server) sendSilence(ctx context.Context, userIDs []string, route string
 func (s *Server) RunSilenceOnce(ctx context.Context, now time.Time) (int, error) {
 	rows, err := s.Pool.Query(ctx, `
 		SELECT c.id::text, c.name, c.silence_alert_hours, u.id::text, u.name,
-		       GREATEST(COALESCE(rs.last_report_at, 'epoch'), COALESCE((SELECT max(d.last_seen) FROM devices d WHERE d.user_id = u.id), 'epoch'))
+		       GREATEST(COALESCE(rs.last_report_at, 'epoch'), COALESCE(rs.last_ws_at, 'epoch'),
+		       COALESCE((SELECT max(d.last_seen) FROM devices d WHERE d.user_id = u.id), 'epoch'),
+		       COALESCE((SELECT max(i.received_at) FROM e2ee_items i JOIN device_keys k ON k.device_id = i.device_id
+		                 WHERE k.user_id = u.id AND i.circle_id = c.id), 'epoch'))
 		FROM circles c
 		JOIN live_circle_members m ON m.circle_id = c.id AND m.sharing_enabled
 		JOIN users u ON u.id = m.user_id
