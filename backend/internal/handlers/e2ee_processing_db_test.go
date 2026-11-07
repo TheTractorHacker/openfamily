@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"encoding/json"
+	"net/http/httptest"
 	"bytes"
 	"context"
 	"crypto/ed25519"
@@ -1419,4 +1421,113 @@ func TestPurgeOnPolicyOffSerialisesWithIngest(t *testing.T) {
 	e.purgeWaitsForIngest(t, "policy off", func() {
 		e.do("A", "PUT", "/circles/"+e.circle+"/e2ee/processing-policy", policyBody(t, e.circle, false, "phone", "allowed", 1, e.a))
 	})
+}
+
+// ---------------------------------------------------------- app-side needs
+
+func (e *srvEnv) invite(t *testing.T, mutate string) string {
+	t.Helper()
+	code := "PRVW" + strings.ToUpper(hexN(4))
+	e.sql(`INSERT INTO invite_codes (code, family_id, circle_id, created_by, role, max_uses, expires_at) VALUES ($1,(SELECT id FROM families WHERE id = $2),$2,$3,'member',1, now() + interval '1 day')`, code, e.circle, e.ids["A"])
+	if mutate != "" {
+		e.sql(mutate, code)
+	}
+	return code
+}
+
+func hexN(n int) string {
+	const d = "0123456789ABCDEF"
+	b := randBytes(n)
+	out := make([]byte, n)
+	for i := range b {
+		out[i] = d[int(b[i])%16]
+	}
+	return string(out)
+}
+
+func TestInvitePreviewShowsOnlyThePrivacySetup(t *testing.T) {
+	e := readyLanes(t)
+	e.mustCode("A", "PUT", "/circles/"+e.circle+"/e2ee/processing-policy", policyBody(t, e.circle, true, "server", "allowed", 1, e.a), 200)
+	code := e.invite(t, "")
+	// Public: no session needed.
+	req := httptest.NewRequest("GET", "/invites/"+code+"/preview", nil)
+	rec := httptest.NewRecorder()
+	e.rt.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+	var m map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &m)
+	if m["private"] != true || m["server_assist"] != true || m["member_opt_out"] != "allowed" || m["default_for_new"] != "server" || len(m) != 4 {
+		t.Fatalf("preview: %v", m)
+	}
+	body := rec.Body.String()
+	for _, leak := range []string{e.circle, e.ids["A"], "Fam"} {
+		if strings.Contains(body, leak) {
+			t.Fatalf("preview leaks %q: %s", leak, body)
+		}
+	}
+	// required_server is reported.
+	e.mustCode("A", "PUT", "/circles/"+e.circle+"/e2ee/processing-policy", policyBody(t, e.circle, true, "server", "required_server", 1, e.a), 200)
+	rec = httptest.NewRecorder()
+	e.rt.ServeHTTP(rec, httptest.NewRequest("GET", "/invites/"+code+"/preview", nil))
+	_ = json.Unmarshal(rec.Body.Bytes(), &m)
+	if m["member_opt_out"] != "required_server" {
+		t.Fatalf("%v", m)
+	}
+	// Unknown, used-up and expired codes are the same generic 404.
+	for name, c := range map[string]string{
+		"unknown": "ZZZZZZZZ",
+		"used":    e.invite(t, `UPDATE invite_codes SET uses = max_uses WHERE code = $1`),
+		"expired": e.invite(t, `UPDATE invite_codes SET expires_at = now() - interval '1 minute' WHERE code = $1`),
+	} {
+		rec = httptest.NewRecorder()
+		e.rt.ServeHTTP(rec, httptest.NewRequest("GET", "/invites/"+c+"/preview", nil))
+		if rec.Code != 404 {
+			t.Fatalf("%s: %d %s", name, rec.Code, rec.Body)
+		}
+	}
+	// A circle that is not private says so and reports the defaults.
+	std := e.createCircle("D", "Std")
+	e.sql(`INSERT INTO invite_codes (code, family_id, circle_id, created_by, role, max_uses) VALUES ('STDPREV1',(SELECT id FROM families WHERE id = $1),$1,$2,'member',1)`, std, e.ids["D"])
+	rec = httptest.NewRecorder()
+	e.rt.ServeHTTP(rec, httptest.NewRequest("GET", "/invites/STDPREV1/preview", nil))
+	_ = json.Unmarshal(rec.Body.Bytes(), &m)
+	if rec.Code != 200 || m["private"] != false || m["server_assist"] != false || m["member_opt_out"] != "allowed" || m["default_for_new"] != "phone" {
+		t.Fatalf("%d %v", rec.Code, m)
+	}
+}
+
+func TestLegacyAccessOpenFlagAndPurgeResponse(t *testing.T) {
+	e := readyEnv(t)
+	e.declareLanes2("A", e.a)
+	e.declareLanes2("B", e.b)
+	e.declareLanes2("C", e.c)
+	st := e.mustCode("A", "GET", "/circles/"+e.circle+"/e2ee/processing", nil, 200)
+	if st["legacy_access_open"] != false {
+		t.Fatalf("legacy circle: %v", st["legacy_access_open"])
+	}
+	// The exact request shape the phone sends: epoch fields at top level, CK wraps
+	// under epoch_wraps, the signed policy under "policy" with its own wraps and
+	// log_signature (the client also sends admin_user_id, which is ignored).
+	body := e.upgradeBody(true)
+	body["policy"].(map[string]any)["admin_user_id"] = e.ids["A"]
+	e.mustCode("A", "POST", "/circles/"+e.circle+"/e2ee/processing-upgrade", body, 200)
+	st = e.mustCode("A", "GET", "/circles/"+e.circle+"/e2ee/processing", nil, 200)
+	if st["legacy_access_open"] != true {
+		t.Fatalf("upgraded circle with old wraps: %v", st["legacy_access_open"])
+	}
+	e.mustCode("A", "DELETE", "/circles/"+e.circle+"/e2ee/legacy-server-access", nil, 200)
+	st = e.mustCode("A", "GET", "/circles/"+e.circle+"/e2ee/processing", nil, 200)
+	if st["legacy_access_open"] != false {
+		t.Fatalf("after ending access: %v", st["legacy_access_open"])
+	}
+	// Purge answers with BOTH counters.
+	m := e.mustCode("B", "DELETE", "/circles/"+e.circle+"/e2ee/server-copies", nil, 200)
+	if _, ok := m["locations_deleted"]; !ok {
+		t.Fatalf("%v", m)
+	}
+	if _, ok := m["items_deleted"]; !ok {
+		t.Fatalf("%v", m)
+	}
 }

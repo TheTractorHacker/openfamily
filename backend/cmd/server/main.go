@@ -242,6 +242,9 @@ func main() {
 	r.Get("/integrations/ha/v1/events", srv.HAEvents)
 	// Public invite landing page: static, no database access, no secrets.
 	r.Get("/join/{code}", srv.JoinLanding)
+	// What an invite holder may know about the circle's privacy setup before joining
+	// (public, per-IP rate limited, generic 404).
+	r.Get("/invites/{code}/preview", srv.InvitePreview)
 	// iOS Universal Links association (public, static; 404 unless IOS_TEAM_ID is set).
 	r.Get("/.well-known/apple-app-site-association", srv.AppleAppSiteAssociation)
 	// Public signed-APK download for invited family members (rate limited).
