@@ -442,6 +442,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  final TextEditingController _search = TextEditingController();
+  String _query = '';
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
+  /// A section header plus its rows, filtered by the search box (matches title words and keywords).
+  List<Widget> _section(String name, List<(String, Widget)> rows) {
+    final List<Widget> shown = <Widget>[
+      for (final (String keys, Widget w) in rows)
+        if (w is! SizedBox && (_query.isEmpty || keys.contains(_query) || _titleOf(w).toLowerCase().contains(_query))) w,
+    ];
+    if (shown.isEmpty) return const <Widget>[];
+    return <Widget>[DsSectionHeader(name), ...shown];
+  }
+
+  static String _titleOf(Widget w) => w is DsListRow ? w.title : (w is DsToggleRow ? w.title : '');
+
   @override
   Widget build(BuildContext context) {
     void push(Widget page) => Navigator.of(context)
@@ -456,169 +477,222 @@ class _SettingsScreenState extends State<SettingsScreen> {
             child: ListView(
               children: [
             UpdateCard(serverHost: ServerConfig.instance.apiBaseUrl),
-            const DsSectionHeader('Account'),
-            DsListRow(
-              leading: DsListRow.iconTile(context, Icons.person_outline),
-              title: 'Profile',
-              chevron: true,
-              onTap: () => push(const ProfileScreen()),
-            ),
-            DsListRow(
-              leading: DsListRow.iconTile(context, Icons.group_outlined),
-              title: 'Family',
-              chevron: true,
-              onTap: () => push(const FamiliesScreen()),
-            ),
-            DsListRow(
-              leading: DsListRow.iconTile(context, Icons.groups_outlined),
-              title: 'Circles',
-              subtitle: 'All your circles and location sharing',
-              chevron: true,
-              onTap: () => push(const CirclesScreen()),
-            ),
-            DsListRow(
-              leading: DsListRow.iconTile(context, Icons.dns_outlined),
-              title: 'Server',
-              subtitle: ServerConfig.instance.apiBaseUrl.isEmpty
-                  ? 'Not set'
-                  : ServerConfig.instance.apiBaseUrl,
-              chevron: true,
-              onTap: _changeServer,
-            ),
-            const DsSectionHeader('Appearance'),
-            const _AppearanceTile(),
-            const _AccentTile(),
-            const _MapStyleTile(),
-            const UnitsSettingTile(),
-            const DsSectionHeader('Privacy & Security'),
-            DsListRow(
-              leading: DsListRow.iconTile(context, Icons.shield_outlined),
-              title: 'Security',
-              subtitle: 'Two-factor, sessions, password, your data',
-              chevron: true,
-              onTap: () => push(const SecurityScreen()),
-            ),
-            DsListRow(
-              key: const Key('settings-processing'),
-              leading: DsListRow.iconTile(context, Icons.smartphone),
-              title: 'Where my data is processed',
-              subtitle: 'Don\'t send my data to the server',
-              chevron: true,
-              onTap: () => push(const MyProcessingScreen()),
-            ),
-            DsToggleRow(
-              icon: Icons.fingerprint,
-              title: 'Biometric unlock',
-              subtitle: _biometricSubtitle,
-              subtitleColor:
-                  _biometricError == null ? null : AppColors.statusRed,
-              value: _biometricEnabled,
-              onChanged: !_biometricLoading &&
-                      !_biometricUpdating &&
-                      ((_biometricAvailability?.isAvailable ?? false) ||
-                          _biometricEnabled)
-                  ? _setBiometricEnabled
-                  : null,
-            ),
-            DsToggleRow(
-              icon: Icons.lock_clock_outlined,
-              title: 'Keep me signed in on this device',
-              subtitle: 'If the server ends your session, sign in again '
-                  'automatically. Your password is kept in the '
-                  '${PlatformFeatures.isIOS ? 'iPhone Keychain' : 'Android Keystore'} '
-                  'on this device only. Turn off to delete it.',
-              value: _keepSignedIn,
-              onChanged: _setKeepSignedIn,
-            ),
-            if (_biometricEnabled)
-              _LockDelayRow(
-                value: _lockGrace,
-                onChanged: _biometricUpdating ? null : _setLockGrace,
+            Padding(
+              padding: const EdgeInsets.fromLTRB(AppSpace.xl, AppSpace.sm, AppSpace.xl, AppSpace.xs),
+              child: TextField(
+                key: const Key('settings-search'),
+                controller: _search,
+                onChanged: (String v) => setState(() => _query = v.trim().toLowerCase()),
+                decoration: InputDecoration(
+                  prefixIcon: const Icon(Icons.search),
+                  hintText: 'Search settings',
+                  isDense: true,
+                  suffixIcon: _query.isEmpty
+                      ? null
+                      : IconButton(
+                          tooltip: 'Clear search',
+                          icon: const Icon(Icons.close),
+                          onPressed: () => setState(() {
+                            _search.clear();
+                            _query = '';
+                          }),
+                        ),
+                ),
               ),
-            const DsSectionHeader('Location'),
-            DsListRow(
-              leading: DsListRow.iconTile(context, Icons.speed_outlined),
-              title: 'Driving detection',
-              subtitle: PlatformFeatures.drivingSensors
-                  ? 'Motion-sensor braking and acceleration events'
-                  : PlatformFeatures.notOnIphone,
-              chevron: true,
-              onTap: () => push(const DrivingDetectionScreen()),
             ),
-            DsToggleRow(
-              icon: Icons.location_on_outlined,
-              title: 'Location sharing',
-              subtitle: 'When off, this device stops reporting your position.',
-              value: _locationSharing,
-              onChanged: _locationSharingLoading ? null : _setLocationSharing,
-            ),
-            if (PlatformFeatures.homeWidget)
-              DsToggleRow(
-                icon: Icons.widgets_outlined,
-                title: 'Show family on home screen widget',
-                subtitle: 'Names and status are stored on this phone for the '
-                    'widget. Turning this off removes them.',
-                value: _widgetShowFamily,
-                onChanged: (bool v) {
-                  setState(() => _widgetShowFamily = v);
-                  HomeWidgetService.setEnabled(v);
-                },
+            for (final (String name, List<(String, Widget)> rows) in <(String, List<(String, Widget)>)>[
+              (
+                'Account',
+                <(String, Widget)>[
+                  ('profile name photo', DsListRow(
+                    leading: DsListRow.iconTile(context, Icons.person_outline),
+                    title: 'Profile',
+                    chevron: true,
+                    onTap: () => push(const ProfileScreen()),
+                  )),
+                  ('family friends people', DsListRow(
+                    leading: DsListRow.iconTile(context, Icons.group_outlined),
+                    title: 'Family & friends',
+                    chevron: true,
+                    onTap: () => push(const FamiliesScreen()),
+                  )),
+                  ('circles sharing', DsListRow(
+                    leading: DsListRow.iconTile(context, Icons.groups_outlined),
+                    title: 'Circles',
+                    subtitle: 'Your circles and who sees you',
+                    chevron: true,
+                    onTap: () => push(const CirclesScreen()),
+                  )),
+                  ('security password two-factor sessions', DsListRow(
+                    leading: DsListRow.iconTile(context, Icons.shield_outlined),
+                    title: 'Security',
+                    subtitle: 'Password, two-factor, sessions',
+                    chevron: true,
+                    onTap: () => push(const SecurityScreen()),
+                  )),
+                  ('biometric fingerprint face', DsToggleRow(
+                    icon: Icons.fingerprint,
+                    title: 'Biometric unlock',
+                    subtitle: _biometricSubtitle,
+                    subtitleColor: _biometricError == null ? null : AppColors.statusRed,
+                    value: _biometricEnabled,
+                    onChanged: !_biometricLoading &&
+                            !_biometricUpdating &&
+                            ((_biometricAvailability?.isAvailable ?? false) || _biometricEnabled)
+                        ? _setBiometricEnabled
+                        : null,
+                  )),
+                  if (_biometricEnabled)
+                    ('lock delay', _LockDelayRow(value: _lockGrace, onChanged: _biometricUpdating ? null : _setLockGrace)),
+                  ('keep signed in', DsToggleRow(
+                    icon: Icons.lock_clock_outlined,
+                    title: 'Keep me signed in',
+                    subtitle: 'Sign in again automatically if needed',
+                    info: 'If the server ends your session, Orbitly signs in again by itself. Your password is kept in the '
+                        '${PlatformFeatures.isIOS ? 'iPhone Keychain' : 'Android Keystore'} on this device only. '
+                        'Turn this off to delete it.',
+                    value: _keepSignedIn,
+                    onChanged: _setKeepSignedIn,
+                  )),
+                ],
               ),
-            if (BatteryOptimizationService.isSupported)
-              DsListRow(
-                leading:
-                    DsListRow.iconTile(context, Icons.battery_alert_outlined),
-                title: 'Background updates',
-                subtitle: 'Let Orbitly run freely so your location stays '
-                    'fresh when the app is closed.',
-                chevron: true,
-                onTap: BatteryOptimizationService.openSettings,
+              (
+                'Sharing & privacy',
+                <(String, Widget)>[
+                  ('location sharing pause', DsToggleRow(
+                    icon: Icons.location_on_outlined,
+                    title: 'Location sharing',
+                    subtitle: _locationSharing ? 'On: your circles see you' : 'Off: you are hidden',
+                    info: 'When off, this device stops reporting your position to all of your circles.',
+                    value: _locationSharing,
+                    onChanged: _locationSharingLoading ? null : _setLocationSharing,
+                  )),
+                  ('widget home screen', PlatformFeatures.homeWidget
+                    ? DsToggleRow(
+                      icon: Icons.widgets_outlined,
+                      title: 'Home screen widget',
+                      subtitle: 'Show people on the widget',
+                      info: 'Names and status are stored on this phone for the widget. Turning this off removes them.',
+                      value: _widgetShowFamily,
+                      onChanged: (bool v) {
+                        setState(() => _widgetShowFamily = v);
+                        HomeWidgetService.setEnabled(v);
+                      },
+                    )
+                    : const SizedBox.shrink()),
+                ],
               ),
-            const DsSectionHeader('Notifications'),
-            DsToggleRow(
-              icon: Icons.notifications_outlined,
-              title: 'Push notifications',
-              subtitle: pushNotificationsSubtitle(isWeb: kIsWeb),
-              value: _notifications,
-              onChanged: _notificationsLoading ? null : _setPushNotifications,
-            ),
-            DsListRow(
-              leading:
-                  DsListRow.iconTile(context, Icons.tune_outlined),
-              title: 'Notification settings',
-              subtitle: 'Place alerts, check-ins, drives, battery and more',
-              chevron: true,
-              onTap: () => push(const NotificationSettingsScreen()),
-            ),
-            const DsSectionHeader('Help'),
-            DsListRow(
-              leading: DsListRow.iconTile(context, Icons.health_and_safety_outlined),
-              title: 'Diagnostics',
-              subtitle: "Why isn't my phone reporting? Checks and one-tap fixes",
-              chevron: true,
-              onTap: () => push(const DiagnosticsScreen()),
-            ),
-            const DsSectionHeader('About'),
-            DsListRow(
-              leading: DsListRow.iconTile(context, Icons.slideshow_outlined),
-              title: 'Replay walkthrough',
-              subtitle: 'A quick tour of how Orbitly works',
-              chevron: true,
-              onTap: _replayWalkthrough,
-            ),
-            DsListRow(
-              leading: DsListRow.iconTile(context, Icons.privacy_tip_outlined),
-              title: 'Privacy policy',
-              chevron: true,
-              onTap: () => push(const PrivacyPolicyScreen()),
-            ),
-            DsListRow(
-              leading: DsListRow.iconTile(context, Icons.info_outline),
-              title: 'About Orbitly',
-              subtitle: 'Credits, source code and licenses',
-              chevron: true,
-              onTap: () => push(const AboutScreen()),
-            ),
+              (
+                'Notifications',
+                <(String, Widget)>[
+                  ('push notifications', DsToggleRow(
+                    icon: Icons.notifications_outlined,
+                    title: 'Push notifications',
+                    subtitle: _notifications ? 'On' : 'Off',
+                    info: pushNotificationsSubtitle(isWeb: kIsWeb),
+                    value: _notifications,
+                    onChanged: _notificationsLoading ? null : _setPushNotifications,
+                  )),
+                  ('notification settings alerts check-ins', DsListRow(
+                    leading: DsListRow.iconTile(context, Icons.tune_outlined),
+                    title: 'Notification settings',
+                    subtitle: 'Choose which alerts you get',
+                    chevron: true,
+                    onTap: () => push(const NotificationSettingsScreen()),
+                  )),
+                ],
+              ),
+              (
+                'Driving & safety',
+                <(String, Widget)>[
+                  ('driving detection braking', DsListRow(
+                    leading: DsListRow.iconTile(context, Icons.speed_outlined),
+                    title: 'Driving detection',
+                    subtitle: PlatformFeatures.drivingSensors ? 'Hard braking and fast starts' : PlatformFeatures.notOnIphone,
+                    chevron: true,
+                    onTap: () => push(const DrivingDetectionScreen()),
+                  )),
+                ],
+              ),
+              (
+                'Server & data',
+                <(String, Widget)>[
+                  ('server address', DsListRow(
+                    leading: DsListRow.iconTile(context, Icons.dns_outlined),
+                    title: 'Server',
+                    subtitle: ServerConfig.instance.apiBaseUrl.isEmpty ? 'Not set' : ServerConfig.instance.apiBaseUrl,
+                    chevron: true,
+                    onTap: _changeServer,
+                  )),
+                  ('where my data is processed phone only server', DsListRow(
+                    key: const Key('settings-processing'),
+                    leading: DsListRow.iconTile(context, Icons.smartphone),
+                    title: 'Where my data is processed',
+                    subtitle: 'Server or this phone only',
+                    info: 'Choose, circle by circle, whether the server may process your location (trips, history) '
+                        'or whether only your phone does. Your data is encrypted either way.',
+                    chevron: true,
+                    onTap: () => push(const MyProcessingScreen()),
+                  )),
+                ],
+              ),
+              (
+                'Phone health',
+                <(String, Widget)>[
+                  ('diagnostics not reporting', DsListRow(
+                    leading: DsListRow.iconTile(context, Icons.health_and_safety_outlined),
+                    title: 'Diagnostics',
+                    subtitle: 'Check why updates are missing',
+                    chevron: true,
+                    onTap: () => push(const DiagnosticsScreen()),
+                  )),
+                  ('background battery', BatteryOptimizationService.isSupported
+                    ? DsListRow(
+                      leading: DsListRow.iconTile(context, Icons.battery_alert_outlined),
+                      title: 'Background updates',
+                      subtitle: 'Keep location fresh when the app is closed',
+                      chevron: true,
+                      onTap: BatteryOptimizationService.openSettings,
+                    )
+                    : const SizedBox.shrink()),
+                ],
+              ),
+              (
+                'Appearance',
+                <(String, Widget)>[
+                  ('theme dark light', const _AppearanceTile()),
+                  ('accent color', const _AccentTile()),
+                  ('map style', const _MapStyleTile()),
+                  ('units miles kilometres', const UnitsSettingTile()),
+                ],
+              ),
+              (
+                'About',
+                <(String, Widget)>[
+                  ('walkthrough tour', DsListRow(
+                    leading: DsListRow.iconTile(context, Icons.slideshow_outlined),
+                    title: 'Replay walkthrough',
+                    subtitle: 'A quick tour of Orbitly',
+                    chevron: true,
+                    onTap: _replayWalkthrough,
+                  )),
+                  ('privacy policy', DsListRow(
+                    leading: DsListRow.iconTile(context, Icons.privacy_tip_outlined),
+                    title: 'Privacy policy',
+                    chevron: true,
+                    onTap: () => push(const PrivacyPolicyScreen()),
+                  )),
+                  ('about credits licenses', DsListRow(
+                    leading: DsListRow.iconTile(context, Icons.info_outline),
+                    title: 'About Orbitly',
+                    subtitle: 'Credits, source code and licenses',
+                    chevron: true,
+                    onTap: () => push(const AboutScreen()),
+                  )),
+                ],
+              ),
+            ])
+              ..._section(name, rows),
             // Seven quick taps open the hidden Performance screen. A bare
             // GestureDetector keeps the row visually and semantically a plain
             // static row.

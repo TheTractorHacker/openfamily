@@ -95,7 +95,9 @@ class ProcessingCopy {
       'processed the history you need. It cannot be undone. Plain copies the server already made stay until they are deleted.';
 }
 
-/// "Processed by server" / "Phone only" chip, from the verified lane of an item or member.
+/// "Processed by server" / "Phone only" / "Not chosen yet" chip. Colours: the app accent for the server (the normal,
+/// recommended mode, so never amber), a calm blue for phone only, neutral grey for undecided, red only when a lane
+/// could not be confirmed.
 class ProcessingBadgeChip extends StatelessWidget {
   const ProcessingBadgeChip({super.key, required this.badge});
   final ProcessingBadge badge;
@@ -104,13 +106,21 @@ class ProcessingBadgeChip extends StatelessWidget {
   Widget build(BuildContext context) {
     switch (badge) {
       case ProcessingBadge.serverAssisted:
-        return const DsStatusChip(label: 'Processed by server', icon: Icons.dns_outlined, color: AppColors.statusOrange);
+        return const DsStatusChip(label: 'Processed by server', icon: Icons.dns_outlined, color: AppColors.accentInk);
       case ProcessingBadge.phoneOnly:
-        return const DsStatusChip(label: 'Phone only', icon: Icons.smartphone, color: AppColors.statusGreen);
+        return const DsStatusChip(label: 'Phone only', icon: Icons.smartphone, color: AppColors.sky);
       case ProcessingBadge.unverified:
         return const DsStatusChip(label: 'Not confirmed', icon: Icons.help_outline, color: AppColors.statusRed);
     }
   }
+}
+
+/// Neutral chip for a member who has not made a choice yet (their data stays on their phone until they do).
+class NotChosenChip extends StatelessWidget {
+  const NotChosenChip({super.key});
+  @override
+  Widget build(BuildContext context) =>
+      const DsStatusChip(label: 'Not chosen yet', icon: Icons.hourglass_empty, color: AppColors.statusGrey);
 }
 
 /// Chip for a member lane (true = server).
@@ -120,6 +130,33 @@ class LaneChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) =>
       ProcessingBadgeChip(badge: server ? ProcessingBadge.serverAssisted : ProcessingBadge.phoneOnly);
+}
+
+/// For the person's own phone-only state on report screens: what it means and two ways forward.
+class PhoneOnlyActions extends StatelessWidget {
+  const PhoneOnlyActions({super.key, required this.onUseServer, required this.onComputeOnPhone});
+  final VoidCallback onUseServer, onComputeOnPhone;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      key: const Key('phone-only-actions'),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        const SizedBox(height: AppSpace.sm),
+        Text('Your data stays on this phone, so the server cannot make a driving report for you.', style: AppType.secondary),
+        const SizedBox(height: AppSpace.sm),
+        Wrap(spacing: AppSpace.sm, runSpacing: AppSpace.sm, children: <Widget>[
+          DsPillButton(key: const Key('use-the-server'), label: 'Use the server', icon: Icons.dns_outlined, onPressed: onUseServer),
+          DsPillButton(
+              key: const Key('compute-on-phone'),
+              label: 'Compute reports on this phone (uses battery)',
+              style: DsPillStyle.outlined,
+              onPressed: onComputeOnPhone),
+        ]),
+      ],
+    );
+  }
 }
 
 String sinceText(DateTime at, DateTime now) {
@@ -132,8 +169,11 @@ String sinceText(DateTime at, DateTime now) {
 
 /// Shown instead of figures of a phone-only member whose phone has not shared a result yet.
 class WaitingForPhoneCard extends StatelessWidget {
-  const WaitingForPhoneCard({super.key, required this.name});
+  const WaitingForPhoneCard({super.key, required this.name, this.onUseServer, this.onComputeOnPhone});
   final String name;
+
+  /// Only for the person's own card.
+  final VoidCallback? onUseServer, onComputeOnPhone;
 
   @override
   Widget build(BuildContext context) {
@@ -156,10 +196,11 @@ class WaitingForPhoneCard extends StatelessWidget {
           const SizedBox(height: AppSpace.sm),
           Text('Waiting for $name\'s phone', style: AppType.body.copyWith(fontWeight: FontWeight.w700)),
           Text(
-            '$name keeps data on their phone. Their phone has not shared a summary yet, for example because it is off or '
-            'has not moved. Driving reports need the server: turn on the server for this circle, or $name can enable phone reports.',
+            '$name keeps data on their phone and it has not shared a summary yet (it may be off or not have moved).',
             style: AppType.secondary.copyWith(color: cs.onSurfaceVariant),
           ),
+          if (onUseServer != null && onComputeOnPhone != null)
+            PhoneOnlyActions(onUseServer: onUseServer!, onComputeOnPhone: onComputeOnPhone!),
         ]),
       ),
     );

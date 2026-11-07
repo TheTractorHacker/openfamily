@@ -16,7 +16,6 @@ import '../services/processing/primary_lanes.dart';
 import '../services/processing/processing_source.dart';
 import '../widgets/phone_driving_widgets.dart';
 import '../widgets/processing_widgets.dart';
-import '../widgets/private_circle_widgets.dart';
 import '../widgets/driving_event_chips.dart';
 import '../widgets/driving_event_sheet.dart';
 import '../widgets/driving_page_widgets.dart';
@@ -25,6 +24,7 @@ import '../widgets/driving_member_dock.dart';
 import '../widgets/ds/ds.dart';
 import 'driving_detection_screen.dart';
 import 'inbox_screen.dart';
+import 'my_processing_screen.dart';
 import 'trip_detail_screen.dart';
 import 'trips_screen.dart';
 import 'weekly_summary_screen.dart';
@@ -121,7 +121,7 @@ class _State extends State<FamilyDrivingReportScreen> {
     setState(() => _lanesLoading = true);
     PrimaryLanes? l;
     try {
-      l = await (widget.lanes ?? loadPrimaryLanes)();
+      l = await (widget.lanes ?? () => loadPrimaryLanes(circleId: _scope))();
     } catch (_) {}
     if (!mounted) return;
     setState(() {
@@ -281,9 +281,25 @@ class _State extends State<FamilyDrivingReportScreen> {
           if (!isPrivate) return _buildScreen(context);
           if (_lanesLoading) return const Scaffold(body: Center(child: CircularProgressIndicator()));
           if (_lanes == null) {
+            // Never a dead end: the lanes could not be read just now (offline, keys still loading). Say so and retry.
             return Scaffold(
               appBar: AppBar(title: const Text('Driving report')),
-              body: const SafeArea(child: NotAvailableInPrivate(feature: PrivateFeature.drivingReport)),
+              body: SafeArea(
+                child: Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(AppSpace.xl),
+                    child: Column(mainAxisSize: MainAxisSize.min, children: <Widget>[
+                      const Icon(Icons.cloud_off_outlined, size: 40),
+                      const SizedBox(height: AppSpace.md),
+                      Text('Could not load the driving report', key: const Key('driving-lanes-failed'), style: AppType.headline, textAlign: TextAlign.center),
+                      const SizedBox(height: AppSpace.sm),
+                      Text('Check your connection and try again. Your data is not affected.', style: AppType.secondary, textAlign: TextAlign.center),
+                      const SizedBox(height: AppSpace.lg),
+                      DsPillButton(label: 'Try again', icon: Icons.refresh, onPressed: _loadLanes),
+                    ]),
+                  ),
+                ),
+              ),
             );
           }
           return _buildPrivate(context, _lanes!);
@@ -349,7 +365,11 @@ class _State extends State<FamilyDrivingReportScreen> {
   Widget _privateMemberCard(BuildContext context, MemberProcessing m, PrimaryLanes l, UnitSystem units, DateTime from, DateTime to) {
     final String name = m.userId == widget.userId.value ? 'You' : l.nameOf(m.userId);
     if (m.origin == ProcessingOrigin.phone) {
-      return PhoneDrivingCard(name: name, member: m, from: from, to: to, units: units, now: _now);
+      final bool mine = m.userId == widget.userId.value;
+      void openMine() => Navigator.of(context).push<void>(MaterialPageRoute<void>(builder: (_) => const MyProcessingScreen()));
+      return PhoneDrivingCard(
+          name: name, member: m, from: from, to: to, units: units, now: _now,
+          onUseServer: mine ? openMine : null, onComputeOnPhone: mine ? openMine : null);
     }
     MemberReport? r;
     for (final MemberReport x in _report?.members ?? const <MemberReport>[]) {

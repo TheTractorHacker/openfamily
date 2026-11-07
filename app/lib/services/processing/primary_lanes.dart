@@ -38,9 +38,9 @@ class _NoServerReader implements ServerProcessingReader {
 }
 
 /// Null when the primary circle is not a Private circle (nothing to compose).
-Future<PrimaryLanes?> loadPrimaryLanes({PrivateRuntime? runtime, DateTime? now, int days = 62}) async {
+Future<PrimaryLanes?> loadPrimaryLanes({PrivateRuntime? runtime, DateTime? now, int days = 62, String? circleId}) async {
   final PrivateRuntime rt = runtime ?? PrivateRuntime.instance;
-  final String? cid = await rt.privateTargetFor(null);
+  final String? cid = await rt.privateTargetFor(circleId);
   if (cid == null) return null;
   try {
     await rt.lanesService.refresh(cid);

@@ -4,6 +4,7 @@ library;
 export 'body.dart';
 export 'choice_setting.dart';
 export 'confirm.dart';
+export 'info_hint.dart';
 export 'list_row.dart';
 export 'map_round_button.dart';
 export 'page.dart';

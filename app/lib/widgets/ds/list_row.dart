@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../theme/app_theme.dart';
+import 'info_hint.dart';
 
 /// Standard list row: leading (avatar or icon), title, optional status line,
 /// optional trailing widget. At least 56dp tall, wraps instead of clipping
@@ -18,7 +19,15 @@ class DsListRow extends StatelessWidget {
     this.chevron = false,
     this.semanticLabel,
     this.wash = true,
+    this.info,
+    this.infoTitle,
   });
+
+  /// Longer explanation, shown in a bottom sheet from a small (i) button. Keeps [subtitle] to one short line.
+  final String? info;
+
+  /// Sheet title; defaults to [title].
+  final String? infoTitle;
 
   /// Paint the selected tint; false when the parent paints a bigger one.
   final bool wash;
@@ -111,6 +120,7 @@ class DsListRow extends StatelessWidget {
                       child: trailing!,
                     ),
                   ],
+                  if (info != null) InfoHint(title: infoTitle ?? title, body: info!),
                   if (chevron) ...<Widget>[
                     const SizedBox(width: AppSpace.xs),
                     Icon(Icons.chevron_right, color: cs.onSurfaceVariant),
@@ -124,6 +134,9 @@ class DsListRow extends StatelessWidget {
     );
   }
 }
+
+/// A settings row: title, at most one short line, optional (i) with the long text. Same widget as [DsListRow].
+typedef SettingRow = DsListRow;
 
 /// Rounded card that groups [DsListRow]s with hairline dividers. Use inside a
 /// [DsPage] (the page already supplies the gutter).
