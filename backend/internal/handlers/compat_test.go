@@ -39,7 +39,17 @@ func getWithVersion(rt http.Handler, path, ver string) *httptest.ResponseRecorde
 	return w
 }
 
+// pinCompatReleases fixes the release list these tests were written against, so
+// adding a release to compat.Releases does not rewrite their expectations.
+func pinCompatReleases(t *testing.T) {
+	t.Helper()
+	old := compat.Releases
+	compat.Releases = []string{"0.14.0", "0.15.0", "0.16.0", "0.17.0", "0.18.0", "0.19.0", "0.20.0"}
+	t.Cleanup(func() { compat.Releases = old })
+}
+
 func TestCompatEndpointPerVersion(t *testing.T) {
+	pinCompatReleases(t)
 	rt := compatRouter(&Server{})
 	cases := []struct {
 		ver, status string
@@ -88,6 +98,7 @@ func TestCompatEndpointPerVersion(t *testing.T) {
 }
 
 func TestConfigCarriesCompat(t *testing.T) {
+	pinCompatReleases(t)
 	s := &Server{}
 	w := getWithVersion(compatRouter(s), "/config", "0.14.0")
 	var body struct {
@@ -140,6 +151,7 @@ func TestPrivateCircleShimPerVersion(t *testing.T) {
 }
 
 func TestRefuseUnsupportedAppEnforcement(t *testing.T) {
+	pinCompatReleases(t)
 	run := func(enforce bool, ver string) (refused bool, code int, body string) {
 		s := &Server{}
 		s.compatCache.loaded, s.compatCache.at = true, time.Now()
@@ -202,6 +214,7 @@ func compatDB(t *testing.T) *pgxpool.Pool {
 }
 
 func TestCompatRecordAndAdmin(t *testing.T) {
+	pinCompatReleases(t)
 	pool := compatDB(t)
 	ctx := context.Background()
 	s := &Server{Pool: pool, hub: newHub()}

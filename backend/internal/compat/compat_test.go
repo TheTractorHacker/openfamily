@@ -36,15 +36,25 @@ func TestReleasesSorted(t *testing.T) {
 	}
 }
 
+// pinReleases fixes the release list so these tests describe the rolling rule
+// itself and do not change every time a release is added to Releases.
+func pinReleases(t *testing.T, list ...string) {
+	t.Helper()
+	old := Releases
+	Releases = list
+	t.Cleanup(func() { Releases = old })
+}
+
+var testReleases = []string{"0.14.0", "0.15.0", "0.16.0", "0.17.0", "0.18.0", "0.19.0", "0.20.0"}
+
 func TestWindowRolls(t *testing.T) {
+	pinReleases(t, testReleases...)
 	p := Compute("", "")
 	if p.Min != (Version{0, 16, 0}) || p.Latest != (Version{0, 20, 0}) || len(p.Window) != WindowSize {
 		t.Fatalf("policy = %+v", p)
 	}
 	// A new release pushes the oldest line out.
-	old := Releases
-	defer func() { Releases = old }()
-	Releases = append(append([]string{}, old...), "0.21.0")
+	Releases = append(append([]string{}, testReleases...), "0.21.0")
 	if got := Compute("", "").Min; got != (Version{0, 17, 0}) {
 		t.Fatalf("min after new release = %v", got)
 	}
@@ -66,6 +76,7 @@ func TestOverridePrecedence(t *testing.T) {
 }
 
 func TestClassify(t *testing.T) {
+	pinReleases(t, testReleases...)
 	p := Compute("", "") // min 0.16.0, latest 0.20.0
 	cases := []struct {
 		v    string
