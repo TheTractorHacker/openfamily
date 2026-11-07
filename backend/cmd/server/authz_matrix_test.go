@@ -173,6 +173,7 @@ var publicRoutes = map[string]string{
 	"GET /integrations/ha/v1/places":   "scoped integration token (ofha_...); see TestAuthzMatrixHAAPI",
 	"GET /integrations/ha/v1/events":   "scoped integration token (ofha_...); see TestAuthzMatrixHAAPI",
 	"GET /join/{code}":                 "static invite landing page",
+	"GET /invites/{code}/preview":      "public: privacy setup of the invited circle only; per-IP rate limit, generic 404",
 	"GET /.well-known/apple-app-site-association": "iOS Universal Links association file (static)",
 	"GET /app.apk":                     "signed APK for invitees",
 	"GET /s/{token}":                   "share-link viewer (hash lookup)",

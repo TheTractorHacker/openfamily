@@ -575,6 +575,13 @@ func (s *Server) E2EEProcessingState(w http.ResponseWriter, r *http.Request) {
 	var inEffect bool
 	_ = s.Pool.QueryRow(ctx, `SELECT e2ee_server_assist($1::uuid)`, m.CircleID).Scan(&inEffect)
 	out["in_effect"] = inEffect
+	// True only on an upgraded circle where the server key still holds wraps of the
+	// old phone-key epochs (what DELETE .../legacy-server-access removes).
+	var accessOpen bool
+	_ = s.Pool.QueryRow(ctx, `SELECT NOT c.server_legacy_ck AND c.server_legacy_epoch_max > 0 AND EXISTS (
+		SELECT 1 FROM circle_key_wraps w JOIN device_keys d ON d.device_id = w.recipient_device_id
+		 WHERE w.circle_id = c.id AND w.key_line = 'phone' AND d.kind = 'server') FROM circles c WHERE c.id = $1`, m.CircleID).Scan(&accessOpen)
+	out["legacy_access_open"] = accessOpen
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -1186,4 +1193,36 @@ func (s *Server) memberKeepsDataOnPhone(ctx context.Context, userID string) bool
 		return true
 	}
 	return keeps
+}
+
+// InvitePreview is GET /invites/{code}/preview (public, per-IP rate limited): what
+// a person holding an invite code may know about HOW the circle treats their data
+// before they join. Only the privacy setup is returned (no name, no member list,
+// no ids); an unknown, expired, used-up or ended invite answers the same generic
+// 404 as a wrong code. Joining stays a separate, authenticated step.
+func (s *Server) InvitePreview(w http.ResponseWriter, r *http.Request) {
+	if !s.allowAuth(w, authIPKey("invitepreview", clientIP(r)), joinPerIP*3, joinWindow) {
+		return
+	}
+	code := normalizeCode(chi.URLParam(r, "code"))
+	if code == "" || len(code) > 32 {
+		writeError(w, http.StatusNotFound, "invalid invite code")
+		return
+	}
+	var private, assist bool
+	var optOut, def string
+	err := s.Pool.QueryRow(r.Context(), `
+		SELECT c.e2ee_mode = 'private', c.e2ee_mode = 'private' AND c.server_assist,
+		       CASE WHEN c.e2ee_mode = 'private' AND c.server_assist THEN c.member_opt_out ELSE 'allowed' END,
+		       CASE WHEN c.e2ee_mode = 'private' AND c.server_assist THEN c.server_assist_default ELSE 'phone' END
+		FROM invite_codes ic
+		JOIN circles c ON c.id = COALESCE(ic.circle_id, ic.family_id) AND `+circleLiveSQL+`
+		WHERE ic.code = $1 AND ic.uses < ic.max_uses AND (ic.expires_at IS NULL OR ic.expires_at > now())`, code).
+		Scan(&private, &assist, &optOut, &def)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "invalid invite code")
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, map[string]any{"private": private, "server_assist": assist, "member_opt_out": optOut, "default_for_new": def})
 }
