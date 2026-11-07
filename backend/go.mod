@@ -6,7 +6,7 @@ require (
 	filippo.io/age v1.3.2
 	github.com/boombuler/barcode v1.0.1-0.20190219062509-6c824513bacc
 	github.com/coder/websocket v1.8.15
-	github.com/go-chi/chi/v5 v5.3.1
+	github.com/go-chi/chi/v5 v5.5.0
 	github.com/go-webauthn/webauthn v0.18.2
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/golang-migrate/migrate/v4 v4.19.1
