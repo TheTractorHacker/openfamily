@@ -6,11 +6,11 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5"
 	"github.com/TheTractorHacker/openfamily/backend/internal/circles"
 	"github.com/TheTractorHacker/openfamily/backend/internal/middleware"
 	"github.com/TheTractorHacker/openfamily/backend/internal/models"
+	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 )
 
 // CreateFamily creates a family and assigns the caller as its admin.
@@ -407,7 +407,7 @@ func (s *Server) ListMembers(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to read members")
 		return
 	}
-	writeJSON(w, http.StatusOK, members)
+	s.writeMemberList(w, r, members)
 }
 
 // GetFamilyMemberAvatar returns a member's avatar only when the caller and
