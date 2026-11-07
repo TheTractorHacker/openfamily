@@ -584,3 +584,12 @@ Writers of plaintext positions are gated per member (ingest re-verifies the lane
 | Writers into `member_positions` (`location.go`, `location_batch.go`, ingest) | n/a | plaintext upload 409 for Private-only users; ingest verified in Go |
 
 Tests: `handlers/e2ee_dawarich_lanes_db_test.go` (planted rows: Dawarich, history, Home Assistant, share link, admin snapshot, purge recompute).
+
+### 19.1 Client notes after the independent review
+
+* `since` (member rows of `GET .../processing`, statements) is **advisory**: the server records it and a phone only uses it for display ("since ..."). It never decides a lane. A lane comes from the member's newest `processing_pref` log entry, verified on the phone (`LanesService._verifiedPref`).
+* Legacy upgrade: consents of the old mode are **not** carried over by phones (a carried-over consent has no log entry, so `_verifiedPref` ignores it). After the upgrade every member signs their own choice again; server processing for a member starts only then. The admin screen says so, including that server-side features pause for a member until they have signed.
+* Policy history: a pref is void when it is older than the newest policy entry that is OFF or does not verify. The phone verifies the newest statement and `policy.history` (up to 30). Policy entries older than the served history are treated as unverified (fail closed); they only void prefs signed before them.
+* Phone-key wraps in circles with server processing: a bridge (`service` key) never receives a phone-key epoch wrap, only the server key, because `e2ee-bridge` reads the server line only. A web viewer gets one only after the owner confirms a dedicated warning for that circle; other members see "X has a web viewer" on the Server processing screen. Bulk wraps (`wrapHeldKeysTo`) go to phones and the recovery identity only.
+* Queue: stored as a versioned record with read-back checks (SharedPreferences has no atomic compare-and-swap, so two isolates can still race in a very narrow window; items are idempotent by (circle, device, seq)). Lane facts are always read fresh in the sealer and flush path. Relay rejections `legacy_epoch_closed` and `bad_epoch` keep the item and trigger a key sync (an item sealed under a closed epoch cannot be re-sealed, it is dropped after 20 failed tries); `required_server` is surfaced to the user as "not delivered".
+* iOS: the preferences plist and Application Support are excluded from backups (`isExcludedFromBackup`).

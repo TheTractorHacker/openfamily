@@ -207,6 +207,10 @@ class _JoinCircleScreenState extends State<JoinCircleScreen> {
           'members who allow it.';
     } else if (!p.isPrivate) {
       text = 'This is a normal circle, not a Private circle: your position is sent to the server in readable form.';
+    } else if (p.legacy) {
+      text = 'Private circle in the OLD trusted-server mode: the server holds the circle key and can read this circle, and it keeps readable '
+          'copies, while every member has allowed it. This is not end-to-end encryption against the server. An admin can upgrade the circle '
+          'so that each member decides for themselves.';
     } else if (!p.serverAssist) {
       text = 'Private circle. Server processing: off. Your phone does the processing and the server cannot read your location.';
     } else if (p.required) {

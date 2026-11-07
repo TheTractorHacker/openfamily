@@ -171,7 +171,7 @@ void main() {
     expect(find.text('OpenFamily server (can read the circle)'), findsOneWidget);
     expect(find.byKey(const Key('viewer-server-warning')), findsOneWidget);
     expect(find.textContaining('SERVER itself'), findsOneWidget);
-    expect(find.textContaining('every member of that circle'), findsOneWidget);
+    expect(find.textContaining('never receives the phone circle key'), findsOneWidget);
   });
 
   testWidgets('the circle badge says the server can read, not "End-to-end encrypted"', (t) async {

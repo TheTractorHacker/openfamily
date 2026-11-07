@@ -20,6 +20,15 @@ String viewerKindLabel(String? kind) => switch (kind) {
       _ => 'Phone',
     };
 
+/// Shown before a web viewer gets the phone key of a circle with server processing (ADR 8.9).
+const String kWebViewerLanesWarning =
+    'This circle has server processing, so some members keep their data on their phone only. A web viewer that gets the circle key '
+    'reads EVERYONE you can read, including those members. They did not agree to that. The other members of this circle will see that '
+    'you have a web viewer. Share the key only if you accept that, and revoke the viewer when you no longer need it.';
+
+const String kBridgeLanesNote =
+    'In this circle a bridge gets only the server key (decided by the admin policy and each member\'s own choice), never the phone key.';
+
 bool _isViewerKind(String k) => k == 'web' || k == 'service' || k == 'server';
 
 /// Approves a read-only "device member" of the Private circles of this account:
@@ -47,6 +56,7 @@ class _ViewerApprovalScreenState extends State<ViewerApprovalScreen> {
   String _me = '';
   CircleE2eeState? _state;
   List<DeviceKey> _waiting = <DeviceKey>[];
+  bool _lanes = false;
 
   @override
   void initState() {
@@ -77,6 +87,7 @@ class _ViewerApprovalScreenState extends State<ViewerApprovalScreen> {
       final LocalIdentity? id = await _svc.identity();
       final CircleE2eeState st = await _svc.api.circleState(widget.circle.id);
       List<DeviceKey> waiting = <DeviceKey>[];
+      final bool lanes = st.isPrivate && await _svc.lanesOn(widget.circle.id);
       if (st.isPrivate && id != null) {
         try {
           await _svc.syncCircleKeys(widget.circle.id);
@@ -93,6 +104,7 @@ class _ViewerApprovalScreenState extends State<ViewerApprovalScreen> {
       setState(() {
         _state = st;
         _waiting = waiting;
+        _lanes = lanes;
         _me = id?.userId ?? '';
         _loading = false;
       });
@@ -152,16 +164,28 @@ class _ViewerApprovalScreenState extends State<ViewerApprovalScreen> {
         setState(() => _approval = a);
       });
 
-  Future<void> _share(DeviceKey k) => _guard(() async {
-        await _svc.confirmWrap(widget.circle.id, k);
-        _snack('Key shared');
-        await _load();
-      });
+  Future<void> _share(DeviceKey k) async {
+    bool informed = false;
+    if (_lanes && k.kind == 'web') {
+      // ADR 8.9: in a circle with server processing a web viewer would read members who keep their data on their phone.
+      informed = await showDsConfirm(context,
+          title: 'Let this web viewer read the whole circle?',
+          message: kWebViewerLanesWarning,
+          confirmLabel: 'I understand: share the key',
+          destructive: true);
+      if (!informed) return;
+    }
+    await _guard(() async {
+      await _svc.confirmWrap(widget.circle.id, k, viewerInformed: informed);
+      _snack(informed ? 'Key shared. Other members can see that you have a web viewer here.' : 'Key shared');
+      await _load();
+    });
+  }
 
   Future<void> _deny(DeviceKey k) async {
     final bool ok = await showDsConfirm(context,
         title: 'Deny this ${viewerKindLabel(k.kind)}?',
-        message: 'Its key is revoked on your account and it never receives the circle key.',
+        message: 'Its key is revoked on your account and it never receives a circle key.',
         confirmLabel: 'Deny',
         destructive: true);
     if (!ok) return;
@@ -289,17 +313,27 @@ class _ViewerApprovalScreenState extends State<ViewerApprovalScreen> {
         child: i.isServer
             ? const Text(
                 'This is the key of the OpenFamily SERVER itself. Approving it only registers the key for your account. '
-                'It can read nothing until you open a Private circle\'s "Trusted server" screen, every member of that circle '
-                'allows it, and a circle admin gives it the circle key. After that the server CAN READ that circle and keeps a '
-                'plaintext copy; anyone who controls the server host can read it too. Approve only the server you run yourself.',
+                'The server never receives the phone circle key, in any circle. It can read only what members who allowed '
+                'server processing sealed for it (Server processing in each circle), and only after a circle admin turned that '
+                'on. Anyone who controls the server host or its backups can read that data. Approve only a server you run yourself.',
                 key: Key('viewer-server-warning'),
               )
-            : Text(
-                'If you approve, this ${i.kind == 'service' ? 'bridge' : 'viewer'} can READ the location of every member of all your Private circles '
-                '(every circle your account is in that is private), now and in the future, until you revoke it. '
-                '${i.kind == 'service' ? 'Whoever runs the server where the bridge runs can read that data. ' : 'Whoever controls the browser and the device it runs on can read that data. '}'
-                'Approve only a viewer or bridge you set up yourself. The kind is not part of the signed approval, so check it here.',
-              ),
+            : (i.kind == 'service'
+                ? const Text(
+                    'A bridge (for example Dawarich) runs on a server. In circles with server processing it receives only the server '
+                    'key, so it can read members who allowed server processing and nobody else. In circles without server '
+                    'processing it reads nothing new. Whoever runs the server where the bridge runs can read that data. '
+                    'Approve only a bridge you set up yourself. The kind is not part of the signed approval, so check it here.',
+                    key: Key('viewer-bridge-warning'),
+                  )
+                : const Text(
+                    'If you approve, this web viewer can be given the key of your Private circles, one circle at a time with its own '
+                    'warning. In a circle with server processing it then reads EVERY member, including members who keep their data on '
+                    'their phone, and the other members of that circle can see that you have a web viewer. Whoever controls the '
+                    'browser and the device it runs on can read that data. Approve only a viewer you set up yourself. The kind is '
+                    'not part of the signed approval, so check it here.',
+                    key: Key('viewer-web-warning'),
+                  )),
       ),
       const SizedBox(height: AppSpace.sm),
       Row(children: <Widget>[
@@ -343,12 +377,16 @@ class _ViewerApprovalScreenState extends State<ViewerApprovalScreen> {
                 Text('${viewerKindLabel(k.kind)}, key ${k.short}', style: AppType.secondary),
                 Text(k.fingerprint, style: AppType.secondary.copyWith(fontFamily: 'monospace')),
                 if (k.approved == false) const Text('Waiting for approval by a circle admin first.', style: AppType.secondary),
+                if (_lanes && k.kind == 'service')
+                  const Text(kBridgeLanesNote, key: Key('bridge-lanes-note'), style: AppType.secondary),
+                if (_lanes && k.kind == 'web')
+                  const Text('This circle has server processing. Sharing the key needs an extra confirmation.', key: Key('web-lanes-note'), style: AppType.secondary),
                 const SizedBox(height: AppSpace.xs),
                 Wrap(spacing: AppSpace.sm, children: <Widget>[
                   FilledButton(
                     key: Key('share-${k.deviceId}'),
-                    onPressed: _busy || k.approved == false || k.kind == 'server' ? null : () => _share(k),
-                    child: Text(k.kind == 'server' ? 'Use "Trusted server"' : 'Share key'),
+                    onPressed: _busy || k.approved == false || k.kind == 'server' || (_lanes && k.kind == 'service') ? null : () => _share(k),
+                    child: Text(k.kind == 'server' ? 'Use "Server processing"' : 'Share key'),
                   ),
                   OutlinedButton(key: Key('deny-${k.deviceId}'), onPressed: _busy ? null : () => _deny(k), child: const Text('Deny')),
                 ]),

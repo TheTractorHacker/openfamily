@@ -205,6 +205,7 @@ class ProcessingServerState {
     this.inEffect = false,
     this.legacy = false,
     this.legacyAccessOpen = false,
+    this.policyHistory = const <PolicyStatement>[],
   });
 
   static const ProcessingServerState off = ProcessingServerState();
@@ -234,6 +235,9 @@ class ProcessingServerState {
 
   /// `legacy_access_open`: an upgraded circle whose server key still holds the old phone-key epochs.
   final bool legacyAccessOpen;
+
+  /// `policy.history`: older signed policy statements (the server serves up to 30). Claims until verified.
+  final List<PolicyStatement> policyHistory;
 
   factory ProcessingServerState.fromJson(Map<String, dynamic> j) {
     final Object? sd = j['device'];
@@ -265,6 +269,10 @@ class ProcessingServerState {
       inEffect: j['in_effect'] == true,
       legacy: j['legacy'] == true,
       legacyAccessOpen: j['legacy_access_open'] == true,
+      policyHistory: <PolicyStatement>[
+        for (final dynamic h in (polMap['history'] as List<dynamic>?) ?? <dynamic>[])
+          if (PolicyStatement.tryParse(h) case final PolicyStatement ps) ps
+      ],
     );
   }
 

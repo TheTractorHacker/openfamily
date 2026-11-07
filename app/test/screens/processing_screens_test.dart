@@ -8,6 +8,7 @@ import 'package:openfamily/screens/processing_screen.dart';
 import 'package:openfamily/services/circle_service.dart';
 import 'package:openfamily/services/e2ee/e2ee_crypto.dart';
 import 'package:openfamily/services/e2ee/lanes_store.dart';
+import 'package:openfamily/services/e2ee/processing_controller.dart' show ProcessingViewer;
 import 'package:openfamily/widgets/ds/ds.dart';
 import 'package:openfamily/widgets/processing_widgets.dart';
 
@@ -103,7 +104,7 @@ void main() {
       await pumpScreen(t, ProcessingScreen(circle: memberCircle, controller: c));
       expect(find.byKey(const Key('proc-choose')), findsOneWidget);
       expect(txt('only a suggestion'), findsOneWidget);
-      expect(t.widget<DsPillButton>(find.byKey(const Key('choose-server'))).style, DsPillStyle.filled);
+      expect(t.widget<DsPillButton>(find.byKey(const Key('choose-server'))).style, DsPillStyle.outlined);
       expect(t.widget<DsPillButton>(find.byKey(const Key('choose-phone'))).style, DsPillStyle.outlined);
       await tapKey(t, 'choose-server');
       expect(find.text('Let the server process your data?'), findsOneWidget);
@@ -365,6 +366,84 @@ void main() {
       final FakeProcessingController c = FakeProcessingController(FakeProcessingController.snapshot(me: pB, admin: false, legacyAccessOpen: true), me: pB);
       await pumpScreen(t, LegacyUpgradeScreen(circle: memberCircle, controller: c));
       expect(find.byKey(const Key('upgrade-end-legacy')), findsNothing);
+    });
+  });
+
+  group('review findings', () {
+    testWidgets('a legacy circle is never shown as "the server cannot read"', (t) async {
+      final FakeProcessingController c = FakeProcessingController(FakeProcessingController.snapshot(me: pB, admin: false, legacy: true, assist: false), me: pB);
+      await pumpScreen(t, ProcessingScreen(circle: memberCircle, controller: c));
+      expect(find.text('Old trusted-server mode'), findsWidgets);
+      expect(find.textContaining('holds the circle key'), findsWidgets);
+      expect(find.text('Phones only'), findsNothing);
+      expect(find.textContaining('cannot read this circle'), findsNothing);
+      expect(find.textContaining('Phones do the processing'), findsNothing);
+      expect(find.text('Phone only'), findsNothing, reason: 'no lane chips in a legacy circle');
+    });
+
+    testWidgets('the settings list says the same for a legacy circle', (t) async {
+      final FakeProcessingController c = FakeProcessingController(FakeProcessingController.snapshot(me: pB, admin: false, legacy: true, assist: false), me: pB);
+      await pumpScreen(t, MyProcessingScreen(controller: c, circles: _Circles()));
+      expect(find.textContaining('Old trusted-server mode'), findsOneWidget);
+      expect(find.text('Server processing is off. Your phone does the work.'), findsNothing);
+    });
+
+    testWidgets('the upgrade copy tells the truth: nobody is carried over, everyone signs again, features pause', (t) async {
+      final FakeProcessingController c = FakeProcessingController(FakeProcessingController.snapshot(legacy: true, assist: false));
+      await pumpScreen(t, LegacyUpgradeScreen(circle: adminCircle, controller: c));
+      expect(txt('Nobody is carried over'), findsOneWidget);
+      expect(txt('sign their own choice again'), findsOneWidget);
+      expect(txt('pause'), findsOneWidget);
+      expect(txt('30 days'), findsNothing);
+      expect(txt('carried over for'), findsNothing);
+    });
+
+    testWidgets('an unconfirmed opt-out is shown as such', (t) async {
+      final FakeProcessingController c = FakeProcessingController(
+          FakeProcessingController.snapshot(me: pB, admin: false, optOutPendingSince: DateTime(2026, 11, 7)), me: pB);
+      await pumpScreen(t, ProcessingScreen(circle: memberCircle, controller: c));
+      expect(find.byKey(const Key('proc-optout-pending')), findsOneWidget);
+      expect(txt('the server still has your previous choice'), findsOneWidget);
+    });
+
+    testWidgets('items refused for good are reported, not dropped silently', (t) async {
+      final FakeProcessingController c = FakeProcessingController(
+          FakeProcessingController.snapshot(me: pB, admin: false, optOut: E2ee.optOutRequiredServer, unverified: <String>{pB}, undeliveredCount: 3), me: pB);
+      await pumpScreen(t, ProcessingScreen(circle: memberCircle, controller: c));
+      expect(find.byKey(const Key('proc-undelivered')), findsOneWidget);
+      expect(txt('3 items were not delivered'), findsOneWidget);
+      expect(txt('requires server processing'), findsWidgets);
+    });
+
+    testWidgets('required_server with a child account says the rule applies to the child', (t) async {
+      final FakeProcessingController c = FakeProcessingController(
+          FakeProcessingController.snapshot(me: pB, admin: false, optOut: E2ee.optOutRequiredServer, children: <String>{pB}), me: pB);
+      await pumpScreen(t, ProcessingScreen(circle: memberCircle, controller: c));
+      expect(find.byKey(const Key('proc-child-note')), findsOneWidget);
+      expect(txt('applies to child accounts too'), findsWidgets);
+    });
+
+    testWidgets('the two default-for-new buttons look exactly alike', (t) async {
+      for (final int def in <int>[E2ee.linePhone, E2ee.lineServer]) {
+        final FakeProcessingController c = FakeProcessingController(
+            FakeProcessingController.snapshot(me: pB, admin: false, defaultForNew: def, unverified: <String>{pB}), me: pB);
+        await pumpScreen(t, ProcessingScreen(circle: memberCircle, controller: c));
+        expect(t.widget<DsPillButton>(find.byKey(const Key('choose-server'))).style, t.widget<DsPillButton>(find.byKey(const Key('choose-phone'))).style);
+        expect(txt('suggests'), findsOneWidget);
+        await t.pumpWidget(const SizedBox());
+      }
+    });
+
+    testWidgets('members see which viewers and bridges exist in the circle', (t) async {
+      final FakeProcessingController c = FakeProcessingController(
+          FakeProcessingController.snapshot(
+              me: pB, admin: false, viewers: const <ProcessingViewer>[ProcessingViewer('Alice', 'web'), ProcessingViewer('Alice', 'service')]),
+          me: pB);
+      await pumpScreen(t, ProcessingScreen(circle: memberCircle, controller: c));
+      await t.ensureVisible(find.byKey(const Key('viewer-Alice-web')));
+      expect(txt('Alice has a web viewer'), findsOneWidget);
+      expect(txt('including members who keep data on their phone'), findsOneWidget);
+      expect(txt('reads members who allowed server processing, not phone-only members'), findsOneWidget);
     });
   });
 

@@ -341,6 +341,18 @@ void main() {
   });
 
   group('Key log screen', () {
+    testWidgets('lists the severe lane alarms the phone recorded (circle key equal to a server key)', (t) async {
+      tall(t);
+      await setup(t);
+      await alice.trust.kv.set('alarm:skck:index', circleId);
+      await alice.trust.kv.set('alarm:skck:$circleId', '2026-11-07T10:00:00Z|ck');
+      await t.pumpWidget(wrap(KeyLogScreen(service: alice)));
+      await t.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 200)));
+      await t.pump();
+      expect(find.byKey(const Key('lane-alarm-$circleId')), findsOneWidget);
+      expect(find.text('Circle key refused'), findsOneWidget);
+    });
+
     testWidgets('verifies the log and reports a split view when heads differ', (t) async {
       tall(t);
       await setup(t);

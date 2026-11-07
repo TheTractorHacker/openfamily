@@ -57,6 +57,18 @@ void main() {
     expect(asked, <String>['ZZ99YY88']);
   });
 
+  testWidgets('a legacy circle is described as the old mode, not as private and safe', (t) async {
+    await pumpJoin(t, (_) async => const InvitePreview(isPrivate: true, serverAssist: false, required: false, defaultServer: false, legacy: true));
+    expect(note(t), contains('OLD trusted-server mode'));
+    expect(note(t), isNot(contains('cannot read your location')));
+  });
+
+  test('InvitePreview reads the legacy flag and tolerates its absence', () {
+    final Map<String, dynamic> base = <String, dynamic>{'private': true, 'server_assist': false, 'member_opt_out': 'allowed', 'default_for_new': 'phone'};
+    expect(InvitePreview.tryParse(base)!.legacy, isFalse);
+    expect(InvitePreview.tryParse(<String, dynamic>{...base, 'legacy': true})!.legacy, isTrue);
+  });
+
   test('InvitePreview.tryParse accepts only the exact shape', () {
     final InvitePreview? p = InvitePreview.tryParse(<String, dynamic>{'private': true, 'server_assist': true, 'member_opt_out': 'required_server', 'default_for_new': 'phone'});
     expect((p!.isPrivate, p.serverAssist, p.required, p.defaultServer), (true, true, true, false));

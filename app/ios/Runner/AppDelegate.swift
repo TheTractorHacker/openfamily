@@ -15,6 +15,12 @@ import background_locator_2
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
+    // Location trails, the sealed upload queue, shared results and the lane store live in the preferences file and the
+    // Application Support folder. They must not leave the phone in an iCloud or computer backup.
+    AppDelegate.excludeStoresFromBackup()
+    NotificationCenter.default.addObserver(
+      forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main
+    ) { _ in AppDelegate.excludeStoresFromBackup() }
     // A reinstalled app must not inherit the previous install's Keychain items.
     SecureKeyChannel.resetKeychainOnFreshInstall()
     GeneratedPluginRegistrant.register(with: self)
@@ -146,5 +152,27 @@ import background_locator_2
       return
     }
     completionHandler([.banner, .list, .sound])
+  }
+
+  /// Marks the preferences plist(s) and the Application Support folder as excluded from backups. The files can be
+  /// created later than launch, so this runs again when the app goes to the background.
+  static func excludeStoresFromBackup() {
+    let fm = FileManager.default
+    var targets: [URL] = []
+    if let lib = fm.urls(for: .libraryDirectory, in: .userDomainMask).first {
+      let prefs = lib.appendingPathComponent("Preferences", isDirectory: true)
+      if let files = try? fm.contentsOfDirectory(at: prefs, includingPropertiesForKeys: nil) {
+        targets.append(contentsOf: files.filter { $0.pathExtension == "plist" })
+      }
+    }
+    if let support = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
+      targets.append(support)
+    }
+    for url in targets where fm.fileExists(atPath: url.path) {
+      var u = url
+      var values = URLResourceValues()
+      values.isExcludedFromBackup = true
+      try? u.setResourceValues(values)
+    }
   }
 }

@@ -48,6 +48,15 @@ class PrefsChannelKv implements ChannelKv {
   }
 
   @override
+  Future<String?> getFresh(String key) async {
+    // Lane facts and the queue: always re-read the file, the other isolate may have written it.
+    final SharedPreferences p = await SharedPreferences.getInstance();
+    await p.reload();
+    _reloadedAt = DateTime.now();
+    return p.getString('$_p$key');
+  }
+
+  @override
   Future<void> set(String key, String value) async =>
       (await SharedPreferences.getInstance()).setString('$_p$key', value);
 
@@ -494,10 +503,12 @@ class PrivateRuntime {
 
   /// Uploads the queue now (also called on app resume and when the network returns).
   Future<int> flush() async {
+    // An opt-out the server has not confirmed yet is sent again here, so it does not depend on the user reopening a screen.
+    unawaited(_retryOptOuts());
     try {
       final SenderIdentity? me = await _me();
       if (me == null) return 0;
-      return await queue.flush(channel, deviceFor: (_) => me.deviceId, lanes: lanes);
+      return await queue.flush(channel, deviceFor: (_) => me.deviceId, lanes: lanes, onNeedKeySync: (String c) => unawaited(_syncKeys(c)));
     } catch (_) {
       return 0;
     }
@@ -729,6 +740,21 @@ class PrivateRuntime {
           if (lat != null && lon != null) ...<String, dynamic>{'lat': lat, 'lon': lon},
           if (note != null && note.isNotEmpty) 'note': note.length > 280 ? note.substring(0, 280) : note,
         });
+      }
+    } catch (_) {}
+  }
+
+  /// The relay refused items for an epoch reason: fetch the newest circle keys so new items use them.
+  Future<void> _syncKeys(String circleId) async {
+    try {
+      await service.syncCircleKeys(circleId);
+    } catch (_) {}
+  }
+
+  Future<void> _retryOptOuts() async {
+    try {
+      for (final String c in await privateCircles()) {
+        if (await lanesService.store.pendingBody(c) != null) await lanesService.retryPendingOptOut(c);
       }
     } catch (_) {}
   }

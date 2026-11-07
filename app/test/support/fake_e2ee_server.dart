@@ -410,6 +410,7 @@ class FakeE2eeClient implements E2eeApi {
       serverAssist: c.assist,
       skGen: c.skGen,
       policy: c.policy,
+      policyHistory: c.policyHistory,
       prefs: c.prefs.values.toList(),
       claimedMembers: <ClaimedMember>[
         for (final String m in c.members)
