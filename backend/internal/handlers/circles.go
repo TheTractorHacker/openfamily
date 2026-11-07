@@ -87,6 +87,12 @@ type circleOut struct {
 	// E2EEServerMember: the circle is Private AND an approved, consented
 	// OpenFamily server device can read it (trusted-server mode).
 	E2EEServerMember bool `json:"e2ee_server_member"`
+	// MinAppVersion is the oldest app that can read this circle (set for
+	// Private circles; additive). UpdateRequired is true when the calling app
+	// reported an older version: the circle's name then also carries an
+	// "update the app" hint so apps that predate the field still show it.
+	MinAppVersion  string `json:"min_app_version,omitempty"`
+	UpdateRequired bool   `json:"update_required,omitempty"`
 }
 
 type circleMemberOut struct {
@@ -330,6 +336,7 @@ func (s *Server) ListCircles(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed to read circles")
 			return
 		}
+		applyCircleCompat(r.Context(), &c)
 		out = append(out, c)
 	}
 	if rows.Err() != nil {

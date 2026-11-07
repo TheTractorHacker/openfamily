@@ -38,6 +38,7 @@ import type {
   AdminSession,
   AuditPage,
   FleetResponse,
+  AdminCompat,
 } from './types'
 
 const API_BASE = '/api'
@@ -885,4 +886,13 @@ export function setTrustedServerDefault(on: boolean): Promise<TrustedServerDefau
     method: 'PUT',
     body: { trusted_server_default: on },
   })
+}
+
+export function getAdminCompat(): Promise<AdminCompat> {
+  return request<AdminCompat>('/api/admin/compat')
+}
+
+/** Sets the minimum-version override ("" clears it) and/or write enforcement. */
+export function saveAdminCompat(body: { min_supported_override?: string; enforce_writes?: boolean }): Promise<AdminCompat> {
+  return request<AdminCompat>('/api/admin/compat', { method: 'PUT', body })
 }

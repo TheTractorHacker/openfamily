@@ -1,3 +1,4 @@
+import '../services/app_compat.dart';
 import '../services/chat_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -6,6 +7,7 @@ import '../models/member.dart';
 import '../services/driving/crash_watcher.dart';
 import '../services/perf/perf_monitor.dart';
 import '../theme/app_theme.dart';
+import '../widgets/update_banner.dart';
 import 'circle_tab_screen.dart';
 import 'driving_tab_screen.dart';
 import 'map_screen.dart';
@@ -166,10 +168,16 @@ class _AppShellState extends State<AppShell> {
     (Icons.groups_outlined, Icons.groups, 'Circle'),
   ];
 
+  static bool get _bannerShown =>
+      AppCompat.state.value.status == CompatStatus.required ||
+      AppCompat.circlesNeedingUpdate.value > 0 ||
+      (AppCompat.state.value.status == CompatStatus.recommended &&
+          !AppCompat.dismissed.value);
+
   @override
   Widget build(BuildContext context) {
     final bool rail = AppShell.useRail(MediaQuery.sizeOf(context));
-    final Widget stack = IndexedStack(
+    final Widget tabs = IndexedStack(
       index: _tab.index,
       children: <Widget>[
         for (final AppTab t in AppTab.values)
@@ -178,6 +186,29 @@ class _AppShellState extends State<AppShell> {
             excluding: t != _tab,
             child: TickerMode(enabled: t == _tab, child: _body(t)),
           ),
+      ],
+    );
+    // The update banner sits above the tabs; when it shows it already covers
+    // the status-bar inset, so the tabs below drop their top padding.
+    final Widget stack = Column(
+      children: <Widget>[
+        const UpdateBanner(),
+        Expanded(
+          child: ListenableBuilder(
+            listenable: Listenable.merge(<Listenable>[
+              AppCompat.state,
+              AppCompat.dismissed,
+              AppCompat.circlesNeedingUpdate,
+            ]),
+            builder: (BuildContext context, Widget? child) =>
+                MediaQuery.removePadding(
+              context: context,
+              removeTop: _bannerShown,
+              child: child!,
+            ),
+            child: tabs,
+          ),
+        ),
       ],
     );
     return PopScope(

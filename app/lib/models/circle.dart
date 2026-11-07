@@ -1,3 +1,5 @@
+import '../services/app_compat.dart';
+
 /// A circle the signed-in user belongs to, from `GET /circles`.
 class Circle {
   const Circle({
@@ -12,6 +14,7 @@ class Circle {
     this.e2eeMode = 'off',
     this.e2eeEpoch = 0,
     this.e2eeServerMember = false,
+    this.needsNewerApp = false,
   });
 
   final String id;
@@ -41,6 +44,11 @@ class Circle {
   /// (trusted-server mode): the server, not only the members, can see positions.
   final bool e2eeServerMember;
 
+  /// The server says this app is too old to open the circle (its
+  /// `min_app_version` is newer than the app, or it uses a mode this app does
+  /// not know). The UI then asks for an update instead of showing an empty map.
+  final bool needsNewerApp;
+
   /// True for a Private (end-to-end encrypted) circle.
   bool get isPrivate => e2eeMode == 'private';
 
@@ -59,13 +67,20 @@ class Circle {
       icon: icon is String && icon.trim().isNotEmpty ? icon : null,
       role: json['role'] as String? ?? 'member',
       sharingEnabled: json['sharing_enabled'] != false,
-      memberCount: (json['member_count'] as num?)?.toInt() ?? 0,
+      memberCount: json['member_count'] is num ? (json['member_count'] as num).toInt() : 0,
       isPrimary: json['is_primary'] == true,
       expiresAt: json['expires_at'] is String
           ? DateTime.tryParse(json['expires_at'] as String)?.toUtc()
           : null,
       e2eeMode: json['e2ee_mode'] == 'private' ? 'private' : 'off',
-      e2eeEpoch: (json['e2ee_epoch'] as num?)?.toInt() ?? 0,
+      needsNewerApp: json['update_required'] == true ||
+          AppCompat.requiresNewer(json['min_app_version'] as String?) ||
+          // A mode value this app has never heard of must not be shown as a
+          // plain circle with nobody sharing.
+          (json['e2ee_mode'] is String &&
+              json['e2ee_mode'] != 'off' &&
+              json['e2ee_mode'] != 'private'),
+      e2eeEpoch: json['e2ee_epoch'] is num ? (json['e2ee_epoch'] as num).toInt() : 0,
       e2eeServerMember: json['e2ee_mode'] == 'private' && json['e2ee_server_member'] == true,
     );
   }
@@ -80,6 +95,7 @@ class Circle {
     String? e2eeMode,
     int? e2eeEpoch,
     bool? e2eeServerMember,
+    bool? needsNewerApp,
   }) {
     return Circle(
       id: id,
@@ -93,6 +109,7 @@ class Circle {
       e2eeMode: e2eeMode ?? this.e2eeMode,
       e2eeEpoch: e2eeEpoch ?? this.e2eeEpoch,
       e2eeServerMember: e2eeServerMember ?? this.e2eeServerMember,
+      needsNewerApp: needsNewerApp ?? this.needsNewerApp,
     );
   }
 }
