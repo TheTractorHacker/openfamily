@@ -118,19 +118,31 @@ jobs:
             printf 'storeFile=%s\n' "../release.jks"
           } > app/android/key.properties
 
-      - name: Build release APK and AAB
+      - name: Build release APKs and AAB
         working-directory: app
         run: |
-          # The downloadable APK targets real phones (arm64 + 32-bit arm); the
-          # x86_64 slice only serves emulators/ChromeOS and is a third of the
-          # native code. The AAB keeps every ABI. There must stay exactly ONE
-          # .apk in the release: the server's APK cache and Obtainium take the
-          # first .apk asset they find.
-          flutter build apk --release \
-            --target-platform android-arm,android-arm64 \
-            --build-name='${{ steps.ver.outputs.name }}' --build-number='${{ steps.ver.outputs.code }}'
-          flutter build appbundle --release \
-            --build-name='${{ steps.ver.outputs.name }}' --build-number='${{ steps.ver.outputs.code }}'
+          # Three APKs, all with the SAME versionCode (no --split-per-abi, which
+          # would add 1000*ABI to it and break updates between variants):
+          #   orbitly-<v>.apk            arm64 + 32-bit arm. The default: it
+          #                              installs on every phone (many 2 GB
+          #                              phones run a 32-bit system) and is
+          #                              what /app.apk serves.
+          #   orbitly-<v>-arm64-v8a.apk  64-bit only, about 40 percent smaller.
+          #   orbitly-<v>-armeabi-v7a.apk 32-bit only.
+          # The x86_64 slice only serves emulators/ChromeOS; the AAB keeps every
+          # ABI. The server's APK cache prefers the plain orbitly-<v>.apk, then
+          # arm64-v8a (see backend/internal/apkrelease). Debug symbols are
+          # stripped by Gradle; Dart symbols are not split (no --obfuscate, see
+          # docs/developers/performance-low-memory.md).
+          B=(--build-name='${{ steps.ver.outputs.name }}' --build-number='${{ steps.ver.outputs.code }}')
+          mkdir -p ../apks
+          flutter build apk --release --target-platform android-arm,android-arm64 "${B[@]}"
+          cp build/app/outputs/flutter-apk/app-release.apk ../apks/combined.apk
+          flutter build apk --release --target-platform android-arm64 "${B[@]}"
+          cp build/app/outputs/flutter-apk/app-release.apk ../apks/arm64-v8a.apk
+          flutter build apk --release --target-platform android-arm "${B[@]}"
+          cp build/app/outputs/flutter-apk/app-release.apk ../apks/armeabi-v7a.apk
+          flutter build appbundle --release "${B[@]}"
 
       - name: Stage and checksum
         run: |
@@ -138,11 +150,18 @@ jobs:
           V='${{ steps.ver.outputs.name }}'
           mkdir -p dist
           cp sbom.spdx.json "dist/orbitly-$V.spdx.json"
-          cp app/build/app/outputs/flutter-apk/app-release.apk "dist/orbitly-$V.apk"
+          cp apks/combined.apk "dist/orbitly-$V.apk"
+          cp apks/arm64-v8a.apk "dist/orbitly-$V-arm64-v8a.apk"
+          cp apks/armeabi-v7a.apk "dist/orbitly-$V-armeabi-v7a.apk"
           cp app/build/app/outputs/bundle/release/app-release.aab "dist/orbitly-$V.aab"
-          (cd dist && sha256sum "orbitly-$V.apk" "orbitly-$V.aab" "orbitly-$V.spdx.json" > SHA256SUMS.txt && cat SHA256SUMS.txt)
+          (cd dist && sha256sum "orbitly-$V.apk" "orbitly-$V-arm64-v8a.apk" "orbitly-$V-armeabi-v7a.apk" "orbitly-$V.aab" "orbitly-$V.spdx.json" > SHA256SUMS.txt && cat SHA256SUMS.txt)
           BT="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)"
-          "$BT/apksigner" verify --print-certs "dist/orbitly-$V.apk" | grep -i 'SHA-256'
+          for f in "dist/orbitly-$V.apk" "dist/orbitly-$V-arm64-v8a.apk" "dist/orbitly-$V-armeabi-v7a.apk"; do
+            "$BT/apksigner" verify --print-certs "$f" | grep -i 'SHA-256'
+          done
+          # Warning only (never fails the release): the 64-bit APK against the
+          # recorded size baseline.
+          scripts/apk-size-budget.sh "dist/orbitly-$V-arm64-v8a.apk" || echo "::warning::arm64 APK exceeds the size budget (scripts/apk-size-baseline.txt)"
 
       - name: Remove signing material
         if: always()
