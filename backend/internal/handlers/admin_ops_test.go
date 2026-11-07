@@ -79,16 +79,23 @@ func TestCSVSafeNeutralisesFormulas(t *testing.T) {
 
 func TestBackupHealthFlags(t *testing.T) {
 	now := time.Now()
-	if b := backupHealth(nil, nil, now); b.Status != "missing" || b.LastAt != nil {
+	if b := backupHealth(nil, nil, now, 36*time.Hour); b.Status != "missing" || b.LastAt != nil {
 		t.Fatalf("missing: %+v", b)
 	}
 	fresh := now.Add(-3 * time.Hour)
-	if b := backupHealth(&fresh, nil, now); b.Status != "ok" {
+	if b := backupHealth(&fresh, nil, now, 36*time.Hour); b.Status != "ok" {
 		t.Fatalf("fresh: %+v", b)
 	}
 	old := now.Add(-49 * time.Hour)
-	if b := backupHealth(&old, nil, now); b.Status != "stale" {
+	if b := backupHealth(&old, nil, now, 36*time.Hour); b.Status != "stale" {
 		t.Fatalf("stale: %+v", b)
+	}
+	mid := now.Add(-40 * time.Hour)
+	if b := backupHealth(&mid, nil, now, 36*time.Hour); b.Status != "stale" || b.StaleAfterHours != 36 {
+		t.Fatalf("40h old with a 36h limit must be stale: %+v", b)
+	}
+	if b := backupHealth(&mid, nil, now, 48*time.Hour); b.Status != "ok" {
+		t.Fatalf("40h old with a 48h limit must be ok: %+v", b)
 	}
 }
 

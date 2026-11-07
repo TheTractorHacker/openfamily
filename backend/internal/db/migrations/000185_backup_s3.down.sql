@@ -1,0 +1,11 @@
+DROP TABLE IF EXISTS backup_requests;
+DROP TABLE IF EXISTS backup_agent;
+DROP INDEX IF EXISTS idx_backup_runs_status_taken;
+ALTER TABLE backup_runs DROP CONSTRAINT IF EXISTS backup_runs_status_check;
+ALTER TABLE backup_runs DROP COLUMN IF EXISTS trigger;
+ALTER TABLE backup_runs DROP COLUMN IF EXISTS duration_ms;
+ALTER TABLE backup_runs DROP COLUMN IF EXISTS error;
+ALTER TABLE backup_runs DROP COLUMN IF EXISTS object_key;
+ALTER TABLE backup_runs DROP COLUMN IF EXISTS encrypted;
+ALTER TABLE backup_runs DROP COLUMN IF EXISTS destination;
+ALTER TABLE backup_runs DROP COLUMN IF EXISTS status;

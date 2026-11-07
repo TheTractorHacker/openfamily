@@ -9,6 +9,11 @@
 #          ALL consent (admin map, history, Dawarich sync, place alerts work again).
 #          The server then holds plaintext for those circles. Read
 #          docs/design/E2EE.md ("Trusted-server mode") before enabling.
+#   backup  scheduled, encrypted backups of the database to a local directory
+#          and/or any S3-compatible bucket (AWS S3, Backblaze B2, Wasabi,
+#          Cloudflare R2, MinIO) with retention, shown on the admin System
+#          page. No host cron needed. Configure the BACKUP_* variables in .env
+#          (see .env.example) and read docs/backup-restore.md first.
 # e.g.  COMPOSE_PROFILES=proxy,push   or   docker compose --profile proxy up -d
 #
 # Without the proxy profile the API is published on 127.0.0.1:${API_PORT:-8080}
@@ -71,6 +76,8 @@ services:
       DRIVING_HARD_BRAKE_MPS2: ${DRIVING_HARD_BRAKE_MPS2:-}
       DRIVING_RAPID_ACCEL_MPS2: ${DRIVING_RAPID_ACCEL_MPS2:-}
       INSECURE_HTTP: ${INSECURE_HTTP:-false}
+      # Admin System page warns when the newest successful backup is older than this.
+      BACKUP_STALE_HOURS: ${BACKUP_STALE_HOURS:-36}
       # Trusted-server mode (profile e2ee-server). Empty = the mode does not exist
       # for this server and Private circles keep the strict phase-2 behaviour.
       # Generate once: openssl rand -hex 32  (>= 32 characters; shared with the
@@ -256,6 +263,70 @@ services:
         limits:
           cpus: "0.5"
           memory: 256M
+
+  # OPT-IN scheduled backups (profile "backup"): daily pg_dump streamed through
+  # age encryption to ./backups and/or an S3-compatible bucket, with retention.
+  # The API never sees the S3 credentials; the admin "Back up now" button only
+  # queues a request this service picks up. Start with:
+  #   docker compose --profile backup up -d backup
+  # Needs BACKUP_AGE_RECIPIENT (public key) or BACKUP_AGE_PASSPHRASE_FILE, plus
+  # BACKUP_S3_* and/or BACKUP_LOCAL_DIR=/backups. The PRIVATE key never belongs here.
+  backup:
+    <<: *hardening
+    profiles: ["backup"]
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      target: backup
+      args:
+        GIT_COMMIT: ${GIT_COMMIT:-}
+    image: openfamily-backup:local
+    # Must be able to write ./backups when BACKUP_LOCAL_DIR is used.
+    user: "${BACKUP_UID:-1000}:${BACKUP_GID:-1000}"
+    read_only: true
+    tmpfs:
+      - /tmp
+      # Encrypted dump staging area (RAM-backed; raise for very large databases).
+      - /work:size=${BACKUP_WORK_SIZE:-4g},mode=1777
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "${DATABASE_URL:-postgres://${POSTGRES_USER:-openfamily}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is not set - run ./scripts/setup.sh to generate .env}@postgres:5432/${POSTGRES_DB:-openfamily}?sslmode=${DB_SSLMODE:-disable}}"
+      BACKUP_WORK_DIR: /work
+      TZ: ${BACKUP_TZ:-UTC}
+      BACKUP_TZ: ${BACKUP_TZ:-UTC}
+      BACKUP_SCHEDULE: ${BACKUP_SCHEDULE:-15 3 * * *}
+      BACKUP_RUN_ON_START: ${BACKUP_RUN_ON_START:-false}
+      BACKUP_LOCAL_DIR: ${BACKUP_LOCAL_DIR:-}
+      BACKUP_KEEP_DAILY: ${BACKUP_KEEP_DAILY:-7}
+      BACKUP_KEEP_WEEKLY: ${BACKUP_KEEP_WEEKLY:-4}
+      BACKUP_KEEP_MONTHLY: ${BACKUP_KEEP_MONTHLY:-6}
+      BACKUP_RETENTION_DRY_RUN: ${BACKUP_RETENTION_DRY_RUN:-false}
+      BACKUP_AGE_RECIPIENT: ${BACKUP_AGE_RECIPIENT:-}
+      BACKUP_AGE_PASSPHRASE_FILE: ${BACKUP_AGE_PASSPHRASE_FILE:-}
+      BACKUP_ALLOW_UNENCRYPTED: ${BACKUP_ALLOW_UNENCRYPTED:-false}
+      BACKUP_S3_ENDPOINT: ${BACKUP_S3_ENDPOINT:-}
+      BACKUP_S3_REGION: ${BACKUP_S3_REGION:-}
+      BACKUP_S3_BUCKET: ${BACKUP_S3_BUCKET:-}
+      BACKUP_S3_PREFIX: ${BACKUP_S3_PREFIX:-openfamily}
+      BACKUP_S3_PATH_STYLE: ${BACKUP_S3_PATH_STYLE:-false}
+      BACKUP_S3_STORAGE_CLASS: ${BACKUP_S3_STORAGE_CLASS:-}
+      BACKUP_S3_INSECURE: ${BACKUP_S3_INSECURE:-false}
+      BACKUP_S3_ACCESS_KEY_ID: ${BACKUP_S3_ACCESS_KEY_ID:-}
+      BACKUP_S3_SECRET_ACCESS_KEY: ${BACKUP_S3_SECRET_ACCESS_KEY:-}
+      BACKUP_S3_ACCESS_KEY_ID_FILE: ${BACKUP_S3_ACCESS_KEY_ID_FILE:-}
+      BACKUP_S3_SECRET_ACCESS_KEY_FILE: ${BACKUP_S3_SECRET_ACCESS_KEY_FILE:-}
+    volumes:
+      - ${BACKUP_LOCAL_PATH:-./backups}:/backups
+      # Optional secret files (passphrase, S3 key files): put them in
+      # deploy/backup/ and reference /run/backup-secrets/<name>.
+      - ${BACKUP_SECRETS_DIR:-./deploy/backup}:/run/backup-secrets:ro
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
 
 volumes:
   e2ee_server_state:

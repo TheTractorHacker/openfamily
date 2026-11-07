@@ -71,6 +71,12 @@ code rollback. There is no in-app updater and no Docker socket access. Schedule
 `BACKUP_PASSPHRASE_FILE`; RPO/RTO, volume snapshots and the restore drill are in
 [backup-restore.md](backup-restore.md).
 
+For scheduled backups without host cron, optional S3-compatible off-site copies
+(AWS S3, Backblaze B2, Wasabi, Cloudflare R2, MinIO), client-side age
+encryption and retention, enable the `backup` compose profile; the admin System
+page then shows the last backup per destination and has a *Back up now* button.
+See [S3 and scheduled backups](backup-restore.md#s3-and-scheduled-backups).
+
 Validate your configuration before starting (non-zero exit on errors; secret
 values are never printed):
 `docker compose run --rm api validate-config`.

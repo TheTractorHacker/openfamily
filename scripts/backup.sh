@@ -6,6 +6,8 @@
 # Env:   BACKUP_KEEP=N  keep only the newest N automatic backups (default: keep all)
 #        BACKUP_PASSPHRASE_FILE=path  encrypt at rest (AES-256, PBKDF2) -> .dump.enc.
 #                      Backups contain location history: encrypt anything that leaves the host.
+# For scheduled and/or S3 backups use the `backup` compose service instead
+# (docker compose --profile backup up -d); see docs/backup-restore.md.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -47,7 +49,12 @@ echo "Backup written: $out ($(du -h "$out" | cut -f1))"
 # Record a heartbeat so the admin System health page can show the last backup
 # and flag a missing recent one. Best effort: a failure never fails the backup.
 size="$(wc -c <"$out" | tr -d ' ')"
+enc=false; [ -n "${BACKUP_PASSPHRASE_FILE:-}" ] && enc=true
+# New schema (migration 000185) first; fall back to the original one-column insert
+# on a server that has not been upgraded yet.
 docker compose exec -T postgres sh -c \
+  'psql -q -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c "INSERT INTO backup_runs (size_bytes, destination, encrypted, trigger) VALUES ('"$size"', '"'local'"', '"$enc"', '"'script'"')"' \
+  >/dev/null 2>&1 || docker compose exec -T postgres sh -c \
   'psql -q -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c "INSERT INTO backup_runs (size_bytes) VALUES ('"$size"')"' \
   >/dev/null 2>&1 || echo "warning: could not record the backup in the database (admin health page may show it as missing)" >&2
 

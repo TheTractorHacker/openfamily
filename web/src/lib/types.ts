@@ -387,6 +387,8 @@ export interface AdminHealth {
     age_hours: number | null
     status: 'ok' | 'stale' | 'missing'
     stale_after_hours: number
+    destination?: string
+    encrypted?: boolean
   }
   recent_errors: { time: string; level: string; message: string }[]
   warnings: string[]
@@ -466,4 +468,55 @@ export interface FleetMember {
 export interface FleetResponse {
   server_time: string
   members: FleetMember[]
+}
+
+// ---- Backups card (platform admin) ----
+
+export interface BackupRun {
+  at: string
+  status: 'success' | 'failed'
+  destination: 'local' | 's3' | string
+  encrypted: boolean
+  size_bytes: number
+  duration_ms: number | null
+  object_key: string | null
+  error: string | null
+  trigger: 'schedule' | 'manual' | 'script' | string
+}
+
+export interface BackupRequest {
+  id: number
+  kind: 'backup' | 'test_s3'
+  status: 'pending' | 'running' | 'done' | 'failed'
+  message: string | null
+  requested_at: string
+  finished_at: string | null
+}
+
+/** Non-secret configuration summary published by the backup service. */
+export interface BackupConfigSummary {
+  destinations: { kind: 'local' | 's3'; target: string }[]
+  encryption: 'age-x25519' | 'age-scrypt' | 'none'
+  schedule: string
+  timezone: string
+  retention: { daily: number; weekly: number; monthly: number; dry_run: boolean }
+}
+
+/** GET /api/admin/backups. Never carries credentials or keys. */
+export interface AdminBackups {
+  agent: {
+    running: boolean
+    heartbeat_at: string
+    started_at: string
+    version: string
+    next_run_at: string | null
+    config: Partial<BackupConfigSummary>
+  } | null
+  stale_after_hours: number
+  last_success: BackupRun | null
+  last_failure: BackupRun | null
+  /** Per destination, the latest run when it failed. */
+  failing: BackupRun[]
+  recent: BackupRun[]
+  request: BackupRequest | null
 }

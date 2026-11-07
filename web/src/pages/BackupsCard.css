@@ -1,0 +1,26 @@
+/* System page: Backups card */
+.wb-bk { display: flex; flex-direction: column; gap: var(--space-4); }
+.wb-bk code { font-family: var(--font-mono); font-size: 0.92em; }
+.wb-bk a { color: var(--accent, inherit); text-decoration: underline; text-underline-offset: 2px; }
+.wb-bk-mono { font-family: var(--font-mono); }
+.wb-bk-dests { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+.wb-bk-dests li { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
+.wb-bk-target { font-family: var(--font-mono); font-size: var(--font-sm); overflow-wrap: anywhere; min-width: 0; }
+.wb-bk-runs { list-style: none; margin: 0; padding: 0; }
+.wb-bk-run {
+  display: grid;
+  grid-template-columns: 64px 1fr auto;
+  align-items: baseline;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-5);
+  border-bottom: 1px solid var(--border);
+}
+.wb-bk-run:last-child { border-bottom: none; }
+.wb-bk-run .wb-badge { justify-self: start; }
+.wb-bk-run-text { font-size: var(--font-sm); line-height: 1.5; min-width: 0; overflow-wrap: anywhere; display: flex; flex-direction: column; gap: 2px; }
+.wb-bk-run-err { color: var(--text-muted); font-family: var(--font-mono); font-size: var(--font-xs); }
+@media (max-width: 520px) {
+  .wb-bk-run { grid-template-columns: auto 1fr; row-gap: var(--space-1); padding: var(--space-3) var(--space-4); }
+  .wb-bk-run-text { grid-column: 1 / -1; grid-row: 2; }
+  .wb-bk-run .wb-sys-log-time { justify-self: end; }
+}

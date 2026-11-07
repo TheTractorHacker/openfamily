@@ -37,6 +37,21 @@ text (MIT / BSD-style / Apache-2.0 / MPL-2.0).
 | github.com/jackc/puddle/v2 | v2.2.2 | MIT |
 | github.com/lib/pq | v1.10.9 | MIT |
 | github.com/pquerna/otp | v1.5.0 | Apache-2.0 |
+| filippo.io/age | v1.3.2 | BSD-3-Clause |
+| filippo.io/hpke | v0.4.0 | BSD-3-Clause |
+| github.com/cespare/xxhash/v2 | v2.3.0 | MIT |
+| github.com/dustin/go-humanize | v1.0.1 | MIT |
+| github.com/klauspost/compress | v1.19.2 | BSD-3-Clause, Apache-2.0, MIT (per file) |
+| github.com/klauspost/cpuid/v2 | v2.4.0 | MIT |
+| github.com/klauspost/crc32 | v1.3.0 | BSD-3-Clause |
+| github.com/minio/crc64nvme | v1.1.1 | Apache-2.0 |
+| github.com/minio/md5-simd | v1.1.2 | Apache-2.0 |
+| github.com/minio/minio-go/v7 | v7.4.1 | Apache-2.0 |
+| github.com/rs/xid | v1.6.0 | MIT |
+| github.com/zeebo/xxh3 | v1.1.0 | BSD-2-Clause |
+| go.yaml.in/yaml/v3 | v3.0.5 | MIT, Apache-2.0 |
+| golang.org/x/net | v0.60.0 | BSD-3-Clause |
+| gopkg.in/ini.v1 | v1.67.3 | Apache-2.0 |
 | golang.org/x/crypto | v0.55.0 | BSD-3-Clause |
 | golang.org/x/sync | v0.22.0 | BSD-3-Clause |
 | golang.org/x/sys | v0.47.0 | BSD-3-Clause |

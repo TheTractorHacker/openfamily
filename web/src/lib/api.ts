@@ -28,6 +28,7 @@ import type {
   AdminPlace,
   AdminCircle,
   AdminCircleMember,
+  AdminBackups,
   AdminHealth,
   AdminAlertPage,
   MapStyleSettings,
@@ -720,6 +721,22 @@ export function removeAdminCircleMember(circleId: string, userId: string): Promi
 
 export function getAdminHealth(): Promise<AdminHealth> {
   return request<AdminHealth>('/api/admin/health')
+}
+
+// ---- Backups card (platform admin) ----
+
+export function getAdminBackups(): Promise<AdminBackups> {
+  return request<AdminBackups>('/api/admin/backups')
+}
+
+/** Queues an immediate backup on the backup service. */
+export function runBackupNow(): Promise<{ id: number; status: string }> {
+  return request<{ id: number; status: string }>('/api/admin/backups/run', { method: 'POST' })
+}
+
+/** Queues an S3 write/read/delete probe on the backup service. */
+export function testBackupS3(): Promise<{ id: number; status: string }> {
+  return request<{ id: number; status: string }>('/api/admin/backups/test-s3', { method: 'POST' })
 }
 
 // ---- Alerts and SOS (platform admin, no coordinates) ----

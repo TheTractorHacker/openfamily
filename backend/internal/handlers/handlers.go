@@ -126,6 +126,14 @@ type Server struct {
 	// source runs). Shown read-only in the admin panel.
 	BuildVersion string
 
+	// BackupStaleHours is how old the newest successful backup may be before the
+	// health page warns (config: BACKUP_STALE_HOURS, default 36).
+	BackupStaleHours int
+
+	// backupLimit rate-limits the admin "back up now" / "test S3" actions.
+	backupOnce  sync.Once
+	backupLimit *sms.Limiter
+
 	// apk tracks the platform APK build job state (at most one concurrent build).
 	apk apkManager
 

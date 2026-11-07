@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -141,6 +142,9 @@ func main() {
 	srv.APKGitHubToken = cfg.APKGitHubToken
 	srv.FlutterAppDir = cfg.FlutterAppDir
 	srv.BuildVersion = config.BuildVersion()
+	if v, err := strconv.Atoi(os.Getenv("BACKUP_STALE_HOURS")); err == nil && v > 0 && v <= 24*365 {
+		srv.BackupStaleHours = v
+	}
 	// A managed server (one with a configured platform admin) closes open
 	// registration: new users must present an invite code.
 	srv.RequireInvite = cfg.PlatformAdminEmail != ""
@@ -556,6 +560,12 @@ func main() {
 		// Read-only running version. Upgrades happen on the host (scripts/upgrade.sh).
 		r.Get("/api/admin/version", srv.AdminVersion)
 		r.Get("/api/admin/health", srv.AdminHealth)
+		// Backups card: state published by the optional `backup` compose
+		// service, plus queued "back up now" / "test S3" requests for it. The
+		// API never holds S3 credentials.
+		r.Get("/api/admin/backups", srv.AdminGetBackups)
+		r.Post("/api/admin/backups/run", srv.AdminBackupRun)
+		r.Post("/api/admin/backups/test-s3", srv.AdminBackupTestS3)
 	})
 
 	// Admin web panel (embedded static SPA) at /admin/*, served public. The page

@@ -6,30 +6,14 @@ import { getAdminHealth } from '../lib/api'
 import { isAccessDenied, useAsync } from '../lib/useAsync'
 import { AccessDenied, Badge, Button, Card, EmptyState, ErrorState, Spinner } from '../components/primitives'
 import { Alert, CopyCommand, KeyValueList, PageHeader, Section } from '../components/patterns'
-import { formatRelativeTime } from '../lib/format'
+import { formatBytes, formatRelativeTime } from '../lib/format'
+import { BackupsCard } from './BackupsCard'
+import { destinationLabel, splitWarning } from '../lib/backups'
 import './pages.css'
 import './SystemPage.css'
 
-export function formatBytes(n: number): string {
-  if (!Number.isFinite(n) || n < 0) return '—'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  let v = n
-  let i = 0
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024
-    i += 1
-  }
-  return `${i === 0 ? v : v.toFixed(1)} ${units[i]}`
-}
-
 const BACKUP_TONE = { ok: 'green', stale: 'orange', missing: 'red' } as const
 const BACKUP_TEXT = { ok: 'Recent', stale: 'Overdue', missing: 'No backup recorded' } as const
-
-/** Splits a server warning into its prose and an embedded ./scripts/... command, if any. */
-export function splitWarning(w: string): { message: string; command?: string } {
-  const m = w.match(/(\.\/scripts\/[\w.-]+)/)
-  return m ? { message: w, command: m[1] } : { message: w }
-}
 
 export function SystemPage() {
   const q = useAsync(getAdminHealth, [])
@@ -53,7 +37,7 @@ export function SystemPage() {
     <div className="wb-page">
       <PageHeader
         title="System health"
-        subtitle="The server's state at a glance. Read-only."
+        subtitle="The server's state at a glance."
         actions={
           <>
             {updatedAt && <span className="wb-sys-updated">Updated {updatedAt.toLocaleTimeString()}</span>}
@@ -117,6 +101,7 @@ export function SystemPage() {
                         {h.backup.last_at && (
                           <span className="wb-kv-note" title={new Date(h.backup.last_at).toLocaleString()}>
                             {formatRelativeTime(h.backup.last_at)}
+                            {h.backup.destination ? ` · ${destinationLabel(h.backup.destination)}` : ''}
                             {h.backup.size_bytes != null ? ` · ${formatBytes(h.backup.size_bytes)}` : ''}
                           </span>
                         )}
@@ -127,6 +112,8 @@ export function SystemPage() {
               />
             </Card>
           </Section>
+
+          <BackupsCard onChanged={q.refetch} />
 
           <Section title="Recent warnings and errors" description="Since the server last started.">
             {h.recent_errors.length === 0 ? (

@@ -3,14 +3,34 @@
 # DESTRUCTIVE: the current database is dropped and recreated.
 #
 # Usage: ./scripts/restore.sh backups/openfamily-<timestamp>.dump[.enc] [--yes]
-# Env:   BACKUP_PASSPHRASE_FILE=path  required for .enc backups
+#        ./scripts/restore.sh --from-s3 [latest|openfamily-<UTC timestamp>] [--yes]
+#        ./scripts/restore.sh --from-local [latest|openfamily-<UTC timestamp>] [--yes]
+# Env:   BACKUP_PASSPHRASE_FILE=path  required for .enc backups (scripts/backup.sh format)
+#        --from-s3 / --from-local read backups written by the `backup` compose service:
+#        the download is verified against its SHA-256 manifest, then decrypted with
+#        BACKUP_AGE_IDENTITY_FILE=path (age private key) or BACKUP_AGE_PASSPHRASE_FILE.
+#        S3 settings (BACKUP_S3_*) are read from the environment or ./.env.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
 file="${1:-}"
+yes="${2:-}"
+case "$file" in
+  --from-s3|--from-local)
+    # shellcheck source=scripts/lib-s3.sh
+    . "$(dirname "$0")/lib-s3.sh"
+    which="latest"
+    case "${2:-}" in ""|--yes) ;; *) which="$2"; yes="${3:-}" ;; esac
+    [ "${2:-}" = "--yes" ] && yes="--yes"
+    fetched="$(mktemp -d)"; chmod 700 "$fetched"
+    trap 'rm -rf "$fetched"' EXIT
+    fetch_backup "${file#--from-}" "$which" "$fetched/restore.dump" || { echo "error: could not fetch a verified backup" >&2; exit 1; }
+    echo "Downloaded, checksum-verified and decrypted: $which (${file#--from-})"
+    file="$fetched/restore.dump" ;;
+esac
 if [ -z "$file" ] || [ ! -f "$file" ]; then
-  echo "usage: $0 <backup.dump> [--yes]" >&2
+  echo "usage: $0 <backup.dump> [--yes] | --from-s3|--from-local [latest|NAME] [--yes]" >&2
   exit 2
 fi
 
@@ -25,7 +45,7 @@ case "$file" in
   *) src="$file" ;;
 esac
 
-if [ "${2:-}" != "--yes" ]; then
+if [ "$yes" != "--yes" ]; then
   echo "This will REPLACE the current OpenFamily database with: $file"
   read -r -p "Type RESTORE to continue: " answer
   [ "$answer" = "RESTORE" ] || { echo "Aborted."; exit 1; }
