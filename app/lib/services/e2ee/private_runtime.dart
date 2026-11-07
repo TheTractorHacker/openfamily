@@ -13,6 +13,7 @@ import '../processing/fix.dart';
 import '../processing/on_device_processor.dart';
 import '../processing/processing_source.dart';
 import '../push_service.dart';
+import '../driving/driving_settings.dart';
 import 'e2ee_api.dart';
 import 'e2ee_app.dart';
 import 'e2ee_crypto.dart';
@@ -540,6 +541,9 @@ class PrivateRuntime {
       if (circles.isEmpty) return;
       _resultCircles = circles;
       final OnDeviceProcessor p = _proc(me);
+      try {
+        p.phoneUseEnabled = await DrivingSettings.phoneUseEnabled(reload: false);
+      } catch (_) {}
       if (!_processorRestored) {
         _processorRestored = true;
         final List<TrackPoint> past = await trailFor(me.userId, ts.subtract(const Duration(hours: 6)), ts);

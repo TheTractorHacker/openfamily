@@ -216,7 +216,7 @@ class DriveResult {
 
 /// One member's driving figures for one window (server `weekStat`).
 class WeekFigures {
-  const WeekFigures({required this.drives, required this.distanceM, required this.durationS, required this.topSpeedMps, required this.speeding, required this.hardBrake, required this.rapidAccel, required this.phoneUse, this.score});
+  const WeekFigures({required this.drives, required this.distanceM, required this.durationS, required this.topSpeedMps, required this.speeding, required this.hardBrake, required this.rapidAccel, this.phoneUse, this.score});
 
   factory WeekFigures.of(WeekStatOut s) => WeekFigures(
         drives: s.drives,
@@ -226,13 +226,17 @@ class WeekFigures {
         speeding: s.events.speeding,
         hardBrake: s.events.hardBrake,
         rapidAccel: s.events.rapidAccel,
-        phoneUse: s.events.phone,
+        phoneUse: s.events.phoneUseEnabled ? s.events.phone : null,
         score: s.score,
       );
 
   final int drives;
   final double distanceM, durationS, topSpeedMps;
-  final int speeding, hardBrake, rapidAccel, phoneUse;
+  final int speeding, hardBrake, rapidAccel;
+
+  /// Null when this member did not switch phone-use detection on (then zero is NOT claimed).
+  /// On the wire a null is `-1` in `ev[3]`; an older phone's plain count is read as a count.
+  final int? phoneUse;
   final int? score;
 
   Map<String, dynamic> toJson() => <String, dynamic>{
@@ -240,7 +244,7 @@ class WeekFigures {
         'd': _r1(distanceM),
         't': durationS.round(),
         'top': _r1(topSpeedMps),
-        'ev': <int>[speeding, hardBrake, rapidAccel, phoneUse],
+        'ev': <int>[speeding, hardBrake, rapidAccel, phoneUse ?? -1],
         if (score != null) 'sc': score,
       };
 
@@ -252,11 +256,11 @@ class WeekFigures {
       final List<dynamic> ev = j['ev'] as List<dynamic>;
       if (n < 0 || n > 100000 || d < 0 || d > 5e8 || t < 0 || t > 1e8 || top < 0 || top > 400 || ev.length != 4) return null;
       final List<int> c = <int>[for (final dynamic x in ev) (x as num).toInt()];
-      if (c.any((int x) => x < 0 || x > 1000000)) return null;
+      if (c.sublist(0, 3).any((int x) => x < 0 || x > 1000000) || c[3] < -1 || c[3] > 1000000) return null;
       final num? sc = j['sc'] as num?;
       if (sc != null && (sc < 0 || sc > 100)) return null;
       return WeekFigures(
-          drives: n, distanceM: d.toDouble(), durationS: t.toDouble(), topSpeedMps: top.toDouble(), speeding: c[0], hardBrake: c[1], rapidAccel: c[2], phoneUse: c[3], score: sc?.toInt());
+          drives: n, distanceM: d.toDouble(), durationS: t.toDouble(), topSpeedMps: top.toDouble(), speeding: c[0], hardBrake: c[1], rapidAccel: c[2], phoneUse: c[3] < 0 ? null : c[3], score: sc?.toInt());
     } catch (_) {
       return null;
     }
@@ -271,10 +275,10 @@ class WeekResult {
   final WeekFigures current, previous;
 
   /// Computes the figures with the same functions the server's weekly summary is pinned to.
-  static WeekResult compute(Iterable<TripSummary> trips, Iterable<DrivingEvent> events, int weekStartUs) {
+  static WeekResult compute(Iterable<TripSummary> trips, Iterable<DrivingEvent> events, int weekStartUs, {bool phoneUseEnabled = false}) {
     const int week = 7 * 24 * 3600 * 1000000;
     WeekFigures f(int from) =>
-        WeekFigures.of(computeWeekStat(trips, events, fromUs: from, toUs: from + week));
+        WeekFigures.of(computeWeekStat(trips, events, fromUs: from, toUs: from + week, phoneUseEnabled: phoneUseEnabled));
     return WeekResult(weekStartMs: weekStartUs ~/ 1000, current: f(weekStartUs), previous: f(weekStartUs - week));
   }
 

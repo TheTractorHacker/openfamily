@@ -3,6 +3,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:openfamily/models/member.dart';
 import 'package:openfamily/models/trip.dart';
+import 'package:openfamily/screens/driving_report_screen.dart';
+import 'package:openfamily/screens/family_driving_report_screen.dart';
+import 'package:openfamily/models/trip_report.dart';
+import 'package:openfamily/services/trip_report_service.dart';
 import 'package:openfamily/screens/trips_screen.dart';
 import 'package:openfamily/screens/weekly_summary_screen.dart';
 import 'package:openfamily/services/e2ee/private_runtime.dart';
@@ -234,4 +238,137 @@ void main() {
       expect(find.byKey(const ValueKey<String>('not-available-title')), findsOneWidget);
     });
   });
+
+  group('driving reports in a Private circle', () {
+    final DateTime now = DateTime(2026, 11, 4, 12); // a Wednesday
+    int ms(DateTime d) => d.millisecondsSinceEpoch;
+    TripResult trip(String id, DateTime at) => TripResult(
+        id: id, startMs: ms(at), endMs: ms(at) + 1200000, distanceM: 16093.44, maxSpeedMps: 25, avgSpeedMps: 12, mode: 'driving',
+        startLat: 10, startLon: 20, endLat: 10.1, endLon: 20.1);
+    DriveResult drive(String id, {int speeding = 1, int brake = 2, int phone = 0}) =>
+        DriveResult(tripId: id, events: const <DriveEventResult>[], speeding: speeding, hardBrake: brake, rapidAccel: 0, phoneUse: phone);
+
+    MemberProcessing alex({bool detection = false}) => MemberProcessing(
+          userId: 'u3',
+          origin: ProcessingOrigin.phone,
+          trips: <TripResult>[trip('a', DateTime(2026, 11, 3, 9)), trip('b', DateTime(2026, 11, 4, 8)), trip('old', DateTime(2026, 9, 1, 8))],
+          drives: <DriveResult>[drive('a'), drive('b'), drive('old', brake: 50)],
+          weeks: detection ? <WeekResult>[WeekResult(weekStartMs: ms(DateTime(2026, 11, 2)), current: const WeekFigures(drives: 2, distanceM: 1, durationS: 1, topSpeedMps: 1, speeding: 0, hardBrake: 0, rapidAccel: 0, phoneUse: 0), previous: _fig(0, 0))] : const <WeekResult>[],
+          updatedAt: now,
+        );
+
+    testWidgets('member screen, phone-only: week figures from the sealed results, badge, note and what is missing', (t) async {
+      _big(t);
+      final PrimaryLanes l = PrimaryLanes(circleId: 'c1', names: const <String, String>{'u3': 'Alex'}, members: <MemberProcessing>[alex()]);
+      await t.pumpWidget(_wrap(DrivingReportScreen(member: _member('u3', 'Alex'), api: _FakeTrips(), lanes: () async => l, clock: () => now)));
+      await t.pumpAndSettle();
+      expect(find.byKey(const Key('driving-phone-only')), findsOneWidget);
+      await t.tap(find.text('Week'));
+      await t.pumpAndSettle();
+      expect(find.text('Phone only'), findsWidgets);
+      expect(find.textContaining('2 drives'), findsOneWidget, reason: 'only this week; the September trip is outside');
+      expect(find.text('Hard braking 4'), findsOneWidget);
+      expect(find.text('Speeding 2'), findsOneWidget);
+      expect(find.textContaining('Phone use'), findsNothing, reason: 'detection off: no count is claimed');
+      expect(find.byKey(const Key('computed-on-phone')), findsOneWidget);
+      expect(find.byKey(const Key('phone-driving-limits')), findsOneWidget);
+    });
+
+    testWidgets('a zero phone-use count is shown when the member has detection on', (t) async {
+      _big(t);
+      final PrimaryLanes l = PrimaryLanes(circleId: 'c1', names: const <String, String>{'u3': 'Alex'}, members: <MemberProcessing>[alex(detection: true)]);
+      await t.pumpWidget(_wrap(DrivingReportScreen(member: _member('u3', 'Alex'), api: _FakeTrips(), lanes: () async => l, clock: () => now)));
+      await t.pumpAndSettle();
+      await t.tap(find.text('Week'));
+      await t.pumpAndSettle();
+      expect(find.text('Phone use 0'), findsOneWidget);
+    });
+
+    testWidgets('member screen, phone not shared yet: placeholder; unknown member: honest not available', (t) async {
+      _big(t);
+      const PrimaryLanes l = PrimaryLanes(circleId: 'c1', names: <String, String>{'u3': 'Alex'}, members: <MemberProcessing>[
+        MemberProcessing(userId: 'u3', origin: ProcessingOrigin.phone, placeholder: PlaceholderReason.notSharedYet)
+      ]);
+      await t.pumpWidget(_wrap(DrivingReportScreen(member: _member('u3', 'Alex'), api: _FakeTrips(), lanes: () async => l, clock: () => now)));
+      await t.pumpAndSettle();
+      expect(find.byKey(const Key('waiting-phone-Alex')), findsOneWidget);
+      await t.pumpWidget(_wrap(DrivingReportScreen(key: const Key('zed'), member: _member('u9', 'Zed'), api: _FakeTrips(), lanes: () async => null)));
+      await t.pumpAndSettle();
+      expect(find.byKey(const ValueKey<String>('not-available-title')), findsOneWidget);
+    });
+
+    testWidgets('family screen: phone-only member from their phone, server member from the server report, both badged', (t) async {
+      _big(t);
+      final PrimaryLanes l = PrimaryLanes(circleId: 'c1', names: const <String, String>{'u2': 'Sam', 'u3': 'Alex'}, members: <MemberProcessing>[
+        const MemberProcessing(userId: 'u2', origin: ProcessingOrigin.server),
+        alex(),
+      ]);
+      final _FakeReport api = _FakeReport();
+      await t.pumpWidget(_wrap(FamilyDrivingReportScreen(
+        members: ValueNotifier<List<Member>>(<Member>[]),
+        userId: ValueNotifier<String?>('u1'),
+        api: api,
+        clock: () => now,
+        detectionLoader: () async => true,
+        lanes: () async => l,
+      )));
+      await t.pumpAndSettle();
+      expect(api.calls, 1);
+      expect(find.byKey(const Key('driving-private-list')), findsOneWidget);
+      expect(find.text('Processed by server'), findsOneWidget);
+      expect(find.byKey(const Key('phone-driving-Alex')), findsOneWidget);
+      expect(find.byKey(const Key('driving-private-note')), findsOneWidget);
+    });
+
+    testWidgets('family screen with only phone-only members never asks the server', (t) async {
+      _big(t);
+      final PrimaryLanes l = PrimaryLanes(circleId: 'c1', names: const <String, String>{'u3': 'Alex'}, members: <MemberProcessing>[alex()]);
+      final _FakeReport api = _FakeReport();
+      await t.pumpWidget(_wrap(FamilyDrivingReportScreen(
+        members: ValueNotifier<List<Member>>(<Member>[]),
+        userId: ValueNotifier<String?>('u1'),
+        api: api,
+        clock: () => now,
+        detectionLoader: () async => true,
+        lanes: () async => l,
+      )));
+      await t.pumpAndSettle();
+      expect(api.calls, 0);
+      expect(find.byKey(const Key('phone-driving-Alex')), findsOneWidget);
+    });
+  });
+
+  group('WeekFigures phone use', () {
+    test('null means detection off, zero is a real zero, both survive the wire', () {
+      const WeekFigures off = WeekFigures(drives: 1, distanceM: 1, durationS: 1, topSpeedMps: 1, speeding: 0, hardBrake: 0, rapidAccel: 0);
+      const WeekFigures zero = WeekFigures(drives: 1, distanceM: 1, durationS: 1, topSpeedMps: 1, speeding: 0, hardBrake: 0, rapidAccel: 0, phoneUse: 0);
+      const WeekFigures three = WeekFigures(drives: 1, distanceM: 1, durationS: 1, topSpeedMps: 1, speeding: 0, hardBrake: 0, rapidAccel: 0, phoneUse: 3);
+      expect(WeekFigures.tryParse(off.toJson())!.phoneUse, isNull);
+      expect(WeekFigures.tryParse(zero.toJson())!.phoneUse, 0);
+      expect(WeekFigures.tryParse(three.toJson())!.phoneUse, 3);
+      final Map<String, dynamic> bad = off.toJson()..['ev'] = <int>[0, 0, 0, -2];
+      expect(WeekFigures.tryParse(bad), isNull);
+    });
+  });
+}
+
+class _FakeReport implements TripReportApi {
+  int calls = 0;
+  @override
+  Future<TripReport> report({required DateTime start, String period = 'week', String? circleId}) async {
+    calls++;
+    return TripReport.fromJson(<String, dynamic>{
+      'period': period,
+      'start': '2026-11-02',
+      'end': '2026-11-08',
+      'prev_start': '2026-10-26',
+      'prev_end': '2026-11-01',
+      'members': <Map<String, dynamic>>[
+        <String, dynamic>{'user_id': 'u2', 'name': 'Sam', 'drives': 2, 'distance_m': 5000.0, 'duration_s': 600.0, 'top_speed_mps': 20.0},
+      ],
+    });
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation i) => throw UnimplementedError('${i.memberName}');
 }
