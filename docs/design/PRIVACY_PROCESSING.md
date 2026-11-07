@@ -532,3 +532,48 @@ Data layer wired into the weekly summary and the trips list (`primary_lanes.dart
 The legacy "give the server the circle key" button is gone; `TrustedServerScreen` keeps consent withdrawal and copy deletion for legacy circles and points to the admin upgrade. The admin default only preselects a button; a pref is never signed without an explicit confirmation dialog.
 
 Web admin (Encryption keys page): per-circle policy badge and counts of members the server can read versus members who keep data on their phone. No control.
+
+## 20. Phase 3 status (sidecar and Dawarich bridge; implemented on branch `feat/lanes-sidecar`)
+
+Code: `backend/cmd/e2ee-bridge/lanes.go` (engine), `bridge.go`/`main.go` (mode switch, exit codes), `backend/internal/e2ee/processing_verify.go` (`Trust.VerifyPolicy`, `Trust.VerifyPref`, `Trust.OpenSKWrap`, `CheckSKIndependent`, `LogIndex.HasPolicy`), `rollback_state.go` (persistable `RollbackGuard`), `verify.go` (log index of action 10/11 entries). Tests: `cmd/e2ee-bridge/lanes_test.go` (world built from the Phase 1 vectors `testdata/lanes.json`), `internal/e2ee/processing_verify_test.go`, `internal/handlers/e2ee_dawarich_lanes_db_test.go`. Operator text: `backend/cmd/e2ee-bridge/README.md`, "Lanes circles".
+
+Behaviour:
+
+* **Mode per circle, decided by the verified log.** No `processing_policy` entry in the verified log: the old flow (legacy trusted-server consents + CK wrap for the sidecar; the Dawarich bridge's CK flow). A policy entry exists: the policy served by `GET .../processing` must be the newest one in the log and signed by a usable device of a current admin, else the circle is not read. Verified assist on: lanes flow. Verified off: the sidecar drops its SK; the Dawarich bridge falls back to its old flow.
+* **Lanes flow**: SK wraps only (`key_line=server`; wrapper = a device of the admin who signed that generation, commitment from the signed policy; policy history for older generations), items `key_line=server`, purposes `fix,history`. A phone-line (CK) wrap offered for the server line, or an SK equal to a held CK or with a CK epoch's commitment: alarm, exit 7, nothing stored. Per author: newest lane-server `processing_pref` in the verified log naming exactly the server key; otherwise the item is dropped before decryption. Per item: v2 header line and generation, AEAD, signature, sender chain, seq/replay, per-line rollback (persisted).
+* **Result items** (`trip`, `drive`, `week`) are not requested by the sidecar and never ingested: the server computes trips and driving from the fixes it ingests (8.4); a phone-lane author's results are phone-line data and unreadable by it.
+* **Missing wraps** (this device, and member devices from `.../pending?key_line=server`) and **policy off / revoked key** (exit 3) are logged as described in the README.
+
+Trust decisions (all fail closed):
+
+1. Nothing the server reports about lanes is trusted; policy and prefs are re-verified from signatures plus the verified log (newest-entry rule defeats replay of an old statement).
+2. The lane is evaluated at read time: an author who is not CURRENTLY lane server is not read, even for items sealed while they were (the server purges those copies on opt-out anyway). Such items wait up to 15 minutes (race with a statement that is about to arrive), and are read after a later opt-in because the log carries no times.
+3. The sidecar verifies lane prefs against its own key; the Dawarich bridge against the pinned server key from `GET /e2ee/server-device`.
+4. A legacy-converted consent (no log entry) counts only while the member has no `processing_pref` entry in the log; its 30-day expiry is enforced by the server only (the sidecar cannot see it).
+5. In a circle with assist on, the Dawarich bridge never reads the phone line, even if it holds a CK. A circle without a policy/with policy off keeps the old CK behaviour (the owner's explicit decision, ADR 5.4 rule 4).
+6. A CK or SK-reuse alarm stops the process (exit 7); under `restart: unless-stopped` docker restarts it and it stops again.
+
+Not verified: against a real server and phone (tests use fakes with real cryptography plus the DB tests of Phase 2), against a live Dawarich; the Dart side producing the log entries (the sidecar assumes the format of section 17: pref entry `subject` = server device id, `epoch` = sk_gen).
+
+### 20.1 Plaintext readers and their gates
+
+Writers of plaintext positions are gated per member (ingest re-verifies the lane in Go; plaintext uploads from a Private-only user answer 409; a lane end calls `e2ee_purge_user_server_copies`). Because a database writer could still plant a row, every READER below also gates per member, so a planted `locations` or `member_positions` row of a member who keeps data on the phone is not served. `keeps` = `NOT e2ee_keeps_data_on_phone(user)`; `server_ok` = `e2ee_member_server_ok(l.e2ee_circle_id, user)` on rows tagged with a circle.
+
+| Reader | Source | Gate |
+|---|---|---|
+| Built-in Dawarich sync (`nextDawarichBatch`, `dawarichPending`) | `locations` | `e2ee_circle_id IS NULL OR server_ok` |
+| History (`loadHistoryPoints`), history export | `locations` | same predicate, plus the 403 `keeps_data_on_phone` check |
+| Trips / driving jobs (`trips.loadPoints`, user listing) | `locations` | same predicate |
+| Post-purge last-position recompute (Go purge and `e2ee_purge_user_server_copies`) | `locations` -> `member_positions` | same predicate |
+| Home Assistant states (`haPositions`), HA events member lists | `member_positions`, circle lists | `keeps`; lists via `e2ee_member_plaintext_ok` |
+| Public share link view | `member_positions` | `keeps` in the join |
+| Live shares (incoming) | `member_positions` | `keeps` in the join |
+| Member list, `/ws` snapshot, admin members, admin WS snapshot | `member_positions` | `keeps` in the join (admin still receives the `keeps_data_on_phone` flag) |
+| Severe-weather cells, geofence reconcile, bubbles (subject position) | `member_positions` | `keeps` |
+| Alerts / crash alerts / check-in / SOS position of the caller | own `member_positions` | `memberPlaintextOK(circle, user)` |
+| Circle visibility, live fan-out, geofence evaluation, check-ins | `circles.Authz` queries | `e2ee_member_plaintext_ok` |
+| Account data export | own `locations` | the user's own data, ungated by design |
+| Location retention | delete only | n/a |
+| Writers into `member_positions` (`location.go`, `location_batch.go`, ingest) | n/a | plaintext upload 409 for Private-only users; ingest verified in Go |
+
+Tests: `handlers/e2ee_dawarich_lanes_db_test.go` (planted rows: Dawarich, history, Home Assistant, share link, admin snapshot, purge recompute).

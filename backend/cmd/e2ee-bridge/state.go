@@ -228,6 +228,8 @@ type recvState struct {
 	Dev       map[string]*devState  `json:"dev"`
 	EpochSeen map[string]*epochSeen `json:"epoch_seen"`
 	Deferred  map[string]int64      `json:"deferred"` // "circle/dev/seq" -> first deferred (ms)
+	// SKGuard is the per-line (server line) rollback state per circle (lanes).
+	SKGuard map[string]*e2ee.RollbackState `json:"sk_guard,omitempty"`
 }
 
 // sentState survives a rollback: points already delivered must never be
@@ -271,6 +273,9 @@ func (rs *runState) normalize() {
 	}
 	if rs.Recv.Deferred == nil {
 		rs.Recv.Deferred = map[string]int64{}
+	}
+	if rs.Recv.SKGuard == nil {
+		rs.Recv.SKGuard = map[string]*e2ee.RollbackState{}
 	}
 	if rs.Sent.LastTsMs == nil {
 		rs.Sent.LastTsMs = map[string]int64{}

@@ -500,6 +500,10 @@ Defence in depth, so a stored row is not enough: the ingest endpoint re-derives 
 * The circle badge reads **"Server can read"** and the circle's toggle subtitle says so. The turn-on dialog of Private mode mentions the option and what it costs.
 * Trips, the weekly summary and the other "server needs plaintext" screens are available again for a server-member primary circle.
 
+### Lanes circles (per-member processing lanes)
+
+For circles with per-member lanes (`docs/design/PRIVACY_PROCESSING.md`) the sidecar, and the Dawarich bridge in a circle with server assistance on, read only the **server line**: they hold the server key SK and never a circle key CK, ingest/forward only members whose own signed lane (checked against the key log) is `server`, and treat a CK wrap or an SK that reuses a CK as a security alarm (exit 7). The all-members consent of this section applies only to legacy circles. Details: `backend/cmd/e2ee-bridge/README.md`, "Lanes circles", and PRIVACY_PROCESSING.md section 20.
+
 ### Phase-2 enforcement, relaxed only where the server can read
 
 `e2ee_plaintext_blocked(circle) = private AND NOT e2ee_server_member(circle)` replaces "private" in: the 409 on plaintext positions (`circleModes`), place/geofence/bubble handlers and the DB triggers, the geofence/bubble evaluators, the SOS/check-in position rules, and every `circles.Authz` visibility query. A circle **without** an approved server device is unchanged (the whole phase-2 test suite passes untouched, plus new negative tests). The legacy-plaintext purge refuses a server-member circle (its places are legitimate).

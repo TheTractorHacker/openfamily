@@ -470,7 +470,7 @@ const reconcileLookback = 24 * time.Hour
 const reconcileLatestPointsSQL = `
 	SELECT user_id, lon, lat, ts, accuracy_meters
 	FROM member_positions
-	WHERE ts > now() - make_interval(secs => $1::float8)`
+	WHERE ts > now() - make_interval(secs => $1::float8) AND NOT e2ee_keeps_data_on_phone(user_id)`
 
 // reconcileLatestPoints re-evaluates the latest point for each user. Only the
 // latest point is re-evaluated so the pass is idempotent: that point is already

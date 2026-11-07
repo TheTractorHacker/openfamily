@@ -733,8 +733,10 @@ func TestServerPurgeKeepsPositionsFromOtherSources(t *testing.T) {
 	e.locAt(dev, now.Add(-time.Hour), 20, other)
 	e.locAt(dev, now.Add(-2*time.Hour), 30, nil)
 	e.mustCode("B", "DELETE", "/circles/"+e.circle+"/e2ee/server-copies", nil, 200)
-	if lat, ok := e.lastLat("B"); !ok || lat != 20 {
-		t.Fatalf("last position after purge = %v %v, want the other circle's 20", lat, ok)
+	// The tagged row of a circle the member is NOT server-readable in (here a circle that does not
+	// exist) is never promoted to the last position: the untagged plaintext row (30) wins.
+	if lat, ok := e.lastLat("B"); !ok || lat != 30 {
+		t.Fatalf("last position after purge = %v %v, want the untagged 30", lat, ok)
 	}
 	var n int
 	_ = e.pool.QueryRow(context.Background(), `SELECT count(*) FROM locations WHERE device_id = $1 AND e2ee_circle_id IS NULL OR e2ee_circle_id = $2`, dev, other).Scan(&n)

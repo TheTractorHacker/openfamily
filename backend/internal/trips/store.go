@@ -72,6 +72,7 @@ func (s *Store) loadPoints(ctx context.Context, userID string, from, to time.Tim
 		FROM locations l
 		JOIN devices d ON d.id = l.device_id
 		WHERE d.user_id = $1 AND l.ts >= $2 AND l.ts <= $3
+		  AND (l.e2ee_circle_id IS NULL OR e2ee_member_server_ok(l.e2ee_circle_id, d.user_id))
 		ORDER BY l.ts
 		LIMIT $4`, userID, from, to, limit)
 	if err != nil {
@@ -563,7 +564,8 @@ func (w *Worker) Pass(ctx context.Context) {
 		LEFT JOIN trip_watermarks w ON w.user_id = u.id
 		WHERE EXISTS (
 			SELECT 1 FROM devices d JOIN locations l ON l.device_id = d.id
-			WHERE d.user_id = u.id AND l.ts > COALESCE(w.last_point_at, $1::timestamptz))
+			WHERE d.user_id = u.id AND l.ts > COALESCE(w.last_point_at, $1::timestamptz)
+			  AND (l.e2ee_circle_id IS NULL OR e2ee_member_server_ok(l.e2ee_circle_id, d.user_id)))
 		LIMIT $2`, now.Add(-backfill), maxUsers)
 	if err != nil {
 		slog.Warn("trips: list users failed", "err", err)

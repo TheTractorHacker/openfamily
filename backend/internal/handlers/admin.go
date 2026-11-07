@@ -89,7 +89,7 @@ func (s *Server) AdminListFamilyMembers(w http.ResponseWriter, r *http.Request) 
 		       d.last_seen,
 		       e2ee_keeps_data_on_phone(u.id)
 		FROM users u
-		LEFT JOIN member_positions mp ON mp.user_id = u.id
+		LEFT JOIN member_positions mp ON mp.user_id = u.id AND NOT e2ee_keeps_data_on_phone(u.id)
 		LEFT JOIN (
 			SELECT user_id, MAX(last_seen) AS last_seen
 			FROM devices GROUP BY user_id
@@ -180,7 +180,7 @@ func (s *Server) AdminListMembers(w http.ResponseWriter, r *http.Request) {
 		       u.family_id, f.name,
 		       e2ee_keeps_data_on_phone(u.id)
 		FROM users u
-		LEFT JOIN member_positions mp ON mp.user_id = u.id
+		LEFT JOIN member_positions mp ON mp.user_id = u.id AND NOT e2ee_keeps_data_on_phone(u.id)
 		LEFT JOIN (
 			SELECT user_id, MAX(last_seen) AS last_seen
 			FROM devices GROUP BY user_id

@@ -119,7 +119,7 @@ func (s *Server) CreateBubble(w http.ResponseWriter, r *http.Request) {
 	}
 	var lat, lon float64
 	var ts time.Time
-	err = tx.QueryRow(ctx, `SELECT lat, lon, ts FROM member_positions WHERE user_id = $1`, subject).Scan(&lat, &lon, &ts)
+	err = tx.QueryRow(ctx, `SELECT lat, lon, ts FROM member_positions WHERE user_id = $1 AND NOT e2ee_keeps_data_on_phone(user_id)`, subject).Scan(&lat, &lon, &ts)
 	if err == pgx.ErrNoRows || (err == nil && time.Since(ts) > bubblePositionMax) {
 		writeError(w, http.StatusConflict, "no recent location for this member")
 		return

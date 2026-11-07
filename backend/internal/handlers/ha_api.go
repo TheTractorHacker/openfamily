@@ -273,7 +273,7 @@ func (s *Server) haPositions(ctx context.Context, userIDs []string) (map[string]
 	}
 	rows, err := s.Pool.Query(ctx, `
 		SELECT user_id::text, lat, lon, accuracy_meters, battery_pct, speed_mps, ts, motion_state
-		FROM member_positions WHERE user_id = ANY($1::uuid[])`, userIDs)
+		FROM member_positions WHERE user_id = ANY($1::uuid[]) AND NOT e2ee_keeps_data_on_phone(user_id)`, userIDs)
 	if err != nil {
 		return nil, err
 	}
