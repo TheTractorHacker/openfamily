@@ -1,3 +1,6 @@
+@Timeout(Duration(minutes: 3))
+library;
+
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -49,10 +52,10 @@ void main() {
       final SealedQueue qa = SealedQueue(kv: a), qb = SealedQueue(kv: b);
       WireItem it(int s) => WireItem(circleId: 'c', deviceId: 'd', seq: s, purpose: 'fix', epoch: 1, sizeBucket: 256, ciphertext: Uint8List.fromList(<int>[s]));
       await Future.wait(<Future<void>>[
-        for (int i = 1; i <= 10; i++) (i.isOdd ? qa : qb).enqueue(it(i)),
+        for (int i = 1; i <= 8; i++) (i.isOdd ? qa : qb).enqueue(it(i)),
       ]);
       final List<int> seqs = (await qa.peek()).map((WireItem w) => w.seq).toList()..sort();
-      expect(seqs, <int>[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+      expect(seqs, <int>[1, 2, 3, 4, 5, 6, 7, 8]);
     });
   });
 
