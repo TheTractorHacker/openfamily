@@ -6,7 +6,7 @@ import 'tokens.dart';
 export 'accent.dart';
 export 'tokens.dart';
 
-/// Brand tokens for OpenFamily.
+/// Brand tokens for Orbitly.
 ///
 /// Light is Ice (lime on blue-grey paper). Dark is Night (brighter lime on
 /// charcoal). Lime is the action color — buttons and pins — not a wash.

@@ -165,7 +165,7 @@ class _LoginScreenState extends State<LoginScreen> {
           subtitle: _totpRequired
               ? 'Enter the code from your authenticator app to finish '
                   'signing in.'
-              : 'Sign in to see your family.',
+              : 'Sign in to see your people.',
         ),
         TextField(
           controller: _identifier,

@@ -8,10 +8,10 @@
 import React from 'react'
 import { ApiError, getDomainStatus } from '../lib/api'
 import type { DomainCheck, DomainStatus } from '../lib/types'
+import { REPO_URL } from '../lib/brand'
 import { Badge, Button, Card, CopyButton, Mono } from '../components/primitives'
 
-const CUSTOM_DOMAIN_DOCS_URL =
-  'https://github.com/TheTractorHacker/openfamily/blob/main/docs/custom-domain.md'
+const CUSTOM_DOMAIN_DOCS_URL = `${REPO_URL}/blob/main/docs/custom-domain.md`
 
 function messageFromError(error: unknown, fallback: string): string {
   if (error instanceof ApiError) return error.message || fallback

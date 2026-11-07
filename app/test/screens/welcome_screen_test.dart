@@ -20,7 +20,7 @@ void main() {
   testWidgets('shows value-prop pages and swipes between them',
       (WidgetTester tester) async {
     await tester.pumpWidget(_app(buildLightTheme()));
-    expect(find.text('Know where your family is'), findsOneWidget);
+    expect(find.text('Know where your people are'), findsOneWidget);
     await tester.fling(find.byType(PageView), const Offset(-400, 0), 1000);
     await tester.pumpAndSettle();
     expect(find.text('Gentle heads-ups'), findsOneWidget);

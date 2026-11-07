@@ -1,7 +1,7 @@
 # ADR: End-to-end encryption ("Private circle")
 
 Status: **ACCEPTED** (supersedes the earlier "Proposed" text of this file, which recommended against E2EE).
-Issue: #34. Phase 1 (keys and verification) and phase 2 (the encrypted channel) are implemented. Phase 3 (web viewer and Dawarich bridge as approved read-only device members) is implemented; see "Phase 3" below. Chat, media and phone-side trips are still future. An **optional trusted-server mode** (the OpenFamily server as an approved member device, owner's decision) is described in "Trusted-server mode" below.
+Issue: #34. Phase 1 (keys and verification) and phase 2 (the encrypted channel) are implemented. Phase 3 (web viewer and Dawarich bridge as approved read-only device members) is implemented; see "Phase 3" below. Chat, media and phone-side trips are still future. An **optional trusted-server mode** (the Orbitly server as an approved member device, owner's decision) is described in "Trusted-server mode" below.
 
 ## Decision
 
@@ -13,7 +13,7 @@ It is delivered in **phases and opt-in per circle** ("Private circle"):
 | 1 | Cryptographic foundation and verification UX: device identity keys, circle key epochs, wrapped keys, key transparency log, recovery, safety numbers, server-record check, admin/CLI tooling. **No location data moves.** | implemented |
 | 2 | Live fixes, history, places, arrival/departure events and SOS positions move into the encrypted channel; place evaluation runs on the phones. Server-side trips, driving report and weekly summary are unavailable in a Private circle. | implemented; phone background behaviour not yet verified on devices (see phase-2 section) |
 | 3 | Web viewer and Dawarich bridge as approved read-only *device members* (API contract below). | implemented (browser viewer, `e2ee-bridge`, phone approval screen); not yet exercised against a live Dawarich or on a physical phone |
-| 3b | Optional **trusted-server mode**: the OpenFamily server as an approved, per-member-consented device so the server can read (and store plaintext for) a circle again. Off by default. | implemented; not exercised on a physical phone or a live deployment (see "Trusted-server mode") |
+| 3b | Optional **trusted-server mode**: the Orbitly server as an approved, per-member-consented device so the server can read (and store plaintext for) a circle again. Off by default. | implemented; not exercised on a physical phone or a live deployment (see "Trusted-server mode") |
 | 4 | Media (chat photos); encrypted chat; phone-side trips. | encrypted chat and its photos: implemented, see `E2EE_CHAT.md`; phone-side trips: future |
 
 Existing circles keep working exactly as today. A circle switched to Private mode only gets keys in phase 1. The toggle is OFF by default,
@@ -411,7 +411,7 @@ A `service` device member run **off the server host** (`backend/cmd/e2ee-bridge/
 * **Does not defend against a malicious or compromised origin.** The viewer is JavaScript delivered by the same server whose database it is meant to distrust. An operator (or anyone who can alter the files in `backend/web/dist`, the TLS terminator, a CDN or a compromised update path) can ship a viewer that exfiltrates keys or plaintext. The same holds for XSS in the admin panel, a malicious browser extension, and malware in the browser. This is the fundamental limitation of browser E2EE; the phone app's code is signed and installed, the web app's is fetched every time.
 * **Mitigations present:** strict CSP without inline or eval scripts; keys non-extractable in `device` mode; passphrase and session modes; the page shows SHA-256 hashes of the scripts and styles it is running so a careful user can compare them with `sha256sum` of a release they obtained elsewhere (this is computed by the page itself, so it is only a check if the comparison value comes from outside the server); the viewer is a visible, revocable entry in the key list on every phone and in the admin "Encryption keys" page, and is in the key log. Not present: subresource-integrity pinning of the entry document, a reproducible-build attestation, a separately hosted viewer origin. If your threat model includes a hostile operator, **use the phone app only and do not approve a browser viewer**; a self-hosting operator who is also the only user is the case where the viewer's trust is reasonable.
 * **ADMIN_LOCATION_ACCESS is unchanged.** A platform admin sees no location of a Private circle unless THEIR OWN account is a member and THEIR OWN browser key was approved by THEIR OWN phone; the server cannot grant that. The server-side admin map and history endpoints still return nothing for private circles (the server holds nothing).
-* **Bridge host:** see above; additionally the bridge holds an OpenFamily refresh token for the account, which gives API access with the account's rights (not the circle key).
+* **Bridge host:** see above; additionally the bridge holds an Orbitly refresh token for the account, which gives API access with the account's rights (not the circle key).
 
 ### How viewers and the bridge check devices against the log (authorization rules)
 
@@ -454,7 +454,7 @@ Closed in this pass: a listed voucher is now bound to its logged fingerprint; ro
 * Not exercised: a real Dawarich instance, a physical phone, the browser pages in several real browsers (Node 22 and the bundle build were exercised; the UI was not click-tested), and WebCrypto Ed25519/X25519 in Safari/Firefox ESR. Browsers without them fall back to the passphrase mode.
 * The viewer cannot upload; a read-only web key cannot send positions. No chat or media is decrypted (still plaintext).
 
-## Trusted-server mode (the OpenFamily server as a member device)
+## Trusted-server mode (the Orbitly server as a member device)
 
 Status: implemented as an **opt-in** per instance (token) and per circle (every member's signed consent). Off by default; a default install, and every Private circle without an approved server device, behaves exactly as in phase 2.
 
@@ -471,7 +471,7 @@ What it still protects against: a leaked or stolen **database dump or backup of 
 
 The server is a **device member**, not a special role, using the same machinery as the web viewer and the Dawarich bridge:
 
-* A new device kind `server` ("OpenFamily server"). It is registered with `POST /e2ee/devices` like a bridge: cross-signed by a phone key of its owner's account, never `can_upload`, never rotatable (revoke and enroll again).
+* A new device kind `server` ("Orbitly server"). It is registered with `POST /e2ee/devices` like a bridge: cross-signed by a phone key of its owner's account, never `can_upload`, never rotatable (revoke and enroll again).
 * It runs as a **sidecar process**, `e2ee-bridge` in server mode (`backend/cmd/e2ee-bridge`, compose service `e2ee-server-device`, profile `e2ee-server`), **not** inside the API process and **not** in Postgres. Its identity seed and the circle keys live in a `0600` file in a Docker volume (optionally sealed with Argon2id + XChaCha20-Poly1305 under `E2EE_SERVER_DEVICE_PASSPHRASE`). The database only ever holds its public key.
 * The sidecar reuses the bridge's verified-trust engine unchanged: key log verification and pinning, `AuthorizeWrap`/`AuthorizeSender`/`PinApprover`, wrap and key-commitment checks, item AEAD + signature + sequence/replay/rollback rules. A circle whose log does not verify stops the sidecar (exit 4), as for the bridge.
 * It hands each verified plaintext position to `POST /internal/e2ee/ingest`. That endpoint is **not a user route**: it needs the server-device bearer token (`E2EE_SERVER_INGEST_TOKEN`, at least 32 characters, shared only between the API and the sidecar; compared in constant time; `404` while unset). A user JWT never works there.
@@ -502,7 +502,7 @@ An admin can switch on **Settings > Trust this server by default** (`PUT /api/ad
 
 ### Phone behaviour (Flutter)
 
-* **Approve a viewer or bridge** shows a `server` request distinctly ("OpenFamily server (can read the circle)") with its own warning. Approving only registers the key; it grants nothing.
+* **Approve a viewer or bridge** shows a `server` request distinctly ("Orbitly server (can read the circle)") with its own warning. Approving only registers the key; it grants nothing.
 * **Encryption keys > circle > Trusted server** shows the server key's name and fingerprint (compare it with the enroll command's output), who has allowed it (each signature re-verified on the phone), and the buttons *Allow the server to read this circle* (an explicit destructive-styled confirmation with the warning text), *Withdraw my consent*, *Give the server the circle key* (circle-key publisher, enabled only when every consent verifies locally) and *Delete my copies / all copies*.
 * The server key is **never wrapped automatically**: `processPending` skips it, `confirmWrap` refuses it, and `_recipients` (epoch rotation) includes it only while `allowedServerKey` holds (pinned key, matching fingerprint, every consent verified). After a withdrawal the next epoch excludes it.
 * The circle badge reads **"Server can read"** and the circle's toggle subtitle says so. The turn-on dialog of Private mode mentions the option and what it costs.

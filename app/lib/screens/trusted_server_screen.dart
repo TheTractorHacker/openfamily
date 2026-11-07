@@ -15,7 +15,7 @@ import 'security_widgets.dart';
 /// Honest by design: the server host (and anyone who controls it, its backups
 /// and its administrators) CAN read this circle's locations afterwards.
 const String kTrustedServerWarning =
-    'If you allow this, the OpenFamily server can READ the location of every member of this circle, '
+    'If you allow this, the Orbitly server can READ the location of every member of this circle, '
     'and it keeps a plaintext copy in its database (map, history, trips, place alerts, Dawarich export). '
     'Anyone who controls the server host, its backups or its database can read that copy. '
     'This is NOT end-to-end encryption against the server any more. It only protects against leaks of '
@@ -100,7 +100,7 @@ class _TrustedServerScreenState extends State<TrustedServerScreen> {
   Future<void> _allow() async {
     final DeviceKey k = _key!;
     final bool ok = await showDsConfirm(context,
-        title: 'Let the OpenFamily server read "${widget.circle.name}"?',
+        title: 'Let the Orbitly server read "${widget.circle.name}"?',
         message: '$kTrustedServerWarning\n\nServer key: ${k.short}\n${k.digits}',
         confirmLabel: 'I understand: allow the server',
         destructive: true);
@@ -172,7 +172,7 @@ class _TrustedServerScreenState extends State<TrustedServerScreen> {
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.all(AppSpace.xl),
         children: <Widget>[
-          const Text('OpenFamily server as a circle member', style: AppType.headline),
+          const Text('Orbitly server as a circle member', style: AppType.headline),
           const SizedBox(height: AppSpace.xs),
           Text(
             'Optional, off by default. It makes this circle readable by your own server again so the admin map, history, '
@@ -200,7 +200,7 @@ class _TrustedServerScreenState extends State<TrustedServerScreen> {
             )
           else ...<Widget>[
             const DsSectionHeader('Server key', padding: EdgeInsets.fromLTRB(0, 0, 0, AppSpace.xs)),
-            Text(key.label.isEmpty ? 'OpenFamily server' : key.label, key: const Key('server-name'), style: AppType.headline),
+            Text(key.label.isEmpty ? 'Orbitly server' : key.label, key: const Key('server-name'), style: AppType.headline),
             const SizedBox(height: AppSpace.xxs),
             Text('Key: ${key.short}', key: const Key('server-short'), style: AppType.body.copyWith(fontWeight: FontWeight.w800)),
             const SizedBox(height: AppSpace.sm),

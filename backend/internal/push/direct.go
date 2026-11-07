@@ -1,6 +1,6 @@
 package push
 
-// The "direct" channel: OpenFamily's own push transport, with no third-party
+// The "direct" channel: Orbitly's own push transport, with no third-party
 // distributor (no ntfy app, no Google services).
 //
 // Events for a device wait in the push_outbox table (bounded per device, with a

@@ -64,7 +64,7 @@ Trigger SOS on A1 with screen off; pass if the other account is notified within 
 
 ### P9. Battery cost
 1. 100% battery, unplugged, normal use plus tracking for 8 h on each device; same with tracking off as the control.
-2. Record battery drop attributable to OpenFamily from Android Settings -> Battery (app usage %) and `adb shell dumpsys batterystats --charged` if available.
+2. Record battery drop attributable to Orbitly from Android Settings -> Battery (app usage %) and `adb shell dumpsys batterystats --charged` if available.
 3. Pass: attributable drain <= 5% per 8 h of mixed use (proposed budget; adjust after first baseline).
 
 ### P10. Update path
@@ -86,7 +86,7 @@ nearest one and note it.
 
 ### Before you start (3 min)
 
-1. A: Settings, tap the **OpenFamily** version row (note the version), then Settings, **Diagnostics**.
+1. A: Settings, tap the **Orbitly** version row (note the version), then Settings, **Diagnostics**.
    Expected: the checks load within about 10 seconds and the top banner says either
    "Everything looks right" or lists problems. **[shot]**
 2. Fix every red item the screen lists (one tap each) until the banner is green, then
@@ -103,17 +103,17 @@ nearest one and note it.
    Keystore PASS (shows "TEE" or "StrongBox"; "Software" is a finding to note), Vault PASS,
    Private circle encryption PASS, Upload PASS ("server registered it just now"),
    Notifications PASS with a **Confirm** chip, and you must see **two** notifications
-   ("local test" and "OpenFamily test alert") within 30 seconds. Only one or none:
+   ("local test" and "Orbitly test alert") within 30 seconds. Only one or none:
    FAIL and note which. **[shot]**
 2. A: **Start background test**, lock the phone, put it in your pocket and walk or sit
    five minutes with the screen off, then unlock and reopen the Self-test screen.
    Expected: "Background reporting works". FAIL means the OEM is killing the app: go
    back to Diagnostics and follow the battery advice for your brand, then repeat.
-3. A, deliberately break it: Android Settings, Apps, OpenFamily, Permissions, Location,
+3. A, deliberately break it: Android Settings, Apps, Orbitly, Permissions, Location,
    choose **Allow only while using the app**. Reopen Diagnostics. Expected: a red
    "Location permission" card whose button opens the permission page; restore **Allow all
    the time** and the card turns green on return. Then Settings, Battery, set
-   OpenFamily to **Optimized**. Expected: an orange battery card (with a brand-specific
+   Orbitly to **Optimized**. Expected: an orange battery card (with a brand-specific
    button on Samsung, Xiaomi, OnePlus, Huawei, Oppo); restore **Unrestricted**.
 4. A: set the phone clock manually 10 minutes wrong (turn off automatic time).
    Expected: Diagnostics shows a clock warning or failure. Turn automatic time back on.
@@ -129,7 +129,7 @@ nearest one and note it.
    this will not fire. Real test: pick a phone that has been reporting for 3+ days, switch
    it to airplane mode (or power it off) and wait for the threshold plus about 10
    minutes. Expected: A (admin) gets "Phone hasn't checked in ... about N hours" and B
-   gets "OpenFamily can't reach your phone" when back online, opening the Diagnostics
+   gets "Orbitly can't reach your phone" when back online, opening the Diagnostics
    screen when tapped. The text must NOT contain a place or coordinates. With "Show names
    in notifications" off it says "A family member's phone".
 3. Expected non-events: the same silence produces **one** alert, not repeats; nothing

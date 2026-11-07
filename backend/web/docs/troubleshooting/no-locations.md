@@ -1,6 +1,6 @@
 # "Nobody's location shows" in a Private circle
 
-This page explains, in plain words, why a family can open OpenFamily, be in a Private
+This page explains, in plain words, why a family can open Orbitly, be in a Private
 (end-to-end encrypted) circle, and see **no one**, and what the app now does about it.
 
 ## What happened to the Foley family
@@ -92,11 +92,11 @@ touches a position.
 
 ## What to do, in order
 
-1. Open OpenFamily on both phones and keep them open for a minute. Updates are sent immediately on open.
+1. Open Orbitly on both phones and keep them open for a minute. Updates are sent immediately on open.
 2. Tap **Circle settings, Why can't I see everyone?, Fix this circle** on the phone that sees nobody.
 3. If someone is on an old app, update it. Private circles need 0.16 or newer, and per-member privacy
    settings need 0.22.
 4. If a member's phone says "waiting for an admin to approve", an admin opens *Settings, Security,
    Encryption keys* for the circle.
 5. Phones that are off, or where the system has stopped the app in the background, can only send once the
-   app is opened again. On Android, allow OpenFamily to run in the background and exclude it from battery saving.
+   app is opened again. On Android, allow Orbitly to run in the background and exclude it from battery saving.

@@ -1,16 +1,17 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/openfamily/openfamily-logo-horizontal-dark.svg">
-    <img src="assets/brand/openfamily/openfamily-logo-horizontal.svg" alt="OpenFamily" width="560">
+    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/orbitly-logo-horizontal-dark.svg">
+    <img src="assets/brand/orbitly-logo-horizontal.svg" alt="Orbitly" width="560">
   </picture>
 </p>
 
-<h1 align="center">OpenFamily</h1>
+<h1 align="center">Orbitly</h1>
 
 <p align="center">
-  <strong>A self-hosted family GPS locator.</strong> You run the server.
-  Your family's location never leaves it.<br>
-  Life360-style live map, SOS, places, and history — not a calendar or shopping app.<br>
+  <strong>Your people, in orbit.</strong><br>
+  Self-hosted location sharing for your circles: family, friends, a team.
+  You run the server; your people's locations never leave it.<br>
+  Live map, arrival alerts, SOS, places and history, with no vendor cloud.<br>
   <a href="https://foleyit.com">foleyit.com</a>
   ·
   <a href="https://foleyit.com/compare/">Compare</a>
@@ -24,18 +25,20 @@
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)](https://docs.docker.com/compose/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-PostGIS%20%2B%20TimescaleDB-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
 
-OpenFamily is an open-source alternative to commercial family locators
+Orbitly is an open-source alternative to commercial location-sharing apps
 (a self-hosted Life360 alternative). A Flutter app for Android and iOS talks
-to a Go API you host with Docker — on a VPS, a Synology NAS, or a machine on
+to a Go API you host with Docker, on a VPS, a Synology NAS, or a machine on
 your LAN. There is no vendor cloud, no analytics SDK, and no Google Play
 Services requirement on Android.
 
-This repository is a **family GPS location tracker**. It is not
-[NexaFlowFrance/OpenFamily](https://github.com/NexaFlowFrance/OpenFamily), a
-different product: a self-hosted family **organizer** (calendar, shopping,
-chores) that currently ranks first in GitHub search for the same name.
+> **Formerly OpenFamily.** Orbitly is the new name of the project that was
+> published as Orbitly. Upgrading works as before: nothing to migrate, your
+> data, accounts and app installs stay. Some internal names (the Android
+> package `app.openfamily`, database and Docker names, `OPENFAMILY_*` settings)
+> intentionally keep the old spelling, see
+> [Naming](docs/developers/naming.md).
 
-![OpenFamily — keep your family close without giving up your privacy](assets/brand/openfamily/openfamily-social-card.png)
+![Orbitly: Your people, in orbit](assets/brand/orbitly-social-card.png)
 
 ```
 ┌──────────┐   ┌──────────┐   ┌──────────────────────────────┐
@@ -81,7 +84,7 @@ what is new in your server version). Screenshots are generated, see
 ## Why self-host this
 
 Commercial family trackers send live coordinates to someone else's cloud and
-monetize the result. OpenFamily is the opposite posture:
+monetize the result. Orbitly is the opposite posture:
 
 - **You own the data.** Locations, places, and history live in your Postgres.
 - **Android push is self-hosted.** A built-in direct channel delivers alerts
@@ -200,7 +203,7 @@ need a valid invite code.
 
 On-site write-up: [foleyit.com/compare](https://foleyit.com/compare/).
 
-| | OpenFamily | Life360-class apps | [OwnTracks](https://owntracks.org/) | [Traccar](https://www.traccar.org/) | [Dawarich](https://dawarich.app/) |
+| | Orbitly | Life360-class apps | [OwnTracks](https://owntracks.org/) | [Traccar](https://www.traccar.org/) | [Dawarich](https://dawarich.app/) |
 |---|---|---|---|---|---|
 | Self-hosted | Yes | No | Yes | Yes | Yes |
 | Family map + SOS | Yes | Yes | No | Weak | No |
@@ -231,7 +234,7 @@ profiles: `proxy` (Caddy) and `push` (ntfy). See
 [docs/self-hosting.md](docs/self-hosting.md).
 
 Existing deployments should retain their current `DATABASE_URL`,
-`POSTGRES_USER`, and `POSTGRES_DB` values during the upgrade. The OpenFamily
+`POSTGRES_USER`, and `POSTGRES_DB` values during the upgrade. The Orbitly
 database defaults are for fresh installations and do not rename stored data.
 
 ```bash
@@ -267,12 +270,12 @@ before you invite anyone.
 ## Family setup
 
 1. Install the Android APK (admin **Builds** page or the latest GitHub Release).
-2. Enter your server URL (for example `https://openfamily.example.com`).
+2. Enter your server URL (for example `https://orbitly.example.com`).
 3. Create or join a family (invite code if the operator closed registration).
 4. Allow **Always** location and notifications. On Android, grant the battery
    exemption under Settings → Background updates.
 5. Install [ntfy](https://ntfy.sh/) so SOS, geofence, and check-in alerts
-   arrive when OpenFamily is closed.
+   arrive when Orbitly is closed.
 
 Privacy details: [PRIVACY.md](PRIVACY.md) ([on the site](https://foleyit.com/privacy/)).
 Operator hardening: [docs/self-hosting.md](docs/self-hosting.md)
@@ -484,7 +487,7 @@ For a fully private map, host your own tiles. The simplest option is
 3. In Container Manager → **Project**, point at `docker-compose.yml`, or SSH:
 
    ```bash
-   cd /path/to/openfamily
+   cd /path/to/orbitly
    cp .env.example .env   # set strong secrets
    docker compose up -d --build
    ```
@@ -494,7 +497,7 @@ For a fully private map, host your own tiles. The simplest option is
 5. **Remote access:** do **not** expose ports publicly if you can avoid it.
    Use Tailscale or WireGuard, then set
    `SITE_ADDRESS=openfamily.<your-tailnet>.ts.net` so Caddy gets a real
-   certificate. For a public domain, set `SITE_ADDRESS=openfamily.example.com`
+   certificate. For a public domain, set `SITE_ADDRESS=orbitly.example.com`
    and open 80/443.
 6. **ntfy / UnifiedPush:** set `PUSH_ADDRESS` and `NTFY_BASE_URL` so Android
    push works over TLS. `PUSH_ADDRESS` alone does not enable TLS — add a
@@ -589,7 +592,7 @@ circle", see `docs/design/E2EE.md`). In a normal circle the server must read
   its README) forwards Private-circle points to your own Dawarich. Whoever runs
   a viewer or bridge can read those circles.
 - **Optional trusted-server mode** (`docker compose --profile e2ee-server`, off
-  by default): the OpenFamily server becomes an approved member device of a
+  by default): the Orbitly server becomes an approved member device of a
   Private circle so the admin map, history, trips, place alerts and the built-in
   Dawarich sync work for it again. Every member must allow it on their phone, the
   circle then shows "Server can read", and the server keeps plaintext copies; it
@@ -795,8 +798,22 @@ Report security issues privately — see [SECURITY.md](SECURITY.md).
 
 ## License
 
-OpenFamily is licensed under the [GNU Affero General Public License
-v3.0](LICENSE).
+Orbitly is licensed under the [GNU Affero General Public License
+v3.0](LICENSE). The AGPL asks that everyone who uses a running server over a
+network can get the source of the version it runs; this repository is that
+source. See [NOTICE](NOTICE) and
+[Credits and license](docs/about/credits-and-license.md).
+
+## Credits
+
+**Orbitly is a substantially extended fork of
+[OpenFamily](https://github.com/wheresfrank/openfamily) by wheresfrank and
+contributors. Thank you.** The original project (AGPL-3.0) made this possible;
+its copyright notices are kept, and the app and the admin web show this credit
+(Settings, About). Orbitly also vendors a modified copy of
+[background_locator_2](https://pub.dev/packages/background_locator_2) (MIT;
+Copyright 2020 REKAB, 2022 Yukams). Full details:
+[docs/about/credits-and-license.md](docs/about/credits-and-license.md).
 
 ## Acknowledgments
 

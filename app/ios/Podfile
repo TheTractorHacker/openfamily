@@ -1,4 +1,4 @@
-# CocoaPods integration for the OpenFamily iOS app.
+# CocoaPods integration for the Orbitly iOS app.
 #
 # This file was previously missing from the project, which meant the Flutter
 # plugins' iOS implementations (geolocator, permission_handler,

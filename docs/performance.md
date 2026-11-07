@@ -8,7 +8,7 @@ numbers.
 
 ## On-device instrumentation
 
-Open **Settings, tap the "OpenFamily / Version" row 7 times** (each tap within
+Open **Settings, tap the "Orbitly / Version" row 7 times** (each tap within
 2 s of the last). The hidden **Performance** screen shows:
 
 - startup: process start to first frame (process age at `main()` from

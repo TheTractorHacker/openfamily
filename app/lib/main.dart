@@ -71,7 +71,7 @@ Future<void> main() async {
   runApp(const OpenFamilyApp());
 }
 
-/// Root widget for the OpenFamily app.
+/// Root widget for the Orbitly app.
 class OpenFamilyApp extends StatefulWidget {
   const OpenFamilyApp({super.key});
 
@@ -161,7 +161,7 @@ class _OpenFamilyAppState extends State<OpenFamilyApp> {
         return ValueListenableBuilder<Color?>(
           valueListenable: AccentPreferenceService.effective,
           builder: (context, accent, _) => MaterialApp(
-          title: 'OpenFamily',
+          title: 'Orbitly',
           debugShowCheckedModeBanner: false,
           navigatorKey: navigatorKey,
           navigatorObservers: <NavigatorObserver>[PerfRouteObserver()],
@@ -355,7 +355,7 @@ class _SplashScreen extends StatelessWidget {
               const OpenFamilyMark(size: 104),
               const SizedBox(height: 16),
               Text(
-                'OpenFamily',
+                'Orbitly',
                 style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                       fontWeight: FontWeight.w800,
                       letterSpacing: -0.5,

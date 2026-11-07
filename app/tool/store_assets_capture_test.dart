@@ -88,7 +88,7 @@ void main() {
               home: screen)));
       await tester.runAsync(() async {
         await precacheImage(
-            const AssetImage('assets/branding/openfamily-icon.png'),
+            const AssetImage('assets/branding/orbitly-icon.png'),
             key.currentContext!);
       });
       await tester.pumpAndSettle();
@@ -242,7 +242,7 @@ void main() {
                 return http.Response.bytes(
                     tile.existsSync()
                         ? tile.readAsBytesSync()
-                        : File('assets/branding/openfamily-icon.png')
+                        : File('assets/branding/orbitly-icon.png')
                             .readAsBytesSync(),
                     200,
                     headers: {'content-type': 'image/png'});

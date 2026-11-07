@@ -1,4 +1,4 @@
-// Build-time configuration for the OpenFamily app.
+// Build-time configuration for the Orbitly app.
 //
 // The API URL may be hinted via `--dart-define=OPENFAMILY_API_URL` but the
 // stored preference always wins. ServerConfig accepts only HTTPS URLs. Map

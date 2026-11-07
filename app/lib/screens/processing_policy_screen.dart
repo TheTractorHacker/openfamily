@@ -145,7 +145,7 @@ class _ProcessingPolicyScreenState extends State<ProcessingPolicyScreen> {
     } else if (!s.assistOn && s.notReady.isNotEmpty) {
       blocked = s.notReady.map((String n) => '$n\'s app is out of date and cannot use this yet.').join(' ');
     } else if (!s.assistOn && !s.hasServerKey) {
-      blocked = 'This OpenFamily server has no approved server key for this circle. The server operator has to set that up first.';
+      blocked = 'This Orbitly server has no approved server key for this circle. The server operator has to set that up first.';
     }
     final bool canTurnOn = canEdit && (s.assistOn || blocked == null);
     return ListView(

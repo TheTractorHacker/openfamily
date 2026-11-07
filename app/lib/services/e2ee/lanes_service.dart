@@ -376,7 +376,7 @@ class LanesService {
     final CircleLanes cl = await refresh(circleId, force: true);
     if (!cl.policy.assist) throw StateError('Server processing is not turned on for this circle.');
     final DeviceKey? sk = cl.serverKey;
-    if (sk == null) throw StateError('This circle has no approved OpenFamily server key.');
+    if (sk == null) throw StateError('This circle has no approved Orbitly server key.');
     if (confirmServerFingerprintHex == null || confirmServerFingerprintHex.toLowerCase() != sk.fingerprint) {
       throw StateError('Compare the server key shown to you before allowing server processing.');
     }

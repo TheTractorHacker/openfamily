@@ -62,7 +62,7 @@ class OpenFamilyTracker(OpenFamilyEntity, TrackerEntity):
         state = m.get("state")
         if self._location and state not in (STATE_HOME,):
             # With coordinates HA derives zones itself; only forward "home" when the
-            # server says so, so a Home place defined only in OpenFamily still works.
+            # server says so, so a Home place defined only in Orbitly still works.
             return None
         if state in (None, STATE_UNKNOWN, STATE_UNAVAILABLE_PRIVATE, STATE_SHARING_OFF):
             return None

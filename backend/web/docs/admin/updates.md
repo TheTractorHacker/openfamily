@@ -9,7 +9,7 @@ web page from holding powers over your machine.
 
 It makes a backup, pulls the new version, rebuilds, waits until `/healthz` is
 healthy and rolls back to the previous version if it is not. Run it from the
-server's `openfamily` folder with no uncommitted changes.
+server's Orbitly folder (it may still be called `openfamily`) with no uncommitted changes.
 
 ## Before you update
 

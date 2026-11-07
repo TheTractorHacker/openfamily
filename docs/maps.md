@@ -83,7 +83,7 @@ restart. Clearing it falls back to `MAP_STYLE_URL` (or OpenFreeMap).
 
 Creating or editing a place offers (a) an address filled in automatically when
 you drop or move the pin (reverse geocoding) and (b) autocomplete suggestions
-while you type an address. The app calls only your OpenFamily server
+while you type an address. The app calls only your Orbitly server
 (`GET /geocode/search`, `GET /geocode/reverse`, signed-in users only,
 rate-limited per user); the server queries one geocoder provider.
 
@@ -91,7 +91,7 @@ rate-limited per user); the server queries one geocoder provider.
 means the address text people type and the coordinates of places they pin are
 sent from your server to photon.komoot.io, which also sees your server's IP.
 The phone never contacts it. The server sends only a descriptive User-Agent
-(`OpenFamily/<version> (self-hosted)`), forwards no user identity, tokens or
+(`Orbitly/<version> (self-hosted)`), forwards no user identity, tokens or
 client IP, caches results in memory per signed-in user (never shared, so no one can learn by response time whether someone else looked up the same address; upstream requests are never merged across users), and never logs query text or
 coordinates (only counts, status and latency). Lookups happen only while a
 user is editing a place, not for live location tracking.

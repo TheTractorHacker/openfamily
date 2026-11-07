@@ -1,4 +1,4 @@
-// Runtime server configuration for the OpenFamily app.
+// Runtime server configuration for the Orbitly app.
 //
 // The API base URL comes from:
 //   1. A value the user saved in `shared_preferences` (generic APK / Settings).

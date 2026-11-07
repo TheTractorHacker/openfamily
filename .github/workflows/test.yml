@@ -58,6 +58,8 @@ jobs:
           node-version: '22'
       - name: Docs links, images and embedded copy
         run: scripts/docs-check.sh
+      - name: Rebrand guard (no stray user-visible old product name)
+        run: scripts/rebrand.sh --verify
       - name: Admin web tests
         working-directory: web
         run: |

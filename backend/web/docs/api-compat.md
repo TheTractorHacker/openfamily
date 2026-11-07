@@ -94,7 +94,7 @@ the user.
 | Situation | Who | What the server does |
 | --- | --- | --- |
 | Private (end-to-end encrypted) circle, app below 0.15.0 | reports a version | `GET /circles` appends "(update the app to open this private circle)" to the circle name (the only field every version renders) and sets `update_required`; every client gets `min_app_version` on a private circle |
-| All circles private, app below 0.16.0 posts a plaintext location | reports a version | the existing 409 `e2ee_private_circle` carries "Update OpenFamily to share location..." |
+| All circles private, app below 0.16.0 posts a plaintext location | reports a version | the existing 409 `e2ee_private_circle` carries "Update Orbitly to share location..." |
 
 Findings from the audit of v0.10.0 to v0.20.1 (field-level): no JSON field
 that a handler or model declared was removed in that range. The compatibility

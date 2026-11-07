@@ -6,7 +6,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
 ROOT = Path(__file__).resolve().parent
-BRAND = ROOT.parent / 'brand' / 'openfamily'
+BRAND = ROOT.parent / 'brand'
 OUT = ROOT / 'upload'
 OUT.mkdir(exist_ok=True)
 INK, LIME, WHITE, MUTED = '#1C1E22', '#A3E635', '#F4F5F7', '#B7C2CF'
@@ -22,7 +22,7 @@ def canvas(w, h):
             d.ellipse((x, y, x+2, y+2), fill='#30343A')
     return im
 
-icon = Image.open(BRAND / 'openfamily-app-icon.png').convert('RGBA')
+icon = Image.open(BRAND / 'orbitly-app-icon.png').convert('RGBA')
 # Google applies the corner mask; flatten the existing transparent corners.
 square = Image.new('RGBA', icon.size, INK)
 square.alpha_composite(icon)

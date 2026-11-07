@@ -4,7 +4,7 @@ import 'dart:typed_data';
 
 import 'package:cryptography/cryptography.dart';
 
-/// OpenFamily end-to-end encryption primitives (docs/design/E2EE.md).
+/// Orbitly end-to-end encryption primitives (docs/design/E2EE.md).
 ///
 /// Every byte format here is frozen and mirrored by
 /// backend/internal/e2ee; both sides are checked against
@@ -279,7 +279,7 @@ class E2ee {
     ]);
   }
 
-  /// What a member's phone signs to let the OpenFamily server (a `server` key)
+  /// What a member's phone signs to let the Orbitly server (a `server` key)
   /// read ONE circle. It names the circle, the person and the exact server key,
   /// so it cannot be moved. Vector: backend/internal/e2ee/testdata/server_consent.json.
   static Uint8List serverConsentMessage(String circleId, String userId, String serverDeviceId, Bytes serverFingerprint) {
@@ -455,7 +455,7 @@ class E2ee {
 
   static int payloadEpoch(Bytes payload) {
     if (payload.length < 5 || payload[0] != msgVersion) {
-      throw const E2eeFormatException('not an OpenFamily payload');
+      throw const E2eeFormatException('not an Orbitly payload');
     }
     return ByteData.sublistView(Uint8List.fromList(payload.sublist(1, 5)))
         .getUint32(0, Endian.big);

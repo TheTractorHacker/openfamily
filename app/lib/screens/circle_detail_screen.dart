@@ -203,7 +203,7 @@ class _CircleDetailScreenState extends State<CircleDetailScreen> {
             title: 'Private circle (end-to-end encrypted)',
             subtitle: st.isPrivate
                 ? (_circle.e2eeServerMember
-                    ? 'On (key epoch ${st.epoch}), OLD TRUSTED-SERVER MODE: the OpenFamily server can read this circle (every member allowed it). An admin can upgrade it under Encryption keys > Server processing.'
+                    ? 'On (key epoch ${st.epoch}), OLD TRUSTED-SERVER MODE: the Orbitly server can read this circle (every member allowed it). An admin can upgrade it under Encryption keys > Server processing.'
                     : 'On (key epoch ${st.epoch}). Positions, history, places and events are end-to-end encrypted. Server processing is optional and each member decides for their own data (Encryption keys > Server processing).')
                 : 'Off. Turning it on encrypts locations so the server cannot read them. Some server features are not available in private circles.',
             value: st.isPrivate,
@@ -515,11 +515,11 @@ class _CircleDetailScreenState extends State<CircleDetailScreen> {
   Future<void> _share(CircleInvite inv) async {
     try {
       await Share.share(
-        'Join my "${_circle.name}" circle on OpenFamily!\n\n'
-        '1. Install the OpenFamily Android app\n'
+        'Join my "${_circle.name}" circle on Orbitly!\n\n'
+        '1. Install the Orbitly Android app\n'
         '2. Enter this server: ${ServerConfig.instance.apiBaseUrl}\n'
         '3. Use invite code ${inv.code}',
-        subject: 'Join my OpenFamily circle',
+        subject: 'Join my Orbitly circle',
       );
     } catch (_) {
       if (mounted) _snack('Could not open the share sheet');

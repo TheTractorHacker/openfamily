@@ -14,7 +14,7 @@ import (
 	"github.com/TheTractorHacker/openfamily/backend/internal/middleware"
 )
 
-const totpIssuer = "OpenFamily"
+const totpIssuer = "Orbitly"
 
 // TOTPSetup starts enrollment: it generates a secret, stores it sealed but
 // not yet enabled, and returns it once with the otpauth URI. Requires the

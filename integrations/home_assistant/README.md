@@ -1,6 +1,6 @@
-# OpenFamily for Home Assistant
+# Orbitly for Home Assistant
 
-Brings your self-hosted [OpenFamily](https://github.com/TheTractorHacker/openfamily) circles into Home Assistant.
+Brings your self-hosted [Orbitly](https://github.com/TheTractorHacker/orbitly) circles into Home Assistant.
 
 * a **device tracker** per family member (GPS only when the token allows it and the circle may be read by the server)
 * **sensors**: battery, speed, place (`home` / place name / `not_home`), last seen, drives and driving distance in the last 24 h
@@ -12,7 +12,7 @@ It is read-only. It can never move anyone, change a setting or send a message.
 
 ## Privacy, in one paragraph
 
-The token you create in OpenFamily (Settings, Integrations) is limited to the circles and scopes you choose.
+The token you create in Orbitly (Settings, Integrations) is limited to the circles and scopes you choose.
 Without the *GPS position* scope Home Assistant only learns *home / away / place name* and battery.
 For a **Private (end-to-end encrypted) circle** the server has no positions to give, so its members appear with the state
 `unavailable_private_circle` and **no coordinates, no battery, no speed**. That is by design, not a bug.
@@ -23,8 +23,8 @@ Circles in the opt-in trusted-server mode are readable by the server and behave 
 ### HACS (custom repository)
 
 1. HACS, Integrations, menu, **Custom repositories**.
-2. Repository `https://github.com/TheTractorHacker/openfamily`, category **Integration**.
-3. Install **OpenFamily** and restart Home Assistant.
+2. Repository `https://github.com/TheTractorHacker/orbitly`, category **Integration**.
+3. Install **Orbitly** and restart Home Assistant.
 
 HACS looks for `custom_components/<domain>` at the repository root of a repository it installs from. This repository keeps the
 component under `integrations/home_assistant/`, so until it is published in its own repository (or HACS gains a path option) use the
@@ -37,12 +37,12 @@ Copy `custom_components/openfamily` into your Home Assistant `config/custom_comp
 
 ## Set up
 
-1. In the OpenFamily admin panel open **Settings, Integrations**, create a token (name it, tick the circles, tick what it may read) and copy it. It is shown once.
-2. In Home Assistant: **Settings, Devices & services, Add integration, OpenFamily**. Enter the server URL (for example `https://family.example.com`) and the token.
+1. In the Orbitly admin panel open **Settings, Integrations**, create a token (name it, tick the circles, tick what it may read) and copy it. It is shown once.
+2. In Home Assistant: **Settings, Devices & services, Add integration, Orbitly**. Enter the server URL (for example `https://family.example.com`) and the token.
 3. Optional, for instant events instead of waiting for the next poll:
    * In the integration's **Configure** dialog copy the webhook URL it shows, and paste your signing secret (shown once when you created the token, or generated with *New signing secret*).
-   * In OpenFamily, on the token, open **Webhook**, paste the URL and **Send test event**.
-   * If Home Assistant is on your LAN and OpenFamily is elsewhere, the OpenFamily server has to be able to reach it. Private addresses need a server administrator to tick *Home Assistant is on my local network*. A public HTTPS address (for example Nabu Casa Cloud) needs nothing.
+   * In Orbitly, on the token, open **Webhook**, paste the URL and **Send test event**.
+   * If Home Assistant is on your LAN and Orbitly is elsewhere, the Orbitly server has to be able to reach it. Private addresses need a server administrator to tick *Home Assistant is on my local network*. A public HTTPS address (for example Nabu Casa Cloud) needs nothing.
 
 If a token is revoked, Home Assistant shows a **repair / re-authentication** prompt: create a new token and paste it.
 
@@ -114,7 +114,7 @@ Flash the lights and notify on an SOS:
 
 ```yaml
 automation:
-  - alias: "OpenFamily SOS"
+  - alias: "Orbitly SOS"
     trigger:
       - platform: event
         event_type: openfamily_sos
@@ -145,8 +145,8 @@ integration works with; this project is not affiliated with or endorsed by it. I
 ## Status and limits
 
 * **Never run against a real Home Assistant by the authors at the time of writing.** The API client, the signature verification and the full
-  config-flow / entity / webhook behaviour are covered by automated tests (see `tests/`), against a fake OpenFamily server and a test Home Assistant core.
-* No `charging` state: the OpenFamily apps do not report it.
+  config-flow / entity / webhook behaviour are covered by automated tests (see `tests/`), against a fake Orbitly server and a test Home Assistant core.
+* No `charging` state: the Orbitly apps do not report it.
 * Trip start events arrive together with trip end (the server segments trips after the fact); they are not live.
 * Events from a Private circle exist only on the phones; Home Assistant never receives them.
 

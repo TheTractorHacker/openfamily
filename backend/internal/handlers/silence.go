@@ -354,7 +354,7 @@ func (s *Server) alertSilence(ctx context.Context, c *silenceCandidate, now time
 	}
 	if self {
 		s.sendSilence(ctx, []string{c.userID}, "diagnostics", fixedRender(
-			"OpenFamily can't reach your phone", "It hasn't reported for "+text+". Tap to find out why."))
+			"Orbitly can't reach your phone", "It hasn't reported for "+text+". Tap to find out why."))
 	}
 	return true
 }

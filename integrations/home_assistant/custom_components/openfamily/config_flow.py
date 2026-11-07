@@ -80,7 +80,7 @@ class OpenFamilyConfigFlow(ConfigFlow, domain=DOMAIN):
                 await self.async_set_unique_id(_unique_id(info["_url"], token))
                 self._abort_if_unique_id_configured()
                 return self.async_create_entry(
-                    title=f"OpenFamily ({info.get('name') or info['_url']})",
+                    title=f"Orbitly ({info.get('name') or info['_url']})",
                     data={
                         CONF_URL: info["_url"],
                         CONF_TOKEN: token,

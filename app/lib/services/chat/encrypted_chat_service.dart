@@ -50,7 +50,7 @@ class EncryptedChatService implements ChatService, ChatProtection {
 
   ChatStore get _store => runtime.chatStore;
 
-  static const String _waiting = 'Waiting for the circle key. Open OpenFamily on another phone of this circle, then try again.';
+  static const String _waiting = 'Waiting for the circle key. Open Orbitly on another phone of this circle, then try again.';
 
   Future<String> _me() async {
     final String? me = await runtime.myUserId();

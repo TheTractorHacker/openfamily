@@ -1,13 +1,13 @@
-# OpenFamily documentation
+# Orbitly documentation
 
-OpenFamily is a private, self-hosted way for a family to share locations, get
-arrival alerts, chat and send an SOS. This is the manual. It also ships inside
+Orbitly is a private, self-hosted way for a circle of people (family, friends,
+a team) to share locations, get arrival alerts, chat and send an SOS. This is the manual. It also ships inside
 every server: sign in to the admin web and open **Documents**, no internet
 needed.
 
 ![The Documents page in the admin web](images/web/documents-light.png)
 
-## I am a family member
+## I use the app
 
 Start with [Getting started](user/getting-started.md), then:
 
@@ -29,12 +29,18 @@ Start with [Getting started](user/getting-started.md), then:
 - [Troubleshooting](admin/troubleshooting.md), [Nobody shows on the map](troubleshooting/no-locations.md)
 - [Hardening checklist](self-hosting.md), [Operator privacy controls](privacy-controls.md), [Android install and updates](android-install-and-updates.md)
 
-## I build OpenFamily
+## I build Orbitly
 
 [Architecture](developers/architecture.md), [API](developers/api.md),
 [Compatibility](developers/compatibility.md), [Build and test](developers/build.md),
-[Screenshots](developers/screenshots.md), [Design decisions](design/PRIVACY_PROCESSING.md),
-[Licences](THIRD_PARTY_LICENSES.md).
+[Screenshots](developers/screenshots.md), [Naming](developers/naming.md),
+[Design decisions](design/PRIVACY_PROCESSING.md), [Licences](THIRD_PARTY_LICENSES.md).
+
+## About
+
+[Credits and license](about/credits-and-license.md): Orbitly is a substantially
+extended fork of OpenFamily by wheresfrank and contributors (AGPL-3.0), and
+where to get the source. Orbitly was published as Orbitly before the rename.
 
 ## Feature references (technical)
 

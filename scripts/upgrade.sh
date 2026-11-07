@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Upgrade a self-hosted OpenFamily install in place.
+# Upgrade a self-hosted Orbitly install in place.
 #
 #   1. refuses to run with uncommitted changes
 #   2. backs up the database to ./backups

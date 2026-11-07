@@ -115,7 +115,7 @@ function UserRow({
   )
 }
 
-/** Maps each OpenFamily account to its own Dawarich account (API key). */
+/** Maps each Orbitly account to its own Dawarich account (API key). */
 export function DawarichUserMap({ onChanged }: { onChanged?: () => void }) {
   const [users, setUsers] = React.useState<DawarichUser[] | null>(null)
   const [loadError, setLoadError] = React.useState<string | null>(null)

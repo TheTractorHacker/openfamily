@@ -87,7 +87,7 @@ jobs:
         with:
           path: .
           format: spdx-json
-          output-file: openfamily-${{ steps.meta.outputs.version }}.spdx.json
+          output-file: orbitly-${{ steps.meta.outputs.version }}.spdx.json
           artifact-name: sbom-${{ steps.meta.outputs.version }}.spdx.json
 
       - name: Record digest

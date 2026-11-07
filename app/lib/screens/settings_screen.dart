@@ -21,6 +21,7 @@ import '../theme/app_theme.dart';
 import '../widgets/dot_grid.dart';
 import '../widgets/ds/ds.dart';
 import '../widgets/units_setting_tile.dart';
+import 'about_screen.dart';
 import 'profile_screen.dart';
 import 'circles_screen.dart';
 import 'diagnostics_screen.dart';
@@ -63,7 +64,7 @@ String pushNotificationsSubtitle({
   if (previewPlatform == 'android') {
     return 'Alerts reach this phone through your own server; nothing to install. '
         'The ntfy app (UnifiedPush) is optional and only adds delivery when '
-        'OpenFamily is fully stopped. Off unregisters this device.';
+        'Orbitly is fully stopped. Off unregisters this device.';
   }
   if (previewPlatform == 'ios') {
     return 'Delivered through your server via APNs. Off unregisters this '
@@ -77,7 +78,7 @@ String pushNotificationsSubtitle({
     case TargetPlatform.android:
       return 'Alerts reach this phone through your own server; nothing to install. '
           'The ntfy app (UnifiedPush) is optional and only adds delivery when '
-          'OpenFamily is fully stopped. Off unregisters this device.';
+          'Orbitly is fully stopped. Off unregisters this device.';
     case TargetPlatform.iOS:
       return 'Delivered through your server via APNs. Off unregisters this '
           'device.';
@@ -568,7 +569,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 leading:
                     DsListRow.iconTile(context, Icons.battery_alert_outlined),
                 title: 'Background updates',
-                subtitle: 'Let OpenFamily run freely so your location stays '
+                subtitle: 'Let Orbitly run freely so your location stays '
                     'fresh when the app is closed.',
                 chevron: true,
                 onTap: BatteryOptimizationService.openSettings,
@@ -601,7 +602,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             DsListRow(
               leading: DsListRow.iconTile(context, Icons.slideshow_outlined),
               title: 'Replay walkthrough',
-              subtitle: 'A quick tour of how OpenFamily works',
+              subtitle: 'A quick tour of how Orbitly works',
               chevron: true,
               onTap: _replayWalkthrough,
             ),
@@ -611,6 +612,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
               chevron: true,
               onTap: () => push(const PrivacyPolicyScreen()),
             ),
+            DsListRow(
+              leading: DsListRow.iconTile(context, Icons.info_outline),
+              title: 'About Orbitly',
+              subtitle: 'Credits, source code and licenses',
+              chevron: true,
+              onTap: () => push(const AboutScreen()),
+            ),
             // Seven quick taps open the hidden Performance screen. A bare
             // GestureDetector keeps the row visually and semantically a plain
             // static row.
@@ -619,7 +627,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               onTap: _onVersionTap,
               child: DsListRow(
                 leading: DsListRow.iconTile(context, Icons.info_outline),
-                title: 'OpenFamily',
+                title: 'Orbitly',
                 subtitle: _versionText,
               ),
             ),

@@ -1,4 +1,4 @@
-// Seeds a throwaway OpenFamily server with a made-up family for screenshots.
+// Seeds a throwaway Orbitly server with a made-up family for screenshots.
 // Usage: node seed.mjs <base-url> <admin-email> <admin-password>
 // Everything here is fiction: "The Rivera Family", example.com addresses and
 // positions in a public square. Never run this against a real server.

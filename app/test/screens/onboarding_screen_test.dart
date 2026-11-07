@@ -39,7 +39,7 @@ void main() {
     await t.pumpWidget(_host());
     await t.tap(find.text('go'));
     await t.pumpAndSettle();
-    expect(find.text('Welcome to OpenFamily'), findsOneWidget);
+    expect(find.text('Welcome to Orbitly'), findsOneWidget);
     expect(find.text('Skip'), findsOneWidget);
   });
 
@@ -49,7 +49,7 @@ void main() {
     await t.pumpWidget(_host());
     await t.tap(find.text('go'));
     await t.pumpAndSettle();
-    expect(find.text('Welcome to OpenFamily'), findsNothing);
+    expect(find.text('Welcome to Orbitly'), findsNothing);
   });
 
   testWidgets('seen is per user', (t) async {
@@ -58,7 +58,7 @@ void main() {
     await t.pumpWidget(_host());
     await t.tap(find.text('go'));
     await t.pumpAndSettle();
-    expect(find.text('Welcome to OpenFamily'), findsOneWidget);
+    expect(find.text('Welcome to Orbitly'), findsOneWidget);
   });
 
   testWidgets('skip persists', (t) async {
@@ -67,7 +67,7 @@ void main() {
     await t.pumpAndSettle();
     await t.tap(find.text('Skip'));
     await t.pumpAndSettle();
-    expect(find.text('Welcome to OpenFamily'), findsNothing);
+    expect(find.text('Welcome to Orbitly'), findsNothing);
     expect(await OnboardingService.hasSeen('u1'), isTrue);
   });
 
@@ -99,7 +99,7 @@ void main() {
     ));
     await t.tap(find.text('replay'));
     await t.pumpAndSettle();
-    expect(find.text('Welcome to OpenFamily'), findsOneWidget);
+    expect(find.text('Welcome to Orbitly'), findsOneWidget);
   });
 
   testWidgets('permission and circle buttons call injected callbacks',

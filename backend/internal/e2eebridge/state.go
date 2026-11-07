@@ -25,7 +25,7 @@ type identityFile struct {
 	DeviceID string `json:"device_id"`
 	UserID   string `json:"user_id,omitempty"`
 	Name     string `json:"name"`
-	// Kind is "service" (Dawarich bridge, default) or "server" (the OpenFamily
+	// Kind is "service" (Dawarich bridge, default) or "server" (the Orbitly
 	// server's own device, docs/design/E2EE.md "Trusted-server mode").
 	Kind         string `json:"kind,omitempty"`
 	Server       string `json:"server,omitempty"`

@@ -61,7 +61,7 @@ test('cloud warnings name the missing protections, home shows none', () => {
 })
 
 test('qr text matches the phones key screens and renders as svg', () => {
-  assert.equal(qrText('12345 67890'), 'OpenFamily server key\n12345 67890')
+  assert.equal(qrText('12345 67890'), 'Orbitly server key\n12345 67890')
   const svg = qrSvg(qrText('12345 67890 12345 67890'))
   assert.match(svg, /^<svg/)
 })

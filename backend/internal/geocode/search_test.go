@@ -393,7 +393,7 @@ func TestFallbackUserAgentAndNoSecretHeaders(t *testing.T) {
 		return 200, fixture(t, "nominatim_empty.json")
 	}, censusOwner(t))
 	e.svc.SearchWith(context.Background(), "u1", owner, SearchOptions{Explicit: true})
-	if gotUA != "OpenFamily/9.9.9 (self-hosted)" || gotCookie != "" {
+	if gotUA != "Orbitly/9.9.9 (self-hosted)" || gotCookie != "" {
 		t.Fatalf("ua=%q hdr=%q", gotUA, gotCookie)
 	}
 }

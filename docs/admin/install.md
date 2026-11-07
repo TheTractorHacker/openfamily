@@ -1,8 +1,13 @@
 # Install the server with Docker Compose
 
-This guide takes you from an empty machine to a running OpenFamily server. You
+This guide takes you from an empty machine to a running Orbitly server. You
 need about 20 minutes and a computer that stays on: a small home server, a
 NAS that runs Docker, a Raspberry Pi 4 or newer, or a rented VPS.
+
+> **Formerly OpenFamily.** Orbitly is the new name of OpenFamily. If you already
+> run a server, you do not reinstall: just [update](updates.md). Your folder, database,
+> `.env` and Docker volumes keep their old `openfamily` names on purpose, see
+> [Naming](../developers/naming.md).
 
 ## What you need
 
@@ -16,8 +21,8 @@ NAS that runs Docker, a Raspberry Pi 4 or newer, or a rented VPS.
 1. **Get the code.**
 
    ```bash
-   git clone https://github.com/TheTractorHacker/openfamily.git
-   cd openfamily
+   git clone https://github.com/TheTractorHacker/orbitly.git
+   cd orbitly
    ```
 
 2. **Create your settings.** The setup script writes a `.env` file with

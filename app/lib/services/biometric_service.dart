@@ -244,7 +244,7 @@ class BiometricService {
         _graceStore = graceStore ?? SharedPreferencesLockGraceStore();
 
   static const String defaultReason =
-      'Use your biometric to unlock OpenFamily.';
+      'Use your biometric to unlock Orbitly.';
 
   final BiometricAuthenticator _authenticator;
   final BiometricPreferenceStore _preferenceStore;

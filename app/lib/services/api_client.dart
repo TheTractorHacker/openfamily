@@ -53,7 +53,7 @@ class SessionExpiredException implements Exception {
 /// Top-level so it can run on a worker isolate.
 dynamic _decodeJsonBytes(Uint8List bytes) => jsonDecode(utf8.decode(bytes));
 
-/// A thin HTTP client for the OpenFamily backend.
+/// A thin HTTP client for the Orbitly backend.
 ///
 /// Every authenticated request injects `Authorization: Bearer <access_token>`
 /// from [TokenStorage]. On a 401 it attempts a single token refresh and retries
@@ -646,7 +646,7 @@ class ApiClient {
     if (ServerConfig.instance.apiBaseUrl.isEmpty) {
       throw const ApiException(
         0,
-        'Server URL not configured. Enter your OpenFamily server address '
+        'Server URL not configured. Enter your Orbitly server address '
         'in the app settings.',
       );
     }

@@ -525,7 +525,7 @@ class _MapScreenState extends State<MapScreen>
   }
 
   /// One-time Android guidance: when background location is on, ask the user
-  /// to exempt OpenFamily from battery optimization so Doze/OEM managers
+  /// to exempt Orbitly from battery optimization so Doze/OEM managers
   /// don't pause or kill the background service. Fires at most once and only
   /// when "Always" permission is granted; a no-op on iOS/web/desktop.
   Future<void> _suggestBatteryOptimization() async {
@@ -548,8 +548,8 @@ class _MapScreenState extends State<MapScreen>
       builder: (BuildContext context) => AlertDialog(
         title: const Text('Keep background updates reliable'),
         content: const Text(
-          'To keep your location fresh when OpenFamily is closed, Android '
-          'may need OpenFamily exempted from battery optimization. Otherwise '
+          'To keep your location fresh when Orbitly is closed, Android '
+          'may need Orbitly exempted from battery optimization. Otherwise '
           'the system can pause background location to save battery.',
         ),
         actions: <Widget>[

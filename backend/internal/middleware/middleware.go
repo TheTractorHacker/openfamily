@@ -115,7 +115,7 @@ func RequirePlatformAdmin(pool *pgxpool.Pool) func(http.Handler) http.Handler {
 
 // AdminMFARequiredMessage is returned (with HTTP 403) to a platform admin who
 // has not enabled two-factor authentication while REQUIRE_ADMIN_MFA is on.
-const AdminMFARequiredMessage = "two-factor authentication is required for administrators: turn it on in the OpenFamily app (Settings, Security), then sign out and sign in again with your two-factor code"
+const AdminMFARequiredMessage = "two-factor authentication is required for administrators: turn it on in the Orbitly app (Settings, Security), then sign out and sign in again with your two-factor code"
 
 // AdminMFASatisfied reports whether a session may use the admin surfaces when
 // two-factor is mandatory: the account must still have TOTP enabled AND this

@@ -40,7 +40,7 @@ void main() {
         '5 min ago');
     expect(relativeTime(null), 'unknown');
     expect(describeUserAgent('Dart/3.4 (dart:io) Android'),
-        'OpenFamily app on Android');
+        'Orbitly app on Android');
     expect(describeUserAgent(''), 'Unknown device');
   });
 

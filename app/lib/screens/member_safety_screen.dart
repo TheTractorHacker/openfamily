@@ -116,7 +116,7 @@ class _MemberSafetyScreenState extends State<MemberSafetyScreen> {
                         child: Container(
                           color: Colors.white,
                           padding: const EdgeInsets.all(AppSpace.sm),
-                          child: QrImageView(data: 'OpenFamily safety number\n${_number ?? ''}', size: 168),
+                          child: QrImageView(data: 'Orbitly safety number\n${_number ?? ''}', size: 168),
                         ),
                       ),
                     ),

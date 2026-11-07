@@ -97,8 +97,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   List<_PageData> _pages() => <_PageData>[
         _PageData(
           icon: Icons.family_restroom,
-          title: 'Welcome to OpenFamily',
-          body: 'OpenFamily helps your family see where everyone is and keep '
+          title: 'Welcome to Orbitly',
+          body: 'Orbitly helps the people in your circles see where everyone is and keep '
               'each other safe.\n\nYour location goes only to your own server '
               'and the circle you choose to share with. No one else sees it.',
         ),
@@ -106,8 +106,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           icon: Icons.my_location,
           title: 'Share your location',
           body: 'Choose precise location, and when asked, "Allow all the '
-              'time". That lets OpenFamily keep your place up to date in the '
-              'background, so your family still sees you when the app is '
+              'time". That lets Orbitly keep your place up to date in the '
+              'background, so your people still see you when the app is '
               'closed.',
           actions: <_Action>[
             _Action(
@@ -125,7 +125,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           icon: Icons.notifications_active_outlined,
           title: 'Alerts and background updates',
           body: 'Turn on notifications to hear about check-ins, arrivals and '
-              'emergencies. On Android, also let OpenFamily run freely in the '
+              'emergencies. On Android, also let Orbitly run freely in the '
               'background (the "Background updates" setting) so updates are '
               'not paused to save battery.',
           actions: <_Action>[

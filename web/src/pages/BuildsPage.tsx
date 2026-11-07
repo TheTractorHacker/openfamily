@@ -72,7 +72,7 @@ export function BuildsPage() {
       <div className="wb-page-header wb-builds-page-header">
         <div>
           <h1 className="wb-page-title">Android builds</h1>
-          <p className="wb-page-subtitle">Download and install the latest OpenFamily release.</p>
+          <p className="wb-page-subtitle">Download and install the latest Orbitly release.</p>
         </div>
         <Button variant="secondary" size="sm" loading={loading} onClick={() => void loadRelease()}>
           Refresh release

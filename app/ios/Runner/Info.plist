@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>OpenFamily</string>
+	<string>Orbitly</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -13,7 +13,7 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>openfamily</string>
+	<string>Orbitly</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -41,20 +41,20 @@
 	</array>
 	<!-- Location permissions (used by the background-location phase). -->
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>OpenFamily tracks your location in the background so your family can see where you are.</string>
+	<string>Orbitly tracks your location in the background so the people in your circles can see where you are.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>OpenFamily uses your location to show your position on the family map.</string>
+	<string>Orbitly uses your location to show your position on the map.</string>
 	<!-- Motion & fitness (Core Motion) — requested only on supported devices. -->
 	<key>NSMotionUsageDescription</key>
-	<string>OpenFamily uses motion &amp; fitness to detect when you're driving, biking, or walking.</string>
+	<string>Orbitly uses motion &amp; fitness to detect when you're driving, biking, or walking.</string>
 	<!-- Chat photo attachments can use the camera (image_picker ImageSource.camera). -->
 	<key>NSCameraUsageDescription</key>
-	<string>OpenFamily uses the camera to take a photo to send in family chat.</string>
+	<string>Orbitly uses the camera to take a photo to send in circle chat.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>OpenFamily lets you choose a profile photo from your photo library.</string>
+	<string>Orbitly lets you choose a profile photo from your photo library.</string>
 	<!-- Face ID is used only when the user enables biometric app unlock. -->
 	<key>NSFaceIDUsageDescription</key>
-	<string>OpenFamily uses Face ID to unlock your private family location map.</string>
+	<string>Orbitly uses Face ID to unlock your private location map.</string>
 	<!-- Invite links open the app. https://<server>/join/<code> needs the
 	     Associated Domains entitlement (see docs/design/IOS_RELEASE.md);
 	     openfamily://join?server=...&code=... works without any entitlement. -->

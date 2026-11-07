@@ -1,6 +1,6 @@
-# Safety alerts: what OpenFamily does
+# Safety alerts: what Orbitly does
 
-OpenFamily notifies your family. **It never contacts emergency services** (no
+Orbitly notifies your family. **It never contacts emergency services** (no
 911/112/999 call, no dispatch). If someone is in danger, call your local
 emergency number first.
 

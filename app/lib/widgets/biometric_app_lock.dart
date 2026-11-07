@@ -440,7 +440,7 @@ class _BiometricLockView extends StatelessWidget {
                         const Center(child: OpenFamilyMark(size: 88)),
                         const SizedBox(height: 24),
                         Text(
-                          'OpenFamily is locked',
+                          'Orbitly is locked',
                           textAlign: TextAlign.center,
                           style: Theme.of(context)
                               .textTheme

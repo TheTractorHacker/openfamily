@@ -319,7 +319,7 @@ class _EncryptionKeysScreenState extends State<EncryptionKeysScreen> {
             child: Container(
               color: Colors.white,
               padding: const EdgeInsets.all(AppSpace.sm),
-              child: QrImageView(data: 'OpenFamily key\n$_digits', size: 168),
+              child: QrImageView(data: 'Orbitly key\n$_digits', size: 168),
             ),
           ),
         ),

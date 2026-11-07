@@ -161,7 +161,7 @@ Read in full. Changes made are marked **fixed**; the rest were checked and left.
 
 Time: about 2 hours of your time plus Apple's approval delays (enrolment can take 1 to 2 days).
 You need: an Apple ID with two-factor authentication, a payment card, admin access to the
-GitHub repository `TheTractorHacker/openfamily`, and a Mac for the first certificate (the
+GitHub repository `TheTractorHacker/orbitly`, and a Mac for the first certificate (the
 fallback without a Mac is noted in step 4).
 
 1. **Enrol.** Go to https://developer.apple.com/programs/enroll/ and sign in with your Apple ID.
@@ -169,27 +169,27 @@ fallback without a Mac is noted in step 4).
    When it shows "Active", open https://developer.apple.com/account and note your **Team ID**
    (Membership details, 10 characters like `AB12CD34EF`).
 2. **Register the App ID.** Certificates, Identifiers & Profiles > Identifiers > the blue `+` >
-   App IDs > App > Continue. Description `OpenFamily`, Bundle ID **Explicit** `app.openfamily`
+   App IDs > App > Continue. Description `Orbitly`, Bundle ID **Explicit** `app.openfamily`
    (if that is taken, choose your own reverse-DNS id and set the repository variable
    `IOS_BUNDLE_ID`; also change `PRODUCT_BUNDLE_IDENTIFIER` in `app/ios/Runner.xcodeproj` and
    `APNS_TOPIC` on the server). Tick capabilities: **Push Notifications** and, if you want
    `https://<your server>/join/...` links to open the app, **Associated Domains**. Background
    Modes need no tick here (they live in Info.plist). Continue > Register.
 3. **Create the App Store Connect app.** https://appstoreconnect.apple.com > Apps > `+` > New
-   App. Platform iOS, Name `OpenFamily` (unique across the store: pick another if taken),
+   App. Platform iOS, Name `Orbitly` (unique across the store: pick another if taken),
    Primary language, Bundle ID `app.openfamily`, SKU `openfamily`, User Access Full Access.
 4. **Distribution certificate.** On a Mac: Keychain Access > Certificate Assistant > Request a
-   Certificate From a Certificate Authority > your email, Common Name `OpenFamily`, Saved to
+   Certificate From a Certificate Authority > your email, Common Name `Orbitly`, Saved to
    disk. On developer.apple.com: Certificates > `+` > **Apple Distribution** > upload the
    `.certSigningRequest` > Download the `.cer`, double-click it to install. In Keychain Access >
    My Certificates, right-click "Apple Distribution: ..." > Export > `.p12`, choose a password
    (this is `IOS_P12_PASSWORD`). Then in Terminal: `base64 -i cert.p12 | pbcopy` (that is
    `IOS_P12_BASE64`). *No Mac?* Create the key and request with OpenSSL (`openssl genrsa -out
-   key.pem 2048`, `openssl req -new -key key.pem -out ios.csr -subj "/CN=OpenFamily"`), upload
+   key.pem 2048`, `openssl req -new -key key.pem -out ios.csr -subj "/CN=Orbitly"`), upload
    `ios.csr`, convert the downloaded `.cer` with `openssl x509 -inform der -in ios.cer -out
    ios.pem` and bundle `openssl pkcs12 -export -inkey key.pem -in ios.pem -out cert.p12`.
 5. **Provisioning profile.** Profiles > `+` > **App Store Connect** (under Distribution) >
-   App ID `app.openfamily` > pick the certificate from step 4 > name it `OpenFamily AppStore` >
+   App ID `app.openfamily` > pick the certificate from step 4 > name it `Orbitly AppStore` >
    Generate > Download. `base64 -i OpenFamily_AppStore.mobileprovision | pbcopy` is
    `IOS_PROVISIONING_PROFILE_BASE64`. Regenerate the profile whenever you change the App ID's
    capabilities (the workflow checks that it contains production push).
@@ -220,7 +220,7 @@ fallback without a Mac is noted in step 4).
 11. **First TestFlight invite.** App Store Connect > TestFlight > Internal Testing > `+` >
     create a group `Family`, add testers who are *App Store Connect users* (Users and Access >
     `+`, role "Customer Support" or "Marketing" is enough), tick the build. They get an email;
-    they install **TestFlight** from the App Store, accept, install OpenFamily. For relatives
+    they install **TestFlight** from the App Store, accept, install Orbitly. For relatives
     without an Apple Developer role use External Testing: add the group, submit the first build
     for Beta App Review (1 to 2 days; paste the background-location justification below), then
     share the public link.
@@ -229,7 +229,7 @@ fallback without a Mac is noted in step 4).
 
 Background-location justification (App Review and the permission dialog):
 
-> OpenFamily lets members of a private family circle see each other's location on a map. The
+> Orbitly lets members of a private family circle see each other's location on a map. The
 > app only works if location is shared while the phone is in the pocket, so it requests "Always"
 > access. The user can turn sharing off in the app at any time and is shown the background
 > location indicator. Data goes only to the family's self-hosted server.
@@ -260,9 +260,9 @@ Enclave) and the invite-link filter.
 
 `.github/workflows/ios-unsigned.yml` runs on every `v*` tag (and manually). On `macos-15` it runs
 `flutter build ios --release --no-codesign`, zips `Payload/Runner.app` into
-`openfamily-<version>-unsigned.ipa` and attaches it, plus a `.sha256` file and the SHA256 in the
+`orbitly-<version>-unsigned.ipa` and attaches it, plus a `.sha256` file and the SHA256 in the
 release notes, to **this repository's** GitHub release for the tag. It needs no secrets, uses only
-the workflow `GITHUB_TOKEN`, uploads only when the ref is a tag of `TheTractorHacker/openfamily`,
+the workflow `GITHUB_TOKEN`, uploads only when the ref is a tag of `TheTractorHacker/orbitly`,
 and never runs the signed `ios-release.yml` path. It waits for `apk.yml` to create the release
 instead of creating one itself. Non-tag runs only keep a workflow artifact.
 

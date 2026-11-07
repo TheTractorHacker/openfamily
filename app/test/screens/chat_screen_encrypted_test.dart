@@ -100,7 +100,7 @@ void main() {
     await t.pumpWidget(_app(svc));
     await t.pumpAndSettle();
     expect(find.byKey(const Key('chat-waiting-key')), findsOneWidget);
-    expect(find.text('Dad needs to update OpenFamily to read encrypted chat.'), findsOneWidget);
+    expect(find.text('Dad needs to update Orbitly to read encrypted chat.'), findsOneWidget);
   });
 
   testWidgets('sending shows the message as sending and a failed one can be retried by tapping', (WidgetTester t) async {

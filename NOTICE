@@ -1,10 +1,15 @@
-OpenFamily
+Orbitly (formerly OpenFamily)
 
 This project is licensed under the GNU Affero General Public License v3.0
-(see LICENSE) and continues the work of the original OpenFamily project:
+(see LICENSE). Orbitly is a substantially extended fork of, and continues the
+work of, the original OpenFamily project by wheresfrank and contributors:
 
   Copyright (c) the original OpenFamily authors
   https://github.com/wheresfrank/openfamily
+
+The original copyright and license notices are kept. The product was renamed
+from OpenFamily to Orbitly; internal identifiers that still say "openfamily"
+are listed in docs/developers/naming.md.
 
 Modifications and additions are copyright their respective contributors to this
 repository. Third-party components keep their own licenses (see go.mod,
@@ -18,6 +23,11 @@ Vendored third-party code
   (MIT; Copyright 2020 REKAB, Copyright 2022 Yukams). Its LICENSE file is kept
   in that directory and must be preserved in all copies.
 
+Credits and where to find them in the product
+  docs/about/credits-and-license.md; the app (Settings, About) and the admin
+  web (footer, sign-in page, Settings, About) show the upstream credit and the
+  source link.
+
 Complete inventory
   docs/THIRD_PARTY_LICENSES.md lists every Go, npm and Dart dependency and its
   license; docs/LICENSE_COMPLIANCE.md records the audit and open findings.
@@ -25,7 +35,8 @@ Complete inventory
 Source offer (AGPL-3.0 section 13)
   Users who interact with a running instance over a network are entitled to
   the Corresponding Source of the version that instance runs: the public
-  repository https://github.com/TheTractorHacker/openfamily at the tag or commit
+  repository https://github.com/TheTractorHacker/orbitly (formerly
+  https://github.com/TheTractorHacker/openfamily, which redirects) at the tag or commit
   the instance reports. Operators who modify the code must publish their
   modified source and offer it to their users. See docs/LICENSE_COMPLIANCE.md
   for the status of an in-product source link.

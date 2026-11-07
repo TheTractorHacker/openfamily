@@ -1,4 +1,4 @@
-# R8 / ProGuard rules for the OpenFamily release build. Intentionally
+# R8 / ProGuard rules for the Orbitly release build. Intentionally
 # conservative: when a keep rule is in doubt it is included (MOB-006).
 
 # Flutter embedding and generated plugin registrant (the Flutter Gradle plugin

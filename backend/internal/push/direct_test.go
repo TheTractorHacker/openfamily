@@ -28,7 +28,7 @@ func TestBuildDirectPayload(t *testing.T) {
 		{"alert", Notification{Title: "A family member sent SOS", Body: "A family member sent SOS", AlertID: "7c9e6679-7425-40de-944b-e07fc1f90ae7"}, KindAlert, []string{"v", "id", "kind", "alert_id", "title"}},
 		{"alert with body", Notification{Title: "A family member needs help", Body: "A family member needs help: at the gate", AlertID: "a"}, KindAlert, []string{"v", "id", "kind", "alert_id", "title", "body"}},
 		{"notice", Notification{Title: "A family member arrived at School"}, KindNotice, []string{"v", "id", "kind", "title"}},
-		{"command", Notification{Title: "OpenFamily location refresh", Body: `{"type":"location_request","request_id":"abc"}`, Silent: true}, KindCommand, []string{"v", "id", "kind", "command"}},
+		{"command", Notification{Title: "Orbitly location refresh", Body: `{"type":"location_request","request_id":"abc"}`, Silent: true}, KindCommand, []string{"v", "id", "kind", "command"}},
 		{"command non-json", Notification{Body: "plain", Silent: true}, KindCommand, []string{"v", "id", "kind", "command"}},
 	}
 	for _, tc := range cases {

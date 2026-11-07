@@ -236,7 +236,7 @@ void main() {
       await tester.runAsync(
           () => Future<void>.delayed(const Duration(milliseconds: 100)));
       await tester.pump();
-      expect(clip, contains('OpenFamily performance report'));
+      expect(clip, contains('Orbitly performance report'));
       expect(clip, contains('session diary'));
       expect(find.text('Performance report copied'), findsOneWidget);
       await tester.tap(find.text('Reset'));

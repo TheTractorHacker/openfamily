@@ -2,8 +2,8 @@
   "config": {
     "step": {
       "user": {
-        "title": "Connect to OpenFamily",
-        "description": "Create a token in the OpenFamily admin panel (Settings, Integrations) and paste it here.",
+        "title": "Connect to Orbitly",
+        "description": "Create a token in the Orbitly admin panel (Settings, Integrations) and paste it here.",
         "data": {
           "url": "Server URL",
           "token": "Access token"
@@ -15,7 +15,7 @@
       },
       "reauth_confirm": {
         "title": "Token rejected",
-        "description": "The OpenFamily token was revoked or expired. Enter a new one.",
+        "description": "The Orbitly token was revoked or expired. Enter a new one.",
         "data": {
           "token": "Access token"
         }
@@ -25,7 +25,7 @@
       "cannot_connect": "Cannot reach the server. Check the URL and that Home Assistant can connect to it.",
       "invalid_auth": "The token was rejected. It may be revoked.",
       "invalid_url": "Enter an http:// or https:// address.",
-      "invalid_token_format": "That does not look like an OpenFamily token (ofha_...).",
+      "invalid_token_format": "That does not look like an Orbitly token (ofha_...).",
       "unknown": "Unexpected error."
     },
     "abort": {
@@ -36,8 +36,8 @@
   "options": {
     "step": {
       "init": {
-        "title": "OpenFamily options",
-        "description": "Paste this webhook URL into the token's Webhook setting in OpenFamily: {webhook_url}\nThen enter the signing secret OpenFamily showed you to accept pushed events. Without it, events are still received by polling.",
+        "title": "Orbitly options",
+        "description": "Paste this webhook URL into the token's Webhook setting in Orbitly: {webhook_url}\nThen enter the signing secret Orbitly showed you to accept pushed events. Without it, events are still received by polling.",
         "data": {
           "scan_interval": "Update interval",
           "webhook_secret": "Webhook signing secret"

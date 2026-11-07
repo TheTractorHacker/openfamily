@@ -108,7 +108,7 @@ func newWeatherWorker(push func(context.Context, weatherUser, string, string) bo
 	return &weatherWorker{
 		baseURL: nwsBase,
 		client:  &http.Client{Timeout: 10 * time.Second},
-		ua:      "OpenFamily/" + config.BuildVersion() + " (self-hosted family locator; https://github.com/TheTractorHacker/openfamily)",
+		ua:      "Orbitly/" + config.BuildVersion() + " (self-hosted location sharing; https://github.com/TheTractorHacker/orbitly)",
 		pause:   time.Second,
 		push:    push,
 		seen:    map[string]time.Time{},

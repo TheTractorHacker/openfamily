@@ -55,7 +55,7 @@
     </queries>
 
     <application
-        android:label="OpenFamily"
+        android:label="Orbitly"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:allowBackup="false"

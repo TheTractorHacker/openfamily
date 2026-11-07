@@ -28,7 +28,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 //    real server;
 //  * ApiClient reads ONE token store, so the same client puts the token of the
 //    phone the call belongs to (zone value) on the request;
-//  * the OpenFamily server's own device is the real e2ee-bridge binary in
+//  * the Orbitly server's own device is the real e2ee-bridge binary in
 //    server mode, driven through its CLI.
 
 const String kPretendBase = 'https://openfamily.e2e.test';
@@ -202,7 +202,7 @@ Map<String, dynamic> ingestPoint(Phone p, String senderDeviceId, double lat, dou
       'ts_ms': DateTime.now().toUtc().millisecondsSinceEpoch, 'lat': lat, 'lon': lon, 'acc': 8, 'bat': 71,
     };
 
-/// The OpenFamily server's own device: the real e2ee-bridge binary in server mode.
+/// The Orbitly server's own device: the real e2ee-bridge binary in server mode.
 class ServerDevice {
   ServerDevice(this.env, this.owner) : dir = Directory.systemTemp.createTempSync('of-e2e-bridge');
   final E2eEnv env;

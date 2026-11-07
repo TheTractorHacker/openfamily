@@ -80,7 +80,7 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
           permission: OnboardingPermission.location,
           icon: Icons.location_on,
           title: 'Location access',
-          why: 'OpenFamily collects and sends your precise location to your '
+          why: 'Orbitly collects and sends your precise location to your '
               'configured server to enable family location sharing, location '
               'history, and arrival and departure alerts, even when the app '
               'is closed or not in use. Your family members and server '
@@ -121,7 +121,7 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
     icon: Icons.battery_charging_full,
     title: 'Keep updates flowing',
     why: 'Phones put apps to sleep to save battery, which can pause your '
-        'location updates when the app is closed. Setting OpenFamily to '
+        'location updates when the app is closed. Setting Orbitly to '
         '"Don\'t optimize" keeps your family\'s map fresh. It only uses '
         'a little extra battery.',
     consequence: 'Without this, your location may go stale while the app is '

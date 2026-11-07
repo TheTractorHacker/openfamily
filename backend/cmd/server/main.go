@@ -1,4 +1,4 @@
-// Command server runs the OpenFamily API.
+// Command server runs the Orbitly API.
 package main
 
 import (
@@ -427,7 +427,7 @@ func main() {
 		r.Get("/circles/{id}/e2ee/items", srv.E2EEListItems)
 		r.Delete("/circles/{id}/e2ee/items", srv.E2EEEraseItems)
 		r.Post("/circles/{id}/e2ee/purge-plaintext", srv.E2EEPurgePlaintext)
-		// Trusted-server mode: the OpenFamily server as an approved, consented member.
+		// Trusted-server mode: the Orbitly server as an approved, consented member.
 		r.Get("/e2ee/server-device", srv.E2EEServerDevice)
 		r.Get("/e2ee/server-join", srv.E2EEServerJoin)
 		r.Post("/e2ee/server-join/approve", srv.E2EEServerJoinApprove)

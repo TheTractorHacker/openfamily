@@ -40,7 +40,7 @@ func NewWebAuthn(rpID, displayName string, origins []string) (*webauthn.WebAuthn
 		return nil, nil
 	}
 	if displayName == "" {
-		displayName = "OpenFamily"
+		displayName = "Orbitly"
 	}
 	return webauthn.New(&webauthn.Config{
 		RPID:          rpID,
@@ -66,7 +66,7 @@ func WebAuthnFromPublicURL(publicBaseURL, rpID, originsCSV string) (*webauthn.We
 			origins = []string{u.Scheme + "://" + u.Host}
 		}
 	}
-	return NewWebAuthn(rpID, "OpenFamily", origins)
+	return NewWebAuthn(rpID, "Orbitly", origins)
 }
 
 type passkeyUser struct {

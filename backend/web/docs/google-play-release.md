@@ -2,7 +2,7 @@
 
 ## Current status
 
-The English listing is saved in Play Console as **OpenFamily**, with an icon,
+The English listing is saved in Play Console as **Orbitly**, with an icon,
 live-map feature graphic, and five phone screenshots. The short and full
 descriptions explicitly say a self-hosted server is required and explain how
 to connect to one. Public production access still requires a closed test
@@ -72,7 +72,7 @@ its licenses are accepted. CI already provisions its Android environment.
 Use a dedicated HTTPS deployment and fictional sample data, separate from
 real family locations. The proposed reviewer server is
 `https://openfamily.frankjohnette.xyz`. It responds over HTTPS at `/healthz`
-and serves the OpenFamily admin app; its current family list is empty. Create
+and serves the Orbitly admin app; its current family list is empty. Create
 review-only accounts there before entering access details in Play Console.
 Do not use real family admin accounts for review.
 
@@ -87,14 +87,14 @@ commit them, put them in this document, or include them in screenshots.
 
 Reviewer instructions to complete once access exists:
 
-1. Launch OpenFamily and enter the supplied HTTPS server address.
+1. Launch Orbitly and enter the supplied HTTPS server address.
 2. Tap Connect, then Log In with the supplied review account.
 3. Read the location disclosure and grant the Android permissions needed
    for the background-location feature being reviewed.
 4. Open the family map and People to inspect the fictional review family.
 5. Open Places to create a place and configure arrival/departure alerts.
 6. Install/configure ntfy as documented for the review server to test
-   notifications while OpenFamily is closed.
+   notifications while Orbitly is closed.
 7. Use Settings → Location sharing to stop this device reporting.
 8. Use Settings → Privacy policy to read the policy, and a disposable
    account for the account-deletion flow.
@@ -105,9 +105,9 @@ Declare one core feature: **family arrival and departure alerts**.
 
 Suggested explanation:
 
-> OpenFamily uses background location to detect when a consenting family
+> Orbitly uses background location to detect when a consenting family
 > member enters or leaves a saved place, such as home or school, and notify
-> their family. The phone sends location to the user's configured OpenFamily
+> their family. The phone sends location to the user's configured Orbitly
 > server while the app is closed or not in use. Foreground-only access cannot
 > detect these arrivals and departures while the phone is in a pocket and
 > the app is closed. Users can stop reporting using Location sharing in

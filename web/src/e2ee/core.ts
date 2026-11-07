@@ -1,4 +1,4 @@
-// Wire formats of the OpenFamily end-to-end encryption (docs/design/E2EE.md),
+// Wire formats of the Orbitly end-to-end encryption (docs/design/E2EE.md),
 // implemented in the browser. This file mirrors backend/internal/e2ee (Go) and
 // app/lib/services/e2ee/e2ee_crypto.dart (Dart) byte for byte; the shared test
 // vectors in backend/internal/e2ee/testdata/vectors.json are checked by

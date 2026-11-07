@@ -154,7 +154,7 @@ class _SelfTestScreenState extends State<SelfTestScreen> with WidgetsBindingObse
             _bgArmedAt == null
                 ? 'Proves the phone reports with the app closed. Tap Start, lock the phone, '
                     'put it in your pocket and walk around for ${_bgWindow.inMinutes} minutes, '
-                    'then open OpenFamily again.'
+                    'then open Orbitly again.'
                 : _leftAt == null
                     ? 'Armed. Now lock the phone and leave it for at least ${_bgWindow.inMinutes} minutes, then come back to this screen.'
                     : 'Waiting for you to come back...',

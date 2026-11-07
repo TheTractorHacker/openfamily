@@ -1,7 +1,7 @@
 # Places and arrival alerts
 
 A **place** is a spot you care about, such as Home, school or Grandma's. Add a
-place and OpenFamily tells the circle when someone arrives or leaves.
+place and Orbitly tells the circle when someone arrives or leaves.
 
 ![Saved places with alert switches](../images/app/places.png)
 

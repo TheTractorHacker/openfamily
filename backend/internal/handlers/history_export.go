@@ -115,7 +115,7 @@ func (s *Server) AdminExportMemberHistory(w http.ResponseWriter, r *http.Request
 	stamp := from.UTC().Format("20060102") + "-" + to.UTC().Format("20060102")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	w.Header().Set("Content-Disposition", `attachment; filename="openfamily-history-`+stamp+`.`+format+`"`)
+	w.Header().Set("Content-Disposition", `attachment; filename="orbitly-history-`+stamp+`.`+format+`"`)
 	bw := bufio.NewWriterSize(w, 32*1024)
 	if format == "gpx" {
 		w.Header().Set("Content-Type", "application/gpx+xml; charset=utf-8")
@@ -213,7 +213,7 @@ func writeHistoryGPX(w io.Writer, name string, from, to time.Time, each exportIt
 	}
 	title += " " + from.UTC().Format("2006-01-02") + " to " + to.UTC().Format("2006-01-02")
 	if _, err := io.WriteString(w, `<?xml version="1.0" encoding="UTF-8"?>
-<gpx version="1.1" creator="OpenFamily" xmlns="http://www.topografix.com/GPX/1/1">
+<gpx version="1.1" creator="Orbitly" xmlns="http://www.topografix.com/GPX/1/1">
 <trk><name>`+xmlText(title)+`</name><trkseg>
 `); err != nil {
 		return err

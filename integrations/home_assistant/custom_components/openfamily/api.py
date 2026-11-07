@@ -1,4 +1,4 @@
-"""Minimal async client for the OpenFamily Home Assistant API (read only).
+"""Minimal async client for the Orbitly Home Assistant API (read only).
 
 Pure Python on top of aiohttp: no Home Assistant imports, so it is unit-tested
 against a fake server. The token is only ever sent in the Authorization header

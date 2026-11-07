@@ -1,4 +1,4 @@
-// Shared API types for the OpenFamily admin panel.
+// Shared API types for the Orbitly admin panel.
 // Mirrors the backend contract documented in the task brief.
 
 export type Role = 'admin' | 'member' | 'child'
@@ -197,7 +197,7 @@ export interface DawarichSettings {
   pending: number
 }
 
-/** One OpenFamily account and its Dawarich mapping. */
+/** One Orbitly account and its Dawarich mapping. */
 export interface DawarichUser {
   user_id: string
   name: string

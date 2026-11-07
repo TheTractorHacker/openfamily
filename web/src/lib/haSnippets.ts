@@ -15,10 +15,10 @@ export function haSnippets(origin: string, token: string): { id: string; title: 
     {
       id: 'hacs',
       title: 'Install the integration',
-      text: `Copy integrations/home_assistant/custom_components/openfamily from the OpenFamily
+      text: `Copy integrations/home_assistant/custom_components/openfamily from the Orbitly
 repository into your Home Assistant config/custom_components/ (or add the folder to a
 HACS custom repository of your own), restart Home Assistant, then
-Settings > Devices & services > Add integration > OpenFamily:
+Settings > Devices & services > Add integration > Orbitly:
   Server URL: ${origin}
   Token:      ${token}`,
     },
@@ -32,7 +32,7 @@ rest:
     headers:
       Authorization: "Bearer ${token}"
     sensor:
-      - name: "OpenFamily members"
+      - name: "Orbitly members"
         value_template: "{{ value_json.members | length }}"
         json_attributes:
           - members`,

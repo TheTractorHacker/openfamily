@@ -230,3 +230,13 @@
   .wb-topbar .wb-kbd { display: none; }
   .wb-topbar-right { gap: var(--space-2); flex: 0 0 auto; }
 }
+
+.wb-about-footer {
+  display: grid;
+  gap: 2px;
+  line-height: 1.35;
+}
+.wb-about-footer a {
+  color: inherit;
+  text-decoration: underline;
+}

@@ -1,4 +1,4 @@
-// A tiny in-memory "OpenFamily server + phones" for the viewer tests. Phones
+// A tiny in-memory "Orbitly server + phones" for the viewer tests. Phones
 // are played by core.ts helpers; the server is a fake Http that serves what the
 // real one serves (public keys, signed log, wraps, ciphertext).
 import { ed25519, x25519 } from '@noble/curves/ed25519.js'

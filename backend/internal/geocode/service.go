@@ -140,7 +140,7 @@ func New(s Settings) (*Service, error) {
 		base:         base,
 		prov:         prov,
 		lang:         lang,
-		userAgent:    "OpenFamily/" + v + " (self-hosted)",
+		userAgent:    "Orbitly/" + v + " (self-hosted)",
 		client:       newClient(s.AllowPrivate, base.Scheme == "http"),
 		cache:        newUserCache(maxCacheUsers, cacheSizePerUser, nil),
 		autocomplete: !public,

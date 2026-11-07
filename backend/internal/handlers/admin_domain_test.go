@@ -174,7 +174,7 @@ func TestDomainHostname(t *testing.T) {
 		"openfamily.example.com":         "openfamily.example.com",
 		"openfamily.example.com:443":     "openfamily.example.com",
 		"https://openfamily.example.com": "openfamily.example.com",
-		"OpenFamily.Example.COM.":        "openfamily.example.com",
+		"OpenFamily.Example.COM.":     "openfamily.example.com",
 	}
 	for in, want := range cases {
 		if got := domainHostname(in); got != want {

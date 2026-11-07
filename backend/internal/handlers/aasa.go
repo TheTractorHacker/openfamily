@@ -13,7 +13,7 @@ var (
 
 // AppleAppSiteAssociation serves GET /.well-known/apple-app-site-association,
 // the file iOS fetches (through Apple's CDN, no redirects, no auth) to decide
-// whether https://<this server>/join/<code> opens the OpenFamily app instead
+// whether https://<this server>/join/<code> opens the Orbitly app instead
 // of Safari. It is driven by IOS_TEAM_ID and IOS_BUNDLE_ID. With no (or a
 // malformed) team id it answers 404, so servers without an iOS app publish
 // nothing. The app additionally has to carry the matching

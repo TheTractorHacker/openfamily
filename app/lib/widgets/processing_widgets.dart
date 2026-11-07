@@ -28,7 +28,7 @@ class ProcessingCopy {
   // ---- admin: turn on
   static const String turnOnTitle = 'Turn on server processing for this circle?';
   static const String turnOnBody =
-      'The OpenFamily server will be able to read the location, trips and driving data of members who allow it, and it '
+      'The Orbitly server will be able to read the location, trips and driving data of members who allow it, and it '
       'stores that data in readable form. It enables the admin map, history, trips, weekly summaries and Dawarich export '
       'for those members.\n\n'
       'Each member decides for themselves. Members who say no keep end-to-end encryption and their phone does the '

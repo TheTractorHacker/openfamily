@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Back up the OpenFamily database to ./backups/openfamily-<timestamp>.dump
+# Back up the Orbitly database to ./backups/openfamily-<timestamp>.dump
 # (pg_dump custom format, restorable with scripts/restore.sh).
 #
 # Usage: ./scripts/backup.sh [output-file]

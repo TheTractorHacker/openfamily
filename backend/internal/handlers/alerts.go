@@ -27,7 +27,7 @@ const (
 )
 
 // alertNotifiedMessage is returned to the sender. It states what the server
-// actually did. OpenFamily never contacts emergency services.
+// actually did. Orbitly never contacts emergency services.
 const alertNotifiedMessage = "Your family has been notified. Emergency services were not contacted; call your local emergency number if you need them."
 
 type alertRow struct {
@@ -452,7 +452,7 @@ func alertSMSBody(name, typ, shareURL string) string {
 	case alertSOS:
 		action = "sent an SOS"
 	}
-	msg := fmt.Sprintf("%s %s via OpenFamily and their family was notified. Emergency services have NOT been contacted.", name, action)
+	msg := fmt.Sprintf("%s %s via Orbitly and their family was notified. Emergency services have NOT been contacted.", name, action)
 	if shareURL != "" {
 		msg += " Location (temporary link): " + shareURL
 	}

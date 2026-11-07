@@ -1,4 +1,4 @@
-# Self-hosting OpenFamily
+# Self-hosting Orbitly
 
 Production checklist for operators. The README [Quick start](../README.md#quick-start)
 is enough for a laptop. Use this before you invite a family onto a VPS or NAS
@@ -18,7 +18,7 @@ Doing it by hand instead: copy `.env.example` to `.env` and set
 
 1. `JWT_SECRET` (at least 32 random bytes, `openssl rand -hex 32`) and
    `POSTGRES_PASSWORD` (use a hex/alphanumeric value; it is embedded in a URL).
-2. `SITE_ADDRESS=openfamily.example.com` and `COMPOSE_PROFILES=proxy` so Caddy
+2. `SITE_ADDRESS=orbitly.example.com` and `COMPOSE_PROFILES=proxy` so Caddy
    requests a certificate.
 3. `APP_ENV=production` and `DB_SSL_DISABLE_OK=true` (see Database TLS below).
 4. `PLATFORM_ADMIN_EMAIL` and `PLATFORM_ADMIN_PASSWORD`. This creates the
@@ -131,7 +131,7 @@ A key in `TILE_URL` is visible to every phone.
 
 ## Optional SMS
 
-Set `TWILIO_*` and `PUBLIC_BASE_URL=https://openfamily.example.com` so SOS
+Set `TWILIO_*` and `PUBLIC_BASE_URL=https://orbitly.example.com` so SOS
 messages carry a share link instead of raw coordinates. The same values can
 be saved on the admin **Settings** page; a saved row overrides empty env
 values without restarting. Emergency contacts appear in the app only when
@@ -149,7 +149,7 @@ SMS is configured.
 
 1. Install the Android APK from the admin **Builds** page (or the GitHub
    Release).
-2. Enter `https://openfamily.example.com` and Connect.
+2. Enter `https://orbitly.example.com` and Connect.
 3. Create an account (invite code if the server requires one).
 4. Allow **Always** location, notifications, and the battery exemption.
 5. Install **ntfy** so alerts arrive when the app is closed.

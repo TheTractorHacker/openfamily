@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 256 256" role="img" aria-labelledby="t d">
+<title id="t">Orbitly app icon</title><desc id="d">A central dot inside an orbit ring with a small satellite dot: your people, in orbit.</desc>
+<rect width="256" height="256" fill="#1C1E22"/><g transform="translate(128 128) scale(0.86) translate(-128 -128)"><path d="M24 128A104 62 0 1 1 232 128A104 62 0 1 1 24 128" transform="rotate(35 128 128)" fill="none" stroke="#A3E635" stroke-opacity="0.5" stroke-width="10"/><g transform="rotate(-35 128 128)"><path d="M231.94 125.84A104 62 0 1 1 200.24 83.4" fill="none" stroke="#A3E635" stroke-width="16" stroke-linecap="round"/><circle cx="223.01" cy="102.78" r="15" fill="#38BDF8"/></g><circle cx="128" cy="128" r="30" fill="#A3E635"/></g>
+</svg>

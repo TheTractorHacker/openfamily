@@ -44,7 +44,7 @@ edits and deletes share the 20 per minute limit (migration 000210 adds
 
 ## Privacy and E2EE
 
-**Normal circles.** Chat is stored as plain text on your OpenFamily server, as
+**Normal circles.** Chat is stored as plain text on your Orbitly server, as
 described above. Push text is content-free unless the recipient opted in.
 Removed members lose read, post and photo access immediately; deleting a
 message removes it from the database (backups age out per retention).
@@ -83,9 +83,9 @@ What that means in practice:
   (up to 30 days) that were sealed with the key they received. Ask an admin to
   make a new circle key before inviting if that matters.
 * A family member whose app is too old cannot read or send encrypted chat; the
-  chat screen says "<name> needs to update OpenFamily to read encrypted chat."
+  chat screen says "<name> needs to update Orbitly to read encrypted chat."
   and an old app that tries to send gets the message "Chat in this circle is
-  end-to-end encrypted. Update OpenFamily to send and read new messages."
+  end-to-end encrypted. Update Orbitly to send and read new messages."
 
 **When a circle turns private.** Messages written before that stay on the
 server as readable text. They remain visible, marked "Sent before encryption".

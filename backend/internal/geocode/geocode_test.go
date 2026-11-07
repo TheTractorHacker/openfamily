@@ -182,7 +182,7 @@ func TestSearchAndCache(t *testing.T) {
 	if got.URL.Path != "/api" || got.URL.Query().Get("lang") != "en" || got.URL.Query().Get("lat") != "39.799" {
 		t.Fatalf("upstream request: %s", got.URL)
 	}
-	if ua := got.Header.Get("User-Agent"); ua != "OpenFamily/1.2.3 (self-hosted)" {
+	if ua := got.Header.Get("User-Agent"); ua != "Orbitly/1.2.3 (self-hosted)" {
 		t.Fatalf("UA %q", ua)
 	}
 	for _, h := range []string{"Authorization", "Cookie", "X-Forwarded-For", "Referer", "X-Real-Ip"} {

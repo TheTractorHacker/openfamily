@@ -11,10 +11,10 @@ class PrivacyPolicyScreen extends StatelessWidget {
   static const sections = <(String, String)>[
     (
       'Your server and its operator',
-      'OpenFamily is a self-hosted family location app. Your chosen server '
+      'Orbitly is a self-hosted location sharing app for your circles. Your chosen server '
           'operator controls the account and location data stored on that server. '
           'Ask the operator about their contact details, backups, retention and '
-          'any additional privacy terms before joining. OpenFamily does not '
+          'any additional privacy terms before joining. Orbitly does not '
           'provide a hosted location service. The app requires an HTTPS server '
           'address and will not connect to servers over unencrypted HTTP.'
     ),
@@ -61,17 +61,17 @@ class PrivacyPolicyScreen extends StatelessWidget {
       'Your controls and security',
       'Turn off Location sharing in Settings to stop this device reporting '
           'its location. You can also revoke Android location permissions, '
-          'manage notifications, change your profile or log out. OpenFamily '
+          'manage notifications, change your profile or log out. Orbitly '
           'only connects to HTTPS servers, encrypting network traffic in transit. Locations are readable '
           'by the server; they are not end-to-end encrypted. Optional biometric '
-          'unlock protects access to the app interface. OpenFamily contains no '
+          'unlock protects access to the app interface. Orbitly contains no '
           'advertising, analytics or crash-reporting SDK.'
     ),
     (
       'Contact and policy updates',
       'For access, correction or deletion of server data, contact the '
           'administrator who provided your server address or invitation. '
-          'The OpenFamily software publisher can be reached at '
+          'The Orbitly software publisher can be reached at '
           'info@foleyit.com for app support, but cannot directly access '
           'or erase data on a self-hosted server. Public privacy policy and '
           'account deletion instructions: https://foleyit.com/privacy.html '
@@ -88,7 +88,7 @@ class PrivacyPolicyScreen extends StatelessWidget {
       maxWidth: 640,
       children: [
         const DsHeading(
-          'OpenFamily privacy policy',
+          'Orbitly privacy policy',
           subtitle: 'Updated October 17, 2026',
         ),
         for (final section in sections) ...[

@@ -1,4 +1,4 @@
-# Caddy reverse proxy for OpenFamily (compose profile "proxy").
+# Caddy reverse proxy for Orbitly (compose profile "proxy").
 #
 # SITE_ADDRESS: the public address for the API (e.g. "openfamily.example.com"
 # for production with automatic HTTPS, or ":80" for local HTTP-only dev).

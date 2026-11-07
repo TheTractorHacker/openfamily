@@ -149,7 +149,7 @@ func (s *Server) ExportMe(w http.ResponseWriter, r *http.Request) {
 	s.logAudit(ctx, claims.UserID, "", "account.export_started", "started data export", clientIP(r))
 	now := time.Now().UTC()
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="openfamily-export-%s.json"`, now.Format("20060102")))
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="orbitly-export-%s.json"`, now.Format("20060102")))
 	w.WriteHeader(http.StatusOK)
 
 	bw := bufio.NewWriterSize(w, 32<<10)

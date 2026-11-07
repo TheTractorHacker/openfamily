@@ -47,7 +47,7 @@ export function TopBar({ active, actions, onLogout, email, onNavigate }: TopBarP
   return (
     <header className="wb-topbar">
       <div className="wb-topbar-left">
-        <span className="wb-topbar-title">{route?.label ?? 'OpenFamily'}</span>
+        <span className="wb-topbar-title">{route?.label ?? 'Orbitly'}</span>
       </div>
 
       {/* The ⌘K search corpus comes from the server-wide admin endpoints, so

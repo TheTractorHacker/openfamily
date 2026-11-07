@@ -112,7 +112,7 @@ func (s *Server) refuseUnsupportedApp(w http.ResponseWriter, r *http.Request) bo
 		return false
 	}
 	writeJSON(w, http.StatusUpgradeRequired, map[string]any{
-		"error":                 "This version of OpenFamily is no longer supported. Update the app to continue.",
+		"error":                 "This version of Orbitly is no longer supported. Update the app to continue.",
 		"code":                  "upgrade_required",
 		"upgrade_required":      true,
 		"min_supported_version": s.CompatPolicy(r.Context()).Min.String(),

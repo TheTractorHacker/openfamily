@@ -1,4 +1,4 @@
-"""A fake OpenFamily server for the Home Assistant integration tests."""
+"""A fake Orbitly server for the Home Assistant integration tests."""
 
 from __future__ import annotations
 

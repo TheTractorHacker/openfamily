@@ -165,7 +165,7 @@ func (s *Server) respondResetCode(w http.ResponseWriter, r *http.Request, issuer
 		case phone == nil || *phone == "":
 			resp.SMSNote = "the user has no phone number"
 		default:
-			msg := fmt.Sprintf("OpenFamily password reset code: %s (valid 30 minutes). Ignore if you did not ask for this.", code)
+			msg := fmt.Sprintf("Orbitly password reset code: %s (valid 30 minutes). Ignore if you did not ask for this.", code)
 			if err := s.sendSMS(r.Context(), *phone, msg); err != nil {
 				resp.SMSNote = "SMS delivery failed"
 			} else {

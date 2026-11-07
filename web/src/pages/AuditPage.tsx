@@ -35,7 +35,7 @@ function whenText(iso: string): string {
 /** A short device label from a raw User-Agent string. */
 function deviceLabel(ua: string): string {
   if (!ua) return 'Unknown device'
-  if (/OpenFamily/i.test(ua)) return ua.length > 60 ? `${ua.slice(0, 57)}…` : ua
+  if (/(Orbitly|Orbitly)/i.test(ua)) return ua.length > 60 ? `${ua.slice(0, 57)}…` : ua
   const browser = /Edg\//.test(ua)
     ? 'Edge'
     : /Chrome\//.test(ua)

@@ -140,7 +140,7 @@ jobs:
           cp sbom.spdx.json "dist/openfamily-$V.spdx.json"
           cp app/build/app/outputs/flutter-apk/app-release.apk "dist/openfamily-$V.apk"
           cp app/build/app/outputs/bundle/release/app-release.aab "dist/openfamily-$V.aab"
-          (cd dist && sha256sum "openfamily-$V.apk" "openfamily-$V.aab" "openfamily-$V.spdx.json" > SHA256SUMS.txt && cat SHA256SUMS.txt)
+          (cd dist && sha256sum "orbitly-$V.apk" "orbitly-$V.aab" "orbitly-$V.spdx.json" > SHA256SUMS.txt && cat SHA256SUMS.txt)
           BT="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)"
           "$BT/apksigner" verify --print-certs "dist/openfamily-$V.apk" | grep -i 'SHA-256'
 
@@ -151,7 +151,7 @@ jobs:
       - name: Keep build files
         uses: actions/upload-artifact@v4
         with:
-          name: openfamily-${{ steps.ver.outputs.name }}
+          name: orbitly-${{ steps.ver.outputs.name }}
           path: dist/*
           if-no-files-found: error
 
@@ -166,6 +166,6 @@ jobs:
           FLAGS=()
           if [ "$PRE" = "true" ]; then FLAGS+=(--prerelease); else FLAGS+=(--latest); fi
           gh release create "$GITHUB_REF_NAME" "${FLAGS[@]}" \
-            --title "OpenFamily $V" \
+            --title "Orbitly $V" \
             --notes "Android build $V (versionCode ${{ steps.ver.outputs.code }}). Verify the APK against SHA256SUMS.txt. Install/update with Obtainium; see docs/android-install-and-updates.md." \
             dist/*

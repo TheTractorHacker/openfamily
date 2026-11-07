@@ -81,7 +81,7 @@ func (d *tdev) record() e2ee.DeviceRecord {
 	return r
 }
 
-// ---------------------------------------------------------------- fake OpenFamily
+// ---------------------------------------------------------------- fake Orbitly
 
 type fakeItem struct {
 	ID      int64

@@ -6,6 +6,7 @@
 import React from 'react'
 import { ApiError, getAdminBackups, runBackupNow, testBackupS3 } from '../lib/api'
 import { useAsync } from '../lib/useAsync'
+import { REPO_URL } from '../lib/brand'
 import {
   describeDuration,
   describeEncryption,
@@ -21,7 +22,7 @@ import { BackupSettings } from './BackupSettings'
 import './BackupsCard.css'
 
 const SETUP_COMMAND = 'docker compose --profile backup up -d backup'
-const DOCS_URL = 'https://github.com/TheTractorHacker/openfamily/blob/main/docs/backup-restore.md'
+const DOCS_URL = `${REPO_URL}/blob/main/docs/backup-restore.md`
 
 function errMessage(e: unknown): string {
   if (e instanceof ApiError) return e.message

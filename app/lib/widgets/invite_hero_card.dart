@@ -74,7 +74,7 @@ class _InviteHeroCardState extends State<InviteHeroCard> {
               ),
               const SizedBox(height: AppSpace.xs),
               Text(
-                'Send one link. It installs OpenFamily and puts them in your '
+                'Send one link. It installs Orbitly and puts them in your '
                 'circle, no codes to type.',
                 style: text.bodyMedium?.copyWith(color: cs.onSurfaceVariant),
               ),

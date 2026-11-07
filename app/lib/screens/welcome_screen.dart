@@ -29,7 +29,7 @@ class _Page {
 const List<_Page> _pages = <_Page>[
   _Page(
     Icons.location_on_outlined,
-    'Know where your family is',
+    'Know where your people are',
     'See the people you love on one calm map, and let them see you, only '
         'when you share.',
   ),
@@ -42,7 +42,7 @@ const List<_Page> _pages = <_Page>[
   _Page(
     Icons.shield_outlined,
     'Private by design',
-    'Self-hosted. No ads. Your location stays in your family, on your own '
+    'Self-hosted. No ads. Your location stays in your circle, on your own '
         'server.',
   ),
 ];
@@ -83,7 +83,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
                         child: Semantics(
                           header: true,
                           child: const Text(
-                            'OpenFamily',
+                            'Orbitly',
                             style: TextStyle(
                               fontSize: 22,
                               fontWeight: FontWeight.w800,

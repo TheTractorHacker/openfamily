@@ -1,6 +1,6 @@
 # Relationship to the original project
 
-OpenFamily here is an independently maintained continuation of
+Orbitly here is an independently maintained continuation of
 [wheresfrank/openfamily](https://github.com/wheresfrank/openfamily)
 (AGPL-3.0). It started from that project's history, which is preserved in this
 repository, and has since diverged substantially.

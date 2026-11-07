@@ -41,7 +41,7 @@ async def _setup(hass: HomeAssistant, server: FakeOpenFamily, secret: str | None
     options = {CONF_WEBHOOK_SECRET: secret} if secret else {}
     entry = MockConfigEntry(
         domain=DOMAIN,
-        title="OpenFamily",
+        title="Orbitly",
         unique_id="abc",
         data={CONF_URL: server.url, CONF_TOKEN: TOKEN, CONF_WEBHOOK_ID: WEBHOOK_ID},
         options=options,

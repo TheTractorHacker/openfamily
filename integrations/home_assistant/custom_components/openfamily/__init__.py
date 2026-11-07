@@ -1,4 +1,4 @@
-"""OpenFamily integration for Home Assistant."""
+"""Orbitly integration for Home Assistant."""
 
 from __future__ import annotations
 
@@ -44,13 +44,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: OpenFamilyConfigEntry) -
     try:
         client = OpenFamilyClient(session, entry.data[CONF_URL], entry.data[CONF_TOKEN])
     except ValueError as err:
-        raise ConfigEntryNotReady("The configured OpenFamily URL is invalid") from err
+        raise ConfigEntryNotReady("The configured Orbitly URL is invalid") from err
     try:
         info = await client.ping()
     except OpenFamilyAuthError as err:
-        raise ConfigEntryAuthFailed("OpenFamily token was rejected or revoked") from err
+        raise ConfigEntryAuthFailed("Orbitly token was rejected or revoked") from err
     except OpenFamilyConnectionError as err:
-        raise ConfigEntryNotReady(f"Cannot reach the OpenFamily server: {err}") from err
+        raise ConfigEntryNotReady(f"Cannot reach the Orbitly server: {err}") from err
     except OpenFamilyError as err:
         raise ConfigEntryNotReady(str(err)) from err
 
@@ -84,7 +84,7 @@ def _register_webhook(hass: HomeAssistant, entry: OpenFamilyConfigEntry, coordin
     if not webhook_id or not secret:
         return
     handler = make_webhook_handler(secret, coordinator)
-    webhook.async_register(hass, "openfamily", "OpenFamily", webhook_id, handler, allowed_methods=["POST"])
+    webhook.async_register(hass, "openfamily", "Orbitly", webhook_id, handler, allowed_methods=["POST"])
 
 
 def make_webhook_handler(secret: str, coordinator: OpenFamilyCoordinator) -> Any:
@@ -110,7 +110,7 @@ def make_webhook_handler(secret: str, coordinator: OpenFamilyCoordinator) -> Any
             now=time.time(),
             max_skew=WEBHOOK_MAX_SKEW,
         ):
-            _LOGGER.warning("Rejected an OpenFamily webhook delivery with a bad signature or timestamp")
+            _LOGGER.warning("Rejected an Orbitly webhook delivery with a bad signature or timestamp")
             return web.Response(status=401)
         delivery = request.headers.get(HEADER_DELIVERY, "")
         if delivery and delivery != "0" and seen.seen(delivery):

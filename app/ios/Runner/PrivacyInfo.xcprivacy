@@ -4,7 +4,7 @@
 <dict>
 	<!-- Apple privacy manifest. UNVERIFIED on Xcode (no Mac available when this
 	     was written); review with Xcode > Product > Archive > Generate Privacy
-	     Report. Source of truth for the data types: PRIVACY.md. OpenFamily has no
+	     Report. Source of truth for the data types: PRIVACY.md. Orbitly has no
 	     analytics SDK and does not track users across apps or sites. Frameworks and
 	     plugins (Flutter, shared_preferences, ...) ship their own manifests, which
 	     Xcode merges into the report. -->

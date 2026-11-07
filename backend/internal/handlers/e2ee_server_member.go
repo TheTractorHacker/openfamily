@@ -3,7 +3,7 @@ package handlers
 // End-to-end encryption: "trusted server member" mode (docs/design/E2EE.md,
 // section "Trusted-server mode").
 //
-// The instance owner may make the OpenFamily server itself an approved MEMBER
+// The instance owner may make the Orbitly server itself an approved MEMBER
 // DEVICE of a Private circle. The server device (kind "server") is a separate
 // process (`e2ee-bridge` in server mode) that holds its own private key outside
 // the database, pulls sealed items, verifies and decrypts them like a phone
@@ -192,7 +192,7 @@ func (s *Server) verifyServerConsents(ctx context.Context, q querier, circleID s
 // ---------------------------------------------------------------- user API
 
 // E2EEServerDevice tells a signed-in client whether the mode is enabled and which
-// key is the OpenFamily server's. GET /e2ee/server-device.
+// key is the Orbitly server's. GET /e2ee/server-device.
 func (s *Server) E2EEServerDevice(w http.ResponseWriter, r *http.Request) {
 	if _, ok := circleCaller(w, r); !ok {
 		return
@@ -352,7 +352,7 @@ func (s *Server) E2EEPutServerConsent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if dev == nil || dev.DeviceID != req.ServerDeviceID {
-		writeE2EECode(w, http.StatusConflict, "not_the_server_device", "that key is not the OpenFamily server device")
+		writeE2EECode(w, http.StatusConflict, "not_the_server_device", "that key is not the Orbitly server device")
 		return
 	}
 	var pub []byte

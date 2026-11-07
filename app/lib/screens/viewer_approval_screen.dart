@@ -16,7 +16,7 @@ import 'security_widgets.dart';
 String viewerKindLabel(String? kind) => switch (kind) {
       'web' => 'Web viewer (browser)',
       'service' => 'Dawarich bridge (server process)',
-      'server' => 'OpenFamily server (can read the circle)',
+      'server' => 'Orbitly server (can read the circle)',
       _ => 'Phone',
     };
 
@@ -312,7 +312,7 @@ class _ViewerApprovalScreenState extends State<ViewerApprovalScreen> {
         ),
         child: i.isServer
             ? const Text(
-                'This is the key of the OpenFamily SERVER itself. Approving it only registers the key for your account. '
+                'This is the key of the Orbitly SERVER itself. Approving it only registers the key for your account. '
                 'The server never receives the phone circle key, in any circle. It can read only what members who allowed '
                 'server processing sealed for it (Server processing in each circle), and only after a circle admin turned that '
                 'on. Anyone who controls the server host or its backups can read that data. Approve only a server you run yourself.',

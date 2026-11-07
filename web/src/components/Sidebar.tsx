@@ -26,16 +26,16 @@ export function Sidebar({ active, onNavigate, footer }: SidebarProps) {
         <span className="wb-brand-mark" aria-hidden="true">
           <img
             className="wb-brand-icon wb-brand-icon-light"
-            src="/admin/brand/openfamily-icon.svg"
+            src="/admin/brand/orbitly-icon.svg"
             alt=""
           />
           <img
             className="wb-brand-icon wb-brand-icon-dark"
-            src="/admin/brand/openfamily-icon-dark.svg"
+            src="/admin/brand/orbitly-icon-dark.svg"
             alt=""
           />
         </span>
-        <span className="wb-brand-name">OpenFamily</span>
+        <span className="wb-brand-name">Orbitly</span>
         {isPlatformAdmin && <span className="wb-brand-sub">Admin</span>}
       </div>
 

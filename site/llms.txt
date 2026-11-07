@@ -1,9 +1,9 @@
-# OpenFamily
+# Orbitly
 
-> OpenFamily is a self-hosted, privacy-first family location tracker (a Life360 alternative). You run the server. Family GPS locations never leave it.
+> Orbitly is a self-hosted, privacy-first location sharing app for your circles (a Life360 alternative). You run the server. Family GPS locations never leave it.
 
 Canonical site: https://foleyit.com/
-Canonical repository: https://github.com/TheTractorHacker/openfamily
+Canonical repository: https://github.com/TheTractorHacker/orbitly
 
 ## What it is
 
@@ -15,7 +15,7 @@ Canonical repository: https://github.com/TheTractorHacker/openfamily
 
 ## What it is not
 
-- Not NexaFlowFrance/OpenFamily (https://github.com/NexaFlowFrance/OpenFamily), a different product: a self-hosted family organizer for calendars, shopping, and chores
+- Formerly OpenFamily (a fork of https://github.com/wheresfrank/openfamily). Not NexaFlowFrance/OpenFamily (https://github.com/NexaFlowFrance/OpenFamily), a different product: a self-hosted family organizer for calendars, shopping, and chores
 - Not a fleet, vehicle, or asset tracker (see Traccar)
 - Not a commercial cloud family locator (Life360-class apps)
 - Not OwnTracks (an MQTT location recorder) and not Dawarich (a personal timeline)

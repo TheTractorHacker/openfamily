@@ -1,6 +1,6 @@
 # Driving events and the weekly driving report
 
-OpenFamily detects three kinds of driving risk events on the server, from the
+Orbitly detects three kinds of driving risk events on the server, from the
 GPS fixes that already make up a trip, and summarises them per week or month
 for the people in a circle.
 

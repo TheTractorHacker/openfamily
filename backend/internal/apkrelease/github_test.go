@@ -36,23 +36,23 @@ func TestLatestInfoPicksHighestSemverWithAPK(t *testing.T) {
 			},
 			{
 				TagName:     "v0.1.0",
-				Name:        "OpenFamily 0.1.0",
+				Name:        "Orbitly 0.1.0",
 				Body:        "First public release.",
 				HTMLURL:     "https://github.com/acme/openfamily/releases/tag/v0.1.0",
 				PublishedAt: published,
 				Assets: []asset{{
 					ID:   10,
-					Name: "openfamily-0.1.0.apk",
+					Name: "orbitly-0.1.0.apk",
 					Size: 19_200_000,
 				}},
 			},
 			{
 				TagName: "v0.2.0",
-				Name:    "OpenFamily 0.2.0",
+				Name:    "Orbitly 0.2.0",
 				HTMLURL: "https://github.com/acme/openfamily/releases/tag/v0.2.0",
 				Assets: []asset{{
 					ID:   20,
-					Name: "openfamily-0.2.0.apk",
+					Name: "orbitly-0.2.0.apk",
 					Size: 20_000_000,
 				}},
 			},
@@ -68,7 +68,7 @@ func TestLatestInfoPicksHighestSemverWithAPK(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.TagName != "v0.2.0" || got.Name != "OpenFamily 0.2.0" || got.AssetName != "openfamily-0.2.0.apk" {
+	if got.TagName != "v0.2.0" || got.Name != "Orbitly 0.2.0" || got.AssetName != "orbitly-0.2.0.apk" {
 		t.Fatalf("unexpected release info: %+v", got)
 	}
 	if got.AssetSize != 20_000_000 {
@@ -96,7 +96,7 @@ func TestLatestInfoIgnoresGitHubLatestAPKTag(t *testing.T) {
 				},
 				{
 					TagName:     "v0.1.0",
-					Name:        "OpenFamily 0.1.0",
+					Name:        "Orbitly 0.1.0",
 					HTMLURL:     "https://github.com/acme/openfamily/releases/tag/v0.1.0",
 					PublishedAt: published,
 					Assets:      []asset{{ID: 1, Name: "openfamily-release.apk", Size: 18_000_000}},
@@ -162,18 +162,18 @@ func TestLatestInfoSkipsPrereleaseWhenStableExists(t *testing.T) {
 				TagName:    "v0.2.0-rc.1",
 				Name:       "RC",
 				Prerelease: true,
-				Assets:     []asset{{ID: 2, Name: "openfamily-0.2.0-rc.1.apk"}},
+				Assets:     []asset{{ID: 2, Name: "orbitly-0.2.0-rc.1.apk"}},
 			},
 			{
 				TagName:    "v1.0.0",
 				Name:       "flagged prerelease",
 				Prerelease: true,
-				Assets:     []asset{{ID: 3, Name: "openfamily-1.0.0.apk"}},
+				Assets:     []asset{{ID: 3, Name: "orbitly-1.0.0.apk"}},
 			},
 			{
 				TagName: "v0.1.0",
 				Name:    "stable",
-				Assets:  []asset{{ID: 1, Name: "openfamily-0.1.0.apk"}},
+				Assets:  []asset{{ID: 1, Name: "orbitly-0.1.0.apk"}},
 			},
 		})
 	}))
@@ -206,7 +206,7 @@ func TestLatestInfoPaginatesReleases(t *testing.T) {
 			})
 		case "2":
 			_ = json.NewEncoder(w).Encode([]release{
-				{TagName: "v0.1.0", Name: "from page 2", Assets: []asset{{ID: 1, Name: "openfamily-0.1.0.apk", Size: 3}}},
+				{TagName: "v0.1.0", Name: "from page 2", Assets: []asset{{ID: 1, Name: "orbitly-0.1.0.apk", Size: 3}}},
 			})
 		default:
 			http.NotFound(w, r)
@@ -452,8 +452,8 @@ func TestPickAPKAsset(t *testing.T) {
 }
 
 func TestParseRepo(t *testing.T) {
-	owner, name, err := parseRepo("  TheTractorHacker/openfamily ")
-	if err != nil || owner != "TheTractorHacker" || name != "openfamily" {
+	owner, name, err := parseRepo("  TheTractorHacker/orbitly ")
+	if err != nil || owner != "TheTractorHacker" || name != "orbitly" {
 		t.Fatalf("parseRepo = %s/%s (%v)", owner, name, err)
 	}
 	if _, _, err := parseRepo("nopath"); err == nil {
@@ -491,5 +491,16 @@ func TestNextLink(t *testing.T) {
 	}
 	if nextLink("") != "" {
 		t.Fatal("empty header should have no next")
+	}
+}
+
+// Orbitly releases name the asset orbitly-<ver>.apk, earlier ones orbitly-<ver>.apk.
+// The picker is name-agnostic, so /app.apk and the Builds page work with both.
+func TestPickAPKAssetAcceptsBothBrandNames(t *testing.T) {
+	for _, name := range []string{"orbitly-0.24.0.apk", "orbitly-0.23.0.apk", "Orbitly-0.24.0.APK"} {
+		got, err := pickAPKAsset([]asset{{Name: "SHA256SUMS.txt"}, {Name: "orbitly-0.24.0.spdx.json"}, {Name: name, ID: 7}})
+		if err != nil || got.Name != name {
+			t.Fatalf("%s: got %v err %v", name, got.Name, err)
+		}
 	}
 }

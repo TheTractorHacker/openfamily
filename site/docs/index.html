@@ -4,34 +4,34 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'" />
-    <meta name="description" content="Production self-hosting guide for OpenFamily, the family GPS location tracker. Docker, TLS, ntfy, map tiles, backups, and custom domains." />
+    <meta name="description" content="Production self-hosting guide for Orbitly, the family GPS location tracker. Docker, TLS, ntfy, map tiles, backups, and custom domains." />
     <meta name="theme-color" media="(prefers-color-scheme: light)" content="#eef2f6" />
     <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#1c1e22" />
-    <meta property="og:title" content="OpenFamily production self-hosting guide" />
+    <meta property="og:title" content="Orbitly production self-hosting guide" />
     <meta property="og:description" content="Operator checklist before you invite a family onto a public VPS or NAS: secrets, TLS, Android push, tiles, SMS, backups." />
-    <meta property="og:image" content="https://foleyit.com/assets/brand/openfamily-social-card.png" />
+    <meta property="og:image" content="https://foleyit.com/assets/brand/orbitly-social-card.png" />
     <meta property="og:url" content="https://foleyit.com/docs/" />
     <meta property="og:type" content="website" />
-    <meta property="og:site_name" content="OpenFamily" />
+    <meta property="og:site_name" content="Orbitly" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="OpenFamily production self-hosting guide" />
-    <meta name="twitter:description" content="Production checklist for the self-hosted family location tracker." />
-    <meta name="twitter:image" content="https://foleyit.com/assets/brand/openfamily-social-card.png" />
+    <meta name="twitter:title" content="Orbitly production self-hosting guide" />
+    <meta name="twitter:description" content="Production checklist for the self-hosted location sharing app for your circles." />
+    <meta name="twitter:image" content="https://foleyit.com/assets/brand/orbitly-social-card.png" />
     <link rel="canonical" href="https://foleyit.com/docs/" />
-    <link rel="icon" type="image/svg+xml" href="../assets/brand/openfamily-icon.svg" />
-    <link rel="apple-touch-icon" href="../assets/brand/openfamily-app-icon.png" />
+    <link rel="icon" type="image/svg+xml" href="../assets/brand/favicon.svg" />
+    <link rel="apple-touch-icon" href="../assets/brand/orbitly-app-icon.png" />
     <script src="../script.js"></script>
     <link rel="stylesheet" href="../styles.css" />
-    <title>Production guide — OpenFamily self-hosted location tracker</title>
+    <title>Production guide — Orbitly self-hosted location tracker</title>
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
 
     <header class="site-header is-scrolled" data-header data-header-solid>
       <div class="shell header-inner">
-        <a class="brand" href="../" aria-label="OpenFamily home">
-          <img class="brand-logo brand-logo-light" src="../assets/brand/openfamily-logo-horizontal.svg" alt="OpenFamily" />
-          <img class="brand-logo brand-logo-dark" src="../assets/brand/openfamily-logo-horizontal-dark.svg" alt="OpenFamily" />
+        <a class="brand" href="../" aria-label="Orbitly home">
+          <img class="brand-logo brand-logo-light" src="../assets/brand/orbitly-logo-horizontal.svg" alt="Orbitly" />
+          <img class="brand-logo brand-logo-dark" src="../assets/brand/orbitly-logo-horizontal-dark.svg" alt="Orbitly" />
         </a>
         <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="primary-nav" aria-label="Open menu" data-nav-toggle>
           <span></span><span></span><span></span>
@@ -46,7 +46,7 @@
             <span class="theme-icon" aria-hidden="true" data-theme-icon>◐</span>
             <span class="theme-text" data-theme-text>Theme</span>
           </button>
-          <a class="nav-cta" href="https://github.com/TheTractorHacker/openfamily"><span class="github-mark" aria-hidden="true">⌘</span> GitHub</a>
+          <a class="nav-cta" href="https://github.com/TheTractorHacker/orbitly"><span class="github-mark" aria-hidden="true">⌘</span> GitHub</a>
         </nav>
       </div>
     </header>
@@ -57,7 +57,7 @@
         <div class="shell">
           <span class="section-kicker">Production guide</span>
           <h1>Self-host the family GPS tracker on a server you trust.</h1>
-          <p class="page-lede">The <a href="../quick-start/">quick start</a> is enough for a laptop. Use this checklist before you invite a family onto a VPS or NAS that is reachable from the internet. It restates <a href="https://github.com/TheTractorHacker/openfamily/blob/main/docs/self-hosting.md">docs/self-hosting.md</a> — it does not invent a different architecture.</p>
+          <p class="page-lede">The <a href="../quick-start/">quick start</a> is enough for a laptop. Use this checklist before you invite a family onto a VPS or NAS that is reachable from the internet. It restates <a href="https://github.com/TheTractorHacker/orbitly/blob/main/docs/self-hosting.md">docs/self-hosting.md</a> — it does not invent a different architecture.</p>
         </div>
       </section>
 
@@ -69,11 +69,11 @@
             <li>Set <code>APP_ENV=production</code>.</li>
             <li>Set <code>JWT_SECRET</code> to at least 32 random bytes (<code>openssl rand -base64 48</code>).</li>
             <li>Set <code>POSTGRES_PASSWORD</code> (and <code>DATABASE_URL</code> with <code>sslmode=require</code> if Postgres is not on the Compose network).</li>
-            <li>Set <code>SITE_ADDRESS=openfamily.example.com</code> (Caddy will request a certificate).</li>
+            <li>Set <code>SITE_ADDRESS=orbitly.example.com</code> (Caddy will request a certificate).</li>
             <li>Set <code>PLATFORM_ADMIN_EMAIL</code> and <code>PLATFORM_ADMIN_PASSWORD</code>. This creates the first admin and <strong>closes open registration</strong> (invite codes required).</li>
             <li>Set <code>TLS_BEHIND_PROXY=true</code> (Compose default) so the API accepts HTTP from Caddy on the private network.</li>
           </ol>
-          <p>Step 5 in detail — DNS records, certificate behavior, and troubleshooting — is covered in <a href="https://github.com/TheTractorHacker/openfamily/blob/main/docs/custom-domain.md">custom-domain.md</a>. The admin panel's <strong>Settings → Custom domain</strong> card runs live DNS and HTTPS checks against your setup.</p>
+          <p>Step 5 in detail — DNS records, certificate behavior, and troubleshooting — is covered in <a href="https://github.com/TheTractorHacker/orbitly/blob/main/docs/custom-domain.md">custom-domain.md</a>. The admin panel's <strong>Settings → Custom domain</strong> card runs live DNS and HTTPS checks against your setup.</p>
 
           <h2>Android push (ntfy)</h2>
           <p>Do <strong>not</strong> publish ntfy on <code>0.0.0.0:2586</code>. Current Compose binds loopback only.</p>
@@ -90,7 +90,7 @@ SATELLITE_TILE_URL=</code></pre>
           <p>The API returns these on <code>GET /config</code>. The generic APK does not need a rebuild. A key in <code>TILE_URL</code> is visible to every phone.</p>
 
           <h2>Optional SMS</h2>
-          <p>Set <code>TWILIO_*</code> and <code>PUBLIC_BASE_URL=https://openfamily.example.com</code> so SOS messages carry a share link instead of raw coordinates. The same values can be saved on the admin <strong>Settings</strong> page; a saved row overrides empty env values without restarting. Emergency contacts appear in the app only when SMS is configured.</p>
+          <p>Set <code>TWILIO_*</code> and <code>PUBLIC_BASE_URL=https://orbitly.example.com</code> so SOS messages carry a share link instead of raw coordinates. The same values can be saved on the admin <strong>Settings</strong> page; a saved row overrides empty env values without restarting. Emergency contacts appear in the app only when SMS is configured.</p>
 
           <h2>Backups and disk encryption</h2>
           <ul>
@@ -100,25 +100,25 @@ SATELLITE_TILE_URL=</code></pre>
           </ul>
 
           <h2>Custom domain</h2>
-          <p>Serving OpenFamily behind a real domain gives every device automatic HTTPS: Caddy requests and renews a Let's Encrypt certificate. Create an A (and optional AAAA) record for the name, forward ports 80 and 443 if you are behind a home router, then set:</p>
-          <pre><code>SITE_ADDRESS=openfamily.example.com
-ALLOWED_ORIGIN=https://openfamily.example.com
-PUBLIC_BASE_URL=https://openfamily.example.com
+          <p>Serving Orbitly behind a real domain gives every device automatic HTTPS: Caddy requests and renews a Let's Encrypt certificate. Create an A (and optional AAAA) record for the name, forward ports 80 and 443 if you are behind a home router, then set:</p>
+          <pre><code>SITE_ADDRESS=orbitly.example.com
+ALLOWED_ORIGIN=https://orbitly.example.com
+PUBLIC_BASE_URL=https://orbitly.example.com
 APP_ENV=production</code></pre>
-          <p>Then <code>docker compose up -d</code>. Point the apps at <code>https://your-domain</code>. Full DNS and NAT-loopback notes: <a href="https://github.com/TheTractorHacker/openfamily/blob/main/docs/custom-domain.md">docs/custom-domain.md</a>.</p>
+          <p>Then <code>docker compose up -d</code>. Point the apps at <code>https://your-domain</code>. Full DNS and NAT-loopback notes: <a href="https://github.com/TheTractorHacker/orbitly/blob/main/docs/custom-domain.md">docs/custom-domain.md</a>.</p>
 
           <h2>Family setup</h2>
           <ol>
             <li>Install the Android APK from the admin <strong>Builds</strong> page (or the GitHub Release).</li>
-            <li>Enter <code>https://openfamily.example.com</code> and Connect.</li>
+            <li>Enter <code>https://orbitly.example.com</code> and Connect.</li>
             <li>Create an account (invite code if the server requires one).</li>
             <li>Allow <strong>Always</strong> location, notifications, and the battery exemption.</li>
             <li>Install <strong>ntfy</strong> so alerts arrive when the app is closed.</li>
           </ol>
-          <p>More operator detail lives in the <a href="https://github.com/TheTractorHacker/openfamily">canonical README</a>. Privacy boundaries: <a href="../privacy/">privacy</a>.</p>
+          <p>More operator detail lives in the <a href="https://github.com/TheTractorHacker/orbitly">canonical README</a>. Privacy boundaries: <a href="../privacy/">privacy</a>.</p>
           <div class="page-actions">
             <a class="button button-primary" href="../quick-start/">Docker quick start <span aria-hidden="true">→</span></a>
-            <a class="button button-secondary" href="https://github.com/TheTractorHacker/openfamily">GitHub repository</a>
+            <a class="button button-secondary" href="https://github.com/TheTractorHacker/orbitly">GitHub repository</a>
           </div>
         </div>
       </section>
@@ -127,13 +127,13 @@ APP_ENV=production</code></pre>
     <footer class="site-footer">
       <div class="shell footer-grid">
         <div class="footer-brand">
-          <img class="footer-icon footer-icon-light" src="../assets/brand/openfamily-icon.svg" alt="" /><img class="footer-icon footer-icon-dark" src="../assets/brand/openfamily-icon-dark.svg" alt="" />
-          <div><strong>OpenFamily</strong><span>Self-hosted family location tracker</span></div>
+          <img class="footer-icon footer-icon-light" src="../assets/brand/orbitly-icon.svg" alt="" /><img class="footer-icon footer-icon-dark" src="../assets/brand/orbitly-icon-dark.svg" alt="" />
+          <div><strong>Orbitly</strong><span>Self-hosted location sharing app for your circles</span></div>
         </div>
         <div class="footer-links">
-          <a href="https://github.com/TheTractorHacker/openfamily">GitHub</a><a href="../compare/">Compare</a><a href="../privacy/">Privacy</a><a href="../quick-start/">Quick start</a><a href="./">Docs</a><a href="https://github.com/TheTractorHacker/openfamily/blob/main/SECURITY.md">Security</a><a href="https://github.com/TheTractorHacker/openfamily/blob/main/LICENSE">License</a>
+          <a href="https://github.com/TheTractorHacker/orbitly">GitHub</a><a href="../compare/">Compare</a><a href="../privacy/">Privacy</a><a href="../quick-start/">Quick start</a><a href="./">Docs</a><a href="https://github.com/TheTractorHacker/orbitly/blob/main/SECURITY.md">Security</a><a href="https://github.com/TheTractorHacker/orbitly/blob/main/LICENSE">License</a>
         </div>
-        <p>© <span data-year></span> OpenFamily. Open source under AGPL-3.0. This website uses Plausible Analytics — cookieless, no personal data; the OpenFamily software itself contains no analytics.</p>
+        <p>© <span data-year></span> Orbitly. Open source under AGPL-3.0. This website uses Plausible Analytics — cookieless, no personal data; the Orbitly software itself contains no analytics.</p>
       </div>
     </footer>
   </body>
