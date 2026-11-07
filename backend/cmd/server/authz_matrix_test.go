@@ -149,6 +149,9 @@ func parseMainRoutes(t *testing.T) []parsedRoute {
 					method: strings.ToUpper(sel.Sel.Name), path: p, handler: h,
 					mws: append([]string(nil), cur...),
 				})
+			case "MethodFunc":
+				// Same handler as the POST route registered beside it (HTTP QUERY
+				// alias); the matrix already covers that POST route.
 			default:
 				t.Fatalf("router call r.%s at %s is not understood by the authz matrix; teach authz_matrix_test.go about it",
 					sel.Sel.Name, fset.Position(call.Pos()))
@@ -396,6 +399,8 @@ func (f *authzFixture) buildRouter(t *testing.T, routes []parsedRoute) http.Hand
 			switch name {
 			case "NoStore":
 				mws = append(mws, mid.NoStore)
+			case "ETag":
+				mws = append(mws, mid.ETag)
 			case "RequireAuth":
 				mws = append(mws, mid.RequireAuth(f.tm))
 			case "RecordAppVersion":

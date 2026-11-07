@@ -22,8 +22,8 @@ import (
 	"github.com/TheTractorHacker/openfamily/backend/internal/backupsettings"
 	"github.com/TheTractorHacker/openfamily/backend/internal/config"
 	"github.com/TheTractorHacker/openfamily/backend/internal/db"
-	"github.com/TheTractorHacker/openfamily/backend/internal/geocode"
 	"github.com/TheTractorHacker/openfamily/backend/internal/errlog"
+	"github.com/TheTractorHacker/openfamily/backend/internal/geocode"
 	handlers "github.com/TheTractorHacker/openfamily/backend/internal/handlers"
 	mid "github.com/TheTractorHacker/openfamily/backend/internal/middleware"
 	"github.com/TheTractorHacker/openfamily/backend/internal/push"
@@ -188,6 +188,7 @@ func main() {
 	srv.APKGitHubToken = cfg.APKGitHubToken
 	srv.FlutterAppDir = cfg.FlutterAppDir
 	srv.BuildVersion = config.BuildVersion()
+	srv.QueryMethod, _ = strconv.ParseBool(os.Getenv("QUERY_METHOD"))
 	if v, err := strconv.Atoi(os.Getenv("BACKUP_STALE_HOURS")); err == nil && v > 0 && v <= 24*365 {
 		srv.BackupStaleHours = v
 	}
@@ -259,10 +260,14 @@ func main() {
 	srv.OnMapStyleChange = setAdminCSPStyle
 	setAdminCSPStyle(srv.EffectiveMapStyleURL(ctx))
 
+	// HTTP QUERY (draft-ietf-httpbis-safe-method-w-body): chi only routes methods it
+	// knows, so register the name before any route uses it.
+	chi.RegisterMethod(handlers.QueryMethod)
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(mid.ClientIP(trustedProxies))
 	r.Use(middleware.Recoverer)
+	r.Use(mid.Compress)
 	r.Use(mid.SecurityHeaders)
 	r.Use(mid.LimitBody(mid.BodyLimitFor))
 	r.Use(cors(cfg.AllowedOrigin))
@@ -326,9 +331,15 @@ func main() {
 	// Authenticated API.
 	r.Group(func(r chi.Router) {
 		r.Use(mid.NoStore)
+		r.Use(mid.ETag)
 		r.Use(mid.RequireAuth(tm))
 		r.Use(mid.RequireTokenVersion(pool))
 		r.Use(mid.RecordAppVersion(pool))
+
+		// Wire efficiency (docs/developers/api-efficiency.md).
+		r.Get("/app/bootstrap", srv.Bootstrap)
+		r.Post("/family/history/query", srv.HistoryQuery)
+		r.MethodFunc(handlers.QueryMethod, "/family/history/query", srv.HistoryQuery)
 
 		r.Get("/me", srv.GetMe)
 		// Release the server runs, for signed-in users only (not on /healthz).
@@ -758,8 +769,9 @@ func cors(allowedOrigin string) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if allowedOrigin != "" {
 				w.Header().Set("Access-Control-Allow-Origin", allowedOrigin)
-				w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-App-Version, X-App-Platform, X-Device-Id")
-				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+				w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-App-Version, X-App-Platform, X-Device-Id, If-None-Match")
+				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, QUERY, OPTIONS")
+				w.Header().Add("Access-Control-Expose-Headers", "ETag, X-Next-Cursor, Accept-Query")
 			}
 			if r.Method == http.MethodOptions {
 				w.WriteHeader(http.StatusNoContent)
