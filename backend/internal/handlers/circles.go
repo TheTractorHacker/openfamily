@@ -85,7 +85,7 @@ type circleOut struct {
 	E2EEMode  string `json:"e2ee_mode"`
 	E2EEEpoch int    `json:"e2ee_epoch"`
 	// E2EEServerMember: the circle is Private AND an approved, consented
-	// OpenFamily server device can read it (trusted-server mode).
+	// Orbitly server device can read it (trusted-server mode).
 	// Old clients read this as "the server may read the whole circle": it is true
 	// ONLY for a legacy all-members-consented circle, so an app that predates the
 	// lanes stays private (phone-only) in a lanes circle.

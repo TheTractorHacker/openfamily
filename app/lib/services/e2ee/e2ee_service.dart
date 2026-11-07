@@ -856,7 +856,7 @@ class E2eeService {
     return null;
   }
 
-  /// A member allows the OpenFamily server key to read this circle. The signature
+  /// A member allows the Orbitly server key to read this circle. The signature
   /// names the circle, this person and the exact key; it is made by this phone.
   Future<void> consentToServer(String circleId) async {
     final LocalIdentity me = (await identity())!;

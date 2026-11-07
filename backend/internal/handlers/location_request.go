@@ -277,7 +277,7 @@ func (s *Server) iosPushTokens(ctx context.Context, userID string) ([]string, er
 // executed in the background — never shown as an alert). Returns true when at
 // least one transport accepted the request.
 func (s *Server) dispatchLocationRequest(parent context.Context, body []byte, userID string) bool {
-	return s.dispatchSilentCommand(parent, "OpenFamily location refresh", body, userID)
+	return s.dispatchSilentCommand(parent, "Orbitly location refresh", body, userID)
 }
 
 // dispatchSilentCommand delivers a silent command body to a member's devices

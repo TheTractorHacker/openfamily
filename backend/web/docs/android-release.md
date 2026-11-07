@@ -36,7 +36,7 @@ git tag v0.2.0 && git push origin v0.2.0
 
 The workflow `.github/workflows/apk.yml` runs `flutter analyze` and `flutter test`,
 builds the signed APK and AAB, writes `SHA256SUMS.txt`, and creates the GitHub
-Release with `openfamily-<version>.apk` (pre-release tags such as `v0.2.0-rc.1`
+Release with `orbitly-<version>.apk` (pre-release tags such as `v0.2.0-rc.1`
 become GitHub pre-releases). The server's download cache (`APK_GITHUB_REPO`)
 picks the first `.apk` asset of the latest `v*` release, which matches.
 

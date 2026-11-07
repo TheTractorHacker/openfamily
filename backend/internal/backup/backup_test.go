@@ -404,8 +404,8 @@ func TestPruneKeepsNewestAndOnlyOurObjects(t *testing.T) {
 		_ = st.Put(ctx, n+".manifest.json", []byte("{}"))
 	}
 	_ = st.Put(ctx, "unrelated.txt", []byte("keep me"))
-	_ = st.Put(ctx, "openfamily-20260101T000000Z.dump.enc", []byte("legacy local backup from scripts/backup.sh"))
-	_ = st.Put(ctx, "openfamily-20250101T000000Z.dump.age", []byte("orphan without manifest"))
+	_ = st.Put(ctx, "orbitly-20260101T000000Z.dump.enc", []byte("legacy local backup from scripts/backup.sh"))
+	_ = st.Put(ctx, "orbitly-20250101T000000Z.dump.age", []byte("orphan without manifest"))
 	r := &Runner{Cfg: &Config{Retention: Retention{Daily: 3}, Location: time.UTC}}
 
 	dry, err := r.Prune(ctx, st, true)
@@ -425,7 +425,7 @@ func TestPruneKeepsNewestAndOnlyOurObjects(t *testing.T) {
 		have[o.Key] = true
 	}
 	newest := "openfamily-" + base.Format(tsLayout)
-	for _, k := range []string{newest + ".dump.age", newest + ".manifest.json", "unrelated.txt", "openfamily-20260101T000000Z.dump.enc", "openfamily-20250101T000000Z.dump.age"} {
+	for _, k := range []string{newest + ".dump.age", newest + ".manifest.json", "unrelated.txt", "orbitly-20260101T000000Z.dump.enc", "orbitly-20250101T000000Z.dump.age"} {
 		if !have[k] {
 			t.Errorf("%s was deleted", k)
 		}

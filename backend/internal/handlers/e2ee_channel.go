@@ -182,7 +182,7 @@ func (s *Server) refusePrivateOnlyPlaintext(w http.ResponseWriter, r *http.Reque
 	if private > 0 && standard == 0 {
 		msg := "all of your circles are end-to-end encrypted; send positions through the encrypted channel"
 		if !compatSupports(r.Context(), "private_channel") {
-			msg = "Update OpenFamily to share location: your circles are end-to-end encrypted and this app version cannot send to them"
+			msg = "Update Orbitly to share location: your circles are end-to-end encrypted and this app version cannot send to them"
 		}
 		writeE2EECode(w, http.StatusConflict, "e2ee_private_circle", msg)
 		return true
@@ -554,7 +554,7 @@ func (s *Server) fanOutE2EEItems(circleID, senderID string, items []e2eeItemOut,
 	rows.Close()
 	body, _ := json.Marshal(map[string]string{"type": "e2ee_wake", "circle_id": circleID})
 	for _, u := range users {
-		s.dispatchSilentCommand(ctx, "OpenFamily", body, u)
+		s.dispatchSilentCommand(ctx, "Orbitly", body, u)
 	}
 }
 

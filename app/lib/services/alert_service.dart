@@ -95,7 +95,7 @@ String emergencyNumberForCountry(String? countryCode) {
 }
 
 /// Opens the phone's dialer pre-filled with an emergency number. It only
-/// opens the dialer; the user must press call, and OpenFamily never places the
+/// opens the dialer; the user must press call, and Orbitly never places the
 /// call. Android uses android_intent_plus (ACTION_DIAL needs no permission),
 /// iOS the `tel:` handler through LinkBridge.swift. The number follows the
 /// phone's region.

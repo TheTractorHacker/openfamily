@@ -163,7 +163,7 @@ class _AlertReceivedScreenState extends State<AlertReceivedScreen> {
                 const SizedBox(width: AppSpace.md),
                 Expanded(
                   child: Text(
-                    'OpenFamily does not contact emergency services. If you '
+                    'Orbitly does not contact emergency services. If you '
                     'think they are in danger, call emergency services '
                     'yourself.',
                     style: AppType.body.copyWith(height: 1.4),

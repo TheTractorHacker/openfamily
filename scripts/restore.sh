@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Restore the OpenFamily database from a backup made by scripts/backup.sh.
+# Restore the Orbitly database from a backup made by scripts/backup.sh.
 # DESTRUCTIVE: the current database is dropped and recreated.
 #
 # Usage: ./scripts/restore.sh backups/openfamily-<timestamp>.dump[.enc] [--yes]
@@ -46,7 +46,7 @@ case "$file" in
 esac
 
 if [ "$yes" != "--yes" ]; then
-  echo "This will REPLACE the current OpenFamily database with: $file"
+  echo "This will REPLACE the current Orbitly database with: $file"
   read -r -p "Type RESTORE to continue: " answer
   [ "$answer" = "RESTORE" ] || { echo "Aborted."; exit 1; }
 fi

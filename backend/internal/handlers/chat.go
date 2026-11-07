@@ -214,7 +214,7 @@ func (s *Server) refusePlaintextChat(w http.ResponseWriter, ctx context.Context,
 	if !s.circleIsPrivate(ctx, circleID) {
 		return false
 	}
-	msg := "Chat in this circle is end-to-end encrypted. Update OpenFamily to send and read new messages."
+	msg := "Chat in this circle is end-to-end encrypted. Update Orbitly to send and read new messages."
 	if compatSupports(ctx, "chat_e2ee") {
 		msg = "Chat in this circle is end-to-end encrypted; the app sends it through the encrypted channel."
 	}

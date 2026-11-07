@@ -86,7 +86,7 @@ String describeUserAgent(String ua) {
                       ? 'Linux'
                       : '';
   final String app = u.contains('dart')
-      ? 'OpenFamily app'
+      ? 'Orbitly app'
       : u.contains('firefox')
           ? 'Firefox'
           : u.contains('edg')

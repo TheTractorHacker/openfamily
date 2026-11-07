@@ -17,7 +17,7 @@ import (
 
 const srvToken = "0123456789abcdef0123456789abcdef-token"
 
-// fakeIngest plays the OpenFamily API's /internal/e2ee endpoints.
+// fakeIngest plays the Orbitly API's /internal/e2ee endpoints.
 type fakeIngest struct {
 	srv    *httptest.Server
 	mu     sync.Mutex
@@ -313,7 +313,7 @@ func TestEnrollKindServerShowsWarningAndRegistersServerKind(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("%d %s", code, errs)
 	}
-	if !strings.Contains(out, "OpenFamily server") || !strings.Contains(out, "SERVER READ") || !strings.Contains(out, "Fingerprint:") {
+	if !strings.Contains(out, "Orbitly server") || !strings.Contains(out, "SERVER READ") || !strings.Contains(out, "Fingerprint:") {
 		t.Fatalf("output:\n%s", out)
 	}
 	var reqCode string
@@ -324,7 +324,7 @@ func TestEnrollKindServerShowsWarningAndRegistersServerKind(t *testing.T) {
 		}
 	}
 	rc := decodeRequest(t, reqCode)
-	if rc.K != "server" || rc.N != "OpenFamily server" {
+	if rc.K != "server" || rc.N != "Orbitly server" {
 		t.Fatalf("request code %+v", rc)
 	}
 	if code, _, errs := runCLI(t, env, "", "enroll", "--kind", "service"); code == 0 || !strings.Contains(errs, "new --state-dir") {

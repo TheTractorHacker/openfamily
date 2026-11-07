@@ -43,7 +43,7 @@ class Circle {
   final String e2eeMode;
   final int e2eeEpoch;
 
-  /// Private AND an approved, consented OpenFamily server device can read it
+  /// Private AND an approved, consented Orbitly server device can read it
   /// (trusted-server mode): the server, not only the members, can see positions.
   final bool e2eeServerMember;
 

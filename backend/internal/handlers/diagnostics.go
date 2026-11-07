@@ -256,6 +256,6 @@ func (s *Server) SendTestPush(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := withPushRoute(r.Context(), "diagnostics")
 	sent, failed := s.pushUsersRender(ctx, []string{claims.UserID}, fixedRender(
-		"OpenFamily test alert", "If you can read this, alerts reach this phone."))
+		"Orbitly test alert", "If you can read this, alerts reach this phone."))
 	writeJSON(w, http.StatusOK, map[string]int{"sent": sent, "failed": failed})
 }

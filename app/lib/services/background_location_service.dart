@@ -552,11 +552,11 @@ class BackgroundLocationService {
           wakeLockTime: 60,
           client: LocationClient.google,
           androidNotificationSettings: const AndroidNotificationSettings(
-            notificationChannelName: 'OpenFamily',
-            notificationTitle: 'OpenFamily',
+            notificationChannelName: 'Orbitly',
+            notificationTitle: 'Orbitly',
             notificationMsg: 'Sharing your location with your family',
             notificationBigMsg:
-                'OpenFamily is sharing your location in the background so your '
+                'Orbitly is sharing your location in the background so your '
                 'family can see where you are.',
           ),
         ),

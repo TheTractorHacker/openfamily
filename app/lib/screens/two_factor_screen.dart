@@ -127,12 +127,12 @@ class _TwoFactorScreenState extends State<TwoFactorScreen> {
   }
 
   Future<void> _share() async {
-    final String text = 'OpenFamily recovery codes:\n${_recovery.join('\n')}';
+    final String text = 'Orbitly recovery codes:\n${_recovery.join('\n')}';
     try {
       if (widget.shareText != null) {
         await widget.shareText!(text);
       } else {
-        await Share.share(text, subject: 'OpenFamily recovery codes');
+        await Share.share(text, subject: 'Orbitly recovery codes');
       }
     } catch (_) {
       if (mounted) {

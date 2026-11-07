@@ -1,6 +1,6 @@
 package main
 
-// OpenFamily API client: login/refresh with a rotating refresh token that is
+// Orbitly API client: login/refresh with a rotating refresh token that is
 // persisted atomically after every rotation (access tokens live in memory only),
 // and robust retry (exponential backoff with jitter, Retry-After, 5xx/429/network).
 
@@ -22,12 +22,12 @@ import (
 
 var (
 	// errReauth: the refresh token no longer works; the user must log in again.
-	errReauth = errors.New("the OpenFamily session is no longer valid: re-run `e2ee-bridge enroll` with --email to log in again")
+	errReauth = errors.New("the Orbitly session is no longer valid: re-run `e2ee-bridge enroll` with --email to log in again")
 	// errNoApproved: the server refuses to serve ciphertext to this key.
 	errNoApproved = errors.New("the server reports no approved device key for this circle (the bridge was revoked, or its key is no longer approved)")
 )
 
-// apiError is an HTTP error answer from OpenFamily.
+// apiError is an HTTP error answer from Orbitly.
 type apiError struct {
 	Status int
 	Code   string

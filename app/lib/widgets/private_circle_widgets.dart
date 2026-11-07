@@ -21,7 +21,7 @@ class PrivateCircleBadge extends StatelessWidget {
     final BrandTheme brand = BrandTheme.of(context);
     return Semantics(
       label: serverMember
-          ? 'Private circle with a trusted server member. The OpenFamily server can read locations in this circle.'
+          ? 'Private circle with a trusted server member. The Orbitly server can read locations in this circle.'
           : 'End-to-end encrypted circle. The server cannot read locations in this circle.',
       child: Container(
         key: const ValueKey<String>('private-circle-badge'),

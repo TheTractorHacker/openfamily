@@ -1,6 +1,6 @@
 # Server setup: adding your own server to a circle
 
-This page is for the person who runs the OpenFamily server for their family. It takes about ten minutes.
+This page is for the person who runs the Orbitly server for their family. It takes about ten minutes.
 Phones keep working without the server. Adding the server is what lets it keep **history, driving reports,
 trips and the map** for the people who say yes.
 
@@ -19,7 +19,7 @@ The choice changes advice and defaults only. Nobody is added to anything by it.
 
 ### Rented server: protect the disk
 
-* Turn on **full-disk or volume encryption** (LUKS, or your provider's encrypted volume). OpenFamily cannot see
+* Turn on **full-disk or volume encryption** (LUKS, or your provider's encrypted volume). Orbitly cannot see
   your disk, so it cannot check this for you.
 * Set `OPENFAMILY_DATA_KEY` (`./scripts/setup.sh` does this for a rented server). It encrypts stored secrets
   (SMS token, webhook secrets) in the database. **Keep a copy outside the server**, for example in a password
@@ -45,7 +45,7 @@ password. In the admin panel the Server setup card shows the exact lines to copy
 echo "E2EE_SERVER_INGEST_TOKEN=$(openssl rand -hex 32)" >> .env
 echo "COMPOSE_PROFILES=${COMPOSE_PROFILES:+$COMPOSE_PROFILES,}e2ee-server" >> .env   # edit if you already use profiles
 docker compose up -d
-read -rsp 'Your OpenFamily password: ' P; echo
+read -rsp 'Your Orbitly password: ' P; echo
 printf '%s\n' "$P" | docker compose --profile e2ee-server run --rm -T e2ee-server-device \
     enroll --kind server --server http://api:8080 --email you@example.org
 ```

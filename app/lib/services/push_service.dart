@@ -238,7 +238,7 @@ class PushService {
         await LocationRefreshService.handlePush(body);
     if (result == LocationRefreshResult.notCommand) {
       await showForeground(
-        'OpenFamily',
+        'Orbitly',
         body.trim().isEmpty ? 'New notification' : body,
       );
     }

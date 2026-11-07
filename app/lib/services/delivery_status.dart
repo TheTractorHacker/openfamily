@@ -142,13 +142,13 @@ String? describeMemberDelivery(MemberDelivery m, {DateTime? now}) {
 String? deliveryAdvice(MemberDelivery m) {
   switch (m.reason) {
     case DeliveryReason.updateNeeded:
-      return 'Ask them to update OpenFamily from the store.';
+      return 'Ask them to update Orbitly from the store.';
     case DeliveryReason.noKeyWrap:
     case DeliveryReason.notApproved:
       return 'An admin can fix this in Settings, Security, Encryption keys.';
     case DeliveryReason.neverSent:
     case DeliveryReason.quiet:
-      return 'Ask them to open OpenFamily once; it sends a fresh position straight away.';
+      return 'Ask them to open Orbitly once; it sends a fresh position straight away.';
     case DeliveryReason.sharingPaused:
       return 'They can turn sharing back on in the circle settings.';
     default:

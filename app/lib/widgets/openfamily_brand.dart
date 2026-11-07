@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 
-/// Theme-aware OpenFamily brand mark backed by the shared project assets.
+/// Theme-aware Orbitly brand mark backed by the shared project assets.
 class OpenFamilyMark extends StatelessWidget {
   const OpenFamilyMark({
     super.key,
     this.size = 88,
     this.brightness,
-    this.semanticLabel = 'OpenFamily',
+    this.semanticLabel = 'Orbitly',
   });
 
   final double size;
@@ -18,8 +18,8 @@ class OpenFamilyMark extends StatelessWidget {
     final Brightness resolvedBrightness =
         brightness ?? Theme.of(context).brightness;
     final String asset = resolvedBrightness == Brightness.dark
-        ? 'assets/branding/openfamily-icon-dark.png'
-        : 'assets/branding/openfamily-icon.png';
+        ? 'assets/branding/orbitly-icon-dark.png'
+        : 'assets/branding/orbitly-icon.png';
 
     return Image.asset(
       asset,

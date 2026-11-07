@@ -1,4 +1,4 @@
-// Command backup is the optional OpenFamily backup service (compose profile
+// Command backup is the optional Orbitly backup service (compose profile
 // "backup"). Subcommands:
 //
 //	daemon              run the schedule + serve admin-panel requests

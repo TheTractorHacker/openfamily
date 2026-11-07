@@ -116,7 +116,7 @@ abstract class GeocodingBackend {
   Future<String?> reverse(LatLng position);
 }
 
-/// Talks to the OpenFamily server's `/geocode/*` proxy.
+/// Talks to the Orbitly server's `/geocode/*` proxy.
 ///
 /// PRIVACY: the phone never contacts a geocoder provider; address text and
 /// coordinates go to YOUR server, which queries the configured provider (see

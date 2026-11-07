@@ -1,4 +1,4 @@
-# OpenFamily app design system
+# Orbitly app design system
 
 Small, code-first. Everything lives in `app/lib/theme` and
 `app/lib/widgets/ds`. Import `theme/app_theme.dart` (tokens are re-exported)

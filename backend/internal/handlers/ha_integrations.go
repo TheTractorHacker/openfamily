@@ -560,7 +560,7 @@ func (s *Server) TestHAWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 	body, _ := json.Marshal(map[string]any{
 		"id": 0, "type": "test", "occurred_at": time.Now().UTC().Format(time.RFC3339),
-		"message": "OpenFamily test event",
+		"message": "Orbitly test event",
 	})
 	code, class := haSend(r.Context(), integ.WebhookURL, integ.WebhookSecret, s.haEffectiveAllowPrivate(r.Context(), integ), "test", 0, body)
 	s.haRecordDelivery(r.Context(), integ.ID, "test", code, class)

@@ -46,7 +46,7 @@ if HAVE_HA:
 
     @pytest.fixture(autouse=True)
     def _loopback_sockets(socket_enabled):
-        """The fake OpenFamily server listens on 127.0.0.1."""
+        """The fake Orbitly server listens on 127.0.0.1."""
         yield
 
     @pytest.fixture(autouse=True)

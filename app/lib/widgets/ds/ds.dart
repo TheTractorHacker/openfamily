@@ -1,4 +1,4 @@
-/// OpenFamily design-system widgets. See docs/ux/DESIGN_SYSTEM.md.
+/// Orbitly design-system widgets. See docs/ux/DESIGN_SYSTEM.md.
 library;
 
 export 'body.dart';

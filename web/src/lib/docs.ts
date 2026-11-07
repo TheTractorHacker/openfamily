@@ -1,7 +1,8 @@
 // Helpers for the Documents page: link resolution, search, changelog sections.
 // Pure functions (no React) so node --test can cover them.
 
-export const REPO_URL = 'https://github.com/TheTractorHacker/openfamily'
+import { REPO_URL } from './brand.ts'
+export { REPO_URL }
 
 export interface DocEntry {
   path: string

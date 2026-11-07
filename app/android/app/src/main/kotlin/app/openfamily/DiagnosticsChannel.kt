@@ -96,7 +96,7 @@ class DiagnosticsChannel(private val context: Context) {
                 component = ComponentName(t.pkg, t.cls)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 putExtra("package_name", context.packageName)
-                putExtra("package_label", "OpenFamily")
+                putExtra("package_label", "Orbitly")
             }
             if (intent.resolveActivity(context.packageManager) == null) continue
             try {

@@ -8,7 +8,7 @@ import 'tile_config.dart';
 /// User-Agent sent to tile/style hosts so operators (and OSM's tile policy)
 /// can identify the app.
 const String kMapUserAgentPackage = 'app.openfamily';
-const String kMapUserAgent = 'app.openfamily (OpenFamily Flutter app)';
+const String kMapUserAgent = 'app.openfamily (Orbitly Flutter app)';
 
 /// OpenFreeMap styles (free, no key, OpenMapTiles schema).
 const String kDefaultLightStyleUrl =

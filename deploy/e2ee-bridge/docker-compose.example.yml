@@ -1,5 +1,5 @@
 # Example: run the Dawarich bridge. Put this on a machine that is NOT the
-# OpenFamily server (whoever runs it can read the Private circles it joins).
+# Orbitly server (whoever runs it can read the Private circles it joins).
 #
 # One-time enrolment (interactive, the password is read from stdin, never argv):
 #   docker compose run --rm -T bridge enroll --server https://family.example.org --email you@example.org < password.txt

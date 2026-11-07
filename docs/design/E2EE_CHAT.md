@@ -118,7 +118,7 @@ badge, below).
   the server line. Tests assert that no chat is served to it.
 * **Plaintext chat in a private circle.** `POST /circles/{id}/chat`, `PATCH`
   and the photo upload answer `409 {"code":"chat_encrypted"}` with the text
-  "Chat in this circle is end-to-end encrypted. Update OpenFamily to send and
+  "Chat in this circle is end-to-end encrypted. Update Orbitly to send and
   read new messages." An old app shows that message. A database trigger
   (`chat_plaintext_guard`) refuses plaintext rows in a private circle as a
   backstop. Non-private circles are unchanged. Listing and deleting old

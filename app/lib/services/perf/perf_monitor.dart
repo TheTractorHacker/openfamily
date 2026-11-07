@@ -428,7 +428,7 @@ class PerfMonitor {
   String buildReport({String? device}) {
     final StringBuffer b = StringBuffer();
     String f(double v) => v.toStringAsFixed(1);
-    b.writeln('OpenFamily performance report');
+    b.writeln('Orbitly performance report');
     if (device != null) b.writeln('device: $device');
     b.writeln('recording: ${recording ? 'on' : 'off'}');
     final int? su = startupMs;

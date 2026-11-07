@@ -1,4 +1,4 @@
-"""Verification of signed OpenFamily webhook deliveries (no Home Assistant imports).
+"""Verification of signed Orbitly webhook deliveries (no Home Assistant imports).
 
 Signature: ``X-OpenFamily-Signature: v1=hex(HMAC_SHA256(secret, "<timestamp>.<body>"))``.
 The comparison is constant-time, the timestamp must be within ``max_skew``

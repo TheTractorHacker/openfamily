@@ -658,7 +658,7 @@ function FamiliesSkeleton() {
       <div className="wb-page-header">
         <div>
           <h1 className="wb-page-title">Families</h1>
-          <p className="wb-page-subtitle">Families using this OpenFamily server.</p>
+          <p className="wb-page-subtitle">Families using this Orbitly server.</p>
         </div>
       </div>
       <div className="wb-stack">

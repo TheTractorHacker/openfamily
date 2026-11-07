@@ -1,7 +1,7 @@
 # Check-ins and temporary sharing
 
 Three small features that let a person decide, for a limited time, who sees
-where they are. OpenFamily still never contacts emergency services (see
+where they are. Orbitly still never contacts emergency services (see
 [safety.md](safety.md)); none of this changes SOS.
 
 ## "I'm here" check-in to chosen people

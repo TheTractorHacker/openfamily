@@ -116,7 +116,7 @@ func PrintE2EEFingerprints(ctx context.Context, pool *pgxpool.Pool, out io.Write
 	if err != nil {
 		return err
 	}
-	fmt.Fprintln(out, "OpenFamily device key fingerprints (public data; compare with the phone)")
+	fmt.Fprintln(out, "Orbitly device key fingerprints (public data; compare with the phone)")
 	if len(devs) == 0 {
 		fmt.Fprintln(out, "no device keys registered")
 	}

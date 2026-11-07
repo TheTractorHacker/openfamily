@@ -25,7 +25,7 @@ class InviteService {
   }
 
   /// The share-sheet subject line.
-  static const String shareSubject = 'Join my OpenFamily family';
+  static const String shareSubject = 'Join my circle on Orbitly';
 
   /// The shareable invite link (`https://<server>/join/<code>`), which is
   /// also the QR payload. Null when no valid server URL is configured.
@@ -42,10 +42,10 @@ class InviteService {
   /// (server URL and code) for people who cannot open the link.
   static String shareMessage(String code) {
     final String? link = inviteLink(code);
-    return 'Join my OpenFamily family!\n\n'
+    return 'Join my circle on Orbitly!\n\n'
         '${link == null ? '' : 'Tap to join: $link\n\n'}'
         'Or do it by hand:\n'
-        '1. Install the OpenFamily Android app\n'
+        '1. Install the Orbitly Android app\n'
         '2. Enter this server: ${ServerConfig.instance.apiBaseUrl}\n'
         '3. Use invite code $code';
   }

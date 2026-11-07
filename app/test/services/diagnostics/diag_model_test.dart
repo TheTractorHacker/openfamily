@@ -160,7 +160,7 @@ void main() {
   test('the report is redacted: no coordinates, tokens or account details', () {
     final DiagFacts f = healthy(privateCircle: true);
     final String report = buildDiagnosticReport(f, evaluateDiagnostics(f));
-    expect(report, contains('OpenFamily diagnostic report'));
+    expect(report, contains('Orbitly diagnostic report'));
     expect(report, contains('family.example.com'));
     expect(report, contains('...ab12'));
     expect(report, contains('Overall: PASS'));

@@ -1,6 +1,6 @@
 # Changelog
 
-What changed in each OpenFamily release, in plain words. The server shows the
+What changed in each Orbitly release (published as OpenFamily before the rename), in plain words. The server shows the
 section for the version it runs on the admin **Documents** page and on
 **Settings, App versions**. Older entries are in the git history
 (`git log v0.16.0..`); this file starts at v0.17.
@@ -9,6 +9,22 @@ Each release says which app versions it works with. The server keeps working
 for the **last 5 minor versions** of the app (see
 [API compatibility](api-compat.md)), so you can update the server first and
 the phones afterwards.
+
+## Next release: new name, Orbitly
+
+- **OpenFamily is now Orbitly.** The app, the admin web, the notifications and
+  the docs use the new name, logo and icon. The project is for any circle of
+  people, family and friends alike. Nothing to migrate: your server, accounts,
+  circles and app installs keep working, and the app updates in place (the
+  Android and iOS package ids and the signing key are unchanged).
+- **About screens.** Settings, About in the app and in the admin web show the
+  version, the credit "Based on OpenFamily by wheresfrank and contributors
+  (AGPL-3.0)", a link to the source code and the open-source licenses. See
+  [Credits and license](about/credits-and-license.md).
+- **Release files** are now named `orbitly-<version>.apk` (and `.aab`,
+  `.spdx.json`); older releases keep their `openfamily-` names and the server
+  downloads either. If you filter releases in Obtainium by name, use `orbitly`.
+  Some internal names keep "openfamily" on purpose: see [Naming](developers/naming.md).
 
 ## v0.23.0 (2026-11-08)
 

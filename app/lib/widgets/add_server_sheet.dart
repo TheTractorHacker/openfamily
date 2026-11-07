@@ -83,7 +83,7 @@ class _AddServerSheetState extends State<AddServerSheet> {
         _done = true;
       });
     } on LanesNotReady catch (e) {
-      _fail('Some people need to update the OpenFamily app first: ${e.names.join(', ')}. Ask them, then try again.');
+      _fail('Some people need to update the Orbitly app first: ${e.names.join(', ')}. Ask them, then try again.');
     } on StateError catch (e) {
       _fail(e.message);
     } catch (e) {
@@ -236,7 +236,7 @@ class _AddServerSheetState extends State<AddServerSheet> {
       case AddServerState.membersNeedUpdate:
         return <Widget>[
           _title('Some people need to update the app'),
-          _p('Before the server can be added, these people need the newest OpenFamily app: ${p.names.join(', ')}.', key: const Key('add-server-update')),
+          _p('Before the server can be added, these people need the newest Orbitly app: ${p.names.join(', ')}.', key: const Key('add-server-update')),
           _close(),
         ];
       case AddServerState.alreadyAdded:

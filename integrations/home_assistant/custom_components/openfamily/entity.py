@@ -33,8 +33,8 @@ class OpenFamilyEntity(CoordinatorEntity[OpenFamilyCoordinator]):
         member = self.member or {}
         return DeviceInfo(
             identifiers={(DOMAIN, self._member_id)},
-            name=member.get("name") or "OpenFamily member",
-            manufacturer="OpenFamily",
+            name=member.get("name") or "Orbitly member",
+            manufacturer="Orbitly",
             model="Family member",
         )
 

@@ -188,7 +188,7 @@ func (s *Server) WatchMember(w http.ResponseWriter, r *http.Request) {
 		send := s.liveBoostSend
 		if send == nil {
 			send = func(ctx context.Context, userID string, body []byte) bool {
-				return s.dispatchSilentCommand(ctx, "OpenFamily live", body, userID)
+				return s.dispatchSilentCommand(ctx, "Orbitly live", body, userID)
 			}
 		}
 		postCommitRunner.Submit(func() {

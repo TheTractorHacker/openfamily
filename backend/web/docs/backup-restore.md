@@ -311,7 +311,7 @@ that key can delete. Layer the bucket so that does not end your backups:
 - **Rotation.** Generate a new pair, set
   `BACKUP_AGE_RECIPIENT=<new>,<old>` for a while (new backups open with either
   key), later drop `<old>`. Old backups still need the old private key.
-- The format is plain age: you can decrypt without OpenFamily:
+- The format is plain age: you can decrypt without Orbitly:
   `age -d -i openfamily-backup.key openfamily-<ts>.dump.age > restore.dump`
   (check the SHA-256 in the manifest first: `sha256sum openfamily-<ts>.dump.age`).
 
@@ -348,7 +348,7 @@ service stopped reporting.
 export BACKUP_AGE_IDENTITY_FILE=~/openfamily-backup.key       # on the machine that has the private key
 ./scripts/verify-backup.sh --from-s3 latest
 # 2. Real restore (stops the api, replaces the database, starts the api again)
-./scripts/restore.sh --from-s3 latest        # or: --from-s3 openfamily-20261107T031500Z
+./scripts/restore.sh --from-s3 latest        # or: --from-s3 orbitly-20261107T031500Z
 ```
 
 Both read `BACKUP_S3_*` from the environment or `.env`, download through the

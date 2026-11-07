@@ -1,4 +1,4 @@
-"""Constants for the OpenFamily integration."""
+"""Constants for the Orbitly integration."""
 
 from __future__ import annotations
 

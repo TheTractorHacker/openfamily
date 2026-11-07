@@ -407,7 +407,7 @@ class PrivateRuntime {
 
   String? _primary;
 
-  /// Private circles an approved, consented OpenFamily server can read. Server-side
+  /// Private circles an approved, consented Orbitly server can read. Server-side
   /// screens (trips, weekly summary, admin map) work for them again. Place alerts
   /// stay on the phones' sealed places (the single source of truth for arrivals);
   /// the server only geofences places that exist as server places.
@@ -1183,7 +1183,7 @@ class PrivateRuntime {
         if (r.body['k'] == 'place') {
           final String place = (r.body['name'] as String?) ?? 'a place';
           final String who = nameOf?.call(r.userId) ?? 'Someone';
-          await notify('OpenFamily', placeEventText(who, place, r.body['a'] == 'enter'));
+          await notify('Orbitly', placeEventText(who, place, r.body['a'] == 'enter'));
         }
       case ChannelPurpose.trip:
       case ChannelPurpose.drive:
@@ -1208,7 +1208,7 @@ class PrivateRuntime {
         if (clock.now().difference(r.ts) <= const Duration(minutes: 30)) {
           // The wording carries no position; open the app to see it.
           final String what = kind == 'sos' ? 'sent an SOS' : (kind == 'help' ? 'asked for help' : 'checked in');
-          await notify('OpenFamily', '$who $what');
+          await notify('Orbitly', '$who $what');
         }
       default:
         break;

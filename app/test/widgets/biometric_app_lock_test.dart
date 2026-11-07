@@ -20,7 +20,7 @@ void main() {
       ),
     );
 
-    expect(find.text('OpenFamily is locked'), findsNothing);
+    expect(find.text('Orbitly is locked'), findsNothing);
     expect(find.text('Private map'), findsOneWidget);
     expect(authenticator.authenticationCalls, 0);
   });
@@ -37,7 +37,7 @@ void main() {
       ),
     );
 
-    expect(find.text('OpenFamily is locked'), findsNothing);
+    expect(find.text('Orbitly is locked'), findsNothing);
     expect(authenticator.authenticationCalls, 1);
   });
 
@@ -58,7 +58,7 @@ void main() {
       },
     );
 
-    expect(find.text('OpenFamily is locked'), findsOneWidget);
+    expect(find.text('Orbitly is locked'), findsOneWidget);
     expect(
       find.text(
           'Biometric authentication was not completed. Please try again.'),
@@ -72,7 +72,7 @@ void main() {
     await tester.tap(find.text('Log out instead'));
     await tester.pumpAndSettle();
     expect(logoutCalls, 1);
-    expect(find.text('OpenFamily is locked'), findsNothing);
+    expect(find.text('Orbitly is locked'), findsNothing);
   });
 
   testWidgets('clears a stale opt-in when there is no valid session',
@@ -91,7 +91,7 @@ void main() {
 
     expect(store.enabled, isFalse);
     expect(authenticator.authenticationCalls, 0);
-    expect(find.text('OpenFamily is locked'), findsNothing);
+    expect(find.text('Orbitly is locked'), findsNothing);
   });
 
   testWidgets('fails closed when secure session storage cannot be read',
@@ -108,7 +108,7 @@ void main() {
     );
 
     expect(authenticator.authenticationCalls, 1);
-    expect(find.text('OpenFamily is locked'), findsNothing);
+    expect(find.text('Orbitly is locked'), findsNothing);
   });
 
   testWidgets('fails closed when the biometric preference cannot be read',
@@ -127,7 +127,7 @@ void main() {
     );
 
     expect(authenticator.authenticationCalls, 0);
-    expect(find.text('OpenFamily is locked'), findsOneWidget);
+    expect(find.text('Orbitly is locked'), findsOneWidget);
     expect(find.text('Could not read biometric settings. Retry or log out.'),
         findsOneWidget);
   });
@@ -146,7 +146,7 @@ void main() {
     await tester.tap(find.text('Log out instead'));
     await tester.pumpAndSettle();
 
-    expect(find.text('OpenFamily is locked'), findsOneWidget);
+    expect(find.text('Orbitly is locked'), findsOneWidget);
     expect(find.text('Could not log out safely. Please try again.'),
         findsOneWidget);
   });
@@ -170,7 +170,7 @@ void main() {
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     await tester.pumpAndSettle();
     expect(authenticator.authenticationCalls, 2);
-    expect(find.text('OpenFamily is locked'), findsNothing);
+    expect(find.text('Orbitly is locked'), findsNothing);
   });
 
   testWidgets('losing window focus alone (screenshot toolbar) does not lock',
@@ -189,7 +189,7 @@ void main() {
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
     await tester.pump();
     expect(find.byType(CircularProgressIndicator), findsNothing);
-    expect(find.text('OpenFamily is locked'), findsNothing);
+    expect(find.text('Orbitly is locked'), findsNothing);
 
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     await tester.pumpAndSettle();
@@ -271,7 +271,7 @@ void main() {
     // The failed Settings prompt cannot count as the foreground unlock. The
     // root gate performs its own third authentication before uncovering.
     expect(authenticator.authenticationCalls, 3);
-    expect(find.text('OpenFamily is locked'), findsNothing);
+    expect(find.text('Orbitly is locked'), findsNothing);
   });
 
   testWidgets('root auth cannot uncover after backgrounding mid-prompt',
@@ -308,7 +308,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(authenticator.authenticationCalls, 2);
-    expect(find.text('OpenFamily is locked'), findsNothing);
+    expect(find.text('Orbitly is locked'), findsNothing);
   });
 
   testWidgets(
@@ -348,7 +348,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(authenticator.authenticationCalls, 2);
-    expect(find.text('OpenFamily is locked'), findsNothing);
+    expect(find.text('Orbitly is locked'), findsNothing);
   });
 
   testWidgets('grace period keeps the app unlocked on a quick resume',
@@ -362,7 +362,7 @@ void main() {
 
     await _pumpLock(tester, service: service);
     expect(authenticator.authenticationCalls, 1);
-    expect(find.text('OpenFamily is locked'), findsNothing);
+    expect(find.text('Orbitly is locked'), findsNothing);
 
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
     await tester.pump();
@@ -370,7 +370,7 @@ void main() {
 
     // Inside the grace window the app is still unlocked and no new
     // authentication has been queued.
-    expect(find.text('OpenFamily is locked'), findsNothing);
+    expect(find.text('Orbitly is locked'), findsNothing);
     expect(find.text('Private map'), findsOneWidget);
     expect(authenticator.authenticationCalls, 1);
 
@@ -402,7 +402,7 @@ void main() {
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     await tester.pumpAndSettle();
     expect(authenticator.authenticationCalls, 2);
-    expect(find.text('OpenFamily is locked'), findsNothing);
+    expect(find.text('Orbitly is locked'), findsNothing);
   });
 }
 

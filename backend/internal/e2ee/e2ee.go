@@ -1,4 +1,4 @@
-// Package e2ee holds the server-side half of OpenFamily's end-to-end
+// Package e2ee holds the server-side half of Orbitly's end-to-end
 // encryption foundation (docs/design/E2EE.md).
 //
 // The server NEVER holds private keys or circle keys. It uses this package to
@@ -787,7 +787,7 @@ func KeyCommitment(circleKey []byte, circleID string, epoch uint32) ([]byte, err
 	return out, nil
 }
 
-// ServerConsentMessage is what a member's phone signs to let the OpenFamily
+// ServerConsentMessage is what a member's phone signs to let the Orbitly
 // server (a `server` device) read ONE circle: domServerCons || circle_id(36) ||
 // user_id(36) || server_device_id(36) || server_fingerprint(32). The signature
 // names the circle, the person and the exact server key, so it cannot be moved

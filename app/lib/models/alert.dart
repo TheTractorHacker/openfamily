@@ -1,7 +1,7 @@
 /// Models and plain-language wording for the safety alerts API
 /// (`/alerts`, `/alerts/{id}`, `/alerts/{id}/ack`). See docs/safety.md.
 
-/// The sentence every sender-side status screen leads with. OpenFamily never
+/// The sentence every sender-side status screen leads with. Orbitly never
 /// contacts emergency services.
 const String kFamilyNotifiedLine =
     'Your family was notified. Emergency services were NOT contacted.';

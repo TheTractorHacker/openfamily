@@ -1,11 +1,12 @@
-# Getting started with OpenFamily
+# Getting started with Orbitly
 
-OpenFamily is a private way for your family to see where everyone is, get
-arrival and departure alerts, chat, and send an SOS. It runs on a small
-server that your family (or the person who looks after your tech) controls, so
-your locations are not sold or stored by a company.
+Orbitly is a private way for your people (family, friends, a team) to see where
+everyone is, get arrival and departure alerts, chat, and send an SOS. It runs
+on a small server that your circle (or the person who looks after your tech)
+controls, so your locations are not sold or stored by a company. Orbitly was
+published as OpenFamily before the rename.
 
-![The OpenFamily welcome screen with Create account and Sign in buttons](../images/app/welcome.png)
+![The Orbitly welcome screen with Create account and Sign in buttons](../images/app/welcome.png)
 
 ## The three roles
 
@@ -25,7 +26,7 @@ your locations are not sold or stored by a company.
    use the one you were sent ([Invite and join](invite-and-join.md)).
 4. **Create a circle** or join one: [Create a circle](create-a-circle.md).
 5. **Allow location "all the time"** and notifications, and switch off battery
-   saving for OpenFamily: [Battery and permissions](battery-and-permissions.md).
+   saving for Orbitly: [Battery and permissions](battery-and-permissions.md).
 6. Open the **map**: [Locations and the map](locations-and-map.md).
 
 ## Where to go next

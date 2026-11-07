@@ -175,7 +175,7 @@ class _EncryptionCircleScreenState extends State<EncryptionCircleScreen> {
           Text(
             st.isPrivate
                 ? (widget.circle.e2eeServerMember
-                    ? 'The circle key is held by members\' phones AND by your OpenFamily server (old trusted-server mode): the server can read this circle. An admin can upgrade it under Server processing.'
+                    ? 'The circle key is held by members\' phones AND by your Orbitly server (old trusted-server mode): the server can read this circle. An admin can upgrade it under Server processing.'
                     : 'The circle key is held only by members\' phones. The server cannot read what is sealed for phones only. Members who allow server processing under "Server processing" can be read by the server.')
                 : 'Turn on "Private circle" in the circle\'s settings (admins only) to set up end-to-end keys.',
             style: AppType.secondary,
@@ -262,7 +262,7 @@ class _EncryptionCircleScreenState extends State<EncryptionCircleScreen> {
                 leading: DsListRow.iconTile(context, Icons.dns_outlined),
                 title: 'Server processing',
                 subtitle: widget.circle.e2eeServerMember
-                    ? 'Old trusted-server mode: the OpenFamily server CAN read this circle'
+                    ? 'Old trusted-server mode: the Orbitly server CAN read this circle'
                     : 'Where your data is processed. Includes "Don\'t send my data to the server"',
                 chevron: true,
                 onTap: _busy

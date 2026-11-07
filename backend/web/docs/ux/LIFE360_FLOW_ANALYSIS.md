@@ -4,7 +4,7 @@ Issue: #28. **Method and limits, stated honestly:** the Life360 web pages were
 not fetched or scraped, and no Life360 assets, copy, icons or screenshots are
 used here. This is written from (a) widely documented public product behaviour
 (app-store listings, help-centre-level knowledge, public reviews) as recalled,
-and (b) OpenFamily's own screens in `app/lib/screens`. Life360 behaviour can
+and (b) Orbitly's own screens in `app/lib/screens`. Life360 behaviour can
 have changed and is **unverified against the live product**. The issue's "15
 Page Flows" list was not available in the issue text, so the 15 flows below are
 the standard journeys of this product category; the maintainer should confirm
@@ -12,9 +12,9 @@ the intended list. Pages that need a paid Life360 account or an installed app
 (Gold/Platinum tiers, Driver Report details, Crash Detection settings) are
 marked **inaccessible - not observed**.
 
-Legend for the OpenFamily column: **Have** (screen exists), **Partial**, **Gap**.
+Legend for the Orbitly column: **Have** (screen exists), **Partial**, **Gap**.
 
-| # | Flow | What Life360-style apps do (public behaviour) | OpenFamily today | Status |
+| # | Flow | What Life360-style apps do (public behaviour) | Orbitly today | Status |
 |---|---|---|---|---|
 | 1 | Welcome / value pitch | Short carousel, then Create account or Log in | `welcome_screen.dart`, `onboarding_screen.dart` | Have |
 | 2 | Sign up | Phone/email, name, password; permission education follows | `sign_up_screen.dart`, invite-gated registration | Have |
@@ -38,9 +38,9 @@ cases, and any flow gated by a US phone number.
 
 ## Takeaways for the redesign
 
-- Map-first shell with a draggable member sheet is the organising pattern; OpenFamily already follows it (`app_shell.dart`, `map_screen.dart`). Remaining polish is in density of the member sheet and tablet layout (`docs/ux/LARGE_SCREEN.md`).
+- Map-first shell with a draggable member sheet is the organising pattern; Orbitly already follows it (`app_shell.dart`, `map_screen.dart`). Remaining polish is in density of the member sheet and tablet layout (`docs/ux/LARGE_SCREEN.md`).
 - Onboarding sequences permission education *before* the OS prompt and stages "Always" location after While-in-Use; keep this order (`permissions_screen.dart`).
-- Safety features are grouped in one hub; OpenFamily's `safety_hub_screen.dart` matches. A visible "all clear" circle status is a possible addition.
+- Safety features are grouped in one hub; Orbitly's `safety_hub_screen.dart` matches. A visible "all clear" circle status is a possible addition.
 - Gaps worth considering: phone-use-while-driving events, a pause/"ghost" mode surfaced next to the map (check against `docs/safety.md`), and a first-run checklist ("add a place", "invite someone").
 - No paywall, ads or data-sale flows exist or should be added; this is a privacy differentiator (`PRIVACY.md`).
 

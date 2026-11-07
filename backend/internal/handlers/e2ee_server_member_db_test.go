@@ -22,7 +22,7 @@ const testServerToken = "0123456789abcdef0123456789abcdef-test-token"
 
 type srvEnv struct {
 	*chanEnv
-	s *tdev // the OpenFamily server device (owned by A's account)
+	s *tdev // the Orbitly server device (owned by A's account)
 }
 
 func newSrvEnv(t *testing.T) *srvEnv { return newSrvEnvOpt(t, true) }

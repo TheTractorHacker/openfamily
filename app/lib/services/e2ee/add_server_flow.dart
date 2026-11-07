@@ -97,7 +97,7 @@ class AddServerFlow {
       s = await controller.load(circleId, force: true);
     }
     final String? fp = s.serverKeyFingerprint;
-    if (fp == null) throw StateError('This circle has no approved OpenFamily server key.');
+    if (fp == null) throw StateError('This circle has no approved Orbitly server key.');
     if (plan.snapshot.serverKeyFingerprint != fp) throw StateError('The server key changed while you were looking at it. Start again.');
     await controller.setMyLane(circleId, E2ee.lineServer, confirmServerFingerprintHex: fp);
     return controller.load(circleId, force: true);

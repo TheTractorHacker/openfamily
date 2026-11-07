@@ -47,8 +47,8 @@ void main() {
       await alice.enableCircle(cid);
       if (withKey) {
         srv = await ViewerFixture.create(uA);
-        final String ap = await alice.approveLinkRequest(await alice.inspectViewerRequest(await srv.request(kind: 'server', name: 'OpenFamily server')));
-        await srv.register(server, ap, kind: 'server', label: 'OpenFamily server');
+        final String ap = await alice.approveLinkRequest(await alice.inspectViewerRequest(await srv.request(kind: 'server', name: 'Orbitly server')));
+        await srv.register(server, ap, kind: 'server', label: 'Orbitly server');
         server.pinnedServerDevice = srv.deviceId;
       }
     });
@@ -165,10 +165,10 @@ void main() {
         home: ViewerApprovalScreen(circle: const Circle(id: cid, name: 'Family', role: 'admin', sharingEnabled: true, memberCount: 2), service: alice)));
     await settle(t);
     final ViewerFixture v = (await t.runAsync(() => ViewerFixture.create(uA)))!;
-    await t.enterText(find.byKey(const Key('viewer-code')), (await t.runAsync(() => v.request(kind: 'server', name: 'OpenFamily server')))!);
+    await t.enterText(find.byKey(const Key('viewer-code')), (await t.runAsync(() => v.request(kind: 'server', name: 'Orbitly server')))!);
     await t.tap(find.text('Inspect'));
     await settle(t);
-    expect(find.text('OpenFamily server (can read the circle)'), findsOneWidget);
+    expect(find.text('Orbitly server (can read the circle)'), findsOneWidget);
     expect(find.byKey(const Key('viewer-server-warning')), findsOneWidget);
     expect(find.textContaining('SERVER itself'), findsOneWidget);
     expect(find.textContaining('never receives the phone circle key'), findsOneWidget);
@@ -183,7 +183,7 @@ void main() {
     expect(find.text('End-to-end encrypted'), findsOneWidget);
     expect(find.text('Server can read (trusted server)'), findsOneWidget);
     expect(find.text('Server can read'), findsOneWidget);
-    expect(find.bySemanticsLabel(RegExp('OpenFamily server can read locations')), findsNWidgets(2));
+    expect(find.bySemanticsLabel(RegExp('Orbitly server can read locations')), findsNWidgets(2));
   });
 
   test('Circle model carries e2ee_server_member only for private circles', () {

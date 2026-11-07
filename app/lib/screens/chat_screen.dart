@@ -407,7 +407,7 @@ class _ChatScreenState extends State<ChatScreen> {
       for (final String n in _info.outdatedMembers)
         Padding(
           padding: const EdgeInsets.only(top: 4),
-          child: Text('$n needs to update OpenFamily to read encrypted chat.', key: Key('chat-outdated-$n')),
+          child: Text('$n needs to update Orbitly to read encrypted chat.', key: Key('chat-outdated-$n')),
         ),
       if (_info.hasLegacyHistory)
         Padding(

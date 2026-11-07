@@ -27,7 +27,7 @@ var joinPageTmpl = template.Must(template.New("join").Parse(`<!doctype html>
 <meta name="robots" content="noindex">
 <meta name="color-scheme" content="dark light">
 <meta name="theme-color" content="#0f1318">
-<title>Join your family on OpenFamily</title>
+<title>Join your family on Orbitly</title>
 <style>
 :root{--bg:#eef2f4;--card:#fff;--fg:#14181d;--muted:#566370;--line:#dde3e8;--accent:#0b8f84;--accent-fg:#fff;--accent-soft:#d9f4f0;--warn:#fff6e0;--warn-fg:#6b4e00}
 @media (prefers-color-scheme:dark){:root{--bg:#0f1318;--card:#1a2027;--fg:#eef2f5;--muted:#98a4b0;--line:#2b343d;--accent:#3de8d6;--accent-fg:#06211e;--accent-soft:#123a37;--warn:#2d2610;--warn-fg:#f1d38a}}
@@ -63,7 +63,7 @@ a:focus-visible{outline:3px solid var(--accent);outline-offset:3px}
 <main>
 <div class="brand">
 <svg viewBox="0 0 48 48" aria-hidden="true"><rect width="48" height="48" rx="12" fill="var(--accent)"/><path d="M24 11c-5.5 0-9.5 4.2-9.5 9.6 0 6.6 9.5 16.4 9.5 16.4s9.5-9.800 9.5-16.400C33.500 15.200 29.500 11 24 11z" fill="var(--accent-fg)"/><circle cx="24" cy="20.800" r="3.600" fill="var(--accent)"/></svg>
-OpenFamily
+Orbitly
 </div>
 {{if .Code}}
 <div>
@@ -74,16 +74,16 @@ OpenFamily
 <ol>
 <li><span class="n">1</span><h2>Get the app</h2>
 <p>Android phones. It&rsquo;s a free, signed app that comes straight from your family&rsquo;s server.</p>
-<a class="btn" href="{{.Download}}">Download OpenFamily</a></li>
+<a class="btn" href="{{.Download}}">Download Orbitly</a></li>
 <li><span class="n">2</span><h2>Allow the install</h2>
 <p>Open the downloaded file. If Android asks, allow your browser to install apps, then tap <b>Install</b>.</p>
 <div class="help">If Google Play Protect offers to scan the app, tap <b>Scan app</b>. If it blocks the install, tap <b>More details &rarr; Install anyway</b>.</div></li>
 <li><span class="n">3</span><h2>Open it and join</h2>
 <p>This fills in your server and invite code for you.</p>
-<a class="btn alt" href="{{.AppLink}}">Open OpenFamily &amp; join</a></li>
+<a class="btn alt" href="{{.AppLink}}">Open Orbitly &amp; join</a></li>
 </ol>
 <div class="desk">{{.QR}}<p><strong>On a computer?</strong>Scan this with your phone&rsquo;s camera to open this page there.</p></div>
-<p class="fine">Button does nothing? Open the app, tap <b>Join</b>, and enter the server <b>{{.Server}}</b> and the code above.<br>OpenFamily is Android-only for now. The invite expires and has limited uses, so only share it with family.</p>
+<p class="fine">Button does nothing? Open the app, tap <b>Join</b>, and enter the server <b>{{.Server}}</b> and the code above.<br>Orbitly is Android-only for now. The invite expires and has limited uses, so only share it with family.</p>
 {{else}}
 <div>
 <h1>This invite link isn&rsquo;t valid</h1>

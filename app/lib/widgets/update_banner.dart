@@ -25,18 +25,18 @@ class UpdateBanner extends StatelessWidget {
         String? text;
         bool urgent = true;
         if (st.status == CompatStatus.required) {
-          text = 'Update required: this version of OpenFamily is no longer '
+          text = 'Update required: this version of Orbitly is no longer '
               'supported by your server, so locations may be missing or '
               'out of date. Please update the app.';
         } else if (circles > 0) {
           text = circles == 1
-              ? 'This circle needs a newer version of OpenFamily. '
+              ? 'This circle needs a newer version of Orbitly. '
                   'Update the app to see it.'
-              : '$circles circles need a newer version of OpenFamily. '
+              : '$circles circles need a newer version of Orbitly. '
                   'Update the app to see them.';
         } else if (st.status == CompatStatus.recommended &&
             !AppCompat.dismissed.value) {
-          text = 'Update available: a newer version of OpenFamily is '
+          text = 'Update available: a newer version of Orbitly is '
               'available${st.latest.isEmpty ? '' : ' (${st.latest})'}.';
           urgent = false;
         }

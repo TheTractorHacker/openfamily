@@ -113,10 +113,10 @@ void main() {
     await alice.service.enableCircle(priv);
     await bob.service.syncCircleKeys(priv);
     await carol.service.syncCircleKeys(priv);
-    // The OpenFamily server's own key: a `server` key of Alice's account, pinned.
+    // The Orbitly server's own key: a `server` key of Alice's account, pinned.
     srv = await ViewerFixture.create(uA);
-    final String ap = await alice.service.approveLinkRequest(await alice.service.inspectViewerRequest(await srv.request(kind: 'server', name: 'OpenFamily server')));
-    srvKey = await srv.register(server, ap, kind: 'server', label: 'OpenFamily server');
+    final String ap = await alice.service.approveLinkRequest(await alice.service.inspectViewerRequest(await srv.request(kind: 'server', name: 'Orbitly server')));
+    srvKey = await srv.register(server, ap, kind: 'server', label: 'Orbitly server');
     server.serverModeEnabled = true;
     server.pinnedServerDevice = srv.deviceId;
     for (final Dev d in <Dev>[alice, bob, carol]) {

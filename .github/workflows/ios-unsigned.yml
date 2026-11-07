@@ -72,13 +72,13 @@ jobs:
           OUT="$PWD/../dist/openfamily-$V-unsigned.ipa"
           (cd _ipa && zip -qry "$OUT" Payload)
           unzip -l "$OUT" | grep -q 'Payload/Runner.app/Info.plist'
-          (cd ../dist && shasum -a 256 "openfamily-$V-unsigned.ipa" | tee "openfamily-$V-unsigned.ipa.sha256")
+          (cd ../dist && shasum -a 256 "orbitly-$V-unsigned.ipa" | tee "orbitly-$V-unsigned.ipa.sha256")
           codesign -dv "$APP" 2>&1 | head -5 || true
 
       - name: Keep build files
         uses: actions/upload-artifact@v4
         with:
-          name: openfamily-${{ steps.ver.outputs.name }}-unsigned-ipa
+          name: orbitly-${{ steps.ver.outputs.name }}-unsigned-ipa
           path: dist/*
           if-no-files-found: error
 
@@ -88,7 +88,7 @@ jobs:
   # repository's release for that tag.
   attach:
     needs: ipa
-    if: github.ref_type == 'tag' && github.repository == 'TheTractorHacker/openfamily'
+    if: github.ref_type == 'tag' && (github.repository == 'TheTractorHacker/orbitly' || github.repository == 'TheTractorHacker/orbitly')
     runs-on: ubuntu-latest
     timeout-minutes: 75
     permissions:
@@ -101,7 +101,7 @@ jobs:
           echo "name=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
       - uses: actions/download-artifact@v4
         with:
-          name: openfamily-${{ steps.ver.outputs.name }}-unsigned-ipa
+          name: orbitly-${{ steps.ver.outputs.name }}-unsigned-ipa
           path: dist
       - name: Attach to the GitHub release
         env:
@@ -122,8 +122,8 @@ jobs:
           gh release upload "$TAG" --repo "$REPO" --clobber \
             "dist/openfamily-$V-unsigned.ipa" "dist/openfamily-$V-unsigned.ipa.sha256"
           NOTES=$(gh release view "$TAG" --repo "$REPO" --json body -q .body)
-          case "$NOTES" in *"openfamily-$V-unsigned.ipa"*) exit 0;; esac
+          case "$NOTES" in *"orbitly-$V-unsigned.ipa"*) exit 0;; esac
           gh release edit "$TAG" --repo "$REPO" --notes "$NOTES
 
-          iOS UNSIGNED build (sideload only, re-sign with AltStore/Sideloadly; see docs/design/IOS_RELEASE.md): \`openfamily-$V-unsigned.ipa\`
+          iOS UNSIGNED build (sideload only, re-sign with AltStore/Sideloadly; see docs/design/IOS_RELEASE.md): \`orbitly-$V-unsigned.ipa\`
           SHA256: \`$SHA\`"

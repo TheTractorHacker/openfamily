@@ -213,7 +213,7 @@ class _InviteScreenState extends State<InviteScreen> {
               key: const Key('invite-qr-slot'),
               child: Semantics(
                 label: 'QR code for the invite link. Scan it with the '
-                    'OpenFamily app or a camera.',
+                    'Orbitly app or a camera.',
                 image: true,
                 child: Container(
                   padding: const EdgeInsets.all(AppSpace.md),

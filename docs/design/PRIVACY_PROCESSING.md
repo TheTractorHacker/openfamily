@@ -285,7 +285,7 @@ Entry points: **Circle > Encryption keys > Processing** (policy for admins, pref
 
 **Admin: turn on server assistance**
 > Turn on server processing for this circle?
-> The OpenFamily server will be able to read the location, trips and driving data of members who allow it. It stores that data in readable form on the server. It enables the admin map, history, trips, weekly summaries and Dawarich export for those members.
+> The Orbitly server will be able to read the location, trips and driving data of members who allow it. It stores that data in readable form on the server. It enables the admin map, history, trips, weekly summaries and Dawarich export for those members.
 > Each member decides for themselves. Members who say no keep end-to-end encryption and their phone does the processing. You cannot change another member's choice.
 > Default shown to new members: [Server processing] [Phone only]
 > [Turn on] [Cancel]
@@ -500,7 +500,7 @@ Old routes: `PUT .../server-consent` works only for circles still flagged legacy
 
 ### 18.2c Old apps and the key log (rule)
 
-An app without `lanes2` cannot parse log actions 10 and 11: it would stop pinning the log head and miss key-change alarms. The server therefore keeps old apps and processing log entries apart. Every refusal is HTTP 409 with `code: "update_required_for_lanes"`, a human-readable `error` ("Update OpenFamily to continue ...") and `not_ready: [user ids]` (empty when the caller themself is the old app):
+An app without `lanes2` cannot parse log actions 10 and 11: it would stop pinning the log head and miss key-change alarms. The server therefore keeps old apps and processing log entries apart. Every refusal is HTTP 409 with `code: "update_required_for_lanes"`, a human-readable `error` ("Update Orbitly to continue ...") and `not_ready: [user ids]` (empty when the caller themself is the old app):
 * An action-10/11 entry (policy on/edit/rotate, upgrade, any pref) is refused while any live member of the circle has an active phone key without `lanes2`. The check is on keys, not users: a member with one new and one old phone blocks it until the old key is revoked. Turning the policy off is exempt.
 * `POST /circles/join` and `POST /family/join` refuse a user who already has an active phone key without `lanes2` when the circle has such entries (the invite is not consumed). Admin moves and every other path hit the database trigger (a plain 500 error text starting `e2ee_update_required_for_lanes`).
 * A member of such a circle cannot register (`POST /e2ee/devices`) or rotate to a phone key without `lanes2` (send `caps: ["lanes2"]` in the registration body); a user without keys can join, and is stopped at registration. Web, service, server and recovery keys are exempt.

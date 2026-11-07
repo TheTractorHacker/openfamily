@@ -10,10 +10,10 @@ import (
 	"time"
 )
 
-// config comes from the bridge's own JSON file, never from the OpenFamily
+// config comes from the bridge's own JSON file, never from the Orbitly
 // database (the server must not learn where the plaintext goes).
 type config struct {
-	// Mode is "" (Dawarich bridge, the default) or "server" (the OpenFamily
+	// Mode is "" (Dawarich bridge, the default) or "server" (the Orbitly
 	// server's own device: decrypted positions go to Ingest, not to Dawarich).
 	Mode        string             `json:"mode,omitempty"`
 	Ingest      ingestCfg          `json:"ingest,omitempty"`
@@ -26,7 +26,7 @@ type config struct {
 	since time.Time
 }
 
-// ingestCfg is where the server device hands decrypted positions: the OpenFamily
+// ingestCfg is where the server device hands decrypted positions: the Orbitly
 // API, over the private network between the containers.
 type ingestCfg struct {
 	URL       string `json:"url"`
@@ -157,7 +157,7 @@ func (c *config) targetFor(userID string) (target, bool) {
 func (c *config) serverMode() bool { return c.Mode == "server" }
 
 // finishServerConfig validates the server-device configuration. The ingest token
-// is the same secret the OpenFamily server was given (E2EE_SERVER_INGEST_TOKEN);
+// is the same secret the Orbitly server was given (E2EE_SERVER_INGEST_TOKEN);
 // it comes from the environment or a file, never from the JSON itself.
 func finishServerConfig(c *config, env func(string) string) (*config, error) {
 	if err := validateBaseURL(c.Ingest.URL, "ingest.url"); err != nil {

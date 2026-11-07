@@ -111,7 +111,7 @@ class DeviceService {
       case TargetPlatform.android:
         return 'Android device';
       default:
-        return 'OpenFamily device';
+        return 'Orbitly device';
     }
   }
 }

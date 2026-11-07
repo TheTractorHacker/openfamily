@@ -18,7 +18,7 @@ Without `E2E_BASE_URL` (the normal `flutter test`) the suite is skipped.
 
 How the pieces fit: `ApiClient` insists on https and one token store, so the tests use a pretend https
 host that a zone-scoped http client rewrites to the real server and signs with the token of the phone the
-call belongs to. The OpenFamily server's own device is the real `e2ee-bridge` binary (`enroll --kind server`,
+call belongs to. The Orbitly server's own device is the real `e2ee-bridge` binary (`enroll --kind server`,
 approved by the admin phone through `approveLinkRequest`, pinned by `run`). Plaintext at the server is
 checked in the database (`locations`, `member_positions`) through the probe, and the server log is
 grepped for Cleo's coordinates by the script.

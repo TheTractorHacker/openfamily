@@ -189,7 +189,7 @@ void main() {
       final FakeNotifier n = FakeNotifier();
       await DirectPushDispatcher(notifier: n)
           .handle(const DirectPushEvent(id: 'n1', kind: DirectPushKind.notice));
-      expect(n.shown.single['title'], 'OpenFamily');
+      expect(n.shown.single['title'], 'Orbitly');
       expect(n.shown.single['payload'], isNull);
     });
 

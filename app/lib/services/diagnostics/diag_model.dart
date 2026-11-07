@@ -187,23 +187,23 @@ String _oemName(String manufacturer) {
 String oemGuidance(String manufacturer) {
   switch (_oemName(manufacturer)) {
     case 'Xiaomi':
-      return 'On Xiaomi / Redmi / POCO phones: open Security > Permissions > Autostart and switch OpenFamily on, '
-          'then Settings > Apps > OpenFamily > Battery saver and choose "No restrictions". '
-          'Also lock OpenFamily in the recent-apps list (long-press its card, tap the lock).';
+      return 'On Xiaomi / Redmi / POCO phones: open Security > Permissions > Autostart and switch Orbitly on, '
+          'then Settings > Apps > Orbitly > Battery saver and choose "No restrictions". '
+          'Also lock Orbitly in the recent-apps list (long-press its card, tap the lock).';
     case 'Samsung':
-      return 'On Samsung phones: open Settings > Battery > Background usage limits, remove OpenFamily from '
+      return 'On Samsung phones: open Settings > Battery > Background usage limits, remove Orbitly from '
           '"Sleeping apps" and "Deep sleeping apps", and add it to "Never sleeping apps". '
-          'Then set Settings > Apps > OpenFamily > Battery to "Unrestricted".';
+          'Then set Settings > Apps > Orbitly > Battery to "Unrestricted".';
     case 'OnePlus':
-      return 'On OnePlus phones: open Settings > Battery > Battery optimization > OpenFamily > "Don\'t optimize", '
-          'then Settings > Apps > OpenFamily > Battery > "Allow background activity". '
-          'Also allow Auto-launch for OpenFamily and lock it in the recent-apps list.';
+      return 'On OnePlus phones: open Settings > Battery > Battery optimization > Orbitly > "Don\'t optimize", '
+          'then Settings > Apps > Orbitly > Battery > "Allow background activity". '
+          'Also allow Auto-launch for Orbitly and lock it in the recent-apps list.';
     case 'Huawei':
-      return 'On Huawei / Honor phones: open Settings > Apps > App launch, switch OpenFamily to "Manage manually" '
+      return 'On Huawei / Honor phones: open Settings > Apps > App launch, switch Orbitly to "Manage manually" '
           'and turn on Auto-launch, Secondary launch and Run in background.';
     case 'Oppo':
-      return 'On Oppo / Realme phones: open Settings > Battery > OpenFamily and allow background activity, '
-          'allow Auto-launch for OpenFamily and lock it in the recent-apps list.';
+      return 'On Oppo / Realme phones: open Settings > Battery > Orbitly and allow background activity, '
+          'allow Auto-launch for Orbitly and lock it in the recent-apps list.';
   }
   return '';
 }
@@ -224,7 +224,7 @@ List<DiagCheck> evaluateDiagnostics(DiagFacts f) {
           id: 'sharing',
           title: 'Location sharing',
           status: DiagStatus.fail,
-          detail: 'You turned location sharing off in OpenFamily, so nothing is being sent. '
+          detail: 'You turned location sharing off in Orbitly, so nothing is being sent. '
               'Turn it back on in Settings to share again.',
           fix: DiagFix(DiagFixKind.startTracking, 'Turn sharing on')));
 
@@ -259,13 +259,13 @@ List<DiagCheck> evaluateDiagnostics(DiagFacts f) {
           id: 'location_permission',
           title: 'Location permission',
           status: DiagStatus.pass,
-          detail: 'Allowed "all the time", so OpenFamily can report with the screen off.'));
+          detail: 'Allowed "all the time", so Orbitly can report with the screen off.'));
     case 'while_in_use':
       out.add(const DiagCheck(
           id: 'location_permission',
           title: 'Location permission',
           status: DiagStatus.fail,
-          detail: 'Location is only allowed "while using the app". OpenFamily stops reporting as soon as '
+          detail: 'Location is only allowed "while using the app". Orbitly stops reporting as soon as '
               'you lock the phone or switch apps, which is the most common reason a phone goes quiet. '
               'Choose "Allow all the time".',
           fix: DiagFix(DiagFixKind.openAppSettings, 'Open app permissions')));
@@ -274,7 +274,7 @@ List<DiagCheck> evaluateDiagnostics(DiagFacts f) {
           id: 'location_permission',
           title: 'Location permission',
           status: DiagStatus.fail,
-          detail: 'Location permission is denied, so OpenFamily cannot see where this phone is.',
+          detail: 'Location permission is denied, so Orbitly cannot see where this phone is.',
           fix: DiagFix(DiagFixKind.requestLocation, 'Allow location'),
           secondaryFix: DiagFix(DiagFixKind.openAppSettings, 'Open app permissions')));
     default:
@@ -320,7 +320,7 @@ List<DiagCheck> evaluateDiagnostics(DiagFacts f) {
           id: 'battery',
           title: 'Battery and background limits',
           status: DiagStatus.warn,
-          detail: 'Battery optimisation is on for OpenFamily. Android may pause it while the phone is idle, '
+          detail: 'Battery optimisation is on for Orbitly. Android may pause it while the phone is idle, '
               'so updates arrive late or not at all. Set it to "Don\'t optimise".${oem.isEmpty ? '' : ' $oem'}',
           fix: const DiagFix(DiagFixKind.batterySettings, 'Open battery settings'),
           secondaryFix: _oemFix(f.manufacturer, DiagFixKind.oemBattery, 'Open ${_oemName(f.manufacturer)} battery screen')));
@@ -330,8 +330,8 @@ List<DiagCheck> evaluateDiagnostics(DiagFacts f) {
           title: 'Battery and background limits',
           status: oem.isEmpty ? DiagStatus.pass : DiagStatus.info,
           detail: oem.isEmpty
-              ? 'OpenFamily is exempt from battery optimisation.'
-              : 'OpenFamily is exempt from Android\'s battery optimisation. $oem Android cannot tell whether '
+              ? 'Orbitly is exempt from battery optimisation.'
+              : 'Orbitly is exempt from Android\'s battery optimisation. $oem Android cannot tell whether '
                   'your phone maker\'s own extra setting is on, so check it once.',
           secondaryFix: _oemFix(f.manufacturer, DiagFixKind.oemAutostart, 'Open ${_oemName(f.manufacturer)} autostart screen')));
     } else {
@@ -390,13 +390,13 @@ List<DiagCheck> evaluateDiagnostics(DiagFacts f) {
     case ServerState.ok:
       out.add(DiagCheck(
           id: 'server',
-          title: 'Your OpenFamily server',
+          title: 'Your Orbitly server',
           status: DiagStatus.pass,
           detail: 'Reached ${f.serverHost.isEmpty ? 'the server' : f.serverHost} and you are signed in.'));
     case ServerState.authFailed:
       out.add(const DiagCheck(
           id: 'server',
-          title: 'Your OpenFamily server',
+          title: 'Your Orbitly server',
           status: DiagStatus.fail,
           detail: 'The server answered but no longer accepts this sign-in, so nothing can be uploaded. '
               'Sign in again.',
@@ -404,7 +404,7 @@ List<DiagCheck> evaluateDiagnostics(DiagFacts f) {
     case ServerState.unreachable:
       out.add(DiagCheck(
           id: 'server',
-          title: 'Your OpenFamily server',
+          title: 'Your Orbitly server',
           status: f.networkOnline == false ? DiagStatus.info : DiagStatus.fail,
           detail: f.networkOnline == false
               ? 'Could not check the server because the phone is offline.'
@@ -414,7 +414,7 @@ List<DiagCheck> evaluateDiagnostics(DiagFacts f) {
     case ServerState.unknown:
       out.add(const DiagCheck(
           id: 'server',
-          title: 'Your OpenFamily server',
+          title: 'Your Orbitly server',
           status: DiagStatus.info,
           detail: 'The server was not checked.'));
   }
@@ -621,7 +621,7 @@ String statusWord(DiagStatus s) {
 /// verdicts above, which contain only counts, ages and the server host name.
 String buildDiagnosticReport(DiagFacts f, List<DiagCheck> checks) {
   final StringBuffer b = StringBuffer()
-    ..writeln('OpenFamily diagnostic report')
+    ..writeln('Orbitly diagnostic report')
     ..writeln('Time (UTC): ${f.now.toUtc().toIso8601String()}')
     ..writeln('App version: ${f.appVersion.isEmpty ? 'unknown' : f.appVersion}')
     ..writeln('Phone: ${f.manufacturer} ${f.model}'.trimRight())

@@ -197,7 +197,7 @@ class SelfTest {
     const String id = 'notify';
     const String title = 'Notifications';
     try {
-      await _notify('OpenFamily self-test', 'This is the local test notification.');
+      await _notify('Orbitly self-test', 'This is the local test notification.');
       final dynamic res = await ApiClient.post('/me/diagnostics/test-push');
       final int sent = res is Map<String, dynamic> ? ((res['sent'] as num?)?.toInt() ?? 0) : 0;
       final int failed = res is Map<String, dynamic> ? ((res['failed'] as num?)?.toInt() ?? 0) : 0;

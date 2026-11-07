@@ -52,7 +52,7 @@ export function ServerKeyWords({ device }: { device: NonNullable<DeploymentState
       </details>
       <div className="wb-ss-qr" dangerouslySetInnerHTML={{ __html: svg }} role="img" aria-label="QR code of the full server key" />
       <p className="wb-help">
-        The QR holds the full code as text, so you can read it with any phone camera and compare. The OpenFamily app
+        The QR holds the full code as text, so you can read it with any phone camera and compare. The Orbitly app
         shows these same four groups when you tap &ldquo;Add server&rdquo;.
       </p>
     </div>
@@ -217,7 +217,7 @@ export function ServerSetupCard() {
                     key is created in a separate container so it is never next to the database password.
                   </p>
                   <label className="wb-ss-field">
-                    Your OpenFamily login email (the circle admin)
+                    Your Orbitly login email (the circle admin)
                     <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.org" />
                   </label>
                   <Cmd label="1. Switch on the server key service" text={cmds.token} />

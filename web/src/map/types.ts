@@ -1,4 +1,4 @@
-// TypeScript types for the OpenFamily live map.
+// TypeScript types for the Orbitly live map.
 //
 // Mirrors the Flutter app's models (app/lib/models/member.dart) so the web
 // panel derives status/movement from the same raw backend fields the app uses.

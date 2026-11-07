@@ -73,7 +73,7 @@ export function showSetupCard(s: DeploymentState | null): boolean {
 
 /** What the QR (and the "copy" button) carry: the same text format as the phones' key screens. */
 export function qrText(digits: string): string {
-  return 'OpenFamily server key\n' + digits
+  return 'Orbitly server key\n' + digits
 }
 
 /** The documented sidecar enrollment, as copy-paste lines (see docker-compose.yml). */
@@ -81,7 +81,7 @@ export function enrollCommands(email: string): { token: string; request: string;
   const who = email.trim() === '' ? 'you@example.org' : email.trim()
   return {
     token: 'echo "E2EE_SERVER_INGEST_TOKEN=$(openssl rand -hex 32)" >> .env && echo "COMPOSE_PROFILES=${COMPOSE_PROFILES:+$COMPOSE_PROFILES,}e2ee-server" >> .env && docker compose up -d',
-    request: `read -rsp 'Your OpenFamily password: ' P; echo; printf '%s\\n' "$P" | docker compose --profile e2ee-server run --rm -T e2ee-server-device enroll --kind server --server http://api:8080 --email ${who}`,
+    request: `read -rsp 'Your Orbitly password: ' P; echo; printf '%s\\n' "$P" | docker compose --profile e2ee-server run --rm -T e2ee-server-device enroll --kind server --server http://api:8080 --email ${who}`,
     approve: 'docker compose --profile e2ee-server run --rm e2ee-server-device enroll --approval PASTE_THE_APPROVAL_CODE_HERE',
     start: 'docker compose --profile e2ee-server up -d e2ee-server-device',
   }

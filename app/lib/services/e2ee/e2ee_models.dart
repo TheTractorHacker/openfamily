@@ -298,7 +298,7 @@ class LogHead {
   String get hex => E2ee.hex(hash);
 }
 
-/// One member's signed consent for the OpenFamily server to read a circle.
+/// One member's signed consent for the Orbitly server to read a circle.
 class ServerConsent {
   const ServerConsent(this.userId, this.approverDeviceId, this.signature);
   final String userId;
@@ -306,7 +306,7 @@ class ServerConsent {
   final Uint8List signature;
 }
 
-/// The OpenFamily server's own device key, as pinned by the server.
+/// The Orbitly server's own device key, as pinned by the server.
 class ServerDeviceInfo {
   const ServerDeviceInfo({required this.deviceId, required this.fingerprint, required this.short, required this.digits, required this.label, required this.ownerUserId});
   final String deviceId;
@@ -327,7 +327,7 @@ class ServerDeviceInfo {
       fingerprint: fp,
       short: (j['short'] as String?) ?? '',
       digits: (j['digits'] as String?) ?? '',
-      label: (j['label'] as String?) ?? 'OpenFamily server',
+      label: (j['label'] as String?) ?? 'Orbitly server',
       ownerUserId: (j['owner_user_id'] as String?) ?? '',
     );
   }

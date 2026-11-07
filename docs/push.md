@@ -1,6 +1,6 @@
 # Push notifications
 
-OpenFamily can deliver alerts (SOS, help, check-in, geofence arrivals) and
+Orbitly can deliver alerts (SOS, help, check-in, geofence arrivals) and
 silent commands (location refresh requests) over three transports. A phone
 never needs Google services, and on Android it no longer needs a second app.
 

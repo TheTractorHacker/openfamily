@@ -74,7 +74,7 @@ class _MyProcessingScreenState extends State<MyProcessingScreen> {
                 padding: const EdgeInsets.all(AppSpace.xl),
                 children: <Widget>[
                   const Text(
-                      'In each Private circle you decide whether the OpenFamily server may process your data. '
+                      'In each Private circle you decide whether the Orbitly server may process your data. '
                       'Choose "Phone only" ("Don\'t send my data to the server") and your phone does the work; end-to-end '
                       'encryption between phones continues. The server operator can still see that you are a member and when '
                       'your phone connects.',

@@ -6,6 +6,7 @@ import React from 'react'
 import { login } from '../lib/api'
 import { setTokens, setEmail as setSessionEmail } from '../lib/auth'
 import { Button, Spinner } from '../components/primitives'
+import { AboutFooter } from '../components/AboutFooter'
 import './LoginPage.css'
 
 interface LoginPageProps {
@@ -44,33 +45,33 @@ export function LoginPage({ onLoggedIn }: LoginPageProps) {
           <span className="wb-login-mark" aria-hidden="true">
             <img
               className="wb-login-logo"
-              src="/admin/brand/openfamily-icon-on-accent.svg"
+              src="/admin/brand/orbitly-icon-on-accent.svg"
               alt=""
             />
           </span>
-          <span className="wb-login-wordmark">OpenFamily</span>
+          <span className="wb-login-wordmark">Orbitly</span>
         </div>
         <div className="wb-login-aside-body">
-          <h2 className="wb-login-aside-title">Self-hosted family location, in your control.</h2>
+          <h2 className="wb-login-aside-title">Self-hosted location sharing, in your control.</h2>
           <p className="wb-login-aside-text">
-            See your family on the live map, revisit their day, and manage your
+            See your people on the live map, revisit their day, and manage your
             circle — the same things you can do in the mobile apps. Server
             administrators also get user, build, and server-wide tools.
           </p>
         </div>
-        <div className="wb-login-aside-foot">OpenFamily</div>
+        <div className="wb-login-aside-foot"><AboutFooter /></div>
       </aside>
 
       <main className="wb-login-main">
         <div className="wb-login-card">
           <div className="wb-login-mobile-brand" aria-hidden="true">
             <span className="wb-login-mark">
-              <img className="wb-login-logo" src="/admin/brand/openfamily-icon-on-accent.svg" alt="" />
+              <img className="wb-login-logo" src="/admin/brand/orbitly-icon-on-accent.svg" alt="" />
             </span>
-            <span className="wb-login-wordmark">OpenFamily</span>
+            <span className="wb-login-wordmark">Orbitly</span>
           </div>
           <h1 className="wb-login-h1">Sign in</h1>
-          <p className="wb-login-sub">Use your OpenFamily account to continue.</p>
+          <p className="wb-login-sub">Use your Orbitly account to continue.</p>
 
           <form ref={formRef} onSubmit={submit} className="wb-login-form" noValidate>
             <div className="wb-field">

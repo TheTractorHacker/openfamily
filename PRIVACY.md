@@ -1,6 +1,6 @@
 # Privacy
 
-OpenFamily is a self-hosted family location tracker. This document describes
+Orbitly is a self-hosted location sharing app for your circles. This document describes
 what the software stores and who can see it. The operator of each deployment
 is the data controller for that instance. The app requires an HTTPS server URL
 and refuses cleartext HTTP connections.
@@ -63,7 +63,7 @@ They set no cookies and ship no analytics or tracking code.
 - **iOS push:** APNs (platform requirement). Payloads do not include
   coordinates.
 - **iPhone app (TestFlight/App Store):** Apple sees the usual app distribution
-  and push-token traffic; OpenFamily adds no analytics or tracking
+  and push-token traffic; Orbitly adds no analytics or tracking
   (`NSPrivacyTracking` is false in the app's privacy manifest). The iPhone app
   asks for precise location (also in the background, "Always"), notifications,
   and optionally the camera, photo library and Face ID; it does not request
@@ -124,7 +124,7 @@ makes the encrypted data unrecoverable.
 ### Optional: trusted server member (the server CAN read the circle)
 
 If the person who runs this server turns it on (an environment variable and a
-separate container, off by default), the OpenFamily server can become an approved
+separate container, off by default), the Orbitly server can become an approved
 member device of a Private circle, **only if every member of that circle allows it
 on their own phone** and a circle admin hands it the circle key. From then on the
 server can decrypt that circle and **keeps plaintext copies of positions in its
@@ -151,6 +151,6 @@ For a request about account data on a deployment, contact that server's
 operator; the software publisher cannot access or delete data on an
 independently operated server. Users can delete an account in the app or
 follow the public [account deletion instructions](https://foleyit.com/delete-account.html).
-For OpenFamily software support or help finding the right deletion steps,
+For Orbitly software support or help finding the right deletion steps,
 contact `info@foleyit.com`. The public [privacy policy](https://foleyit.com/privacy.html)
 describes data handling and external services.

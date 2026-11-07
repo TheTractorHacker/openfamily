@@ -121,7 +121,7 @@ type Server struct {
 	// (config: APK_GITHUB_REPO). Empty skips GitHub and serves APKDir as-is.
 	APKGitHubRepo string
 	// APKGitHubToken optionally authenticates GitHub API calls (config:
-	// APK_GITHUB_TOKEN). The public OpenFamily repository does not need it.
+	// APK_GITHUB_TOKEN). The public Orbitly repository does not need it.
 	APKGitHubToken string
 	// FlutterAppDir is the Flutter project root used by POST /api/admin/apk/build
 	// (config: FLUTTER_APP_DIR, default "./app").

@@ -12,7 +12,7 @@ import 'privacy_policy_screen.dart';
 
 /// Server URL screen (first launch, or Settings → change server).
 ///
-/// The user enters their OpenFamily server URL, we ping `/healthz`, then
+/// The user enters their Orbitly server URL, we ping `/healthz`, then
 /// persist it for API + WebSocket calls.
 class ServerConfigScreen extends StatefulWidget {
   const ServerConfigScreen({super.key, this.allowCancel = false});
@@ -109,8 +109,8 @@ class _ServerConfigScreenState extends State<ServerConfigScreen> {
         const SizedBox(height: AppSpace.xl),
         const DsHeading(
           'Connect to your server',
-          subtitle: 'Requires a self-hosted OpenFamily server with HTTPS.\n'
-              'Ask your family administrator for its secure address.',
+          subtitle: 'Requires a self-hosted Orbitly server with HTTPS.\n'
+              'Ask your server administrator for its secure address.',
           center: true,
         ),
         TextField(

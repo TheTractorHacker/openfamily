@@ -1,6 +1,6 @@
 # Home Assistant integration
 
-OpenFamily can feed a Home Assistant (HA) you run yourself: who is home, battery, optionally GPS, places, and
+Orbitly can feed a Home Assistant (HA) you run yourself: who is home, battery, optionally GPS, places, and
 arrival / departure / SOS / possible-crash / trip / low-battery events. Everything is **read-only** and opt-in.
 
 Parts:
@@ -14,7 +14,7 @@ Parts:
 ## Quick start
 
 1. Admin panel, **Settings, Integrations**: *Create a token*. Pick the circles HA may see and what it may read. Copy the token (shown once).
-2. In HA add the **OpenFamily** integration (see its README to install it), enter your server URL and the token.
+2. In HA add the **Orbitly** integration (see its README to install it), enter your server URL and the token.
 3. Optional push: on the token open **Webhook**, paste the URL HA shows in the integration's *Configure* dialog, and put the signing
    secret from step 1 into that dialog. Use **Send test event**.
 

@@ -230,9 +230,9 @@ func (p Policy) Describe(v Version, ok bool) Info {
 	}
 	switch st {
 	case StatusRequired:
-		in.Message = "This version of OpenFamily is no longer supported by the server. Update the app to keep seeing locations."
+		in.Message = "This version of Orbitly is no longer supported by the server. Update the app to keep seeing locations."
 	case StatusRecommended:
-		in.Message = "A newer version of OpenFamily is available."
+		in.Message = "A newer version of Orbitly is available."
 	}
 	return in
 }
@@ -289,8 +289,8 @@ func (p Policy) UpdateMessage(name string) string {
 	if name != "" {
 		greet = "Hi " + name
 	}
-	return greet + ", our family server now needs OpenFamily " + p.Min.String() +
+	return greet + ", our family server now needs Orbitly " + p.Min.String() +
 		" or newer, and the newest version is " + p.Latest.String() +
-		". Please update the app (open Obtainium or the app store and update OpenFamily; your sign-in and data stay). Until you do, you may see an \"Update required\" banner" +
+		". Please update the app (open Obtainium or the app store and update Orbitly; your sign-in and data stay). Until you do, you may see an \"Update required\" banner" +
 		" and your location may stop showing for the rest of us. Thanks!"
 }

@@ -30,6 +30,7 @@ import { clearTokens, getEmail, isAuthenticated, subscribeAuth } from './lib/aut
 import { useMe } from './lib/me'
 import { useServerVersion } from './lib/serverVersion'
 import { AccessDenied, Spinner } from './components/primitives'
+import { AboutFooter } from './components/AboutFooter'
 import './shell.css'
 
 // Map pages pull in Leaflet/MapLibre; load them on demand so login and the
@@ -88,7 +89,7 @@ export default function App() {
   return (
     <div className="wb-shell">
       <div className="wb-shell-sidebar">
-        <Sidebar active={route} onNavigate={navigate} footer={<span>{serverVersion ?? ''}</span>} />
+        <Sidebar active={route} onNavigate={navigate} footer={<AboutFooter version={serverVersion} />} />
       </div>
       <div className="wb-shell-topbar">
         <TopBar active={route} onLogout={logout} email={email} onNavigate={navigate} />
@@ -130,7 +131,7 @@ function renderPage(
   if (adminOnly && isPlatformAdmin && adminMfaRequired) {
     return (
       <div className="wb-page">
-        <AccessDenied message="This server requires two-factor authentication for administrators. Turn it on in the OpenFamily app (Settings, Security), then sign out and sign in again with your two-factor code to use the admin panel." />
+        <AccessDenied message="This server requires two-factor authentication for administrators. Turn it on in the Orbitly app (Settings, Security), then sign out and sign in again with your two-factor code to use the admin panel." />
       </div>
     )
   }

@@ -34,8 +34,8 @@ void main() {
     await alice.enableCircle(cid);
     // The server device: a `server` key of Alice's account, approved by her phone.
     srv = await ViewerFixture.create(uA);
-    final String ap = await alice.approveLinkRequest(await alice.inspectViewerRequest(await srv.request(kind: 'server', name: 'OpenFamily server')));
-    srvKey = await srv.register(server, ap, kind: 'server', label: 'OpenFamily server');
+    final String ap = await alice.approveLinkRequest(await alice.inspectViewerRequest(await srv.request(kind: 'server', name: 'Orbitly server')));
+    srvKey = await srv.register(server, ap, kind: 'server', label: 'Orbitly server');
     server.serverModeEnabled = true;
     server.pinnedServerDevice = srv.deviceId;
   });

@@ -123,8 +123,8 @@
     }
 
     var defaultCommands = [
-      "git clone https://github.com/TheTractorHacker/openfamily.git openfamily",
-      "cd openfamily",
+      "git clone https://github.com/TheTractorHacker/orbitly.git",
+      "cd orbitly",
       "cp .env.example .env",
       "docker compose up -d --build"
     ].join("\n");

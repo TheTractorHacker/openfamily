@@ -96,8 +96,8 @@ void main() {
         if (pinned) {
           final ViewerFixture srv = await ViewerFixture.create(uA);
           final String ap = await alice.approveLinkRequest(
-              await alice.inspectViewerRequest(await srv.request(kind: 'server', name: 'OpenFamily server')));
-          await srv.register(server, ap, kind: 'server', label: 'OpenFamily server');
+              await alice.inspectViewerRequest(await srv.request(kind: 'server', name: 'Orbitly server')));
+          await srv.register(server, ap, kind: 'server', label: 'Orbitly server');
           server.pinnedServerDevice = srv.deviceId;
         }
       });

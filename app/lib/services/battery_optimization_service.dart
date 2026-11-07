@@ -4,13 +4,13 @@ import 'package:permission_handler/permission_handler.dart'
     show openAppSettings;
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// Guides the user to exempt OpenFamily from Android battery optimization.
+/// Guides the user to exempt Orbitly from Android battery optimization.
 ///
 /// Doze and device-manufacturer battery managers ("deep sleep", "autostart",
 /// "app standby") routinely kill or defer the plugin's foreground location
 /// service once the app is backgrounded. That is the classic reason a family
 /// tracker goes stale when the app "isn't open". Asking the user to set
-/// OpenFamily to "Don't optimize" is the standard, user-controlled fix, and
+/// Orbitly to "Don't optimize" is the standard, user-controlled fix, and
 /// wireless-aware because the final choice stays with the user.
 ///
 /// iOS has no equivalent knob (its background-location behaviour is gated by
@@ -28,7 +28,7 @@ class BatteryOptimizationService {
   static bool get isSupported =>
       defaultTargetPlatform == TargetPlatform.android;
 
-  /// Opens the system page where the user can set OpenFamily to
+  /// Opens the system page where the user can set Orbitly to
   /// "Don't optimize". Returns true if a settings screen was opened.
   ///
   /// Prefers the general battery-optimization list (reliable across stock

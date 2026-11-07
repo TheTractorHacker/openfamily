@@ -57,13 +57,13 @@ class OpenFamilyCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if "events" in self.scopes:
                 await self._poll_events()
         except OpenFamilyAuthError as err:
-            raise ConfigEntryAuthFailed("OpenFamily token was rejected or revoked") from err
+            raise ConfigEntryAuthFailed("Orbitly token was rejected or revoked") from err
         except OpenFamilyScopeError as err:
-            raise UpdateFailed("The OpenFamily token lacks the presence scope") from err
+            raise UpdateFailed("The Orbitly token lacks the presence scope") from err
         except OpenFamilyRateLimited as err:
-            raise UpdateFailed(f"OpenFamily rate limit, retry in {err.retry_after}s") from err
+            raise UpdateFailed(f"Orbitly rate limit, retry in {err.retry_after}s") from err
         except OpenFamilyConnectionError as err:
-            raise UpdateFailed(f"Cannot reach the OpenFamily server: {err}") from err
+            raise UpdateFailed(f"Cannot reach the Orbitly server: {err}") from err
         members = {m["id"]: m for m in payload.get("members", []) if isinstance(m, dict) and "id" in m}
         return {"members": members, "circles": payload.get("circles", [])}
 

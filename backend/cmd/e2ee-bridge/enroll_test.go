@@ -186,7 +186,7 @@ func TestEnrollNeedsCredentialsAndPasswordFromStdin(t *testing.T) {
 
 func TestHelpMentionsOffHostAndUsageErrors(t *testing.T) {
 	code, out, _ := runCLI(t, nil, "", "--help")
-	if code != 0 || !strings.Contains(out, "OFF the OpenFamily server host") {
+	if code != 0 || !strings.Contains(out, "OFF the Orbitly server host") {
 		t.Fatalf("help: %d\n%s", code, out)
 	}
 	if code, _, _ := runCLI(t, nil, "", "bogus"); code != exitUsage {

@@ -581,7 +581,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                 Expanded(
                                   child: Text(
                                     'Your photo is stored privately on your '
-                                    'OpenFamily server and shared only with '
+                                    'Orbitly server and shared only with '
                                     'authenticated family members and platform '
                                     'administrators.',
                                     style: AppType.secondary.copyWith(

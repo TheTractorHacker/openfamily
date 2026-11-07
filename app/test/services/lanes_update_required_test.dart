@@ -10,10 +10,10 @@ void main() {
     expect(AppCompat.state.value.status, isNot(CompatStatus.required));
     expect(
         () => ApiClient.debugThrowForError(http.Response(
-            '{"error":"Update OpenFamily to continue","code":"update_required_for_lanes","not_ready":["Sam"]}', 409)),
+            '{"error":"Update Orbitly to continue","code":"update_required_for_lanes","not_ready":["Sam"]}', 409)),
         throwsA(isA<ApiException>().having((ApiException e) => e.status, 'status', 409)));
     expect(AppCompat.state.value.status, CompatStatus.required);
-    expect(AppCompat.state.value.message, contains('Update OpenFamily'));
+    expect(AppCompat.state.value.message, contains('Update Orbitly'));
   });
 
   test('other 409s do not claim the app is outdated', () {

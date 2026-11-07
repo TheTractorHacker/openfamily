@@ -87,11 +87,11 @@ class _SecurityScreenState extends State<SecurityScreen> {
             XFile.fromData(
               utf8.encode(json),
               mimeType: 'application/json',
-              name: 'openfamily-export.json',
+              name: 'orbitly-export.json',
             ),
           ],
-          fileNameOverrides: <String>['openfamily-export.json'],
-          subject: 'OpenFamily data export',
+          fileNameOverrides: <String>['orbitly-export.json'],
+          subject: 'Orbitly data export',
         );
       }
     } on SessionExpiredException {

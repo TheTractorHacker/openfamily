@@ -919,7 +919,7 @@ func (s *Server) E2EEPutProcessingPref(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if dev == nil || dev.DeviceID != req.ServerDeviceID || !e2ee.ConstEq(dev.fp, fp) {
-			s.policyErr(w, http.StatusConflict, "not_the_server_device", "that key is not the OpenFamily server device")
+			s.policyErr(w, http.StatusConflict, "not_the_server_device", "that key is not the Orbitly server device")
 			return
 		}
 		if !lanes2 {
@@ -1268,7 +1268,7 @@ func writeUpdateRequired(w http.ResponseWriter, notReady []string) {
 	// Consistent with the compat shims (circles.go applyCircleCompat): update_required
 	// and min_app_version name the first app version that supports processing lanes.
 	writeJSON(w, http.StatusConflict, map[string]any{
-		"error":            "Update OpenFamily to continue: this circle uses privacy controls that your app version does not support.",
+		"error":            "Update Orbitly to continue: this circle uses privacy controls that your app version does not support.",
 		"code":             codeUpdateRequired,
 		"not_ready":        nonNil(notReady),
 		"update_required":  true,

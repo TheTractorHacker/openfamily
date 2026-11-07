@@ -14,7 +14,7 @@ import 'background_credential_store.dart';
 import 'live_boost.dart';
 import 'location_refresh_service.dart';
 
-// OpenFamily "direct" push: the app keeps ONE authenticated Server-Sent Events
+// Orbitly "direct" push: the app keeps ONE authenticated Server-Sent Events
 // connection to its own server open and turns what arrives into local
 // notifications. No ntfy app, no Google services. See docs/push.md for the
 // battery trade-off and what happens when Android kills the process.
@@ -288,7 +288,7 @@ class DirectPushDispatcher {
           await _runCommand(e.command);
         case DirectPushKind.alert:
         case DirectPushKind.notice:
-          final String title = e.title.isEmpty ? 'OpenFamily' : e.title;
+          final String title = e.title.isEmpty ? 'Orbitly' : e.title;
           await notifier.show(
             id: notificationId(e.id),
             title: title,

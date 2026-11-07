@@ -81,7 +81,7 @@ func parseApproval(code string) (approvalCode, error) {
 	return a, nil
 }
 
-// readPassword takes the OpenFamily password from the environment or one line of
+// readPassword takes the Orbitly password from the environment or one line of
 // stdin (never from argv, never echoed).
 func readPassword(env func(string) string, in io.Reader) (string, error) {
 	if p := env("E2EE_BRIDGE_PASSWORD"); p != "" {
@@ -126,7 +126,7 @@ func (a *app) enrollClient(ctx context.Context, o enrollOpts, id *identity) (*ap
 		}
 	} else {
 		if o.email == "" {
-			return nil, "", errors.New("--email is required to log in to OpenFamily")
+			return nil, "", errors.New("--email is required to log in to Orbitly")
 		}
 		pw, err := readPassword(o.env, o.stdin)
 		if err != nil {
@@ -168,7 +168,7 @@ func (a *app) cmdEnroll(ctx context.Context, o enrollOpts) error {
 		if name == "" {
 			name = "Dawarich bridge"
 			if o.kind == "server" {
-				name = "OpenFamily server"
+				name = "Orbitly server"
 			}
 		}
 		id, err = a.st.createIdentity(truncRunes(name, 40))
@@ -257,7 +257,7 @@ func (a *app) cmdEnroll(ctx context.Context, o enrollOpts) error {
 		return err
 	}
 	if id.kind() == "server" {
-		fmt.Fprintln(o.out, "Registered. The OpenFamily server key is now a `server` member key of your account.")
+		fmt.Fprintln(o.out, "Registered. The Orbitly server key is now a `server` member key of your account.")
 		fmt.Fprintln(o.out, "Next: every member of each circle you want to open to the server approves it in the app")
 		fmt.Fprintln(o.out, "(Encryption keys > the circle > Trusted server). Then run `e2ee-bridge run --config <file>`.")
 		return nil

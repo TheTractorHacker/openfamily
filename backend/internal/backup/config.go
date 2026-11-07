@@ -1,4 +1,4 @@
-// Package backup implements OpenFamily's scheduled, encrypted backups: a
+// Package backup implements Orbitly's scheduled, encrypted backups: a
 // streaming pg_dump piped through age encryption, written to a local directory
 // and/or any S3-compatible bucket, with a SHA-256 manifest, retention pruning
 // and run records in the database. It is used only by cmd/backup (the optional

@@ -188,7 +188,7 @@ void main() {
 
     testWidgets('privacy policy scrolls at 200% text', (tester) async {
       await tester.pumpWidget(_wrap(const PrivacyPolicyScreen(), scale: 2));
-      expect(find.text('OpenFamily privacy policy'), findsOneWidget);
+      expect(find.text('Orbitly privacy policy'), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
   });

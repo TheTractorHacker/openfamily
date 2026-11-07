@@ -1,7 +1,7 @@
 # Custom domains
 
-Serving OpenFamily behind a real domain name (for example
-`openfamily.example.com`) gives every device automatic HTTPS: Caddy requests
+Serving Orbitly behind a real domain name (for example
+`orbitly.example.com`) gives every device automatic HTTPS: Caddy requests
 and renews a Let's Encrypt certificate for you. No certbot, no manual renewal.
 
 The admin panel (**Settings → Custom domain**) shows your current setup and
@@ -14,8 +14,8 @@ At your DNS provider, create a record for the name you want:
 
 | Record | Name                  | Value                  |
 |--------|-----------------------|------------------------|
-| A      | `openfamily.example.com` | your server's public IPv4 |
-| AAAA   | `openfamily.example.com` | your server's public IPv6 (optional) |
+| A      | `orbitly.example.com` | your server's public IPv4 |
+| AAAA   | `orbitly.example.com` | your server's public IPv6 (optional) |
 
 If your server sits behind a router (home NAS), forward external ports **80**
 and **443** to it. Port 80 is required even though traffic ends up on 443:
@@ -29,9 +29,9 @@ tells you when the name resolves.
 In the `.env` file next to `docker-compose.yml`:
 
 ```bash
-SITE_ADDRESS=openfamily.example.com
-ALLOWED_ORIGIN=https://openfamily.example.com
-PUBLIC_BASE_URL=https://openfamily.example.com
+SITE_ADDRESS=orbitly.example.com
+ALLOWED_ORIGIN=https://orbitly.example.com
+PUBLIC_BASE_URL=https://orbitly.example.com
 APP_ENV=production
 ```
 

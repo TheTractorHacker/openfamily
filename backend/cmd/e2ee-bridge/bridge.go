@@ -731,7 +731,7 @@ func (b *bridge) collect(circle, purpose, userID, memberName, device string, tsM
 	}
 	name := memberName
 	if name == "" {
-		name = "OpenFamily"
+		name = "Orbitly"
 	}
 	add := func(ts int64, lat, lon float64, acc, alt, spd, bat *float64) {
 		if !mapped {

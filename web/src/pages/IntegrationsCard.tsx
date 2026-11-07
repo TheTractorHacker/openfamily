@@ -148,7 +148,7 @@ export function IntegrationsCard() {
       {tokens !== null && tokens.length === 0 && !creating && !fresh && (
         <EmptyState
           title="No Home Assistant connection yet"
-          description="Create a token, paste it into the OpenFamily integration in Home Assistant, and your family shows up as device trackers."
+          description="Create a token, paste it into the Orbitly integration in Home Assistant, and your family shows up as device trackers."
           action={<Button onClick={() => setCreating(true)}>Create a token</Button>}
         />
       )}
@@ -332,7 +332,7 @@ function TokenRow({ t, open, isPlatformAdmin, busy, circleName, onToggle, onRevo
                   onChange={(e) => setUrl(e.target.value)} autoComplete="off" spellCheck={false}
                   placeholder={t.webhook_configured ? `${t.webhook_url_masked} (leave blank to keep)` : 'http://homeassistant.local:8123/api/webhook/<id>'} />
                 <span className="wb-help">
-                  The OpenFamily integration shows this URL when you add it. Requests are signed (HMAC-SHA256) and retried with backoff.
+                  The Orbitly integration shows this URL when you add it. Requests are signed (HMAC-SHA256) and retried with backoff.
                 </span>
               </label>
               <label className="wb-ha-check">

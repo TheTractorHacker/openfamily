@@ -1,9 +1,9 @@
 package main
 
 // Server mode (docs/design/E2EE.md, "Trusted-server mode"): the bridge is the
-// OpenFamily server's own approved device. It verifies and decrypts exactly like
+// Orbitly server's own approved device. It verifies and decrypts exactly like
 // a phone or the Dawarich bridge, then hands the plaintext positions to the
-// OpenFamily API (POST /internal/e2ee/ingest), authenticated by the server-device
+// Orbitly API (POST /internal/e2ee/ingest), authenticated by the server-device
 // token, so the server's normal tables, map, history, geofencing and Dawarich
 // sync work for the circles whose members all consented.
 
@@ -24,7 +24,7 @@ import (
 	"github.com/TheTractorHacker/openfamily/backend/internal/e2ee"
 )
 
-// pointSink delivers verified positions (Dawarich or the OpenFamily server).
+// pointSink delivers verified positions (Dawarich or the Orbitly server).
 type pointSink interface {
 	flush(ctx context.Context, pts []point, hw map[string]int64, commit func() error) (sent int, dropped map[string]int64, err error)
 	setBackoff(bo backoff)
@@ -32,7 +32,7 @@ type pointSink interface {
 
 func (d *dawarichSink) setBackoff(bo backoff) { d.bo = bo }
 
-var errIngestAuth = errors.New("the OpenFamily server refused the ingest token (401/404); check E2EE_SERVER_INGEST_TOKEN on both sides")
+var errIngestAuth = errors.New("the Orbitly server refused the ingest token (401/404); check E2EE_SERVER_INGEST_TOKEN on both sides")
 
 type serverSink struct {
 	cfg  *config
@@ -69,7 +69,7 @@ func (s *serverSink) call(ctx context.Context, method, path string, body any, ou
 			if ctx.Err() != nil {
 				return 0, ctx.Err()
 			}
-			lastErr = fmt.Errorf("could not reach the OpenFamily server: %w", scrubNetErr(err))
+			lastErr = fmt.Errorf("could not reach the Orbitly server: %w", scrubNetErr(err))
 		} else {
 			data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 			resp.Body.Close()
@@ -86,7 +86,7 @@ func (s *serverSink) call(ctx context.Context, method, path string, body any, ou
 			case !retryableStatus(status):
 				return status, &apiError{Status: status, Msg: errText(data)}
 			}
-			lastErr = fmt.Errorf("the OpenFamily server answered %d", status)
+			lastErr = fmt.Errorf("the Orbitly server answered %d", status)
 		}
 		if attempt+1 >= s.bo.Attempts {
 			break
@@ -95,7 +95,7 @@ func (s *serverSink) call(ctx context.Context, method, path string, body any, ou
 			return status, err
 		}
 	}
-	return 0, fmt.Errorf("the OpenFamily server is unavailable after %d attempts: %w", s.bo.Attempts, lastErr)
+	return 0, fmt.Errorf("the Orbitly server is unavailable after %d attempts: %w", s.bo.Attempts, lastErr)
 }
 
 func errText(data []byte) string {

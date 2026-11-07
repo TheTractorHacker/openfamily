@@ -1,10 +1,10 @@
-# OpenFamily. Basic install:   ./scripts/setup.sh && docker compose up -d
+# Orbitly. Basic install:   ./scripts/setup.sh && docker compose up -d
 #
 # Optional components are compose profiles (enable with --profile or the
 # COMPOSE_PROFILES variable in .env):
 #   proxy  Caddy reverse proxy with automatic HTTPS (set SITE_ADDRESS)
 #   push   self-hosted ntfy server for UnifiedPush (Android push)
-#   e2ee-server  OPT-IN "trusted server member" for Private circles: the OpenFamily
+#   e2ee-server  OPT-IN "trusted server member" for Private circles: the Orbitly
 #          server gets its own approved device so it can read circles whose members
 #          ALL consent (admin map, history, Dawarich sync, place alerts work again).
 #          The server then holds plaintext for those circles. Read
@@ -146,7 +146,7 @@ services:
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
       # Directory the admin panel caches the v* GitHub Release APK into.
       APK_DIR: ${APK_DIR:-/data/apk}
-      APK_GITHUB_REPO: ${APK_GITHUB_REPO:-TheTractorHacker/openfamily}
+      APK_GITHUB_REPO: ${APK_GITHUB_REPO:-TheTractorHacker/orbitly}
       APK_GITHUB_TOKEN: ${APK_GITHUB_TOKEN:-}
     volumes:
       - apk_data:/data/apk
@@ -242,7 +242,7 @@ services:
           cpus: "0.5"
           memory: 256M
 
-  # OPT-IN: the OpenFamily server as an approved member device of Private circles.
+  # OPT-IN: the Orbitly server as an approved member device of Private circles.
   # One-time enrollment (prints the name and fingerprint to approve on the phone):
   #   docker compose --profile e2ee-server run --rm -T e2ee-server-device enroll --kind server \
   #       --server http://api:8080 --email you@example.org < password.txt
