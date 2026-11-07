@@ -921,3 +921,19 @@ export function dismissServerSetup(dismiss: boolean): Promise<DeploymentState> {
     body: { dismiss_setup: dismiss },
   })
 }
+
+// ---- Documentation embedded in the server ----
+
+export function getDocsManifest(): Promise<import('./docs').DocsManifest> {
+  return request('/api/docs/manifest.json')
+}
+
+/** Raw Markdown of a doc (path relative to docs/, e.g. "user/chat.md"). */
+export function getDocText(path: string): Promise<string> {
+  return request<string>(`/api/docs/${path.split('/').map(encodeURIComponent).join('/')}`, { text: true, accept: 'text/plain' })
+}
+
+/** An image from the docs as a Blob (images need the bearer token, so they are fetched, not linked). */
+export function getDocImage(path: string): Promise<Blob> {
+  return request<Blob>(`/api/docs/${path.split('/').map(encodeURIComponent).join('/')}`, { binary: true })
+}

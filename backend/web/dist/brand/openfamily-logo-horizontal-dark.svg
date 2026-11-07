@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="360" viewBox="0 0 1200 360" role="img" aria-labelledby="title desc">
+  <title id="title">OpenFamily horizontal logo for dark backgrounds</title>
+  <desc id="desc">An open bright-lime location pin containing a three-member network, followed by the OpenFamily wordmark for dark mode.</desc>
+  <g transform="translate(50 50)">
+    <path d="M179 49 C165 36 147 28 128 28 C80 28 44 65 44 112 C44 163 87 204 128 230 C169 204 212 163 212 112 C212 94 207 78 198 62" fill="none" stroke="#A3E635" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="198" cy="62" r="10" fill="#D9F99D" stroke="none"/>
+    <path d="M128 88 L100 126 M128 88 L156 126" fill="none" stroke="#F4F5F7" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="128" cy="88" r="13" fill="#F4F5F7" stroke="none"/>
+    <circle cx="100" cy="126" r="12" fill="#F4F5F7" stroke="none"/>
+    <circle cx="156" cy="126" r="12" fill="#F4F5F7" stroke="none"/>
+  </g>
+  <text x="355" y="215" fill="#F4F5F7" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="112" font-weight="800" letter-spacing="-4">OpenFamily</text>
+</svg>

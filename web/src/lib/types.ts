@@ -588,6 +588,10 @@ export interface AdminCompatUser {
   app_version: string
   platform: string
   last_seen: string
+  status?: AppCompatStatus
+  experience?: string
+  missing_features?: string[]
+  update_message?: string
 }
 
 export interface AdminCompat {
@@ -603,6 +607,11 @@ export interface AdminCompat {
   }
   versions: AdminCompatVersion[]
   outside_window: AdminCompatUser[]
+  /** Every person's newest app version per platform, oldest first. */
+  people?: AdminCompatUser[]
+  server?: { version: string; release: string; features: Record<string, string> }
+  /** What a person in each status experiences, in plain words. */
+  experience?: Record<AppCompatStatus, string>
   users_total: number
   users_with_version: number
 }

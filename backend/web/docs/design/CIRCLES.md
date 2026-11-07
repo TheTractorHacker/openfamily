@@ -1,0 +1,162 @@
+# Multi-circle data model (GAP-001, GAP-002)
+
+Status: stage 1 implemented on `feat/circles`. Stage 2 is partly done (circle-aware map and live stream, see below); the rest is listed at the end.
+
+Goal: a user can belong to several circles (family, friends, ...), is admin in
+some and member in others, and chooses per circle whether their location is
+shared. The change is additive: `families`, `users.family_id`, `users.role`
+and every existing endpoint keep working unchanged for current clients.
+
+## Tables (migrations 000060, 000061)
+
+- `circles(id, name, icon, created_by, created_at)`
+- `circle_members(circle_id, user_id, role admin|member, sharing_enabled default true, joined_at)`, primary key `(circle_id, user_id)`, cascades from both parents, index on `user_id`.
+- `invite_codes.circle_id` (nullable FK, cascade). `family_id` is now nullable; a CHECK requires one of the two.
+
+### How existing families map
+
+Each `families` row becomes one circle with the **same id** (name, created_at
+copied; `created_by` = oldest admin). Each user with a `family_id` becomes a
+member of the circle with that id (`admin` stays admin, `member` and `child`
+become `member`). Nothing that references `families(id)` (places, geofences,
+alerts, audit_log, invite_codes) is rewritten. The backfill uses
+`ON CONFLICT DO NOTHING`, so re-running is safe; the down migration drops the
+two tables and triggers and loses nothing legacy.
+
+### Staying in sync with legacy write paths
+
+`users.family_id` remains the user's **primary circle** and the legacy
+endpoints still read it and `users.role`. Triggers keep the new tables correct
+without touching the legacy handlers (or other teams' code):
+
+- `families` insert/rename/delete -> create/rename/delete the circle with that id.
+- `users` insert/update of `family_id` or `role` -> upsert/delete the membership of circle `family_id` (self-heals a missing circle).
+
+In the other direction the circle endpoints repair the legacy pointer: removing
+a member, leaving, or deleting a circle moves `users.family_id` to the user's
+next family-backed circle (or NULL), and a role change in a user's primary
+circle also sets `users.role` (a legacy `child` stays `child`). So a removed
+member loses legacy access in the same transaction. Circles created with
+`POST /circles` have no `families` row; they are reachable only through circle
+endpoints (stage 2 will add circle-scoped places/chat to them).
+
+## Roles and consent
+
+Circle role: `admin` (rename, invite, remove members, change roles, delete) or
+`member`. The last admin cannot leave, be removed or be demoted (409), checked
+inside a transaction holding the circle row lock.
+
+Sharing consent is per membership: `circle_members.sharing_enabled`. A member
+changes only their own flag with `PUT /circles/{id}/sharing {"enabled": bool}`;
+no admin can turn it on for someone else. The flag is read from the database
+for every live update, so turning it off stops the next update for that circle
+immediately. A viewer sees subject S's location only through a circle where
+both are members **and** S has sharing on. A user always sees themselves.
+S still appears in member lists with null location fields (wire format
+unchanged).
+
+## The authorization helper (`internal/circles`)
+
+Handlers must not compare `users.family_id` or write membership SQL; they call:
+
+- `RequireMember(ctx, userID, circleID)` -> membership or `ErrNotFound`.
+- `RequireAdmin(ctx, userID, circleID)` -> `ErrNotFound` for outsiders, `ErrForbidden` for members.
+- `SharedWith(ctx, viewer, subject)` -> circle ids where both are members and the subject shares (self: all own circles).
+- `SharingCircles(ctx, subject)` -> circles the subject currently shares in (live fan-out).
+- `LocationVisibility(ctx, viewer, circleIDs)` -> co-members and whether their location may be shown.
+- `CircleIDs(ctx, user)`.
+
+`New(pool_or_tx)`: works inside a transaction. A non-member and a non-existent
+or malformed circle id are indistinguishable (`ErrNotFound`, HTTP 404), so ids
+cannot be probed (IDOR / SEC-006). Platform-admin cross-family views are a
+separate, audited path and are unchanged.
+
+## Endpoints (handlers/circles.go)
+
+`POST /circles`, `GET /circles`, `PATCH /circles/{id}`, `DELETE /circles/{id}`,
+`GET /circles/{id}/members`, `DELETE /circles/{id}/members/{user_id}` (`me` allowed),
+`PATCH /circles/{id}/members/{user_id}`, `PUT /circles/{id}/sharing`,
+`POST|GET /circles/{id}/invites`, `DELETE /circles/{id}/invites/{invite_id}`,
+`POST /circles/join {code}`. At most 25 circles per user.
+
+Choices: `DELETE /circles/{id}` is refused with 409 if it is the only circle of
+any member, unless `?force=true`; it never deletes the legacy `families` row or
+its places/geofences. Invites reuse `invite_codes`; for a family-backed circle
+`family_id` is also set, so the code still works in legacy join/register. A
+code for a non-family circle is rejected by the legacy flow (not consumed) and
+only redeemable via `POST /circles/join`. Invite roles are admin or member.
+
+## Live read path
+
+The hub keeps its maps but a socket now subscribes to **all** of its user's
+circles (`registerCircles`). `broadcastLocation`/`broadcastPresence` fan out to
+`SharingCircles(owner)` plus the owner's own sockets, once per socket. Removal,
+leave, circle delete and join call `subscribeUser`/`unsubscribeUser` so the
+socket set changes at once; the existing 30 s revalidation also re-syncs
+subscriptions from the database as a backstop and closes a socket whose user has
+no circle. `members` snapshot (WebSocket) and `GET /family/members` use
+`LocationVisibility` and blank location fields for non-sharing members. For a
+user with one circle and default sharing, output is identical to before.
+
+## Stage 1 limitations
+
+- `child` is not a circle role (maps to `member`); `users.role` stays authoritative for legacy checks.
+- A multi-circle user's WebSocket `members` snapshot is the union of their circles (no circle id on the wire yet).
+- Account deletion can leave a circle without an admin (promote the oldest member in stage 2).
+- The legacy registration flow cannot redeem codes of non-family circles.
+
+## Circle-aware map and live stream (stage 2, done)
+
+Wire protocol (`GET /ws/stream`, additive; legacy clients unchanged):
+
+- Connect with `?circle_id=<uuid>` (one circle) or `?circle_id=all` to opt in to circle-labelled frames; an unknown, malformed or foreign id is a plain 404 before the upgrade. Without the parameter the socket is "legacy": every frame is as before (one unlabelled copy per update, snapshot of all co-members).
+- Client -> server `{"type":"subscribe","circle_id":"<uuid>|all"}` switches an open socket (also opts in). The membership is checked against the database. Success: `{"type":"subscribed","circle_id":...}` then a fresh `members` snapshot scoped to that circle. Failure: `{"type":"error","code":"circle_not_found"}` and the previous subscription stays.
+- Aware clients get `members` with `circle_id` (`all` or the id); `location` and `presence` frames carry `circle_id`. A subject who shares in several circles is delivered once per circle (viewer and subject both members, subject sharing on), so the client can filter; an aware socket narrowed to one circle only receives that circle's frames. A subject always receives their own updates, labelled per own circle.
+- New frames for aware sockets: `sharing` `{circle_id,user_id,enabled}` when a member changes their flag, and `circle_removed` `{circle_id}` when the hub drops that circle from the socket (removed, left, deleted). A narrowed socket then falls back to `all`; a socket left with no circle is closed, as before. The 30 s revalidation still re-syncs subscriptions and closes revoked sockets.
+- Each member in `members` (and in `GET /family/members`) carries `circle_ids` (circles shared with the caller in scope) and `sharing_circle_ids` (where that member shares).
+- `GET /family/members?circle_id=<uuid>|all`: membership-checked, 404 for outsiders and malformed ids; without it the legacy primary circle.
+- `admin_ws` is unchanged (platform admins keep the unlabelled global stream).
+
+App: the circle pill selects a circle (or "All circles" when in two or more), persisted in shared preferences; the roster, map markers, People list and socket are scoped to it, with a "Sharing paused" banner (and Resume) when the user turned sharing off in the selected circle. A deleted or left circle falls back to the primary one; stale frames from a previous selection are ignored. With one circle nothing is scoped or shown differently.
+
+## Stage 2 (remaining) - exact files
+
+Convert from `family_id` to a circle id taken from the request and checked with `internal/circles`:
+
+- `handlers/place.go` (List/Create/Update/Delete place + admin list), `handlers/geofence.go`, `handlers/geofence_eval.go` (+ migration relaxing `places.family_id` / `geofences.family_id` FK to `circles`, adding `circle_id`).
+- `handlers/history.go` (`GetMemberHistory` still checks same `family_id`, ignores sharing), `handlers/location_request.go` (family check, sharing), `handlers/family.go` `GetFamilyMemberAvatar`, `ws.go` `broadcastAvatarUpdate`.
+- `handlers/alerts.go`, `handlers/contacts.go`, `handlers/audit.go` (family-scoped fan-out and audit view).
+- `handlers/admin.go`, `admin_users.go`, `admin_ws.go` (move/assign/delete family must call circle repair).
+- `handlers/auth.go` Register / `invites.go` `consumeInviteCode` (circle invite at registration), `profile.go` DeleteMe (last-admin handling).
+- ~~Add circle id to WebSocket frames~~ (done above); `ws.go` `broadcastAvatarUpdate` is still family-scoped.
+- Places, geofences and history per circle (a later issue), tracking history retention per circle, chat (GAP-005), notification settings (GAP-006).
+
+## Temporary circles (migration 000114)
+
+`circles.expires_at` (nullable; NULL = permanent) and `circles.ended_at` (set
+when an admin ends the circle early). A circle is **live** while
+`ended_at IS NULL AND (expires_at IS NULL OR expires_at > now())`. Expiry is
+enforced in SQL on every read, so correctness needs no job:
+
+- Every `internal/circles` helper reads the view `live_circle_members`
+  (circle_members joined to live circles), so `RequireMember`/`RequireAdmin`,
+  `CircleIDs`, `SharedWith`, `SharingCircles`, `OwnAndSharingCircles`,
+  `LocationVisibility`, `MemberCircles` and `CoMembers` treat an expired circle
+  as non-existent (404 to members and outsiders alike). That covers chat,
+  check-ins, trips, watch/live boost, sharing pauses and WS subscriptions.
+  Chat unread/push, crash alerts, live shares and member edit use the view too.
+- Joining by invite code and the legacy code redeem path refuse codes of a
+  non-live circle; creating invites needs a live circle (admin check).
+- `GET /circles` omits non-live circles and returns `expires_at`; WS member
+  snapshots carry `circle_expires` (circle id -> expiry, temporary only).
+
+API: `POST /circles` accepts `duration_hours` (1-720) or `expires_at` (1 hour to
+30 days from now). `PATCH /circles/{id}` (admin) accepts `extend_hours`,
+`expires_at`, or `end: true`; only temporary circles can be extended or ended.
+A circle that lapsed naturally can be extended by its admin during the grace
+period (`RequireGraceAdmin`); one ended early cannot be revived.
+
+Cleanup: `RunCirclePurge` (every 10 min) drops hub subscriptions of lapsed
+circles and deletes circles 7 days after they ended/expired (members, invites,
+chat and check-in rows cascade). No expiry reminder push is sent: there is no
+existing scheduled-notification hook to attach one to.

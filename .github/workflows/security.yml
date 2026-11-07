@@ -47,12 +47,6 @@ jobs:
   npm-audit:
     name: Admin web dependencies (npm audit)
     runs-on: ubuntu-latest
-    # Known open finding: maplibre-gl 5.24.0 (GHSA-jrc7-96c5-q579, DOM.sanitize
-    # bypass, fixed only in the 6.x major). The bump changes the map renderer
-    # and needs a visual pass plus a rebuild of backend/web/dist, so it is
-    # tracked separately (docs/LICENSE_COMPLIANCE.md lists open scan findings).
-    # Remove continue-on-error once maplibre-gl is upgraded.
-    continue-on-error: true
     defaults:
       run:
         working-directory: web

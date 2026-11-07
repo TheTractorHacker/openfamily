@@ -9,6 +9,7 @@ package compat
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -28,7 +29,7 @@ const RecommendLag = 2
 var Releases = []string{
 	"0.2.0", "0.3.0", "0.4.0", "0.5.0", "0.6.0", "0.7.0", "0.8.0", "0.9.0",
 	"0.10.0", "0.11.0", "0.12.0", "0.13.0", "0.14.0", "0.15.0", "0.16.0",
-	"0.17.0", "0.18.0", "0.19.0", "0.20.0", "0.21.0", "0.22.0",
+	"0.17.0", "0.18.0", "0.19.0", "0.20.0", "0.21.0", "0.22.0", "0.23.0",
 }
 
 // Features maps a server feature to the first app version that understands it.
@@ -209,6 +210,8 @@ type Info struct {
 	LatestVersion       string `json:"latest_version"`
 	ClientVersion       string `json:"client_version,omitempty"`
 	Message             string `json:"message,omitempty"`
+	// Window lists the supported minor lines ("0.18" ... "0.22"), oldest first.
+	Window []string `json:"window,omitempty"`
 }
 
 // Describe builds the Info for a client.
@@ -220,6 +223,7 @@ func (p Policy) Describe(v Version, ok bool) Info {
 		UpgradeRecommended:  st == StatusRecommended,
 		MinSupportedVersion: p.Min.String(),
 		LatestVersion:       p.Latest.String(),
+		Window:              p.Window,
 	}
 	if ok {
 		in.ClientVersion = v.String()
@@ -231,4 +235,62 @@ func (p Policy) Describe(v Version, ok bool) Info {
 		in.Message = "A newer version of OpenFamily is available."
 	}
 	return in
+}
+
+// Experience says, in plain words, what a person running a client with this
+// status sees. enforce is the operator's "refuse uploads from unsupported apps"
+// switch. The admin "App versions" page shows this text next to each person.
+func Experience(st Status, enforce bool) string {
+	switch st {
+	case StatusRequired:
+		t := "Sees an \"Update required\" banner. Most things still load, but circles that need a newer app show \"update the app to open this private circle\" and the server no longer promises that everything works."
+		if enforce {
+			t += " Location uploads from this app are refused (HTTP 426) until it is updated, so this person stops appearing on the map."
+		} else {
+			t += " Location uploads are still accepted (enforcement is off)."
+		}
+		return t
+	case StatusRecommended:
+		return "Still works fully. Sees a small dismissible \"A newer version is available\" note."
+	case StatusOK:
+		return "Works fully. Nothing to do."
+	default:
+		return "The app did not report a version (an old app or a script). It is never blocked and never shown a banner."
+	}
+}
+
+// MissingFeatures lists the server features a client at v cannot use yet,
+// sorted by name, as plain-word labels.
+func MissingFeatures(v Version) []string {
+	labels := map[string]string{
+		"private_circles":     "private (end-to-end encrypted) circles",
+		"private_channel":     "the sealed location channel",
+		"trusted_server_mode": "server-assisted private circles",
+		"processing_lanes":    "per-member privacy lanes",
+	}
+	var out []string
+	for name, min := range Features {
+		if v.Less(MustParse(min)) {
+			l := labels[name]
+			if l == "" {
+				l = name
+			}
+			out = append(out, l+" (needs "+min+")")
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// UpdateMessage is the text an admin can copy and send to a person who needs to
+// update. latest is the newest release the server knows.
+func (p Policy) UpdateMessage(name string) string {
+	greet := "Hi"
+	if name != "" {
+		greet = "Hi " + name
+	}
+	return greet + ", our family server now needs OpenFamily " + p.Min.String() +
+		" or newer, and the newest version is " + p.Latest.String() +
+		". Please update the app (open Obtainium or the app store and update OpenFamily; your sign-in and data stay). Until you do, you may see an \"Update required\" banner" +
+		" and your location may stop showing for the rest of us. Thanks!"
 }

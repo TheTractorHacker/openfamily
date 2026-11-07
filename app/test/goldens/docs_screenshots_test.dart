@@ -1,0 +1,394 @@
+import 'dart:io';
+import 'dart:ui' as ui;
+
+import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:latlong2/latlong.dart' show LatLng;
+import 'package:openfamily/models/chat_message.dart';
+import 'package:openfamily/models/circle.dart';
+import 'package:openfamily/models/member.dart';
+import 'package:openfamily/models/place.dart';
+import 'package:openfamily/models/security_models.dart';
+import 'package:openfamily/screens/chat_screen.dart';
+import 'package:openfamily/screens/check_in_screen.dart';
+import 'package:openfamily/screens/circle_detail_screen.dart';
+import 'package:openfamily/screens/circles_screen.dart';
+import 'package:openfamily/screens/create_circle_screen.dart';
+import 'package:openfamily/screens/create_or_join_circle_screen.dart';
+import 'package:openfamily/screens/family_driving_report_screen.dart';
+import 'package:openfamily/screens/invite_screen.dart';
+import 'package:openfamily/screens/login_screen.dart';
+import 'package:openfamily/screens/people_screen.dart';
+import 'package:openfamily/screens/permissions_screen.dart';
+import 'package:openfamily/screens/places_screen.dart';
+import 'package:openfamily/screens/processing_policy_screen.dart';
+import 'package:openfamily/screens/processing_screen.dart';
+import 'package:openfamily/screens/security_screen.dart';
+import 'package:openfamily/screens/settings_screen.dart';
+import 'package:openfamily/screens/sos_screen.dart';
+import 'package:openfamily/screens/welcome_screen.dart';
+import 'package:openfamily/services/chat_service.dart';
+import 'package:openfamily/services/e2ee/e2ee_crypto.dart';
+import 'package:openfamily/services/e2ee/processing_controller.dart'
+    show ProcessingMember, ProcessingSnapshot;
+import 'package:openfamily/services/speed_units.dart';
+import 'package:openfamily/theme/app_theme.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import '../screens/alert_screens_test.dart' show FakeDialer;
+import '../screens/circles_screens_test.dart' show FakeCircleService;
+import '../support/fake_processing_controller.dart';
+import '../support/fake_security_api.dart';
+import '../support/trip_report_fixtures.dart';
+
+/// Renders real app screens (from the widget tree, with fake data) to PNGs for
+/// the user documentation. Skipped unless `DOCS_SCREENSHOTS=1`. Output goes to
+/// `$DOCS_OUT` (default `../docs/images/app`). See scripts/docs-screenshots-app.sh.
+final bool _on = Platform.environment['DOCS_SCREENSHOTS'] == '1';
+final String _out = Platform.environment['DOCS_OUT'] ?? '../docs/images/app';
+
+Future<void> _loadFonts() async {
+  final String? root = Platform.environment['FLUTTER_ROOT'];
+  if (root == null) return;
+  final String dir = '$root/bin/cache/artifacts/material_fonts';
+  final FontLoader roboto = FontLoader('Roboto');
+  for (final String n in <String>['Roboto-Regular', 'Roboto-Bold']) {
+    final File f = File('$dir/$n.ttf');
+    if (f.existsSync()) {
+      roboto.addFont(Future.value(ByteData.sublistView(f.readAsBytesSync())));
+    }
+  }
+  await roboto.load();
+  final File icons = File('$dir/MaterialIcons-Regular.otf');
+  if (icons.existsSync()) {
+    final FontLoader il = FontLoader('MaterialIcons')
+      ..addFont(Future.value(ByteData.sublistView(icons.readAsBytesSync())));
+    await il.load();
+  }
+}
+
+final GlobalKey _shot = GlobalKey();
+
+Widget _app(Widget home, ThemeData theme) => RepaintBoundary(
+      key: _shot,
+      child: MaterialApp(
+        debugShowCheckedModeBanner: false,
+        theme: theme.copyWith(
+          textTheme: theme.textTheme.apply(fontFamily: 'Roboto'),
+          listTileTheme: theme.listTileTheme.copyWith(
+            titleTextStyle:
+                theme.listTileTheme.titleTextStyle?.copyWith(fontFamily: 'Roboto'),
+            subtitleTextStyle: theme.listTileTheme.subtitleTextStyle
+                ?.copyWith(fontFamily: 'Roboto'),
+          ),
+        ),
+        builder: (BuildContext c, Widget? child) => DefaultTextStyle.merge(
+          style: const TextStyle(fontFamily: 'Roboto'),
+          child: child!,
+        ),
+        home: home,
+      ),
+    );
+
+void _shoot(
+  String name,
+  Widget Function() screen, {
+  bool dark = false,
+  Future<void> Function(WidgetTester)? after,
+}) {
+  final String file = dark ? '$name-dark' : name;
+  testWidgets('docs screenshot $file', (WidgetTester t) async {
+    t.view.physicalSize = const Size(780, 1688);
+    t.view.devicePixelRatio = 2;
+    addTearDown(t.view.reset);
+    await t.pumpWidget(
+      _app(screen(), dark ? buildDarkTheme() : buildLightTheme()),
+    );
+    await t.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 300)),
+    );
+    await t.pumpAndSettle();
+    if (after != null) await after(t);
+    final RenderRepaintBoundary b =
+        _shot.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+    final List<int> bytes = (await t.runAsync(() async {
+      final ui.Image img = await b.toImage(pixelRatio: 2);
+      final ByteData? d = await img.toByteData(format: ui.ImageByteFormat.png);
+      return d!.buffer.asUint8List().toList();
+    }))!;
+    Directory(_out).createSync(recursive: true);
+    File('$_out/$file.png').writeAsBytesSync(bytes);
+  }, skip: !_on);
+}
+
+const String _circleName = 'The Rivera Family';
+
+FakeCircleService _circles() => FakeCircleService()
+  ..circles = <Circle>[
+    const Circle(
+      id: 'c1',
+      name: _circleName,
+      role: 'admin',
+      sharingEnabled: true,
+      memberCount: 4,
+      isPrimary: true,
+    ),
+    const Circle(
+      id: 'c2',
+      name: 'Soccer carpool',
+      role: 'member',
+      sharingEnabled: true,
+      memberCount: 5,
+    ),
+    const Circle(
+      id: 'c3',
+      name: 'Grandparents',
+      role: 'member',
+      sharingEnabled: false,
+      memberCount: 3,
+    ),
+  ]
+  ..members = <CircleMember>[
+    const CircleMember(userId: 'me', name: 'Maria', role: 'admin', sharingEnabled: true),
+    const CircleMember(userId: 'u2', name: 'Carlos', role: 'admin', sharingEnabled: true),
+    const CircleMember(userId: 'u3', name: 'Sofia', role: 'member', sharingEnabled: true),
+    const CircleMember(userId: 'u4', name: 'Mateo', role: 'member', sharingEnabled: false),
+  ];
+
+Member _member(String id, String name, Color c, MemberStatus s, int battery,
+        String address,
+        {MovementType movement = MovementType.none}) =>
+    Member(
+      id: id,
+      name: name,
+      // Fictional point in the open sea; never a real home.
+      position: const LatLng(10, -30),
+      movement: movement,
+      lastSeen: DateTime.now().toUtc(),
+      status: s,
+      batteryPercent: battery,
+      address: address,
+      avatarColor: c,
+    );
+
+final List<Member> _family = <Member>[
+  _member('me', 'Maria', const Color(0xFF7C3AED), MemberStatus.normal, 82,
+      '12 Oak Street',
+      movement: MovementType.home),
+  _member('u2', 'Carlos', const Color(0xFF0284C7), MemberStatus.normal, 64,
+      'Riverside Office Park',
+      movement: MovementType.work),
+  _member('u3', 'Sofia', const Color(0xFFDB2777), MemberStatus.normal, 91,
+      'Maple Elementary'),
+  _member('u4', 'Mateo', const Color(0xFF16A34A), MemberStatus.stopped, 0,
+      'Last seen at 12 Oak Street'),
+];
+
+class _FakeChat implements ChatService {
+  _FakeChat(this.history);
+  final List<ChatMessage> history;
+
+  @override
+  Future<String> myUserId() async => 'me';
+  @override
+  Future<ChatPage> messages(String circleId,
+          {int? before, int? after, int limit = 50}) async =>
+      ChatPage(history, null, const <ChatReader>[]);
+  @override
+  Future<void> markRead(String circleId, {int? seq}) async {}
+  @override
+  Future<Map<String, int>> unread() async => <String, int>{'c1': 0};
+  @override
+  dynamic noSuchMethod(Invocation i) => super.noSuchMethod(i);
+}
+
+List<ChatMessage> _conversation() {
+  final List<(String, String, String)> lines = <(String, String, String)>[
+    ('u3', 'Sofia', 'Practice is over, can someone pick me up?'),
+    ('u2', 'Carlos', 'I am still at the office, about 30 minutes away.'),
+    ('me', 'Maria', 'I can go! Leaving the house now.'),
+    ('u3', 'Sofia', 'Thanks Mom! I will wait by the main gate.'),
+    ('me', 'Maria', 'Perfect. Mateo, do you want pasta tonight?'),
+    ('u4', 'Mateo', 'Yes please! Can we have garlic bread too?'),
+    ('u2', 'Carlos', 'I will pick up the bread on my way home.'),
+  ];
+  final List<ChatMessage> out = <ChatMessage>[];
+  for (int i = 0; i < lines.length; i++) {
+    out.add(ChatMessage(
+      id: 'm$i',
+      seq: i + 1,
+      circleId: 'c1',
+      senderId: lines[i].$1,
+      senderName: lines[i].$2,
+      body: lines[i].$3,
+      createdAt: DateTime(2026, 10, 26, 17, 5 + i * 2),
+    ));
+  }
+  // Newest first, as the service returns them.
+  return out.reversed.toList();
+}
+
+Widget _chat() => ChatScreen(
+      circleId: 'c1',
+      circleName: _circleName,
+      service: _FakeChat(_conversation()),
+      incoming: const Stream<ChatMessage>.empty(),
+      edits: const Stream<ChatMessage>.empty(),
+      deletes: const Stream<(String, String)>.empty(),
+      reconnects: const Stream<void>.empty(),
+    );
+
+Place _p(String id, String name, double lat, String type, String address) =>
+    Place(
+      id: id,
+      name: name,
+      icon: Place.iconForType(type),
+      address: address,
+      position: LatLng(lat, 0),
+      radiusMeters: 100,
+      type: type,
+    );
+
+Widget _drivingReport() => FamilyDrivingReportScreen(
+      members: ValueNotifier<List<Member>>(<Member>[
+        _member('u1', 'Maria', const Color(0xFF7C3AED), MemberStatus.normal, 80, ''),
+        _member('u2', 'Carlos', const Color(0xFF0284C7), MemberStatus.normal, 80, ''),
+      ]),
+      userId: ValueNotifier<String?>(null),
+      api: FakeTripReportApi(result: reportJson(twoMembers: true, speeding: 2)),
+      clock: () => DateTime(2026, 10, 26, 9),
+    );
+
+/// Four fictional members; Maria (you) lets the server help, the rest stay phone-only.
+ProcessingSnapshot _processing() {
+  final ProcessingSnapshot b = FakeProcessingController.snapshot(
+    lanes: <String, int>{pA: E2ee.lineServer, pB: E2ee.linePhone},
+  );
+  ProcessingMember m(String id, String name, int lane, bool admin, bool me) =>
+      ProcessingMember(
+        userId: id,
+        name: name,
+        lane: lane,
+        verified: true,
+        isMe: me,
+        isAdmin: admin,
+      );
+  return ProcessingSnapshot(
+    circleId: b.circleId,
+    isPrivate: b.isPrivate,
+    policy: b.policy,
+    status: b.status,
+    iAmAdmin: true,
+    serverKeyShort: b.serverKeyShort,
+    serverKeyDigits: b.serverKeyDigits,
+    serverKeyFingerprint: b.serverKeyFingerprint,
+    members: <ProcessingMember>[
+      m(pA, 'Maria', E2ee.lineServer, true, true),
+      m(pB, 'Carlos', E2ee.linePhone, false, false),
+      m(pC, 'Sofia', E2ee.linePhone, false, false),
+      m('44444444-4444-4444-8444-444444444444', 'Mateo', E2ee.linePhone, false, false),
+    ],
+  );
+}
+
+void main() {
+  setUpAll(_loadFonts);
+  setUp(() {
+    SharedPreferences.setMockInitialValues(<String, Object>{
+      'sos_intro_seen': true,
+    });
+    UnitPreferenceService.units.value = UnitSystem.imperial;
+  });
+
+  _shoot('welcome', () => const WelcomeScreen());
+  _shoot('login', () => const LoginScreen());
+  _shoot('create-or-join', () => const CreateOrJoinCircleScreen());
+  _shoot('create-circle', () => const CreateCircleScreen());
+  _shoot('invite', () => const InviteScreen(circleName: _circleName, step: 5));
+  _shoot('permissions', () => const PermissionsScreen());
+  _shoot('circles', () => CirclesScreen(service: _circles()));
+  _shoot('circles', () => CirclesScreen(service: _circles()), dark: true);
+  _shoot(
+    'circle-detail',
+    () => CircleDetailScreen(
+      circle: _circles().circles.first,
+      service: _circles(),
+    ),
+  );
+  _shoot(
+    'people',
+    () => PeopleScreen(
+      circleName: _circleName,
+      members: ValueNotifier<List<Member>>(_family),
+    ),
+  );
+  _shoot('settings', () => const SettingsScreen());
+  _shoot(
+    'security',
+    () => SecurityScreen(
+      api: FakeSecurityApi(
+        account: const AccountInfo(
+          id: 'me',
+          email: 'maria@example.com',
+          role: 'admin',
+          totpEnabled: true,
+        ),
+      ),
+    ),
+  );
+  _shoot(
+    'processing',
+    () => ProcessingScreen(
+      circle: const Circle(
+        id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+        name: _circleName,
+        role: 'admin',
+        sharingEnabled: true,
+        memberCount: 4,
+        e2eeMode: 'private',
+      ),
+      controller: FakeProcessingController(_processing()),
+    ),
+  );
+  _shoot(
+    'processing-policy',
+    () => ProcessingPolicyScreen(
+      circle: const Circle(
+        id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+        name: _circleName,
+        role: 'admin',
+        sharingEnabled: true,
+        memberCount: 4,
+        e2eeMode: 'private',
+      ),
+      controller: FakeProcessingController(_processing()),
+    ),
+  );
+  _shoot('sos', () => SosScreen(smsConfigured: true, dialer: FakeDialer()));
+  _shoot(
+    'check-in',
+    () => CheckInScreen(
+      loadPlaces: () async => <Place>[
+        _p('a', 'Home', 0.001, 'home', '12 Oak Street'),
+        _p('b', 'Maple Elementary', 0.004, 'school', '400 Maple Avenue'),
+      ],
+      loadPosition: () async => const LatLng(0, 0),
+      send: (Map<String, dynamic> b) async => null,
+    ),
+  );
+  _shoot('chat', _chat);
+  _shoot('chat', _chat, dark: true);
+  _shoot(
+    'places',
+    () => PlacesScreen(
+      loader: () async => PlacesSnapshot(places: <Place>[
+        _p('p1', 'Home', 37.78, 'home', '12 Oak Street'),
+        _p('p2', 'Maple Elementary', 37.79, 'school', '400 Maple Avenue'),
+        _p('p3', 'Grandma', 37.80, 'custom', '8 Pine Lane'),
+      ]),
+    ),
+  );
+  _shoot('driving-report', _drivingReport);
+}

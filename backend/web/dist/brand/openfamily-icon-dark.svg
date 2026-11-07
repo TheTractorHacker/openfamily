@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">OpenFamily icon for dark backgrounds</title>
+  <desc id="desc">An open bright-lime location pin surrounding three connected family members.</desc>
+  <path d="M179 49 C165 36 147 28 128 28 C80 28 44 65 44 112 C44 163 87 204 128 230 C169 204 212 163 212 112 C212 94 207 78 198 62" fill="none" stroke="#A3E635" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="198" cy="62" r="10" fill="#D9F99D" stroke="none"/>
+  <path d="M128 88 L100 126 M128 88 L156 126" fill="none" stroke="#F4F5F7" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="128" cy="88" r="13" fill="#F4F5F7" stroke="none"/>
+  <circle cx="100" cy="126" r="12" fill="#F4F5F7" stroke="none"/>
+  <circle cx="156" cy="126" r="12" fill="#F4F5F7" stroke="none"/>
+</svg>

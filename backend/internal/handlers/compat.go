@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -127,7 +128,13 @@ func (s *Server) GetCompat(w http.ResponseWriter, r *http.Request) {
 		v, ok = compat.Parse(r.URL.Query().Get("v"))
 	}
 	info := s.CompatPolicy(r.Context()).Describe(v, ok)
-	writeJSON(w, http.StatusOK, info)
+	// Additive: the server's own release and which app version each feature
+	// needs, so the app can explain "this needs 0.22" without hard-coding it.
+	writeJSON(w, http.StatusOK, struct {
+		compat.Info
+		ServerVersion string            `json:"server_version,omitempty"`
+		Features      map[string]string `json:"features"`
+	}{info, s.BuildVersion, compat.Features})
 }
 
 // compatInfoFor is the same document for embedding in GET /config.
@@ -151,6 +158,11 @@ type adminCompatUser struct {
 	AppVersion string    `json:"app_version"`
 	Platform   string    `json:"platform"`
 	LastSeen   time.Time `json:"last_seen"`
+	// Filled for the per-person list on the App versions page.
+	Status          string   `json:"status,omitempty"`
+	Experience      string   `json:"experience,omitempty"`
+	MissingFeatures []string `json:"missing_features,omitempty"`
+	UpdateMessage   string   `json:"update_message,omitempty"`
 }
 
 // AdminGetCompat reports the policy and which app versions are in use.
@@ -182,13 +194,15 @@ func (s *Server) AdminGetCompat(w http.ResponseWriter, r *http.Request) {
 	rows.Close()
 	sortVersionsDesc(versions)
 
-	// Users whose most recent app version is outside the window.
+	// Every person's most recent app version per platform. People outside the
+	// window also go into outside_window (kept for older admin pages).
 	outside := []adminCompatUser{}
+	people := []adminCompatUser{}
 	urows, err := s.Pool.Query(ctx, `
-		SELECT DISTINCT ON (a.user_id) a.user_id::text, u.name, u.email, a.app_version, a.platform, a.last_seen
+		SELECT DISTINCT ON (a.user_id, a.platform) a.user_id::text, u.name, u.email, a.app_version, a.platform, a.last_seen
 		FROM app_client_versions a JOIN users u ON u.id = a.user_id
 		WHERE a.last_seen > now() - interval '90 days'
-		ORDER BY a.user_id, a.last_seen DESC`)
+		ORDER BY a.user_id, a.platform, a.last_seen DESC`)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to read app versions")
 		return
@@ -200,13 +214,37 @@ func (s *Server) AdminGetCompat(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed to read app versions")
 			return
 		}
-		if pv, ok := compat.Parse(u.AppVersion); ok && p.Classify(pv, ok) == compat.StatusRequired {
+		pv, pok := compat.Parse(u.AppVersion)
+		st := p.Classify(pv, pok)
+		u.Status = string(st)
+		u.Experience = compat.Experience(st, cs.Enforce)
+		if pok {
+			u.MissingFeatures = compat.MissingFeatures(pv)
+		}
+		if st == compat.StatusRequired || st == compat.StatusRecommended {
+			u.UpdateMessage = p.UpdateMessage(u.Name)
+		}
+		people = append(people, u)
+	}
+	urows.Close()
+	sort.SliceStable(people, func(i, j int) bool {
+		a, _ := compat.Parse(people[i].AppVersion)
+		b, _ := compat.Parse(people[j].AppVersion)
+		if c := a.Compare(b); c != 0 {
+			return c < 0 // oldest first: the people who need a nudge
+		}
+		return people[i].Email < people[j].Email
+	})
+	for _, u := range people {
+		if u.Status == string(compat.StatusRequired) {
 			outside = append(outside, u)
 		}
 	}
-	urows.Close()
 	if len(outside) > 100 {
 		outside = outside[:100]
+	}
+	if len(people) > 300 {
+		people = people[:300]
 	}
 
 	var total, withVersion int
@@ -224,7 +262,19 @@ func (s *Server) AdminGetCompat(w http.ResponseWriter, r *http.Request) {
 			"override":              cs.Override,
 			"enforce_writes":        cs.Enforce,
 		},
+		"server": map[string]any{
+			"version":  s.BuildVersion,
+			"release":  p.Latest.String(),
+			"features": compat.Features,
+		},
+		"experience": map[string]string{
+			"ok":          compat.Experience(compat.StatusOK, cs.Enforce),
+			"recommended": compat.Experience(compat.StatusRecommended, cs.Enforce),
+			"required":    compat.Experience(compat.StatusRequired, cs.Enforce),
+			"unknown":     compat.Experience(compat.StatusUnknown, cs.Enforce),
+		},
 		"versions":           versions,
+		"people":             people,
 		"outside_window":     outside,
 		"users_total":        total,
 		"users_with_version": withVersion,

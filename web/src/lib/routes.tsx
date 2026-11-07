@@ -19,6 +19,7 @@ export type RouteKey =
   | 'fleet'
   | 'system'
   | 'builds'
+  | 'documents'
   | 'settings'
 
 export interface RouteDef {
@@ -271,6 +272,20 @@ export const ROUTES: RouteDef[] = [
     icon: icon(
       <path
         d="M12 3v9m0 0 3-3m-3 3L9 9M5 17v2a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    ),
+  },
+  {
+    key: 'documents',
+    label: 'Documents',
+    hash: '#/documents',
+    icon: icon(
+      <path
+        d="M7 4h7l4 4v12H7zM14 4v4h4M10 12h5M10 15.5h5"
         stroke="currentColor"
         strokeWidth="1.6"
         strokeLinecap="round"

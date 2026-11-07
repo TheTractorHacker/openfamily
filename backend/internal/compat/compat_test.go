@@ -166,3 +166,31 @@ func TestContractAdditiveOnly(t *testing.T) {
 		t.Fatal("no fixture inside the support window")
 	}
 }
+
+func TestExperienceAndMessages(t *testing.T) {
+	if !strings.Contains(Experience(StatusRequired, true), "426") || strings.Contains(Experience(StatusRequired, false), "426") {
+		t.Fatal("required experience must mention refusal only when enforcement is on")
+	}
+	for _, st := range []Status{StatusOK, StatusRecommended, StatusRequired, StatusUnknown} {
+		if Experience(st, false) == "" {
+			t.Fatalf("no experience text for %s", st)
+		}
+	}
+	p := Compute("", "")
+	m := p.UpdateMessage("Sofia")
+	if !strings.HasPrefix(m, "Hi Sofia,") || !strings.Contains(m, p.Min.String()) || !strings.Contains(m, p.Latest.String()) {
+		t.Fatalf("message: %s", m)
+	}
+	if !strings.HasPrefix(p.UpdateMessage(""), "Hi,") {
+		t.Fatal("anonymous greeting")
+	}
+}
+
+func TestMissingFeatures(t *testing.T) {
+	if got := MissingFeatures(MustParse("0.14.0")); len(got) != len(Features) {
+		t.Fatalf("0.14 lacks every feature, got %v", got)
+	}
+	if got := MissingFeatures(MustParse("99.0.0")); len(got) != 0 {
+		t.Fatalf("new app lacks nothing, got %v", got)
+	}
+}
