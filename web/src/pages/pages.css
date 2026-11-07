@@ -161,3 +161,8 @@
   .wb-page-header { align-items: stretch; }
   .wb-page-actions { flex-wrap: wrap; }
 }
+.wb-user-table-wrap { overflow-x: auto; max-width: 100%; }
+.wb-settings-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+@media (max-width: 900px) { .wb-settings-grid { grid-template-columns: minmax(0, 1fr); } }
+.wb-info-body { max-width: min(280px, calc(100vw - 80px)); }
+@media (max-width: 600px) { .wb-info { position: static; } .wb-info-body { left: var(--space-4); right: var(--space-4); width: auto; max-width: none; } }

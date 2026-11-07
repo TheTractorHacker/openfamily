@@ -6,6 +6,7 @@
 // sees public keys, wrapped keys and ciphertext. See docs/design/E2EE.md
 // ("Phase 3: web viewer") for what this does and does not protect against.
 
+import { ServerProcessingPanel } from './ServerProcessingPanel'
 import React from 'react'
 import { e2eeHttp, getProfile } from '../lib/api'
 import { getAccessToken } from '../lib/auth'
@@ -98,6 +99,7 @@ export function PrivateCirclesPage() {
           </p>
         </div>
       </div>
+      {isPlatformAdmin && <ServerProcessingPanel />}
       <TrustCard isPlatformAdmin={isPlatformAdmin} defaultOpen={!ctl.meta} />
       <ViewerSetup ctl={ctl} />
       {ctl.unlocked && ctl.meta?.registered ? (

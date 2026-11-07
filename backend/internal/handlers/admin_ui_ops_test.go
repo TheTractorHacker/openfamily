@@ -22,7 +22,7 @@ func callAs(t *testing.T, h http.Handler, method, path, uid, fam string, body an
 	t.Helper()
 	b, _ := json.Marshal(body)
 	req := httptest.NewRequest(method, path, bytes.NewReader(b))
-	req = req.WithContext(middleware.ContextWithClaims(req.Context(), &auth.Claims{UserID: uid, FamilyID: fam}))
+	req = req.WithContext(middleware.ContextWithClaims(req.Context(), &auth.Claims{UserID: uid, SessionID: fam}))
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
 	var out map[string]any
@@ -131,6 +131,10 @@ func TestAdminBulkRevokeSessions(t *testing.T) {
 		if code, _ := callAs(t, r, "POST", "/sessions/bulk-revoke", fx.a, cur, bad); code != 400 {
 			t.Fatalf("bad %v: %d", bad, code)
 		}
+	}
+	// A token without a session id cannot protect the caller: refused.
+	if code, _ := callAs(t, r, "POST", "/sessions/bulk-revoke", fx.a, "", map[string]any{"mode": "inactive", "days": 3}); code != 409 {
+		t.Fatalf("no sid: %d", code)
 	}
 	// Explicit include_current may cut off the caller.
 	code, out = callAs(t, r, "POST", "/sessions/bulk-revoke", fx.a, cur, map[string]any{"mode": "inactive", "days": 1, "user_id": fx.a, "include_current": true, "dry_run": true})

@@ -285,7 +285,7 @@ func (s *Server) AdminListSessions(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed to read sessions")
 			return
 		}
-		o.Current = claims.FamilyID != "" && o.ID == claims.FamilyID
+		o.Current = claims.SessionID != "" && o.ID == claims.SessionID
 		out = append(out, o)
 	}
 	if rows.Err() != nil {
@@ -385,6 +385,12 @@ func (s *Server) AdminBulkRevokeSessions(w http.ResponseWriter, r *http.Request)
 		}
 		uid = req.UserID
 	}
+	if claims.SessionID == "" && !req.IncludeCurrent {
+		// An older access token does not say which sign-in is the caller's, so
+		// the caller's own session cannot be protected: refuse rather than guess.
+		writeError(w, http.StatusConflict, "cannot tell which session is yours; sign in again, then retry")
+		return
+	}
 	// Families that qualify. The caller's own family is skipped unless asked.
 	const target = `
 		SELECT family_id FROM refresh_sessions
@@ -393,7 +399,7 @@ func (s *Server) AdminBulkRevokeSessions(w http.ResponseWriter, r *http.Request)
 		GROUP BY family_id
 		HAVING bool_or(used_at IS NULL AND revoked_at IS NULL AND expires_at > now())
 		   AND ($4 = 0 OR max(created_at) < now() - make_interval(days => $4))`
-	args := []any{uid, claims.FamilyID, req.IncludeCurrent, days}
+	args := []any{uid, claims.SessionID, req.IncludeCurrent, days}
 	if req.DryRun {
 		var n int
 		if err := s.Pool.QueryRow(r.Context(), `SELECT count(*) FROM (`+target+`) t`, args...).Scan(&n); err != nil {

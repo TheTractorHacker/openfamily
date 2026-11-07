@@ -21,7 +21,7 @@ function Sha({ value }: { value?: string }) {
   if (!value) return <span className="wb-audit-sub">Not published</span>
   return (
     <span className="wb-build-sha">
-      <Mono truncate="none" title={value}>{value.slice(0, 12)}…{value.slice(-6)}</Mono>{' '}
+      <Mono truncate="none" title={value}>{`${value.slice(0, 12)}…${value.slice(-6)}`}</Mono>{' '}
       <button type="button" className="wb-build-copy" aria-label="Copy SHA-256"
         onClick={() => void navigator.clipboard?.writeText(value).then(() => { setCopied(true); window.setTimeout(() => setCopied(false), 1500) })}>
         {copied ? 'Copied' : 'Copy'}

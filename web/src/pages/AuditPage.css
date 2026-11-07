@@ -26,3 +26,7 @@
 .wb-sess-grouphead:focus-visible { outline: none; box-shadow: inset 0 0 0 3px var(--ring); }
 .wb-sess-who { display: flex; flex-direction: column; min-width: 0; flex: 1 1 200px; overflow-wrap: anywhere; }
 .wb-sess-table { min-width: 560px; }
+
+.wb-srvproc { display: flex; flex-direction: column; gap: var(--space-3); margin: var(--space-6) 0; }
+.wb-srvproc-head { padding: var(--space-3) var(--space-4); }
+.wb-srvproc-table { min-width: 520px; }

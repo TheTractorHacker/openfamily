@@ -1007,3 +1007,22 @@ export function getMemberDefaults(): Promise<MemberDefaults> {
 export function putMemberDefaults(v: MemberDefaults): Promise<MemberDefaults> {
   return request<MemberDefaults>('/api/admin/settings/member-defaults', { method: 'PUT', body: v })
 }
+
+// ---- Server processing overview (platform admin) ----
+
+export interface ProcessingMember {
+  user_id: string
+  name: string
+  lane: 'server' | 'phone' | 'not_chosen'
+  last_data_at: string | null
+  points_today: number
+  last_private_update_at: string | null
+}
+export interface ProcessingOverview {
+  server_key: { state: 'approved' | 'waiting' | 'none'; device?: string; label?: string }
+  circles: { id: string; name: string; server_assist: boolean; members: ProcessingMember[] }[]
+}
+
+export function getProcessingOverview(): Promise<ProcessingOverview> {
+  return request<ProcessingOverview>('/api/admin/processing-overview')
+}

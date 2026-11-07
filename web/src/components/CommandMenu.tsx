@@ -5,7 +5,8 @@
 
 import React from 'react'
 import { listAllMembers, listFamilies } from '../lib/api'
-import type { RouteKey } from '../lib/routes'
+import { routesFor, type RouteDef, type RouteKey } from '../lib/routes'
+import { useMe } from '../lib/me'
 import type { AdminMember, Family } from '../lib/types'
 import { Kbd, Spinner } from './primitives'
 import './CommandMenu.css'
@@ -17,8 +18,20 @@ interface CommandMenuProps {
 type Result =
   | { kind: 'family'; family: Family }
   | { kind: 'member'; member: AdminMember }
+  | { kind: 'page'; route: RouteDef }
+
+/** Extra search words so settings topics lead to their page. */
+const PAGE_WORDS: Partial<Record<RouteKey, string>> = {
+  settings: 'sessions security privacy processing retention notifications sms twilio map style units theme accent integrations dawarich home assistant updates domain account password',
+  audit: 'sessions revoke sign out log',
+  fleet: 'devices battery permissions push health',
+  system: 'backup database migration health',
+  builds: 'android apk ios ipa download',
+  documents: 'help docs guide manual',
+}
 
 export function CommandMenu({ onNavigate }: CommandMenuProps) {
+  const { isPlatformAdmin } = useMe()
   const [open, setOpen] = React.useState(false)
   const [query, setQuery] = React.useState('')
   const [families, setFamilies] = React.useState<Family[]>([])
@@ -84,7 +97,11 @@ export function CommandMenu({ onNavigate }: CommandMenuProps) {
     ? members.filter((m) => `${m.name} ${m.email}`.toLowerCase().includes(q))
     : members
 
+  const filteredPages = q
+    ? routesFor(isPlatformAdmin).filter((r) => `${r.label} ${PAGE_WORDS[r.key] ?? ''}`.toLowerCase().includes(q))
+    : []
   const results: Result[] = [
+    ...filteredPages.map((route) => ({ kind: 'page' as const, route })),
     ...filteredFamilies.map((family) => ({ kind: 'family' as const, family })),
     ...filteredMembers.map((member) => ({ kind: 'member' as const, member })),
   ]
@@ -95,7 +112,7 @@ export function CommandMenu({ onNavigate }: CommandMenuProps) {
   }, [q, loaded])
 
   const select = (r: Result) => {
-    onNavigate(r.kind === 'family' ? 'families' : 'dashboard')
+    onNavigate(r.kind === 'page' ? r.route.key : r.kind === 'family' ? 'families' : 'dashboard')
     setOpen(false)
     setQuery('')
   }
@@ -160,9 +177,26 @@ export function CommandMenu({ onNavigate }: CommandMenuProps) {
             <div className="wb-cmd-empty">No results for “{query}”</div>
           ) : (
             <>
+              {filteredPages.length > 0 && <div className="wb-cmd-group">Pages and settings</div>}
+              {filteredPages.map((r, i) => (
+                <button
+                  key={r.key}
+                  id={`wb-cmd-opt-${i}`}
+                  type="button"
+                  className="wb-cmd-item"
+                  role="option"
+                  aria-selected={activeIndex === i}
+                  data-active={activeIndex === i}
+                  onMouseEnter={() => setActiveIndex(i)}
+                  onClick={() => select({ kind: 'page', route: r })}
+                >
+                  <span className="wb-cmd-item-name">{r.label}</span>
+                  <span className="wb-cmd-item-meta">Page</span>
+                </button>
+              ))}
               {hasFamilies && <div className="wb-cmd-group">Groups</div>}
               {filteredFamilies.map((f, i) => {
-                const idx = i
+                const idx = filteredPages.length + i
                 return (
                   <button
                     key={f.id}
@@ -182,7 +216,7 @@ export function CommandMenu({ onNavigate }: CommandMenuProps) {
               })}
               {hasMembers && <div className="wb-cmd-group">Members</div>}
               {filteredMembers.map((m, i) => {
-                const idx = filteredFamilies.length + i
+                const idx = filteredPages.length + filteredFamilies.length + i
                 return (
                   <button
                     key={m.id}

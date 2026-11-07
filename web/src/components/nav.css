@@ -60,6 +60,16 @@
   overflow-x: hidden;
 }
 .wb-nav-item { flex: 0 0 auto; }
+.wb-nav-group { display: flex; flex-direction: column; gap: 2px; margin-bottom: var(--space-1, 4px); }
+.wb-nav-group-head {
+  display: flex; justify-content: space-between; align-items: center; width: 100%;
+  background: none; border: 0; cursor: pointer; font: inherit; font-size: 11px; font-weight: 600;
+  letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-faint);
+  padding: var(--space-2) var(--space-3) 2px;
+}
+.wb-nav-group.is-collapsed .wb-nav-item { display: none; }
+.wb-nav-group-head:hover { color: var(--text); }
+.wb-nav-group-head:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: var(--radius-xs); }
 .wb-nav-item {
   position: relative;
   display: flex;
@@ -223,6 +233,8 @@
   .wb-shell {
     grid-template-columns: 64px 1fr;
   }
+  .wb-nav-group-head { display: none; }
+  .wb-nav-group.is-collapsed .wb-nav-item { display: flex; }
   .wb-nav-label,
   .wb-brand-name,
   .wb-brand-sub,

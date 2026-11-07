@@ -364,7 +364,11 @@ func (s *Server) mintTokens(w http.ResponseWriter, user models.User, refreshJTI,
 	if user.FamilyID != nil {
 		familyID = *user.FamilyID
 	}
-	access, err := s.TM.IssueAccessAMR(user.ID, familyID, user.TokenVersion, amr)
+	sid := ""
+	if s.Pool != nil && refreshJTI != "" {
+		_ = s.Pool.QueryRow(context.Background(), `SELECT family_id FROM refresh_sessions WHERE jti = $1`, refreshJTI).Scan(&sid)
+	}
+	access, err := s.TM.IssueAccessSession(user.ID, familyID, user.TokenVersion, amr, sid)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to issue access token")
 		return tokenPair{}, false

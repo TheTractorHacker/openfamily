@@ -587,6 +587,7 @@ func main() {
 		r.Get("/api/admin/members", srv.AdminListMembers)
 		r.Get("/api/admin/fleet", srv.AdminFleetHealth)
 		r.Post("/api/admin/fleet/hide-stale", srv.AdminHideStaleDevices)
+		r.Get("/api/admin/processing-overview", srv.AdminProcessingOverview)
 		r.Get("/api/admin/members/{id}/avatar", srv.GetAdminMemberAvatar)
 		r.Get("/api/admin/members/{id}/history", srv.AdminGetMemberHistory)
 		r.Get("/api/admin/members/{id}/history/export", srv.AdminExportMemberHistory)
