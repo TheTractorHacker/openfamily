@@ -69,7 +69,7 @@ jobs:
           if [ -e "$APP/embedded.mobileprovision" ]; then echo "unexpected provisioning profile"; exit 1; fi
           rm -rf ../dist _ipa && mkdir -p ../dist _ipa/Payload
           cp -R "$APP" _ipa/Payload/Runner.app
-          OUT="$PWD/../dist/openfamily-$V-unsigned.ipa"
+          OUT="$PWD/../dist/orbitly-$V-unsigned.ipa"
           (cd _ipa && zip -qry "$OUT" Payload)
           unzip -l "$OUT" | grep -q 'Payload/Runner.app/Info.plist'
           (cd ../dist && shasum -a 256 "orbitly-$V-unsigned.ipa" | tee "orbitly-$V-unsigned.ipa.sha256")
@@ -88,7 +88,7 @@ jobs:
   # repository's release for that tag.
   attach:
     needs: ipa
-    if: github.ref_type == 'tag' && (github.repository == 'TheTractorHacker/orbitly' || github.repository == 'TheTractorHacker/orbitly')
+    if: github.ref_type == 'tag' && startsWith(github.repository, 'TheTractorHacker/')
     runs-on: ubuntu-latest
     timeout-minutes: 75
     permissions:
@@ -118,9 +118,9 @@ jobs:
             echo "release $TAG not there yet ($i/60)"; sleep 60
           done
           gh release view "$TAG" --repo "$REPO" >/dev/null
-          SHA=$(cut -d' ' -f1 "dist/openfamily-$V-unsigned.ipa.sha256")
+          SHA=$(cut -d' ' -f1 "dist/orbitly-$V-unsigned.ipa.sha256")
           gh release upload "$TAG" --repo "$REPO" --clobber \
-            "dist/openfamily-$V-unsigned.ipa" "dist/openfamily-$V-unsigned.ipa.sha256"
+            "dist/orbitly-$V-unsigned.ipa" "dist/orbitly-$V-unsigned.ipa.sha256"
           NOTES=$(gh release view "$TAG" --repo "$REPO" --json body -q .body)
           case "$NOTES" in *"orbitly-$V-unsigned.ipa"*) exit 0;; esac
           gh release edit "$TAG" --repo "$REPO" --notes "$NOTES

@@ -10,6 +10,12 @@ for the **last 5 minor versions** of the app (see
 [API compatibility](api-compat.md)), so you can update the server first and
 the phones afterwards.
 
+## v0.24.1 (2026-11-08)
+
+- Build fix: the v0.24.0 release files were not produced because of a file-name
+  mismatch in the build scripts. Same app and server as v0.24.0, now with the
+  `orbitly-<version>.apk`, `.aab` and iPhone files attached.
+
 ## v0.24.0 (2026-11-08)
 
 **Orbitly.** 

@@ -137,12 +137,12 @@ jobs:
           set -euo pipefail
           V='${{ steps.ver.outputs.name }}'
           mkdir -p dist
-          cp sbom.spdx.json "dist/openfamily-$V.spdx.json"
-          cp app/build/app/outputs/flutter-apk/app-release.apk "dist/openfamily-$V.apk"
-          cp app/build/app/outputs/bundle/release/app-release.aab "dist/openfamily-$V.aab"
+          cp sbom.spdx.json "dist/orbitly-$V.spdx.json"
+          cp app/build/app/outputs/flutter-apk/app-release.apk "dist/orbitly-$V.apk"
+          cp app/build/app/outputs/bundle/release/app-release.aab "dist/orbitly-$V.aab"
           (cd dist && sha256sum "orbitly-$V.apk" "orbitly-$V.aab" "orbitly-$V.spdx.json" > SHA256SUMS.txt && cat SHA256SUMS.txt)
           BT="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)"
-          "$BT/apksigner" verify --print-certs "dist/openfamily-$V.apk" | grep -i 'SHA-256'
+          "$BT/apksigner" verify --print-certs "dist/orbitly-$V.apk" | grep -i 'SHA-256'
 
       - name: Remove signing material
         if: always()
