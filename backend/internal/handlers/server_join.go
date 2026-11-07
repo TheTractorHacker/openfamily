@@ -119,6 +119,6 @@ func (s *Server) NotifyServerJoinWaiting(ctx context.Context) {
 	}
 	rows.Close()
 	if len(ids) > 0 {
-		s.pushUsers(ctx, ids, "Your server wants to join", "Open OpenFamily and check that the code matches, then tap Approve.")
+		s.pushUsers(ctx, ids, "Your server wants to join", "Open Orbitly and check that the code matches, then tap Approve.")
 	}
 }

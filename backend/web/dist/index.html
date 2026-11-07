@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Mirrors --paper. A meta tag cannot read a custom property. -->
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#EEF2F6" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#1C1E22" />
+    <link rel="icon" type="image/svg+xml" href="/admin/favicon.svg" />
+    <link rel="icon" type="image/x-icon" sizes="any" href="/admin/favicon.ico" />
+    <link rel="manifest" href="/admin/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/admin/brand/orbitly-touch-icon.png" />
+    <meta property="og:image" content="https://life.foleyit.com/admin/brand/orbitly-social-card.png" />
+    <title>Orbitly Admin</title>
+    <script>
+      (function () {
+        var pref = 'system'
+        try { pref = localStorage.getItem('wb-theme') || 'system' } catch (e) {}
+        var dark = pref === 'dark' || (pref !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches)
+        document.documentElement.dataset.theme = dark ? 'dark' : 'light'
+        document.documentElement.style.colorScheme = dark ? 'dark' : 'light'
+      })()
+    </script>
+    <script type="module" crossorigin src="/admin/assets/index-Cc_iemvO.js"></script>
+    <link rel="stylesheet" crossorigin href="/admin/assets/index-DTEZs3x7.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>

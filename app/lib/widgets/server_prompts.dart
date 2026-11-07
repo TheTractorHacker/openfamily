@@ -72,8 +72,8 @@ enum ServerPromptKind { none, memberChoice, adminSetup }
 
 /// The copy-paste message for members whose app is too old to choose.
 String updateMessageText(String serverHost) =>
-    'Please update the OpenFamily app so you show up on our family map again. '
-    'Open the Play Store and update OpenFamily, or, if you installed it from the website, download the new version at '
+    'Please update the Orbitly app so you show up on our family map again. '
+    'Open the Play Store and update Orbitly, or, if you installed it from the website, download the new version at '
     '${serverHost.isEmpty ? 'our server' : serverHost}/app.apk and install it.';
 
 class ServerPrompts extends StatelessWidget {
@@ -272,7 +272,7 @@ class UpdateCard extends StatelessWidget {
           child: Padding(
             padding: const EdgeInsets.all(12),
             child: Text(
-              'Update available${st.latest.isEmpty ? '' : ' (${st.latest})'}. Update OpenFamily in the Play Store, or, if you installed it from your server, download it again at ${serverHost.isEmpty ? 'your server' : serverHost}/app.apk. Your current version keeps working.',
+              'Update available${st.latest.isEmpty ? '' : ' (${st.latest})'}. Update Orbitly in the Play Store, or, if you installed it from your server, download it again at ${serverHost.isEmpty ? 'your server' : serverHost}/app.apk. Your current version keeps working.',
               style: TextStyle(color: cs.onSecondaryContainer),
             ),
           ),

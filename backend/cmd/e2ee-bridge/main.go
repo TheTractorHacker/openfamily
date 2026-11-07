@@ -1,5 +1,5 @@
 // Command e2ee-bridge is the standalone sidecar: a circle member device that
-// exports Private circles to Dawarich, or acts as the OpenFamily server's own
+// exports Private circles to Dawarich, or acts as the Orbitly server's own
 // device. The logic lives in internal/e2eebridge, shared with the API's
 // built-in server device. See README.md.
 package main

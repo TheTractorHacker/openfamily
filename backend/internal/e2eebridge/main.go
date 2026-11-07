@@ -1,7 +1,7 @@
 // Package e2eebridge is the logic of the e2ee-bridge sidecar (cmd/e2ee-bridge)
-// and of the OpenFamily server's built-in device (embedded.go): a circle device
+// and of the Orbitly server's built-in device (embedded.go): a circle device
 // that pulls, verifies and decrypts what the circle allows it to read and hands it
-// to Dawarich (bridge) or to the OpenFamily API (server device).
+// to Dawarich (bridge) or to the Orbitly API (server device).
 //
 // RUN THE DAWARICH BRIDGE OFF THE OPENFAMILY SERVER HOST: whoever runs it can read
 // the circle. See cmd/e2ee-bridge/README.md. The server device is the one
@@ -24,17 +24,17 @@ import (
 	"github.com/TheTractorHacker/openfamily/backend/internal/e2ee"
 )
 
-const usageText = `e2ee-bridge - export Private (end-to-end encrypted) OpenFamily circles to your own Dawarich
+const usageText = `e2ee-bridge - export Private (end-to-end encrypted) Orbitly circles to your own Dawarich
 
-IMPORTANT: run this program OFF the OpenFamily server host (a home server, a
+IMPORTANT: run this program OFF the Orbitly server host (a home server, a
 NAS, a Raspberry Pi). Whoever runs it holds a circle member's keys and can read
-every position of the circles it joins. Running it next to the OpenFamily server
+every position of the circles it joins. Running it next to the Orbitly server
 removes the point of end-to-end encryption. It never logs keys, coordinates,
 tokens or passwords.
 
 SERVER MODE (enroll --kind server, config "mode": "server"): this program is the
-OpenFamily server's own device. It decrypts circles whose members ALL consented on
-their phones and hands the positions to the OpenFamily API, so the server CAN read
+Orbitly server's own device. It decrypts circles whose members ALL consented on
+their phones and hands the positions to the Orbitly API, so the server CAN read
 them and keeps plaintext. Running it next to the server is then the point. See
 docs/design/E2EE.md "Trusted-server mode".
 
@@ -53,8 +53,8 @@ Common flags:
   --passphrase-file FILE seal keys/session with the passphrase in FILE
                          (env E2EE_BRIDGE_PASSPHRASE also works)
 
-Environment: E2EE_BRIDGE_PASSWORD (OpenFamily password; otherwise read from stdin),
-E2EE_SERVER_INGEST_TOKEN (server mode: shared secret with the OpenFamily API),
+Environment: E2EE_BRIDGE_PASSWORD (Orbitly password; otherwise read from stdin),
+E2EE_SERVER_INGEST_TOKEN (server mode: shared secret with the Orbitly API),
 E2EE_BRIDGE_DAWARICH_KEY (main Dawarich API key).
 
 Exit codes: 0 ok / clean shutdown, 1 error, 2 usage or config, 3 bridge revoked or
@@ -109,11 +109,11 @@ func realMain(ctx context.Context, args []string, env func(string) string, stdin
 	fs.Usage = func() { fmt.Fprint(stderr, usageText) }
 	stateDir := fs.String("state-dir", defaultStateDir(env), "state directory")
 	passFile := fs.String("passphrase-file", env("E2EE_BRIDGE_PASSPHRASE_FILE"), "file holding the state passphrase")
-	server := fs.String("server", "", "OpenFamily server URL")
-	email := fs.String("email", "", "OpenFamily account email (login)")
+	server := fs.String("server", "", "Orbitly server URL")
+	email := fs.String("email", "", "Orbitly account email (login)")
 	totp := fs.String("totp", "", "TOTP code, if the account uses one")
 	name := fs.String("name", "", "display name of this bridge (max 40 chars)")
-	kind := fs.String("kind", "", `enroll: "service" (Dawarich bridge, default) or "server" (the OpenFamily server's own device)`)
+	kind := fs.String("kind", "", `enroll: "service" (Dawarich bridge, default) or "server" (the Orbitly server's own device)`)
 	approval := fs.String("approval", "", "approval code from the phone")
 	cfgPath := fs.String("config", "", "bridge config file (run)")
 	once := fs.Bool("once", false, "run a single pass and exit")
@@ -292,7 +292,7 @@ func (a *app) cmdRun(ctx context.Context, cfgPath string, once bool) int {
 	b.sink.setBackoff(a.bo)
 	if ss, ok := b.sink.(*serverSink); ok {
 		if err := ss.pin(ctx); err != nil {
-			return fail(fmt.Errorf("could not register this key as the OpenFamily server device: %w", err))
+			return fail(fmt.Errorf("could not register this key as the Orbitly server device: %w", err))
 		}
 	}
 	return b.loop(ctx, time.Duration(cfg.PollSeconds)*time.Second, once)

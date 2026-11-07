@@ -1,6 +1,6 @@
 # Server setup: adding your own server to a circle
 
-This page is for the person who runs the OpenFamily server for their family. It takes about five minutes
+This page is for the person who runs the Orbitly server for their family. It takes about five minutes
 and has three steps: **pick where the server runs, approve on your phone, install the apps and invite family**.
 The server keeps **history, driving reports, trips and the map** for everyone by default; privacy-conscious
 members choose "Keep on my phone".
@@ -20,7 +20,7 @@ The choice changes advice and defaults only. Nobody is added to anything by it.
 
 ### Rented server: protect the disk
 
-* Turn on **full-disk or volume encryption** (LUKS, or your provider's encrypted volume). OpenFamily cannot see
+* Turn on **full-disk or volume encryption** (LUKS, or your provider's encrypted volume). Orbitly cannot see
   your disk, so it cannot check this for you.
 * Set `OPENFAMILY_DATA_KEY` (`./scripts/setup.sh` does this for a rented server). It encrypts stored secrets
   (SMS token, webhook secrets) in the database. **Keep a copy outside the server**, for example in a password
@@ -60,7 +60,7 @@ own server's address.
 
 Cloud and security-minded operators can keep the key in a separate container, away from the database. Set
 `E2EE_SERVER_INGEST_TOKEN` (or `OPENFAMILY_SERVER_DEVICE=sidecar`) and follow the commands under
-**Details** on the Server setup card, or [the sidecar README](https://github.com/TheTractorHacker/openfamily/blob/main/backend/cmd/e2ee-bridge/README.md). The
+**Details** on the Server setup card, or [the sidecar README](https://github.com/TheTractorHacker/orbitly/blob/main/backend/cmd/e2ee-bridge/README.md). The
 built-in device is then switched off (`OPENFAMILY_SERVER_DEVICE=auto` decides; `builtin`, `sidecar` and `off`
 force it).
 

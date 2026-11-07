@@ -1491,6 +1491,11 @@ func (s *Server) notifyCircleNormalMode(ctx context.Context, actor, circleID str
 	if len(ids) == 0 {
 		return
 	}
+	// The circle name only goes to the push provider when the operator opted into verbose push.
+	circleLabel := "A circle"
+	if s.VerbosePush && name != "" {
+		circleLabel = name
+	}
 	go s.pushUsers(context.WithoutCancel(ctx), ids, "A circle is back in normal mode",
-		"An admin switched "+name+" to normal mode. The server now keeps its locations so maps, history and driving reports work.")
+		"An admin switched "+circleLabel+" to normal mode. The server now keeps its locations so maps, history and driving reports work.")
 }

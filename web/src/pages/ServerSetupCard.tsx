@@ -54,7 +54,7 @@ export function ServerKeyWords({ device }: { device: NonNullable<DeploymentState
       </details>
       <div className="wb-ss-qr" dangerouslySetInnerHTML={{ __html: svg }} role="img" aria-label="QR code of the full server key" />
       <p className="wb-help">
-        The QR holds the full code as text, so you can read it with any phone camera and compare. The OpenFamily app
+        The QR holds the full code as text, so you can read it with any phone camera and compare. The Orbitly app
         shows these same four groups when you tap &ldquo;Add server&rdquo;.
       </p>
     </div>
@@ -186,7 +186,7 @@ function ManualRoute({ state }: { state: DeploymentState }) {
         server.
       </p>
       <label className="wb-ss-field">
-        Your OpenFamily login email (the server admin)
+        Your Orbitly login email (the server admin)
         <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.org" />
       </label>
       <Cmd label="1. Switch on the key container" text={cmds.token} />
@@ -279,11 +279,11 @@ export function ServerSetupCard() {
               {s.key === 'approve' && !s.done && waiting && state.builtin && (
                 <div data-testid="server-join-code">
                   <p className="wb-help">
-                    Open OpenFamily on your phone (you get a message &ldquo;Your server wants to join&rdquo;; if not,
+                    Open Orbitly on your phone (you get a message &ldquo;Your server wants to join&rdquo;; if not,
                     the same prompt shows at the top of the app). It must show this code:
                   </p>
                   <ServerKeyWords
-                    device={{ device_id: '', label: 'OpenFamily server', fingerprint: state.builtin.fingerprint, short: state.builtin.short, digits: state.builtin.digits }}
+                    device={{ device_id: '', label: 'Orbitly server', fingerprint: state.builtin.fingerprint, short: state.builtin.short, digits: state.builtin.digits }}
                   />
                 </div>
               )}

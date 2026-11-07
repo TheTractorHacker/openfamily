@@ -124,7 +124,7 @@ func OpenEmbedded(opt EmbeddedOptions) (*Embedded, error) {
 	e := &Embedded{opt: opt, st: st, log: opt.Log.With("component", "server-device"), state: StateWaitingApproval, pass: len(pass) > 0}
 	id, err := st.loadIdentity()
 	if errors.Is(err, errNotFound) {
-		id, err = st.createIdentity("OpenFamily server")
+		id, err = st.createIdentity("Orbitly server")
 		if err == nil {
 			id.f.Kind = "server"
 			err = st.saveIdentity(id)

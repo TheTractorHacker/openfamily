@@ -10,41 +10,9 @@ for the **last 5 minor versions** of the app (see
 [API compatibility](api-compat.md)), so you can update the server first and
 the phones afterwards.
 
-## Next release: new name, Orbitly
+## v0.24.0 (2026-11-08)
 
-- **OpenFamily is now Orbitly.** The app, the admin web, the notifications and
-  the docs use the new name, logo and icon. The project is for any circle of
-  people, family and friends alike. Nothing to migrate: your server, accounts,
-  circles and app installs keep working, and the app updates in place (the
-  Android and iOS package ids and the signing key are unchanged).
-- **About screens.** Settings, About in the app and in the admin web show the
-  version, the credit "Based on OpenFamily by wheresfrank and contributors
-  (AGPL-3.0)", a link to the source code and the open-source licenses. See
-  [Credits and license](about/credits-and-license.md).
-- **Release files** are now named `orbitly-<version>.apk` (and `.aab`,
-  `.spdx.json`); older releases keep their `openfamily-` names and the server
-  downloads either. If you filter releases in Obtainium by name, use `orbitly`.
-  Some internal names keep "openfamily" on purpose: see [Naming](developers/naming.md).
-
-## v0.23.0 (2026-11-08)
-
-- **"Why can't I see everyone?"** In Private circles the app now says why a
-  person has no location (their phone has not sent an update, has not received
-  the key, needs the app updated, or paused sharing) and has a one-tap fix.
-  The phone fetches its circle key on its own, sends a first position as soon
-  as the app opens, and no longer drops queued updates while offline.
-- **Add the server in three taps**: add, compare the four code groups, OK.
-  The admin picks a **home** or **cloud** server profile in Settings; the app
-  uses it to suggest the right default.
-- **Encrypted chat** in Private circles: messages, edits, deletes and photos go
-  phone to phone and never to the server's processing. Old plaintext history
-  stays readable and an admin can delete it.
-- **Documents** page in the admin site, with the guides and screenshots that
-  ship with the server, plus an **App versions** card showing who needs to
-  update.
-- Works with app versions 0.19 to 0.23. Chat encryption needs app 0.23.
-
-## Unreleased
+**Orbitly.** 
 
 - **The server does the processing by default.** New circles are Normal (the
   server keeps locations so maps, history and driving reports just work). Private
@@ -66,6 +34,47 @@ the phones afterwards.
   explanation of what is deleted and who is told.
 - New Docker volume `server_device` for the server's key (back it up with the
   database). `OPENFAMILY_SERVER_DEVICE` chooses built-in, sidecar or off.
+- **Smoother app in Private circles.** Decrypting updates no longer blocks the
+  screen, a catch-up draws two map frames instead of hundreds, and each person's
+  last known position is remembered on the phone, so a cold start is never blank.
+  Phone-side driving reports are now an opt-in switch (off by default).
+- **Phone health reports arrive.** The admin Fleet page shows the real app
+  version, OS, battery and permission state, and treats a Private-circle phone
+  that is sending encrypted updates as alive.
+
+- **OpenFamily is now Orbitly.** The app, the admin web, the notifications and
+  the docs use the new name, logo and icon. The project is for any circle of
+  people, family and friends alike. Nothing to migrate: your server, accounts,
+  circles and app installs keep working, and the app updates in place (the
+  Android and iOS package ids and the signing key are unchanged).
+- **About screens.** Settings, About in the app and in the admin web show the
+  version, the credit "Based on OpenFamily by wheresfrank and contributors
+  (AGPL-3.0)", a link to the source code and the open-source licenses. See
+  [Credits and license](about/credits-and-license.md).
+- **Release files** are now named `orbitly-<version>.apk` (and `.aab`,
+  `.spdx.json`); older releases keep their `openfamily-` names and the server
+  downloads either. If you filter releases in Obtainium by name, use `orbitly`.
+  Some internal names keep "openfamily" on purpose: see [Naming](developers/naming.md).
+
+- Works with app versions 0.20 to 0.24.
+
+## v0.23.0 (2026-11-08)
+
+- **"Why can't I see everyone?"** In Private circles the app now says why a
+  person has no location (their phone has not sent an update, has not received
+  the key, needs the app updated, or paused sharing) and has a one-tap fix.
+  The phone fetches its circle key on its own, sends a first position as soon
+  as the app opens, and no longer drops queued updates while offline.
+- **Add the server in three taps**: add, compare the four code groups, OK.
+  The admin picks a **home** or **cloud** server profile in Settings; the app
+  uses it to suggest the right default.
+- **Encrypted chat** in Private circles: messages, edits, deletes and photos go
+  phone to phone and never to the server's processing. Old plaintext history
+  stays readable and an admin can delete it.
+- **Documents** page in the admin site, with the guides and screenshots that
+  ship with the server, plus an **App versions** card showing who needs to
+  update.
+- Works with app versions 0.19 to 0.23. Chat encryption needs app 0.23.
 
 ## v0.22.1 (2026-11-07)
 
