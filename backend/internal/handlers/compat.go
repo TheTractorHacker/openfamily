@@ -85,6 +85,19 @@ func applyCircleCompat(ctx context.Context, c *circleOut) {
 		c.UpdateRequired = true
 		c.Name += " (update the app to open this private circle)"
 	}
+	// A circle whose key log holds processing entries (per-member lanes) cannot be
+	// verified by an app below processing_lanes: it must update, not show a blank circle.
+	if c.hasLanesLog {
+		if v := compat.Features["processing_lanes"]; c.MinAppVersion == "" || compat.MustParse(c.MinAppVersion).Less(compat.MustParse(v)) {
+			c.MinAppVersion = v
+		}
+		if !compatSupports(ctx, "processing_lanes") {
+			c.UpdateRequired = true
+			if !strings.Contains(c.Name, "(update the app") {
+				c.Name += " (update the app to open this private circle)"
+			}
+		}
+	}
 }
 
 // refuseUnsupportedApp answers 426 Upgrade Required to an app below the

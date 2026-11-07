@@ -26,6 +26,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/TheTractorHacker/openfamily/backend/internal/compat"
 	"github.com/TheTractorHacker/openfamily/backend/internal/e2ee"
 )
 
@@ -1263,11 +1264,21 @@ func (s *Server) InvitePreview(w http.ResponseWriter, r *http.Request) {
 const codeUpdateRequired = "update_required_for_lanes"
 
 func writeUpdateRequired(w http.ResponseWriter, notReady []string) {
+	// Consistent with the compat shims (circles.go applyCircleCompat): update_required
+	// and min_app_version name the first app version that supports processing lanes.
 	writeJSON(w, http.StatusConflict, map[string]any{
-		"error":     "Update OpenFamily to continue: this circle uses privacy controls that your app version does not support.",
-		"code":      codeUpdateRequired,
-		"not_ready": nonNil(notReady),
+		"error":            "Update OpenFamily to continue: this circle uses privacy controls that your app version does not support.",
+		"code":             codeUpdateRequired,
+		"not_ready":        nonNil(notReady),
+		"update_required":  true,
+		"min_app_version":  compat.Features["processing_lanes"],
 	})
+}
+
+// isUpdateRequiredErr recognises the database guard triggers (migration 000220), the
+// authoritative check when a concurrent change slipped past a handler pre-check.
+func isUpdateRequiredErr(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "e2ee_update_required_for_lanes")
 }
 
 // devicesLackingLanes2 lists live members of the circle who have an active phone
