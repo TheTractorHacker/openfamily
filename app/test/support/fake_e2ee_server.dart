@@ -127,6 +127,9 @@ class FakeCircle {
   /// Old trusted-server mode (server_legacy_ck): the circle can be upgraded by its admin.
   bool legacy = false;
   bool endedLegacyAccess = false;
+
+  /// Upgraded circle whose server key still holds wraps of the old phone-key epochs.
+  bool legacyAccessOpen = false;
 }
 
 class FakeE2eeClient implements E2eeApi {
@@ -417,6 +420,7 @@ class FakeE2eeClient implements E2eeApi {
       rekeyRequired: c.skRekey,
       inEffect: srv != null && c.assist && c.skWraps.containsKey('${c.skGen}/${srv.deviceId}'),
       legacy: c.legacy,
+      legacyAccessOpen: c.legacyAccessOpen,
     );
   }
 
@@ -425,6 +429,7 @@ class FakeE2eeClient implements E2eeApi {
     final FakeCircle c = s.circles[circleId]!;
     if (c.admin != uid) throw StateError('403');
     c.endedLegacyAccess = true;
+    c.legacyAccessOpen = false;
   }
 
   @override
@@ -435,6 +440,7 @@ class FakeE2eeClient implements E2eeApi {
     final Map<String, dynamic> pol = (body['policy'] as Map<String, dynamic>);
     await _epoch(circleId, <String, dynamic>{...body, 'wraps': body['epoch_wraps']}, E2ee.actEpoch, enabling: false);
     c.legacy = false;
+    c.legacyAccessOpen = true;
     await putProcessingPolicy(circleId, pol);
   }
 
@@ -449,12 +455,6 @@ class FakeE2eeClient implements E2eeApi {
           if (d.kind != 'server' && !c.skWraps.containsKey('${c.skGen}/${d.deviceId}')) _withApproval(d, s.approved(d, circleId), s.names[m])
     ];
   }
-
-  @override
-  Future<PolicyStatement?> getProcessingPolicy(String circleId) async => s.circles[circleId]!.policy;
-
-  @override
-  Future<PrefStatement?> getProcessingPref(String circleId) async => s.circles[circleId]!.prefs[uid];
 
   bool _hasServerPref(FakeCircle c) => c.prefs.values.any((PrefStatement p) => p.lane == E2ee.lineServer);
 

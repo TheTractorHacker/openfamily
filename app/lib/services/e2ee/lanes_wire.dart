@@ -204,6 +204,7 @@ class ProcessingServerState {
     this.rekeyRequired = false,
     this.inEffect = false,
     this.legacy = false,
+    this.legacyAccessOpen = false,
   });
 
   static const ProcessingServerState off = ProcessingServerState();
@@ -230,6 +231,9 @@ class ProcessingServerState {
   /// `legacy`: the circle is still in the old trusted-server mode (the server
   /// holds the phone key of some epochs). An admin can upgrade it.
   final bool legacy;
+
+  /// `legacy_access_open`: an upgraded circle whose server key still holds the old phone-key epochs.
+  final bool legacyAccessOpen;
 
   factory ProcessingServerState.fromJson(Map<String, dynamic> j) {
     final Object? sd = j['device'];
@@ -260,6 +264,7 @@ class ProcessingServerState {
       rekeyRequired: polMap['rekey_required'] == true,
       inEffect: j['in_effect'] == true,
       legacy: j['legacy'] == true,
+      legacyAccessOpen: j['legacy_access_open'] == true,
     );
   }
 
