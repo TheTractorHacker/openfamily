@@ -3,6 +3,8 @@ import 'dart:typed_data';
 import 'package:openfamily/services/e2ee/e2ee_api.dart';
 import 'package:openfamily/services/e2ee/e2ee_crypto.dart';
 import 'package:openfamily/services/e2ee/e2ee_models.dart';
+import 'package:openfamily/services/e2ee/lanes_wire.dart';
+import 'package:openfamily/services/e2ee/private_channel.dart';
 
 /// An in-memory stand-in for the Go server's E2EE endpoints. It keeps the same
 /// rules that matter to the client (signatures are checked, wraps only to
@@ -24,6 +26,15 @@ class FakeE2eeServer {
   bool serverModeEnabled = false;
   String? pinnedServerDevice;
 
+  /// Server clock (tests that use a fake clock set this to it).
+  DateTime Function() now = () => DateTime.now().toUtc();
+
+  /// Users whose registrations lose their `caps` (an app that predates lanes).
+  final Set<String> oldAppUsers = <String>{};
+
+  /// Every wrap the server ever accepted, as "line/gen/recipient" (never removed).
+  final List<String> acceptedWraps = <String>[];
+
   FakeCircle circle(String id, {required List<String> members, required String admin}) =>
       circles[id] = FakeCircle(id, members, admin);
 
@@ -38,6 +49,18 @@ class FakeE2eeServer {
       'action': action, 'user': userId, 'actor': actor, 'pub': actorPub, 'circle': circleId,
       'subject': subjectId, 'epoch': epoch, 'ref': ref ?? Uint8List(32), 'sig': sig,
     });
+  }
+
+  /// A member leaves or is removed: their wraps (both lines) and prefs go and the circle asks for a rekey.
+  void removeMember(String circleId, String userId) {
+    final FakeCircle c = circles[circleId]!;
+    final Set<String> devs = <String>{for (final DeviceKey d in activeOf(userId)) d.deviceId};
+    c.members.remove(userId);
+    c.wraps.removeWhere((String _, WrapRecord w) => devs.contains(w.recipientDeviceId));
+    c.skWraps.removeWhere((String _, WrapRecord w) => devs.contains(w.recipientDeviceId));
+    c.prefs.remove(userId);
+    c.rekey = true;
+    if (c.assist) c.skRekey = true;
   }
 
   List<DeviceKey> activeOf(String user) => (keys[user] ?? <DeviceKey>[]).where((DeviceKey k) => k.isActive).toList();
@@ -89,6 +112,17 @@ class FakeCircle {
   /// Trusted-server mode: user -> {approver_device_id, signature}.
   final Map<String, ({String dev, Uint8List sig})> serverConsents = <String, ({String dev, Uint8List sig})>{};
   final List<String> serverPurges = <String>[];
+
+  // ---- processing lanes (the server side of docs/design/PRIVACY_PROCESSING.md) ----
+  PolicyStatement? policy;
+  final List<PolicyStatement> policyHistory = <PolicyStatement>[];
+  bool assist = false;
+  int skGen = 0;
+  final Map<String, PrefStatement> prefs = <String, PrefStatement>{}; // user -> latest
+  final Map<String, WrapRecord> skWraps = <String, WrapRecord>{}; // "gen/recipient"
+
+  /// The server line key must rotate (member removed / key revoked); cleared by a new generation.
+  bool skRekey = false;
 }
 
 class FakeE2eeClient implements E2eeApi {
@@ -112,6 +146,7 @@ class FakeE2eeClient implements E2eeApi {
         initial: initial,
         label: (b['label'] as String?) ?? '',
         createdAt: DateTime.now().toUtc(),
+        caps: s.oldAppUsers.contains(uid) || b['caps'] is! List ? const <String>[] : (b['caps'] as List<dynamic>).cast<String>(),
       );
 
   @override
@@ -160,7 +195,7 @@ class FakeE2eeClient implements E2eeApi {
         fingerprint: k.fingerprint, digits: k.digits, short: k.short,
         registeredByDeviceId: k.registeredByDeviceId, registeredByPub: k.registeredByPub,
         registrationAction: k.registrationAction, registrationSignature: k.registrationSignature,
-        initial: k.initial, label: k.label, createdAt: k.createdAt, revokedAt: DateTime.now().toUtc(), revokedReason: 'revoked');
+        initial: k.initial, label: k.label, createdAt: k.createdAt, revokedAt: DateTime.now().toUtc(), revokedReason: 'revoked', caps: k.caps);
 
   @override
   Future<List<DeviceKey>> myKeys() async => List<DeviceKey>.of(s.keys[uid] ?? <DeviceKey>[]);
@@ -173,7 +208,9 @@ class FakeE2eeClient implements E2eeApi {
     l[i] = _revoked(l[i]);
     for (final FakeCircle c in s.circles.values) {
       c.wraps.removeWhere((String _, WrapRecord w) => w.recipientDeviceId == deviceId);
+      c.skWraps.removeWhere((String _, WrapRecord w) => w.recipientDeviceId == deviceId);
       if (c.mode == 'private') c.rekey = true;
+      if (c.assist) c.skRekey = true;
     }
   }
 
@@ -246,14 +283,17 @@ class FakeE2eeClient implements E2eeApi {
         fingerprint: d.fingerprint, digits: d.digits, short: d.short, registeredByDeviceId: d.registeredByDeviceId,
         registeredByPub: d.registeredByPub, registrationAction: d.registrationAction,
         registrationSignature: d.registrationSignature, initial: d.initial, label: d.label,
-        createdAt: d.createdAt, approved: ok, userName: name);
+        createdAt: d.createdAt, approved: ok, userName: name, caps: d.caps);
 
   @override
   Future<List<WrapRecord>> myWraps(String circleId, String deviceId) async {
     final FakeCircle c = s.circles[circleId]!;
     final DeviceKey? d = s.findActive(deviceId);
     if (d == null || d.userId != uid) return <WrapRecord>[];
-    return c.wraps.values.where((WrapRecord w) => w.recipientDeviceId == deviceId).toList();
+    return <WrapRecord>[
+      ...c.wraps.values.where((WrapRecord w) => w.recipientDeviceId == deviceId),
+      ...c.skWraps.values.where((WrapRecord w) => w.recipientDeviceId == deviceId),
+    ];
   }
 
   @override
@@ -270,6 +310,7 @@ class FakeE2eeClient implements E2eeApi {
     for (final Map<String, dynamic> w in wraps) {
       final DeviceKey r = s.findActive(w['recipient_device_id'] as String)!;
       if (!c.members.contains(r.userId)) throw StateError('recipient not a member');
+      if (r.kind == 'server') throw StateError('403 the phone key line is never wrapped to a server key'); // mirrors the DB trigger
       if (!s.approved(r, c.id)) throw StateError('waiting for approval');
       if (r.userId != uid && c.epochRecords[epoch]?.publisherUserId != uid) {
         throw StateError('only the epoch publisher may wrap for other members');
@@ -349,6 +390,169 @@ class FakeE2eeClient implements E2eeApi {
     c.approvals.add(d.deviceId);
   }
 
+  // ------------------------------------------------------ processing lanes
+
+  DeviceKey? _serverDevice() => s.pinnedServerDevice == null ? null : s.findActive(s.pinnedServerDevice!);
+
+  @override
+  Future<ProcessingServerState> processingState(String circleId) async {
+    final FakeCircle c = s.circles[circleId]!;
+    if (!c.members.contains(uid)) throw StateError('404');
+    final DeviceKey? srv = _serverDevice();
+    return ProcessingServerState(
+      serverAssist: c.assist,
+      skGen: c.skGen,
+      policy: c.policy,
+      prefs: c.prefs.values.toList(),
+      claimedMembers: <ClaimedMember>[
+        for (final String m in c.members)
+          ClaimedMember(m, c.prefs[m]?.lane ?? E2ee.linePhone, c.prefs[m]?.sinceMs ?? 0),
+      ],
+      serverDeviceId: srv?.deviceId,
+      serverFingerprint: srv?.fingerprint,
+      rekeyRequired: c.skRekey,
+      inEffect: srv != null && c.assist && c.skWraps.containsKey('${c.skGen}/${srv.deviceId}'),
+    );
+  }
+
+  @override
+  Future<List<DeviceKey>> pendingLine(String circleId, int line) async {
+    if (line == E2ee.linePhone) return pending(circleId);
+    final FakeCircle c = s.circles[circleId]!;
+    if (!c.assist) return <DeviceKey>[];
+    return <DeviceKey>[
+      for (final String m in c.members)
+        for (final DeviceKey d in s.activeOf(m))
+          if (d.kind != 'server' && !c.skWraps.containsKey('${c.skGen}/${d.deviceId}')) _withApproval(d, s.approved(d, circleId), s.names[m])
+    ];
+  }
+
+  @override
+  Future<PolicyStatement?> getProcessingPolicy(String circleId) async => s.circles[circleId]!.policy;
+
+  @override
+  Future<PrefStatement?> getProcessingPref(String circleId) async => s.circles[circleId]!.prefs[uid];
+
+  bool _hasServerPref(FakeCircle c) => c.prefs.values.any((PrefStatement p) => p.lane == E2ee.lineServer);
+
+  /// Stores SK wraps like the DB trigger and the handler would: no CK semantics,
+  /// server key only while the policy is on and a member is in lane server.
+  Future<void> _storeSk(FakeCircle c, int gen, List<Map<String, dynamic>> wraps) async {
+    for (final Map<String, dynamic> w in wraps) {
+      final DeviceKey r = s.findActive(w['recipient_device_id'] as String)!;
+      if (!c.members.contains(r.userId)) throw StateError('recipient not a member');
+      if (!s.approved(r, c.id)) throw StateError('waiting for approval');
+      if (r.kind == 'server' && (!c.assist || !_hasServerPref(c))) {
+        throw StateError('403 the server key may only get SK while assistance is on and a member is in lane server');
+      }
+      final DeviceKey wr = s.findActive(w['wrapper_device_id'] as String)!;
+      if (wr.userId != uid) throw StateError('wrapper not mine');
+      if (r.userId != uid && c.admin != uid) throw StateError('only an admin may wrap SK for other members');
+      final Uint8List blob = E2ee.unb64(w['wrapped_key']);
+      final Uint8List sig = E2ee.unb64(w['signature']);
+      if (!await E2ee.verifyWrapSignatureLine(wr.edPub, c.id, E2ee.lineServer, gen, r.deviceId, wr.deviceId, blob, sig)) {
+        throw StateError('bad wrap sig');
+      }
+      c.skWraps['$gen/${r.deviceId}'] = WrapRecord(
+          line: E2ee.lineServer, epoch: gen, recipientDeviceId: r.deviceId, wrapperDeviceId: wr.deviceId,
+          wrapperEdPub: wr.edPub, blob: blob, signature: sig);
+      s.acceptedWraps.add('server/$gen/${r.deviceId}');
+    }
+  }
+
+  @override
+  Future<int> submitLineWraps(String circleId, int line, int gen, List<Map<String, dynamic>> wraps) async {
+    final FakeCircle c = s.circles[circleId]!;
+    if (!c.members.contains(uid)) throw StateError('404');
+    if (line != E2ee.lineServer) throw StateError('use submitWraps for the phone line');
+    if (gen < 1 || gen > c.skGen) throw StateError('409 gen');
+    final int before = c.skWraps.length;
+    await _storeSk(c, gen, wraps);
+    return c.skWraps.length - before;
+  }
+
+  @override
+  Future<void> putProcessingPolicy(String circleId, Map<String, dynamic> body) async {
+    final FakeCircle c = s.circles[circleId]!;
+    if (c.admin != uid) throw StateError('403');
+    final PolicyStatement? st = PolicyStatement.tryParse(<String, dynamic>{...body, 'since': s.now().toIso8601String()});
+    if (st == null) throw StateError('400');
+    if (st.adminUserId != uid) throw StateError('403 admin mismatch');
+    final DeviceKey a = s.findActive(st.actorDeviceId)!;
+    if (a.userId != uid || a.kind != 'device') throw StateError('actor must be my phone key');
+    final Uint8List msg = st.message(circleId);
+    if (!await E2ee.verify(a.edPub, msg, st.signature)) throw StateError('bad statement signature');
+    final Uint8List ref = await E2ee.processingRef(msg);
+    final Uint8List logSig = E2ee.unb64(body['log_signature']);
+    if (!await E2ee.verify(
+        a.edPub, E2ee.logActionMessage(E2ee.actProcessingPolicy, uid, a.deviceId, circleId: circleId, epoch: st.skGen, ref: ref), logSig)) {
+      throw StateError('bad log signature');
+    }
+    final List<Map<String, dynamic>> wraps = ((body['wraps'] as List<dynamic>?) ?? <dynamic>[]).cast<Map<String, dynamic>>();
+    if (st.serverAssist) {
+      // lanes2 gate, like the real handler: every approved phone key must advertise it to TURN ON.
+      if (!c.assist) {
+        for (final String m in c.members) {
+          for (final DeviceKey d in s.activeOf(m)) {
+            if (d.kind == 'device' && s.approved(d, circleId) && !d.supportsLanes) throw StateError('409 member app too old');
+          }
+        }
+      }
+      if (_serverDevice() == null) throw StateError('409 no server key');
+      if (st.skGen > c.skGen) {
+        if (st.skGen != c.skGen + 1) throw StateError('409 sk gen');
+        // a new generation: the server key loses every old wrap (it must be re-wrapped by a phone)
+        c.skGen = st.skGen;
+        c.skRekey = false;
+        final String? sd = _serverDevice()?.deviceId;
+        if (sd != null) c.skWraps.removeWhere((String _, WrapRecord w) => w.recipientDeviceId == sd);
+      } else if (wraps.isNotEmpty) {
+        throw StateError('409 wraps without a new generation');
+      }
+      c.assist = true;
+    } else {
+      c.assist = false;
+      // switching off ends every consent and takes the server key's SK wraps away
+      c.prefs.removeWhere((String _, PrefStatement p) => p.lane == E2ee.lineServer);
+      final String? sd = _serverDevice()?.deviceId;
+      if (sd != null) c.skWraps.removeWhere((String _, WrapRecord w) => w.recipientDeviceId == sd);
+    }
+    if (wraps.isNotEmpty) await _storeSk(c, st.skGen, wraps);
+    if (c.policy != null) c.policyHistory.add(c.policy!);
+    c.policy = st;
+    c.policyHistory.add(st);
+    await s.appendLog(E2ee.actProcessingPolicy, uid, a.deviceId, a.edPub, circleId: circleId, epoch: st.skGen, ref: ref, sig: logSig);
+  }
+
+  @override
+  Future<void> putProcessingPref(String circleId, Map<String, dynamic> body) async {
+    final FakeCircle c = s.circles[circleId]!;
+    if (!c.members.contains(uid)) throw StateError('404');
+    final PrefStatement? st = PrefStatement.tryParse(<String, dynamic>{...body, 'user_id': uid, 'since': s.now().toIso8601String()});
+    if (st == null) throw StateError('400');
+    final DeviceKey a = s.findActive(st.approverDeviceId)!;
+    if (a.userId != uid || a.kind != 'device') throw StateError('approver must be my phone key');
+    Uint8List fp = Uint8List(32);
+    if (st.lane == E2ee.lineServer) {
+      final DeviceKey? srv = _serverDevice();
+      if (!c.assist || srv == null || srv.deviceId != st.serverDeviceId || st.skGen < 1 || st.skGen > c.skGen) {
+        throw StateError('409 server lane not possible');
+      }
+      fp = E2ee.unhex(srv.fingerprint);
+    }
+    final Uint8List msg = st.message(circleId, fp);
+    if (!await E2ee.verify(a.edPub, msg, st.signature)) throw StateError('bad statement signature');
+    final Uint8List ref = await E2ee.processingRef(msg);
+    final Uint8List logSig = E2ee.unb64(body['log_signature']);
+    final String? subject = st.lane == E2ee.lineServer ? st.serverDeviceId : null;
+    if (!await E2ee.verify(
+        a.edPub, E2ee.logActionMessage(E2ee.actProcessingPref, uid, a.deviceId, circleId: circleId, subjectId: subject, epoch: st.skGen, ref: ref), logSig)) {
+      throw StateError('bad log signature');
+    }
+    c.prefs[uid] = st;
+    await s.appendLog(E2ee.actProcessingPref, uid, a.deviceId, a.edPub, circleId: circleId, subjectId: subject, epoch: st.skGen, ref: ref, sig: logSig);
+  }
+
   @override
   Future<({List<LogEntry> entries, LogHead head})> log(int after) async {
     if (s.logOverride != null) return s.logOverride!;
@@ -364,5 +568,71 @@ class FakeE2eeClient implements E2eeApi {
       ],
       head: s.log.isEmpty ? LogHead(0, Uint8List(32)) : LogHead(s.log.length, s.log.last['entry_hash'] as Uint8List),
     );
+  }
+}
+
+/// Item relay with the server's lane rules, for tests (stands in for
+/// POST/GET /circles/{id}/e2ee/batch|items): idempotent by (circle, device,
+/// seq), routing label `key_line`, and the checks the real handler makes:
+/// a server-line item is refused while assistance is off or for a generation
+/// that does not exist yet. Everything it stores is what the real server would
+/// see, so tests can assert what reached it.
+class FakeLaneChannel implements ChannelApi {
+  FakeLaneChannel(this.server);
+  final FakeE2eeServer server;
+  final List<WireItem> items = <WireItem>[];
+
+  /// Every item that was POSTed in a request, in order, as "circle/device/seq/line".
+  final List<String> uploaded = <String>[];
+  bool offline = false;
+
+  /// When set, GET answers with this `key_line` instead of the stored one (a lying server).
+  int? lieLine;
+
+  /// When true, GET leaves `key_line` out.
+  bool omitLine = false;
+
+  int posts = 0;
+
+  @override
+  Future<List<BatchResult>> postBatch(String circleId, String deviceId, List<WireItem> batch) async {
+    posts++;
+    if (offline) throw StateError('offline');
+    final FakeCircle c = server.circles[circleId]!;
+    final List<BatchResult> out = <BatchResult>[];
+    for (final WireItem i in batch) {
+      uploaded.add('$circleId/$deviceId/${i.seq}/${i.line}');
+      if (i.line == E2ee.lineServer && (!c.assist || i.epoch < 1 || i.epoch > c.skGen)) {
+        out.add(BatchResult(i.seq, 'rejected', error: 'server line not available'));
+        continue;
+      }
+      final bool dup = items.any((WireItem x) => x.circleId == circleId && x.deviceId == deviceId && x.seq == i.seq);
+      if (dup) {
+        out.add(BatchResult(i.seq, 'duplicate'));
+      } else {
+        items.add(WireItem(
+            circleId: circleId, deviceId: deviceId, seq: i.seq, purpose: i.purpose, epoch: i.epoch, sizeBucket: i.sizeBucket,
+            ciphertext: i.ciphertext, id: items.length + 1, line: i.line));
+        out.add(BatchResult(i.seq, 'stored'));
+      }
+    }
+    return out;
+  }
+
+  @override
+  Future<Page> pull(String circleId, int after, {List<String>? purposes, int limit = 200}) async {
+    final List<WireItem> all = items
+        .where((WireItem i) => i.circleId == circleId && i.id! > after && (purposes == null || purposes.contains(i.purpose)))
+        .toList();
+    final List<WireItem> page = all.take(limit).toList();
+    return Page(
+        <WireItem>[
+          for (final WireItem i in page)
+            WireItem(
+                circleId: i.circleId, deviceId: i.deviceId, seq: i.seq, purpose: i.purpose, epoch: i.epoch, sizeBucket: i.sizeBucket,
+                ciphertext: i.ciphertext, id: i.id, line: i.line, declaredLine: omitLine ? null : (lieLine ?? i.line))
+        ],
+        page.isEmpty ? after : page.last.id!,
+        all.length > page.length);
   }
 }

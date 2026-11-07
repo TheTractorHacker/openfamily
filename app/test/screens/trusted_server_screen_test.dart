@@ -126,7 +126,10 @@ void main() {
     expect(find.byKey(const Key('server-share')), findsOneWidget);
     await t.tap(find.byKey(const Key('server-share')));
     await settle(t);
-    expect(server.circles[cid]!.wraps.containsKey('1/${srv.deviceId}'), isTrue);
+    // Phase 4 (PRIVACY_PROCESSING 5.4.1): the legacy hand-over of the CIRCLE key is gone; the
+    // button now reports an error and nothing reaches the server key. (Replaced by the processing
+    // screens of Phase 6.)
+    expect(server.circles[cid]!.wraps.containsKey('1/${srv.deviceId}'), isFalse);
 
     await t.tap(find.byKey(const Key('server-withdraw')));
     await settle(t);

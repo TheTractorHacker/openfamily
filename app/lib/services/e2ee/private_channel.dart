@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'e2ee_crypto.dart';
 import 'e2ee_models.dart';
+import 'lanes_wire.dart';
 
 // Phase 2 of docs/design/E2EE.md: the encrypted channel of a Private circle.
 //
@@ -28,11 +29,21 @@ class ChannelPurpose {
   static const String history = 'history';
   static const String checkin = 'checkin';
   static const String chat = 'chat';
-  static const List<String> all = <String>[fix, event, place, history, checkin, chat];
+
+  /// Result items of on-device processing (PRIVACY_PROCESSING 8.4): a finished
+  /// trip, the driving figures of a trip, a week summary. Sealed in the AUTHOR's lane.
+  static const String trip = 'trip';
+  static const String drive = 'drive';
+  static const String week = 'week';
+  static const List<String> all = <String>[fix, event, place, history, checkin, chat, trip, drive, week];
+
+  /// The purposes that carry on-device processing results.
+  static const List<String> results = <String>[trip, drive, week];
 
   /// Largest padded plaintext the server accepts per purpose (mirrors the Go side).
   static const Map<String, int> maxBucket = <String, int>{
     fix: 1024, event: 1024, checkin: 1024, chat: 4096, place: 4096, history: 69632,
+    trip: 1024, drive: 4096, week: 1024,
   };
 }
 
@@ -86,6 +97,9 @@ Future<Uint8List> buildPaddedEnvelope({
 }
 
 /// A sealed item as it goes to / comes from the server.
+///
+/// [epoch] is the generation of the key of [line]: the circle key epoch for
+/// the phone line, the SK generation for the server line.
 class WireItem {
   const WireItem({
     required this.circleId,
@@ -97,6 +111,9 @@ class WireItem {
     required this.ciphertext,
     this.id,
     this.receivedAt,
+    this.line = E2ee.linePhone,
+    this.declaredLine,
+    this.twin,
   });
 
   final String circleId;
@@ -111,17 +128,35 @@ class WireItem {
   final int? id;
   final DateTime? receivedAt;
 
+  /// Key line this item was sealed under (own items: authoritative).
+  final int line;
+
+  /// The `key_line` the SERVER reported for a downloaded item (null when it
+  /// reported none). Routing metadata, not trust: the receiver checks it
+  /// against the signed header and rejects a mismatch.
+  final int? declaredLine;
+
+  /// Queue only: the same item sealed under the phone line (same seq and time),
+  /// kept so a server-line item can be turned into a phone-line item without
+  /// ever storing plaintext if the member opts out before the upload.
+  final WireItem? twin;
+
   Map<String, dynamic> toUpload() => <String, dynamic>{
         'seq': seq,
         'purpose': purpose,
         'epoch': epoch,
         'size_bucket': sizeBucket,
         'ciphertext': E2ee.b64(ciphertext),
+        // Only the server line is labelled: a phone-line item is byte-for-byte
+        // what an older app uploads (no new field, old servers stay happy).
+        if (line == E2ee.lineServer) LanesFields.keyLine: E2ee.lineName(line),
       };
 
   Map<String, dynamic> toStore() => <String, dynamic>{
         'c': circleId, 'd': deviceId, 's': seq, 'p': purpose, 'e': epoch, 'b': sizeBucket,
         'ct': E2ee.b64(ciphertext),
+        if (line != E2ee.linePhone) 'l': line,
+        if (twin != null) 'tw': twin!.toStore(),
       };
 
   factory WireItem.fromStore(Map<String, dynamic> j) => WireItem(
@@ -132,11 +167,16 @@ class WireItem {
         epoch: (j['e'] as num).toInt(),
         sizeBucket: (j['b'] as num).toInt(),
         ciphertext: E2ee.unb64(j['ct'] as String),
+        line: E2ee.validLine((j['l'] as num?)?.toInt() ?? E2ee.linePhone) ? ((j['l'] as num?)?.toInt() ?? E2ee.linePhone) : throw const FormatException('line'),
+        twin: j['tw'] is Map<String, dynamic> ? WireItem.fromStore(j['tw'] as Map<String, dynamic>) : null,
       );
 
-  /// Parses a REST item or a WebSocket `e2ee_item` frame. Null if malformed.
+  /// Parses a REST item or a WebSocket `e2ee_item` frame. Null if malformed,
+  /// including an unknown `key_line` (fail closed).
   static WireItem? fromServer(Map<String, dynamic> j) {
     try {
+      final Object? kl = j[LanesFields.keyLine];
+      final int? declared = kl == null ? null : E2ee.parseLine(kl as String);
       return WireItem(
         circleId: j['circle_id'] as String,
         deviceId: j['device_id'] as String,
@@ -147,11 +187,26 @@ class WireItem {
         ciphertext: E2ee.unb64(j['ciphertext'] as String),
         id: (j['id'] as num?)?.toInt(),
         receivedAt: j['received_at'] is String ? DateTime.tryParse(j['received_at'] as String)?.toUtc() : null,
+        declaredLine: declared,
+        line: declared ?? E2ee.linePhone,
       );
     } catch (_) {
       return null;
     }
   }
+}
+
+/// How an item should be presented: derived on THIS phone from the verified
+/// header and the signed log, never from a server flag.
+enum ProcessingBadge {
+  /// Sealed under the phone key: the server cannot read it.
+  phoneOnly,
+
+  /// Sealed under the server key by a member whose signed pref says server.
+  serverAssisted,
+
+  /// Sealed under the server key but the author's signed pref does not confirm it.
+  unverified,
 }
 
 /// A verified, decrypted item.
@@ -166,10 +221,22 @@ class ReceivedItem {
     required this.ts,
     required this.body,
     this.cursor,
+    this.line = E2ee.linePhone,
+    this.verdict = LaneVerdict.consistent,
   });
 
   final String circleId;
   final String deviceId;
+
+  /// Key line the item was sealed under, taken from the VERIFIED header.
+  final int line;
+
+  /// For a server-line item: whether the author's signed pref confirms it.
+  final LaneVerdict verdict;
+
+  ProcessingBadge get badge => line == E2ee.linePhone
+      ? ProcessingBadge.phoneOnly
+      : (verdict == LaneVerdict.consistent ? ProcessingBadge.serverAssisted : ProcessingBadge.unverified);
 
   /// The account that owns the (verified, approved) sender device.
   final String userId;
@@ -196,6 +263,9 @@ enum ItemRejection {
   duplicate,
   epochRollback,
   clockSkew,
+
+  /// The server's `key_line` differs from the signed header (cross-line confusion / relabelling).
+  laneMismatch,
 }
 
 class ItemRejected implements Exception {
@@ -213,6 +283,41 @@ abstract class ChannelKeys {
 
   /// Highest epoch for which this phone holds a key (0 if none).
   Future<int> latestEpoch(String circleId);
+}
+
+/// Server-line keys (SK) held by this phone. A separate interface so older
+/// [ChannelKeys] implementations (and an "old app" simulation) need no change.
+abstract class ServerKeys {
+  Future<Uint8List?> serverKey(String circleId, int gen);
+  Future<int> latestServerGen(String circleId);
+}
+
+/// What lane this phone seals under for one circle. [skGen] is the SK
+/// generation to seal under when [line] is the server line.
+class LaneChoice {
+  const LaneChoice(this.line, [this.skGen = 0]);
+  static const LaneChoice phone = LaneChoice(E2ee.linePhone);
+  final int line;
+  final int skGen;
+}
+
+/// The verified lane facts the channel needs. Backed by `LanesService` (which
+/// verifies signatures and the transparency log and persists the result).
+/// EVERY method fails closed: unknown, unverifiable or erroring means the
+/// phone lane / "not confirmed".
+abstract class LaneSource {
+  /// This member's own effective lane for [circleId] (from their own signed pref).
+  Future<LaneChoice> ownLane(String circleId);
+
+  /// Whether the server lane may be USED by this phone right now (own pref
+  /// server, admin policy on). Read again at upload time.
+  Future<bool> serverLaneAllowed(String circleId);
+
+  /// The verified pref history of [userId] (for badge decisions on received items).
+  Future<List<PrefEntry>> prefsOf(String circleId, String userId);
+
+  /// Whether the verified admin policy has server assistance on.
+  Future<bool> serverAssistOn(String circleId);
 }
 
 /// Who may send in a circle. Backed by the circle's E2EE state (the verified key
@@ -278,12 +383,23 @@ class SenderIdentity {
 }
 
 /// Seals payloads for one circle and keeps the per-(circle, device) sequence.
+///
+/// Lane selection (PRIVACY_PROCESSING 3.2): without [lanes] and [serverKeys]
+/// this is exactly the v1 sealer (phone line only) which is what an old app
+/// does. With them, each item is sealed under the line of THIS member's own
+/// signed pref, read at seal time. Any doubt means the phone line.
 class ChannelSealer {
-  ChannelSealer({required this.keys, required this.kv, this.clock = const Clock()});
+  ChannelSealer({required this.keys, required this.kv, this.clock = const Clock(), this.lanes, this.serverKeys});
 
   final ChannelKeys keys;
   final ChannelKv kv;
   final Clock clock;
+  final LaneSource? lanes;
+  final ServerKeys? serverKeys;
+
+  /// Items that were meant for the server line but sealed under the phone line
+  /// because no usable SK was held (diagnostics; never a privacy loss).
+  int laneFallbacks = 0;
 
   /// Serialises seq allocation within this isolate.
   Future<void> _lock = Future<void>.value();
@@ -304,9 +420,21 @@ class ChannelSealer {
     return c.future;
   }
 
-  /// Seals [body] as [purpose] for [circleId] under the newest epoch key this
-  /// phone holds. Throws [ItemRejected] (noKey) when it holds none: the caller
-  /// must NOT fall back to plaintext.
+  Future<LaneChoice> _choice(String circleId) async {
+    final LaneSource? l = lanes;
+    if (l == null || serverKeys == null) return LaneChoice.phone;
+    try {
+      final LaneChoice c = await l.ownLane(circleId);
+      if (c.line == E2ee.lineServer && c.skGen >= 1 && await l.serverLaneAllowed(circleId)) return c;
+    } catch (_) {}
+    return LaneChoice.phone;
+  }
+
+  /// Seals [body] as [purpose] for [circleId] under the lane of this member's
+  /// signed pref. Phone lane: the newest epoch key this phone holds; server
+  /// lane: the SK generation of the verified policy (plus a phone-line twin for
+  /// the queue). Throws [ItemRejected] (noKey) when no key is held at all: the
+  /// caller must NOT fall back to plaintext.
   Future<WireItem> seal(
     SenderIdentity me,
     String circleId,
@@ -315,14 +443,24 @@ class ChannelSealer {
     DateTime? at,
     int? maxEpoch,
   }) async {
+    final LaneChoice choice = await _choice(circleId);
+    final int tsMs = (at ?? clock.now()).toUtc().millisecondsSinceEpoch;
+    final Uint8List bodyBytes = Uint8List.fromList(utf8.encode(jsonEncode(body)));
+    if (choice.line == E2ee.lineServer) {
+      final Uint8List? sk = await serverKeys!.serverKey(circleId, choice.skGen);
+      if (sk != null) return _sealServer(me, circleId, purpose, bodyBytes, tsMs, choice.skGen, sk, maxEpoch);
+      laneFallbacks++;
+    }
+    return _sealPhone(me, circleId, purpose, bodyBytes, tsMs, maxEpoch, null);
+  }
+
+  Future<WireItem> _sealPhone(SenderIdentity me, String circleId, String purpose, Uint8List bodyBytes, int tsMs, int? maxEpoch, int? seqOverride) async {
     int epoch = await keys.latestEpoch(circleId);
     if (maxEpoch != null && epoch > maxEpoch) epoch = maxEpoch;
     if (epoch < 1) throw const ItemRejected(ItemRejection.noKey);
     final Uint8List? key = await keys.circleKey(circleId, epoch);
     if (key == null) throw const ItemRejected(ItemRejection.noKey);
-    final int seq = await _nextSeq(circleId, me.deviceId);
-    final int tsMs = (at ?? clock.now()).toUtc().millisecondsSinceEpoch;
-    final Uint8List bodyBytes = Uint8List.fromList(utf8.encode(jsonEncode(body)));
+    final int seq = seqOverride ?? await _nextSeq(circleId, me.deviceId);
     final Uint8List padded = await buildPaddedEnvelope(
         edSeed: me.edSeed, circleId: circleId, epoch: epoch, deviceId: me.deviceId, purpose: purpose, seq: seq, tsMs: tsMs, body: bodyBytes);
     final int cap = ChannelPurpose.maxBucket[purpose] ?? 1024;
@@ -330,6 +468,24 @@ class ChannelSealer {
     final Uint8List ct = await E2ee.seal(key, circleId, epoch, me.deviceId, purpose, padded);
     return WireItem(
         circleId: circleId, deviceId: me.deviceId, seq: seq, purpose: purpose, epoch: epoch, sizeBucket: padded.length, ciphertext: ct);
+  }
+
+  Future<WireItem> _sealServer(SenderIdentity me, String circleId, String purpose, Uint8List bodyBytes, int tsMs, int gen, Uint8List sk, int? maxEpoch) async {
+    final int padded = E2ee.padBucket(1 + 8 + 8 + E2ee.sigLen + bodyBytes.length);
+    if (padded > (ChannelPurpose.maxBucket[purpose] ?? 1024)) throw const ItemRejected(ItemRejection.malformed);
+    final int seq = await _nextSeq(circleId, me.deviceId);
+    final Uint8List ct = await E2ee.sealItemV2(sk, circleId, E2ee.lineServer, gen, me.deviceId, me.edSeed, purpose, seq, tsMs, bodyBytes);
+    // The phone-line twin (same seq, same time) lets the queue re-seal on an
+    // opt-out without keeping plaintext. No CK held: no twin, the queue drops instead.
+    WireItem? twin;
+    try {
+      twin = await _sealPhone(me, circleId, purpose, bodyBytes, tsMs, maxEpoch, seq);
+    } on ItemRejected {
+      twin = null;
+    }
+    return WireItem(
+        circleId: circleId, deviceId: me.deviceId, seq: seq, purpose: purpose, epoch: gen, sizeBucket: padded, ciphertext: ct,
+        line: E2ee.lineServer, twin: twin);
   }
 }
 
@@ -402,9 +558,16 @@ class SealedQueue {
   /// used: order is preserved so seq stays monotonic per device. Returns the
   /// number of items the server now has (stored or duplicate). Stops at the first
   /// transport failure; permanently rejected items are dropped.
-  Future<int> flush(ChannelApi api, {required String Function(String circleId) deviceFor, int batchSize = 50}) async {
+  ///
+  /// Server-line items are only ever sent while [lanes] confirms, RIGHT BEFORE
+  /// each request, that this member's own signed pref still says server (and
+  /// the policy is still on). Otherwise the item is replaced by its phone-line
+  /// twin or dropped (see [reconcileLanes]). Without a [lanes] source no
+  /// server-line item is ever sent.
+  Future<int> flush(ChannelApi api, {required String Function(String circleId) deviceFor, int batchSize = 50, LaneSource? lanes}) async {
     int delivered = 0;
     while (true) {
+      await reconcileLanes(lanes);
       final List<Map<String, dynamic>> all = await _locked(_load);
       if (all.isEmpty) return delivered;
       // One request is for one circle + device.
@@ -416,6 +579,10 @@ class SealedQueue {
           .take(batchSize)
           .toList();
       final List<WireItem> items = batch.map(WireItem.fromStore).toList();
+      // Last look at the pref before the bytes leave the phone.
+      if (items.any((WireItem i) => i.line == E2ee.lineServer) && !(lanes != null && await _allowsServer(lanes, circle))) {
+        continue; // the next loop turn reconciles (twin or drop) before anything is sent
+      }
       List<BatchResult> results;
       try {
         results = await api.postBatch(circle, device, items);
@@ -441,6 +608,43 @@ class SealedQueue {
       }
     }
   }
+
+  static Future<bool> _allowsServer(LaneSource lanes, String circle) async {
+    try {
+      return await lanes.serverLaneAllowed(circle);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Re-seals or drops queued server-line items whose circle no longer allows
+  /// the server lane (opt-out, policy off, SK missing, no lane source). An item
+  /// with a phone-line twin is replaced by the twin IN PLACE (same circle,
+  /// device and seq, so ordering and idempotency hold); one without is dropped.
+  /// Nothing is ever re-sealed from plaintext: none is stored. Returns how many
+  /// items were changed. Call it whenever a pref changes (and flush calls it
+  /// before every request).
+  Future<int> reconcileLanes(LaneSource? lanes) => _locked(() async {
+        final List<Map<String, dynamic>> l = await _load();
+        final Map<String, bool> allowed = <String, bool>{};
+        int changed = 0;
+        for (int i = l.length - 1; i >= 0; i--) {
+          final Map<String, dynamic> m = l[i];
+          if (((m['l'] as num?)?.toInt() ?? E2ee.linePhone) != E2ee.lineServer) continue;
+          final String c = m['c'] as String;
+          final bool ok = allowed[c] ??= lanes != null && await _allowsServer(lanes, c);
+          if (ok) continue;
+          changed++;
+          final Object? tw = m['tw'];
+          if (tw is Map<String, dynamic>) {
+            l[i] = <String, dynamic>{...tw, 'q': m['q'], 'n': m['n']};
+          } else {
+            l.removeAt(i);
+          }
+        }
+        if (changed > 0) await _save(l);
+        return changed;
+      });
 
   Future<void> _remove(List<Map<String, dynamic>> batch, Set<int> seqs) => _locked(() async {
         final List<Map<String, dynamic>> l = await _load();
@@ -481,6 +685,10 @@ Duration uploadJitter(Random rng, {Duration max = const Duration(seconds: 8)}) =
 // ------------------------------------------------------------------ receiver
 
 /// Verifies and decrypts incoming items.
+///
+/// v1 items are the phone line. v2 items carry (line, generation) in the signed
+/// header; the key is chosen from THAT header (never from a server field), the
+/// server's `key_line` must agree with it, and the rollback rule runs per line.
 class ChannelReceiver {
   ChannelReceiver({
     required this.keys,
@@ -489,12 +697,20 @@ class ChannelReceiver {
     this.clock = const Clock(),
     this.maxSkew = const Duration(minutes: 10),
     this.rollbackGrace = const Duration(minutes: 10),
+    this.serverKeys,
+    this.lanes,
   });
 
   final ChannelKeys keys;
   final SenderDirectory directory;
   final ChannelKv kv;
   final Clock clock;
+
+  /// SK store. Null (an old app, or a phone without lanes): a server-line item is "noKey".
+  final ServerKeys? serverKeys;
+
+  /// Verified lane facts for badges. Null: every server-line item is flagged.
+  final LaneSource? lanes;
 
   /// Largest tolerated distance of a signed timestamp into the future.
   final Duration maxSkew;
@@ -505,9 +721,10 @@ class ChannelReceiver {
 
   // ---- persisted receiver state --------------------------------------------
 
-  String _hwKey(String c, String d) => 'hw/$c/$d'; // highest seq seen per sender
-  String _devEpochKey(String c, String d) => 'dep/$c/$d'; // highest epoch used by sender
-  String _epochSeenKey(String c) => 'maxep/$c'; // "epoch:firstSeenMs"
+  String _hwKey(String c, String d) => 'hw/$c/$d'; // highest seq seen per sender (one seq space for both lines)
+  // The rollback state is per KEY LINE: a newer SK generation never outdates CK and vice versa.
+  String _devEpochKey(String c, String d, int line) => line == E2ee.linePhone ? 'dep/$c/$d' : 'dep/$c/$d/s'; // highest gen used by sender
+  String _epochSeenKey(String c, int line) => line == E2ee.linePhone ? 'maxep/$c' : 'maxep/$c/s'; // "gen:firstSeenMs"
 
   Future<int> _int(String key) async => int.tryParse(await kv.get(key) ?? '') ?? 0;
 
@@ -521,6 +738,13 @@ class ChannelReceiver {
     return raw.split(',').map(int.parse).toSet();
   }
 
+  Future<DeviceKey> _sender(WireItem item) async {
+    DeviceKey? dev = await directory.sender(item.circleId, item.deviceId);
+    dev ??= await directory.sender(item.circleId, item.deviceId, refresh: true);
+    if (dev == null) throw const ItemRejected(ItemRejection.unknownSender);
+    return dev;
+  }
+
   /// Decrypts, authenticates and de-duplicates [item]. Throws [ItemRejected].
   /// A successful call records the item as seen (so a replay is a duplicate).
   Future<ReceivedItem> process(WireItem item) async {
@@ -528,88 +752,131 @@ class ChannelReceiver {
       throw const ItemRejected(ItemRejection.malformed);
     }
     final Uint8List ct = item.ciphertext;
-    final int hdrEpoch;
+    final PayloadHeader hdr;
     try {
-      hdrEpoch = E2ee.payloadEpoch(ct);
+      hdr = E2ee.parsePayloadHeader(ct); // unknown version or line: malformed (fail closed)
     } catch (_) {
       throw const ItemRejected(ItemRejection.malformed);
     }
-    if (hdrEpoch != item.epoch) throw const ItemRejected(ItemRejection.malformed);
+    if (hdr.gen != item.epoch) throw const ItemRejected(ItemRejection.malformed);
+    final int line = hdr.line;
+    // The server's routing label must agree with the signed header.
+    if (item.declaredLine != null && item.declaredLine != line) throw const ItemRejected(ItemRejection.laneMismatch);
 
     // Duplicate? (cheap check before any crypto)
     final Set<int> win = await _window(item.circleId, item.deviceId);
     if (win.contains(item.seq)) throw const ItemRejected(ItemRejection.duplicate);
 
-    final Uint8List? key = await keys.circleKey(item.circleId, item.epoch);
+    // The key comes from the line in the signed header, never from anything else.
+    final Uint8List? key = line == E2ee.linePhone
+        ? await keys.circleKey(item.circleId, hdr.gen)
+        : await serverKeys?.serverKey(item.circleId, hdr.gen);
     if (key == null) throw const ItemRejected(ItemRejection.noKey);
 
-    final Uint8List padded;
-    try {
-      padded = await E2ee.open(key, item.circleId, item.deviceId, item.purpose, ct);
-    } on E2eeAuthException {
-      throw const ItemRejected(ItemRejection.badCipher);
-    } on E2eeFormatException {
-      throw const ItemRejected(ItemRejection.malformed);
+    final int seq;
+    final int tsMs;
+    final Uint8List bodyBytes;
+    final DeviceKey dev;
+    if (hdr.version == E2ee.msgVersion) {
+      final Uint8List padded;
+      try {
+        padded = await E2ee.open(key, item.circleId, item.deviceId, item.purpose, ct);
+      } on E2eeAuthException {
+        throw const ItemRejected(ItemRejection.badCipher);
+      } on E2eeFormatException {
+        throw const ItemRejected(ItemRejection.malformed);
+      }
+      final Uint8List env;
+      try {
+        env = E2ee.unpad(padded);
+      } catch (_) {
+        throw const ItemRejected(ItemRejection.badPadding);
+      }
+      if (env.length < 1 + 8 + 8 + E2ee.sigLen || env[0] != 1) throw const ItemRejected(ItemRejection.badEnvelope);
+      seq = _readI64(env, 1);
+      tsMs = _readI64(env, 9);
+      final Uint8List sig = Uint8List.fromList(env.sublist(17, 17 + E2ee.sigLen));
+      bodyBytes = Uint8List.fromList(env.sublist(17 + E2ee.sigLen));
+      // The inner (signed) seq must be the one the server shows, or the server could renumber.
+      if (seq != item.seq) throw const ItemRejected(ItemRejection.badEnvelope);
+      // Sender must be a known, approved device of a member of this circle.
+      dev = await _sender(item);
+      _checkSender(dev, DateTime.fromMillisecondsSinceEpoch(tsMs, isUtc: true));
+      final bool ok = await E2ee.verify(
+          dev.edPub,
+          itemSignedMessage(
+              circleId: item.circleId, epoch: item.epoch, deviceId: item.deviceId, purpose: item.purpose, seq: seq, tsMs: tsMs, body: bodyBytes),
+          sig);
+      if (!ok) throw const ItemRejected(ItemRejection.badSignature);
+    } else {
+      // v2: line and generation are inside the signature and the AEAD AAD.
+      dev = await _sender(item);
+      if (dev.kind == 'recovery' || dev.approved != true) throw const ItemRejected(ItemRejection.senderNotMember);
+      final ItemV2 v;
+      try {
+        v = await E2ee.openItemV2(key, item.circleId, line, item.deviceId, dev.edPub, item.purpose, item.seq, ct);
+      } on E2eeAuthException catch (e) {
+        throw ItemRejected(e.message == 'bad item signature'
+            ? ItemRejection.badSignature
+            : (e.message == 'seq mismatch' ? ItemRejection.badEnvelope : ItemRejection.badCipher));
+      } on E2eeFormatException {
+        throw const ItemRejected(ItemRejection.malformed);
+      }
+      if (v.line != line || v.gen != hdr.gen) throw const ItemRejected(ItemRejection.laneMismatch);
+      seq = v.seq;
+      tsMs = v.tsMs;
+      bodyBytes = v.body;
+      _checkSender(dev, DateTime.fromMillisecondsSinceEpoch(tsMs, isUtc: true));
     }
-    final Uint8List env;
-    try {
-      env = E2ee.unpad(padded);
-    } catch (_) {
-      throw const ItemRejected(ItemRejection.badPadding);
-    }
-    if (env.length < 1 + 8 + 8 + E2ee.sigLen || env[0] != 1) throw const ItemRejected(ItemRejection.badEnvelope);
-    final int seq = _readI64(env, 1);
-    final int tsMs = _readI64(env, 9);
-    final Uint8List sig = Uint8List.fromList(env.sublist(17, 17 + E2ee.sigLen));
-    final Uint8List bodyBytes = Uint8List.fromList(env.sublist(17 + E2ee.sigLen));
-    // The inner (signed) seq must be the one the server shows, or the server could renumber.
-    if (seq != item.seq) throw const ItemRejected(ItemRejection.badEnvelope);
     final DateTime ts = DateTime.fromMillisecondsSinceEpoch(tsMs, isUtc: true);
-
-    // Sender must be a known, approved device of a member of this circle.
-    DeviceKey? dev = await directory.sender(item.circleId, item.deviceId);
-    dev ??= await directory.sender(item.circleId, item.deviceId, refresh: true);
-    if (dev == null) throw const ItemRejected(ItemRejection.unknownSender);
-    if (dev.kind == 'recovery' || dev.approved != true) throw const ItemRejected(ItemRejection.senderNotMember);
-    if (dev.revokedAt != null && ts.isAfter(dev.revokedAt!)) throw const ItemRejected(ItemRejection.senderNotMember);
-    final bool ok = await E2ee.verify(
-        dev.edPub,
-        itemSignedMessage(
-            circleId: item.circleId, epoch: item.epoch, deviceId: item.deviceId, purpose: item.purpose, seq: seq, tsMs: tsMs, body: bodyBytes),
-        sig);
-    if (!ok) throw const ItemRejected(ItemRejection.badSignature);
 
     final DateTime now = clock.now();
     if (ts.isAfter(now.add(maxSkew))) throw const ItemRejected(ItemRejection.clockSkew);
 
-    // ---- epoch rollback ----------------------------------------------------
-    // 1. A device never goes back to an older epoch: once a fresh item (higher seq than
-    //    anything seen) used epoch E, a later-seq item with an older epoch is refused.
+    // ---- epoch / generation rollback, per key line ---------------------------
+    // 1. A device never goes back to an older generation: once a fresh item (higher seq than
+    //    anything seen) used generation G, a later-seq item with an older one is refused.
     final int hw = await _int(_hwKey(item.circleId, item.deviceId));
-    final int devEpoch = await _int(_devEpochKey(item.circleId, item.deviceId));
-    if (seq > hw && item.epoch < devEpoch) throw const ItemRejected(ItemRejection.epochRollback);
-    // 2. Circle-wide: once a newer epoch has been seen for longer than the grace
-    //    period, an item sealed under an older epoch is refused unless it is backlog
-    //    (its signed time precedes the moment the newer epoch was first seen).
-    final String? seen = await kv.get(_epochSeenKey(item.circleId));
+    final int devEpoch = await _int(_devEpochKey(item.circleId, item.deviceId, line));
+    if (seq > hw && hdr.gen < devEpoch) throw const ItemRejected(ItemRejection.epochRollback);
+    // 2. Circle-wide: once a newer generation has been seen for longer than the grace
+    //    period, an item sealed under an older one is refused unless it is backlog
+    //    (its signed time precedes the moment the newer one was first seen).
+    final String? seen = await kv.get(_epochSeenKey(item.circleId, line));
     int maxEpoch = 0;
     int maxSeenAtMs = 0;
     if (seen != null && seen.contains(':')) {
       maxEpoch = int.tryParse(seen.split(':')[0]) ?? 0;
       maxSeenAtMs = int.tryParse(seen.split(':')[1]) ?? 0;
     }
-    if (item.epoch < maxEpoch) {
+    if (hdr.gen < maxEpoch) {
       final bool backlog = tsMs < maxSeenAtMs;
       final bool inGrace = now.millisecondsSinceEpoch - maxSeenAtMs < rollbackGrace.inMilliseconds;
       if (!backlog && !inGrace) throw const ItemRejected(ItemRejection.epochRollback);
     }
 
+    // ---- lane verdict (server line only): is the author's signed pref consistent? ----
+    LaneVerdict verdict = LaneVerdict.consistent;
+    if (line == E2ee.lineServer) {
+      verdict = LaneVerdict.flagged;
+      final LaneSource? l = lanes;
+      if (l != null) {
+        try {
+          if (await l.serverAssistOn(item.circleId)) {
+            verdict = E2ee.classifyItemLane(await l.prefsOf(item.circleId, dev.userId), line, tsMs);
+          }
+        } catch (_) {
+          verdict = LaneVerdict.flagged;
+        }
+      }
+    }
+
     // ---- record state ------------------------------------------------------
-    if (item.epoch > maxEpoch) {
-      await kv.set(_epochSeenKey(item.circleId), '${item.epoch}:${now.millisecondsSinceEpoch}');
+    if (hdr.gen > maxEpoch) {
+      await kv.set(_epochSeenKey(item.circleId, line), '${hdr.gen}:${now.millisecondsSinceEpoch}');
     }
     if (seq > hw) await kv.set(_hwKey(item.circleId, item.deviceId), '$seq');
-    if (item.epoch > devEpoch) await kv.set(_devEpochKey(item.circleId, item.deviceId), '${item.epoch}');
+    if (hdr.gen > devEpoch) await kv.set(_devEpochKey(item.circleId, item.deviceId, line), '${hdr.gen}');
     win.add(item.seq);
     // keep the window bounded: only the newest 512 seqs
     final List<int> sorted = win.toList()..sort();
@@ -630,10 +897,17 @@ class ChannelReceiver {
         userId: dev.userId,
         seq: seq,
         purpose: item.purpose,
-        epoch: item.epoch,
+        epoch: hdr.gen,
         ts: ts,
         body: body,
-        cursor: item.id);
+        cursor: item.id,
+        line: line,
+        verdict: verdict);
+  }
+
+  void _checkSender(DeviceKey dev, DateTime ts) {
+    if (dev.kind == 'recovery' || dev.approved != true) throw const ItemRejected(ItemRejection.senderNotMember);
+    if (dev.revokedAt != null && ts.isAfter(dev.revokedAt!)) throw const ItemRejected(ItemRejection.senderNotMember);
   }
 }
 

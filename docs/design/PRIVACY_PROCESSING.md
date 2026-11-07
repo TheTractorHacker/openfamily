@@ -505,3 +505,20 @@ Old routes: `PUT .../server-consent` works only for circles still flagged legacy
 * History up to epoch N stays readable by the server. The upgrade only stops the server from reading NEW phone-key data. Texts the apps must show: "Everything up to now stays readable by the server. From now on only data you choose to share with the server is readable by it."
 * To end that, the admin calls `DELETE /circles/{id}/e2ee/legacy-server-access` once the server has ingested the history it needs (it deletes the server key's wraps of the old epochs; the stored plaintext copies are removed with the normal purge). Until then the server still holds the old phone key.
 * Members who had not consented (or whose consent was part of an incomplete set) are phone-lane after the upgrade and must sign a fresh pref; carried-over prefs expire after 30 days.
+
+## 19. Phase 4 status (phone core; implemented on branch `feat/lanes-phone`)
+
+Code: `app/lib/services/e2ee/` (`lanes_wire.dart`, `lanes_store.dart`, `lanes_service.dart`, changes in `private_channel.dart`, `private_runtime.dart`, `e2ee_service.dart`, `e2ee_api.dart`, `e2ee_models.dart`) and `app/lib/services/processing/` (`result_items.dart`, `on_device_processor.dart`, `processing_source.dart`). Tests: `app/test/services/e2ee/lanes_channel_test.dart`, `lanes_service_test.dart`, `app/test/processing/lane_results_test.dart`, fakes in `app/test/support/fake_e2ee_server.dart`.
+
+Done:
+
+* `ChannelSealer` picks the lane from the member's OWN verified pref (phone: v1 item under CK, byte-identical to an old app; server: v2 item under SK plus a phone-line "twin" with the same seq). Any doubt (no SK, policy off, unreadable store) means the phone lane.
+* SK custody in `E2eeService` (vault names `sk/<circle>/<gen>`), SK generation/rotation/wrapping in `LanesService`; `_recipients(line)` never includes a `server` key for CK (checked twice, plus `E2ee.checkWrapRecipient` in `_wrapTo`); the legacy "share circle key with server" action is removed (`shareKeyWithServer` and `confirmWrap` for a server key throw).
+* Pref and policy signing, with the log entries of section 17 (`processing_pref`, `processing_policy`); the phone derives lanes and the policy from the VERIFIED transparency log (admin/member signatures, statement hash pinned by the log entry), never from server flags.
+* Queue: a server-line item is re-sealed (replaced by its twin) or dropped when the member opts out, the policy goes off, the log fails verification or no lane source exists. The pref is read at seal time AND right before every upload request.
+* Receiver: key chosen from the signed header, server `key_line` must agree, per-line rollback state, badges (`ProcessingBadge`) from header + verified pref history + verified policy.
+* `caps: ['lanes2']` in device registration; admin turn-on refuses (`LanesNotReady`) while a member app lacks it.
+* `member_opt_out`: `required_server` yields `LaneStatus.consentRequired` for a member without a server pref; the phone seals and sends nothing to that circle until the member signs consent (explicit act with fingerprint comparison) or leaves.
+* On-device processing wired: phone-only members' fixes feed `OnDeviceProcessor` (Phase 0 segmenter and weekly functions) and publish `trip`, `drive`, `week` items; `ResultStore` + `ProcessingSource` are the data-access layer for screens (server source, phone source, explicit placeholders).
+
+Open / not done (see also the report that accompanied this change): the server contract names in `lanes_wire.dart` and the fake must be aligned with the real server (paths, `key_line`, `caps`, statement JSON, `sk_wrapped_device_ids`, `policy_history`), including accepting purposes `trip`/`drive`/`week` with buckets 1024/4096/1024; SK is not part of recovery-phrase restore (a restored phone gets SK when an admin phone next wraps it); screens, dialogs and legacy trusted-server upgrade are Phases 6 and 7; battery/CPU of on-device processing is unmeasured; the on-device segmenter keeps its buffers in memory and is rebuilt from the local history (derived speeds) after a restart.
