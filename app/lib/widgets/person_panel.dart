@@ -12,6 +12,7 @@ import '../screens/weekly_summary_screen.dart';
 import '../services/api_client.dart';
 import '../services/history_service.dart';
 import '../services/location_refresh_service.dart';
+import '../services/delivery_status.dart';
 import '../services/member_day_service.dart';
 import '../services/person_launcher.dart';
 import '../services/place_alert_rules_service.dart';
@@ -443,7 +444,9 @@ class _PersonPanelState extends State<PersonPanel> {
           ),
           Expanded(
             child: Text(
-              lastUpdatedLabel(m.lastSeen?.toLocal(), _now),
+              m.position == null && m.lastSeen == null
+                  ? (DeliveryHints.hintFor(m.id) ?? lastUpdatedLabel(null, _now))
+                  : lastUpdatedLabel(m.lastSeen?.toLocal(), _now),
               key: const Key('person_last_updated'),
               style: AppType.secondary.copyWith(color: cs.onSurfaceVariant),
             ),

@@ -605,6 +605,7 @@ function CircleView({ ctl, conn }: { ctl: ViewerController; conn: CircleConn }) 
         </tbody>
       </table></div>
       {who && <Trail points={conn.book.trail(who)} />}
+      <DeliveryPanel circleId={conn.circleId} tick={conn.lastUpdate} />
       {conn.book.events.length > 0 && (
         <>
           <h3 className="wb-pc-h3">Recent events</h3>
@@ -626,6 +627,99 @@ function CircleView({ ctl, conn }: { ctl: ViewerController; conn: CircleConn }) 
         </Button>
       </div>
     </Card>
+  )
+}
+
+interface DeliveryDevice {
+  device_id: string
+  label: string
+  approved: boolean
+  can_upload: boolean
+  has_key_wrap: boolean
+  last_item_at: string | null
+}
+interface DeliveryMember {
+  user_id: string
+  name: string
+  you: boolean
+  sharing_enabled: boolean
+  lane: string
+  app_version?: string
+  app_bucket: string
+  last_contact_at: string | null
+  last_item_at: string | null
+  reason: string
+  devices: DeliveryDevice[]
+}
+interface DeliveryReport {
+  summary: string
+  epoch: number
+  members: DeliveryMember[]
+}
+
+const DELIVERY_REASON: Record<string, { tone: 'green' | 'orange' | 'red'; text: (m: DeliveryMember) => string }> = {
+  ok: { tone: 'green', text: () => 'Sending normally' },
+  sharing_paused: { tone: 'orange', text: (m) => `Location sharing paused by ${m.name}` },
+  update_needed: { tone: 'red', text: (m) => `${m.name} needs to update the app (v${m.app_version ?? '?'} is too old for private circles)` },
+  no_device: { tone: 'red', text: (m) => `${m.name} has not set up encryption on a phone yet` },
+  not_approved: { tone: 'red', text: (m) => `${m.name}’s phone is waiting for an admin to approve it` },
+  no_key_wrap: { tone: 'red', text: (m) => `${m.name}’s phone has not received the circle key yet` },
+  never_sent: { tone: 'orange', text: (m) => `${m.name} has the key but has not sent an encrypted update yet (phone off or app closed?)` },
+  quiet: {
+    tone: 'orange',
+    text: (m) =>
+      `${m.name} hasn’t sent an encrypted update since ${m.last_item_at ? new Date(m.last_item_at).toLocaleString() : 'a while'} (phone may be off or the app closed)`,
+  },
+}
+
+/** Delivery: who is sending sealed updates, and why not. Metadata only, from the server; no positions. */
+function DeliveryPanel({ circleId, tick }: { circleId: string; tick: unknown }) {
+  const rep = useAsync(() => e2eeHttp.get<DeliveryReport>(`/circles/${circleId}/delivery`), [circleId, tick])
+  return (
+    <section aria-labelledby={`wb-pc-delivery-${circleId}`}>
+      <h3 id={`wb-pc-delivery-${circleId}`} className="wb-pc-h3">Delivery</h3>
+      <p className="wb-hint">
+        Why a member might show “no location yet”. This is built from what the server already knows (key shares, when a sealed update last arrived,
+        app version, sharing switch). It contains no positions.
+      </p>
+      {rep.loading && !rep.data ? (
+        <p className="wb-hint"><Spinner /> Checking…</p>
+      ) : rep.error || !rep.data ? (
+        <p className="wb-hint">The server could not report delivery for this circle.</p>
+      ) : (
+        <>
+          {rep.data.summary === 'nobody_sending' && (
+            <p className="wb-pc-notice">You are in private mode and nobody has sent an update.</p>
+          )}
+          <div className="wb-table-wrap wb-pc-tablewrap"><table className="wb-table">
+            <thead>
+              <tr><th>Member</th><th>Status</th><th>Last sealed update</th><th>Phones</th><th>App</th><th>Lane</th></tr>
+            </thead>
+            <tbody>
+              {rep.data.members.map((m) => {
+                const r = DELIVERY_REASON[m.reason] ?? DELIVERY_REASON.ok!
+                return (
+                  <tr key={m.user_id}>
+                    <td><strong>{m.name}</strong>{m.you ? ' (you)' : ''}</td>
+                    <td><Badge tone={r.tone} dot>{r.text(m)}</Badge></td>
+                    <td className="wb-muted">{m.last_item_at ? new Date(m.last_item_at).toLocaleString() : 'never'}</td>
+                    <td className="wb-muted">
+                      {m.devices.length === 0
+                        ? 'none'
+                        : m.devices
+                            .map((d) => `${d.label || 'phone'}: ${d.has_key_wrap ? 'has key' : 'no key'}${d.approved ? '' : ', not approved'}`)
+                            .join('; ')}
+                    </td>
+                    <td className="wb-muted">{m.app_version ? `v${m.app_version}` : 'unknown'}</td>
+                    <td className="wb-muted">{m.lane === 'server' ? 'server-assisted' : 'phone only'}</td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table></div>
+        </>
+      )}
+    </section>
   )
 }
 

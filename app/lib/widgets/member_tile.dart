@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/member.dart';
+import '../services/delivery_status.dart';
 import '../services/speed_units.dart';
 import '../theme/app_theme.dart';
 import '../utils/member_status.dart';
@@ -67,7 +68,7 @@ class MemberTile extends StatelessWidget {
                       Expanded(
                         child: Text(
                           member.position == null
-                              ? 'No location yet'
+                              ? (DeliveryHints.hintFor(member.id) ?? 'No location yet')
                               : _placeOrAddress(),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,

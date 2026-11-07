@@ -6,6 +6,7 @@ import '../models/member.dart';
 import '../models/trip.dart';
 import '../models/trip_report.dart';
 import '../services/api_client.dart';
+import '../services/delivery_status.dart';
 import '../services/location_refresh_service.dart';
 import '../services/member_day_service.dart';
 import '../services/speed_units.dart';
@@ -40,8 +41,10 @@ String memberDetailStatus(
   UnitSystem units = UnitSystem.imperial,
 }) {
   final DateTime n = now ?? DateTime.now();
-  if (m.position == null) return 'No location yet';
+  if (m.position == null) return DeliveryHints.hintFor(m.id, now: n) ?? 'No location yet';
   if (m.status == MemberStatus.stopped) {
+    final String? why = DeliveryHints.hintFor(m.id, now: n);
+    if (why != null) return why;
     final DateTime? seen = m.lastSeen;
     return seen == null ? 'Updates stopped' : 'Last seen ${agoLabel(seen.toLocal(), n)}';
   }

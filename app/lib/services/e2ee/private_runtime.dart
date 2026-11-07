@@ -151,8 +151,10 @@ class HttpChannelApi implements ChannelApi {
           .map((Map<String, dynamic> m) => BatchResult((m['seq'] as num).toInt(), (m['status'] as String?) ?? 'rejected', error: m['error'] as String?))
           .toList();
     } on ApiException catch (e) {
-      // 0 = no connection, 408/429/5xx = try again later. Other 4xx can never succeed.
-      if (e.status == 0 || e.status == 408 || e.status == 429 || e.status >= 500) rethrow;
+      // 0 = no connection, 401 = the session is being renewed, 408/429 = slow down: keep the items and try
+      // again later (this must not count against the batch). 5xx also retries. Other 4xx can never succeed.
+      if (e.status == 0 || e.status == 401 || e.status == 408 || e.status == 429) throw UploadUnavailable('${e.status}');
+      if (e.status >= 500) rethrow;
       throw PermanentUploadError('${e.status}');
     }
   }
@@ -185,14 +187,20 @@ class IngestKeyChannelApi implements ChannelApi {
 
   @override
   Future<List<BatchResult>> postBatch(String circleId, String deviceId, List<WireItem> items) async {
-    final http.Response r = await http
-        .post(Uri.parse('$apiBaseUrl/circles/$circleId/e2ee/batch'),
-            headers: headers,
-            body: jsonEncode(<String, dynamic>{
-              'sender_device_id': deviceId,
-              'items': items.map((WireItem i) => i.toUpload()).toList(),
-            }))
-        .timeout(const Duration(seconds: 15));
+    final http.Response r;
+    try {
+      r = await http
+          .post(Uri.parse('$apiBaseUrl/circles/$circleId/e2ee/batch'),
+              headers: headers,
+              body: jsonEncode(<String, dynamic>{
+                'sender_device_id': deviceId,
+                'items': items.map((WireItem i) => i.toUpload()).toList(),
+              }))
+          .timeout(const Duration(seconds: 15));
+    } catch (e) {
+      // No connection / timeout in the background: not the batch's fault.
+      throw UploadUnavailable('$e');
+    }
     if (r.statusCode >= 200 && r.statusCode < 300) {
       final List<dynamic> list = ((jsonDecode(r.body) as Map<String, dynamic>)['results'] as List<dynamic>?) ?? <dynamic>[];
       return list
@@ -200,7 +208,8 @@ class IngestKeyChannelApi implements ChannelApi {
           .map((Map<String, dynamic> m) => BatchResult((m['seq'] as num).toInt(), (m['status'] as String?) ?? 'rejected'))
           .toList();
     }
-    if (r.statusCode == 408 || r.statusCode == 429 || r.statusCode >= 500) throw StateError('retry ${r.statusCode}');
+    if (r.statusCode == 401 || r.statusCode == 408 || r.statusCode == 429) throw UploadUnavailable('${r.statusCode}');
+    if (r.statusCode >= 500) throw StateError('retry ${r.statusCode}');
     throw PermanentUploadError('${r.statusCode}');
   }
 
@@ -217,6 +226,34 @@ class _OfflineE2eeApi implements E2eeApi {
 class _NoDirectory implements SenderDirectory {
   @override
   Future<DeviceKey?> sender(String circleId, String deviceId, {bool refresh = false}) async => null;
+}
+
+/// This phone's own view of its delivery for one Private circle.
+class LocalDelivery {
+  const LocalDelivery({
+    required this.hasKey,
+    required this.heldEpoch,
+    required this.queued,
+    required this.parked,
+    required this.lastSealedAt,
+    required this.lastPulledCursor,
+    required this.undelivered,
+    required this.undeliveredCode,
+  });
+  final bool hasKey;
+  final int heldEpoch;
+
+  /// Sealed updates waiting for the network.
+  final int queued;
+
+  /// Positions waiting for the circle key.
+  final int parked;
+  final DateTime? lastSealedAt;
+  final int lastPulledCursor;
+
+  /// Updates the relay refused for good, and the reason code.
+  final int undelivered;
+  final String undeliveredCode;
 }
 
 /// How a fix must be delivered, decided from the user's circles.
@@ -363,6 +400,8 @@ class PrivateRuntime {
 
   /// Updates the known circle modes and persists them for the background isolate.
   Future<void> setCircles(List<Circle> circles) async {
+    await _loadModes();
+    final Set<String> before = Set<String>.of(_private);
     _all = circles.map((Circle c) => c.id).toSet();
     _private = circles.where((Circle c) => c.isPrivate).map((Circle c) => c.id).toSet();
     _serverMember = circles.where((Circle c) => c.isPrivate && c.e2eeServerMember).map((Circle c) => c.id).toSet();
@@ -372,15 +411,28 @@ class PrivateRuntime {
     final Iterable<Circle> prim = circles.where((Circle c) => c.isPrimary);
     _primary = prim.isEmpty ? null : prim.first.id;
     primaryPrivate.value = _primary != null && _private.contains(_primary) && !_serverMember.contains(_primary);
-    await kv.set(_modeKey, jsonEncode(<String, dynamic>{
+    final String enc = jsonEncode(<String, dynamic>{
       'all': _all.toList(), 'private': _private.toList(), 'server_member': _serverMember.toList(), 'primary': _primary, 'names': _names,
-    }));
+    });
+    _modesRaw = enc;
+    await kv.set(_modeKey, enc);
+    _newlyPrivate = _private.difference(before);
   }
 
+  /// Circles that turned Private in the last [setCircles] call (so the first view is not empty:
+  /// [onAppActive] sends a fix for them right away).
+  Set<String> _newlyPrivate = <String>{};
+
+  String? _modesRaw;
+
+  /// Reads the circle modes the foreground persisted. It re-reads every time (the kv
+  /// caches for a couple of seconds at most): the background isolate lives for days, and a
+  /// circle that turned Private after its first fix must not leave it sending plaintext
+  /// (which the server refuses) while it believes nothing is private.
   Future<void> _loadModes() async {
-    if (_all.isNotEmpty) return;
     final String? raw = await kv.get(_modeKey);
-    if (raw == null) return;
+    if (raw == null || raw == _modesRaw) return;
+    _modesRaw = raw;
     try {
       final Map<String, dynamic> m = jsonDecode(raw) as Map<String, dynamic>;
       _all = ((m['all'] as List<dynamic>?) ?? <dynamic>[]).cast<String>().toSet();
@@ -429,7 +481,16 @@ class PrivateRuntime {
   /// Returns whether the caller must STILL send the plaintext report (only for
   /// standard circles). Sealing failure for a private circle never falls back to
   /// plaintext: the item is simply not sent for that circle.
+  DateTime? _lastRemembered;
+
   Future<bool> routeFix(Map<String, dynamic> locationBody) async {
+    // Remember the newest fix (at most every 30 s) even while no circle is private: the day a circle turns Private
+    // this is what lets the first view be non-empty.
+    final DateTime nowT = clock.now();
+    if (_lastRemembered == null || nowT.difference(_lastRemembered!) >= const Duration(seconds: 30)) {
+      _lastRemembered = nowT;
+      await _rememberLastFix(locationBody, DateTime.tryParse((locationBody['ts'] as String?) ?? '')?.toUtc() ?? nowT);
+    }
     final UplinkMode mode = await uplinkMode();
     if (mode == UplinkMode.plaintextOnly) return true;
     unawaited(_sealFix(locationBody));
@@ -442,7 +503,7 @@ class PrivateRuntime {
   /// background isolate, key not here yet). They stay in app-private storage like
   /// the pre-existing location outbox, and are sealed with their ORIGINAL
   /// timestamp when the app next runs. They are never sent in plaintext.
-  Future<void> _park(Map<String, dynamic> loc) async {
+  Future<void> _park(Map<String, dynamic> loc, {List<String>? circles}) async {
     try {
       final String? raw = await kv.get(_parkedKey);
       final List<dynamic> l = raw == null ? <dynamic>[] : (jsonDecode(raw) as List<dynamic>);
@@ -450,6 +511,7 @@ class PrivateRuntime {
         'ts': loc['ts'], 'lat': loc['lat'], 'lon': loc['lon'], 'accuracy_meters': loc['accuracy_meters'],
         'altitude_meters': loc['altitude_meters'], 'speed_mps': loc['speed_mps'], 'heading_deg': loc['heading_deg'],
         'battery_pct': loc['battery_pct'], 'motion_state': loc['motion_state'],
+        if (circles != null) 'for': circles,
       });
       final int cut = clock.now().subtract(const Duration(hours: 12)).millisecondsSinceEpoch;
       final List<dynamic> kept = l.where((dynamic e) {
@@ -468,14 +530,16 @@ class PrivateRuntime {
     int n = 0;
     try {
       for (final dynamic e in (jsonDecode(raw) as List<dynamic>)) {
-        await _sealFix((e as Map<String, dynamic>).cast<String, dynamic>());
+        final Map<String, dynamic> m = (e as Map<String, dynamic>).cast<String, dynamic>();
+        final Object? only = m['for'];
+        await _sealFix(m, only: only is List ? only.cast<String>().toSet() : null);
         n++;
       }
     } catch (_) {}
     return n;
   }
 
-  Future<void> _sealFix(Map<String, dynamic> loc) async {
+  Future<void> _sealFix(Map<String, dynamic> loc, {bool resend = false, Set<String>? only}) async {
     try {
       final SenderIdentity? me = await _me();
       if (me == null) {
@@ -483,15 +547,28 @@ class PrivateRuntime {
         return;
       }
       final DateTime ts = DateTime.tryParse((loc['ts'] as String?) ?? '')?.toUtc() ?? clock.now();
+      if (!resend) await _rememberLastFix(loc, ts);
       final Map<String, dynamic> body = fixBodyFromLocation(loc);
       final double? lat = (loc['lat'] as num?)?.toDouble(), lon = (loc['lon'] as num?)?.toDouble();
       final double? acc = (loc['accuracy_meters'] as num?)?.toDouble();
+      final List<String> missingKey = <String>[];
       for (final String circle in await privateCircles()) {
+        if (only != null && !only.contains(circle)) continue;
         // A circle that requires server processing and this member has not consented to:
         // nothing is sealed or sent for it (the server would refuse a phone-lane item anyway).
         if (await lanes.store.status(circle) == LaneStatus.consentRequired) continue;
-        final WireItem it = await sealer.seal(me, circle, ChannelPurpose.fix, body, at: ts);
+        final WireItem it;
+        try {
+          it = await sealer.seal(me, circle, ChannelPurpose.fix, body, at: ts);
+        } on ItemRejected catch (e) {
+          if (e.reason != ItemRejection.noKey) rethrow;
+          // This phone does not hold the circle key (yet). Park the fix, and go and get the key: waiting for the
+          // user to open a settings screen is how a whole family ended up with nobody sending.
+          missingKey.add(circle);
+          continue;
+        }
         await queue.enqueue(it);
+        await kv.set(_sealedAtKey(circle), '${clock.now().millisecondsSinceEpoch}');
         if (lat != null && lon != null) {
           await chunker.add(circle, TrackPoint(ts.millisecondsSinceEpoch, lat, lon, acc));
           await history.add(circle, me.userId, <TrackPoint>[TrackPoint(ts.millisecondsSinceEpoch, lat, lon, acc)]);
@@ -499,12 +576,99 @@ class PrivateRuntime {
           await _evaluatePlaces(me, circle, lat, lon, ts, acc);
         }
       }
-      await _processOnDevice(me, loc, ts);
+      if (missingKey.isNotEmpty) {
+        // Parked for exactly the circles that lacked the key; the others already got their copy.
+        await _park(loc, circles: missingKey);
+        for (final String c in missingKey) {
+          unawaited(_keysThenDrain(c));
+        }
+      }
+      if (!resend) await _processOnDevice(me, loc, ts);
       // Batched, jittered upload: do not wake the radio for every fix.
       _scheduleFlush();
     } catch (_) {
       // Never throw into the location pipeline and never fall back to plaintext.
-      await _park(loc);
+      await _park(loc, circles: only?.toList());
+    }
+  }
+
+  static const String _lastFixKey = 'lastfix/v1';
+  String _sealedAtKey(String circle) => 'sealedat/$circle';
+
+  Future<void> _rememberLastFix(Map<String, dynamic> loc, DateTime ts) async {
+    try {
+      final String? old = await kv.get(_lastFixKey);
+      if (old != null) {
+        final DateTime? o = DateTime.tryParse(((jsonDecode(old) as Map<String, dynamic>)['ts'] as String?) ?? '');
+        if (o != null && !ts.isAfter(o)) return; // a parked, older fix must not replace the newest one
+      }
+      await kv.set(_lastFixKey, jsonEncode(<String, dynamic>{
+        'ts': ts.toIso8601String(), 'lat': loc['lat'], 'lon': loc['lon'], 'accuracy_meters': loc['accuracy_meters'],
+        'altitude_meters': loc['altitude_meters'], 'speed_mps': loc['speed_mps'], 'heading_deg': loc['heading_deg'],
+        'battery_pct': loc['battery_pct'], 'motion_state': loc['motion_state'],
+      }));
+    } catch (_) {}
+  }
+
+  /// When this phone last sealed a fix for [circleId] (null: never since it was installed).
+  Future<DateTime?> lastSealedAt(String circleId) async {
+    final int? ms = int.tryParse(await kv.get(_sealedAtKey(circleId)) ?? '');
+    return ms == null ? null : DateTime.fromMillisecondsSinceEpoch(ms, isUtc: true);
+  }
+
+  /// Seals the last known position again (with its own, original time) for the given circles, so
+  /// a circle that just turned Private, or a phone that was closed for a while, is not empty to the
+  /// others until the next GPS fix. Returns false when there is no last fix or it is older than [maxAge].
+  Future<bool> resendLastFix({Set<String>? circles, Duration maxAge = const Duration(hours: 12)}) async {
+    try {
+      final String? raw = await kv.get(_lastFixKey);
+      if (raw == null) return false;
+      final Map<String, dynamic> loc = (jsonDecode(raw) as Map<String, dynamic>).cast<String, dynamic>();
+      final DateTime? ts = DateTime.tryParse((loc['ts'] as String?) ?? '');
+      if (ts == null || clock.now().difference(ts) > maxAge) return false;
+      await _sealFix(loc, resend: true, only: circles);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  // ------------------------------------------------------------ circle keys
+
+  final Map<String, DateTime> _keyTry = <String, DateTime>{};
+
+  /// Makes sure this phone holds the newest circle key the server has a wrap for. A wrap that was made for this phone
+  /// is worthless until the phone fetches it, and nothing else ever fetched it automatically. Returns true if a key
+  /// was stored. Throttled (a minute per circle) unless [force]. Never throws.
+  Future<bool> ensureKeys(String circleId, {bool force = false}) async {
+    final DateTime now = clock.now();
+    final DateTime? last = _keyTry[circleId];
+    if (!force && last != null && now.difference(last) < const Duration(minutes: 1)) return false;
+    _keyTry[circleId] = now;
+    try {
+      final int held = await keys.latestEpoch(circleId);
+      final CircleE2eeState st = await api.circleState(circleId);
+      if (!st.isPrivate || st.epoch <= held) return false;
+      return await service.syncCircleKeys(circleId) > 0;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> _keysThenDrain(String circleId) async {
+    if (await ensureKeys(circleId)) {
+      await drainParked();
+      unawaited(flush());
+    }
+  }
+
+  /// An admin's phone wraps the circle key for members' new phones that are waiting (only the automatic, safe
+  /// cases; anything that needs a person's confirmation stays on the Encryption keys screen). Never throws.
+  Future<int> wrapForWaitingDevices(String circleId) async {
+    try {
+      return (await service.processPending(circleId)).wrapped;
+    } catch (_) {
+      return 0;
     }
   }
 
@@ -780,10 +944,24 @@ class PrivateRuntime {
   /// pending place transitions and catch up on every private circle.
   Future<void> onAppActive(List<Circle> circles) async {
     await setCircles(circles);
+    final Set<String> privs = await privateCircles();
+    // Keys first: without the circle key this phone can neither send nor read.
+    for (final String id in privs) {
+      await ensureKeys(id);
+      unawaited(wrapForWaitingDevices(id));
+    }
     await drainParked();
+    // A circle that just turned Private, or one this phone has not sent anything to for a while: send the last
+    // position now, so the first view of the others is not empty.
+    final Set<String> stale = <String>{};
+    for (final String id in privs) {
+      final DateTime? at = await lastSealedAt(id);
+      if (_newlyPrivate.contains(id) || at == null || clock.now().difference(at) > const Duration(minutes: 3)) stale.add(id);
+    }
+    if (stale.isNotEmpty) await resendLastFix(circles: stale);
     await flush();
     await tickPlaces();
-    for (final String id in await privateCircles()) {
+    for (final String id in privs) {
       try {
         await lanesService.maintain(id);
       } catch (_) {
@@ -795,6 +973,64 @@ class PrivateRuntime {
         // offline: the next resume or socket frame retries
       }
     }
+  }
+
+  // ------------------------------------------------------------ diagnostics
+
+  /// What THIS phone knows about its own delivery for [circleId] (no server round trip).
+  Future<LocalDelivery> localDelivery(String circleId) async {
+    int parked = 0;
+    try {
+      final String? raw = await kv.get(_parkedKey);
+      if (raw != null && raw.isNotEmpty) parked = (jsonDecode(raw) as List<dynamic>).length;
+    } catch (_) {}
+    final int epoch = await keys.latestEpoch(circleId);
+    final und = await queue.undelivered(circleId);
+    return LocalDelivery(
+      hasKey: epoch > 0,
+      heldEpoch: epoch,
+      queued: await queue.length(),
+      parked: parked,
+      lastSealedAt: await lastSealedAt(circleId),
+      lastPulledCursor: await sync.cursor(circleId),
+      undelivered: und?.count ?? 0,
+      undeliveredCode: und?.code ?? '',
+    );
+  }
+
+  /// The one-tap "Fix this circle": gets the circle key, lets an admin phone share keys that are waiting, seals
+  /// parked fixes, sends the last known position, uploads, and downloads everything new. Returns what was done, in words.
+  Future<List<String>> fixCircle(String circleId) async {
+    final List<String> done = <String>[];
+    final int before = await keys.latestEpoch(circleId);
+    final bool got = await ensureKeys(circleId, force: true);
+    final int after = await keys.latestEpoch(circleId);
+    if (got) {
+      done.add('Fetched the circle key for this phone.');
+    } else if (after == 0) {
+      done.add("This phone still has no key for the circle. An admin's phone has to share it (Settings, Security, Encryption keys).");
+    } else if (before == after) {
+      done.add('This phone already has the newest circle key.');
+    }
+    final int wrapped = await wrapForWaitingDevices(circleId);
+    if (wrapped > 0) done.add('Shared the circle key with $wrapped waiting phone${wrapped == 1 ? '' : 's'}.');
+    final int parked = await drainParked();
+    if (parked > 0) done.add('Sealed $parked position${parked == 1 ? '' : 's'} that were waiting for the key.');
+    if (after > 0 && await resendLastFix(circles: <String>{circleId}, maxAge: const Duration(days: 2))) {
+      done.add('Sent your last known position.');
+    }
+    final int sent = await flush();
+    if (sent > 0) done.add('Uploaded $sent update${sent == 1 ? '' : 's'}.');
+    if (after > 0) {
+      try {
+        final SyncStats st = await catchUp(circleId);
+        done.add(st.accepted > 0 ? 'Received ${st.accepted} update${st.accepted == 1 ? '' : 's'} from the others.' : 'No new updates from the others.');
+        await replayLatest();
+      } catch (_) {
+        done.add("Couldn't reach the server to download updates. Check the connection and try again.");
+      }
+    }
+    return done;
   }
 
   // ---------------------------------------------------------------- receive

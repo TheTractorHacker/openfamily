@@ -641,8 +641,12 @@ class SealedQueue {
       List<BatchResult> results;
       try {
         results = await api.postBatch(circle, device, items);
-      } on PermanentUploadError {
+      } on UploadUnavailable {
+        return delivered; // no connection / session being renewed: keep everything, and do NOT count a failure
+      } on PermanentUploadError catch (e) {
         // e.g. circle no longer private / device revoked: drop the batch, it can never succeed.
+        // Not silent: the diagnostics screen tells the user that the relay refused updates, and why.
+        await noteUndelivered(circle, 'http_${e.message}');
         await _remove(batch, <int>{for (final WireItem i in items) i.seq});
         continue;
       } catch (_) {
@@ -769,6 +773,15 @@ class SealedQueue {
 }
 
 /// A failure that retrying cannot fix (4xx other than rate limiting).
+/// The relay could not be asked right now (no connection, session being renewed, slow down). The
+/// queue keeps its items and does not count the attempt as a failure of the batch.
+class UploadUnavailable implements Exception {
+  const UploadUnavailable(this.message);
+  final String message;
+  @override
+  String toString() => 'UploadUnavailable($message)';
+}
+
 class PermanentUploadError implements Exception {
   const PermanentUploadError(this.message);
   final String message;

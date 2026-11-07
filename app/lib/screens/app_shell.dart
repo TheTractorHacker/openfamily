@@ -7,6 +7,7 @@ import '../models/member.dart';
 import '../services/driving/crash_watcher.dart';
 import '../services/perf/perf_monitor.dart';
 import '../theme/app_theme.dart';
+import '../widgets/delivery_banner.dart';
 import '../widgets/update_banner.dart';
 import 'circle_tab_screen.dart';
 import 'driving_tab_screen.dart';
@@ -193,6 +194,7 @@ class _AppShellState extends State<AppShell> {
     final Widget stack = Column(
       children: <Widget>[
         const UpdateBanner(),
+        const DeliveryBanner(),
         Expanded(
           child: ListenableBuilder(
             listenable: Listenable.merge(<Listenable>[

@@ -365,6 +365,7 @@ func main() {
 		r.Post("/e2ee/devices/{id}/rotate", srv.E2EERotateDevice)
 		r.Delete("/e2ee/devices/{id}", srv.E2EERevokeDevice)
 		r.Get("/e2ee/users/{user_id}/devices", srv.E2EEUserDevices)
+		r.Get("/circles/{id}/delivery", srv.E2EEDelivery)
 		r.Get("/circles/{id}/e2ee", srv.E2EECircleState)
 		r.Get("/circles/{id}/e2ee/wraps", srv.E2EEMyWraps)
 		r.Get("/circles/{id}/e2ee/pending", srv.E2EEPending)

@@ -5,6 +5,7 @@ import 'package:share_plus/share_plus.dart';
 import '../models/circle.dart';
 import '../services/circle_service.dart';
 import '../services/e2ee/e2ee_app.dart';
+import 'delivery_screen.dart';
 import '../services/e2ee/private_runtime.dart';
 import '../services/e2ee/e2ee_models.dart';
 import '../services/e2ee/e2ee_service.dart';
@@ -157,9 +158,32 @@ class _CircleDetailScreenState extends State<CircleDetailScreen> {
     }
   }
 
+  Widget _deliveryRow() {
+    if (!_circle.isPrivate) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(top: AppSpace.md),
+      child: DsRowGroup(
+        children: <Widget>[
+          DsListRow(
+            key: const Key('circle-why-cant-i-see'),
+            leading: DsListRow.iconTile(context, Icons.help_outline),
+            title: "Why can't I see everyone?",
+            subtitle: 'Check who is sending updates, and fix this circle in one tap.',
+            chevron: true,
+            onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => DeliveryScreen(circle: _circle))),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _privateCard() {
     final CircleE2eeState? st = _e2eeState;
-    if (st == null || !_circle.isAdmin) return const SizedBox.shrink();
+    if (st == null || !_circle.isAdmin) return _deliveryRow();
+    return Column(children: <Widget>[_privateCardBody(st), _deliveryRow()]);
+  }
+
+  Widget _privateCardBody(CircleE2eeState st) {
     return Padding(
       padding: const EdgeInsets.only(top: AppSpace.md),
       child: DsRowGroup(

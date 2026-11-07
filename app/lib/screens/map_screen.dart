@@ -21,6 +21,7 @@ import '../services/invite_service.dart';
 import '../services/inbox_service.dart';
 import '../services/battery_optimization_service.dart';
 import '../services/circle_selection.dart';
+import '../services/delivery_status.dart';
 import '../services/e2ee/private_runtime.dart';
 import '../services/circle_service.dart';
 import '../services/device_service.dart';
@@ -618,6 +619,15 @@ class _MapScreenState extends State<MapScreen>
     }
   }
 
+  /// Keys, queue and catch-up for the Private circles, then ask the server why anyone is silent
+  /// (so "No location yet" turns into a reason).
+  Future<void> _activateAndExplain(List<Circle> circles) async {
+    try {
+      await PrivateRuntime.instance.onAppActive(circles);
+    } catch (_) {}
+    await DeliveryMonitor.refresh(circles);
+  }
+
   /// Restarts the foreground reporter and refreshes family
   /// data.
   Future<void> _onResumed() async {
@@ -625,7 +635,7 @@ class _MapScreenState extends State<MapScreen>
       _reporter.start();
     }
     if (_circles.isNotEmpty) {
-      unawaited(PrivateRuntime.instance.onAppActive(_circles).catchError((Object _) {}));
+      unawaited(_activateAndExplain(_circles));
     }
     // Refresh member positions right away: the app may have sat in the
     // background for hours, and the WebSocket (or its repair cycle) may not
@@ -856,7 +866,7 @@ class _MapScreenState extends State<MapScreen>
       if (fellBack) _applySelection();
       _scheduleCircleExpiry();
       // Seal parked fixes, upload the queue, catch up on Private circles.
-      unawaited(PrivateRuntime.instance.onAppActive(circles).catchError((Object _) {}));
+      unawaited(_activateAndExplain(circles));
     } catch (_) {
       // Keep the previous list.
     }

@@ -1,4 +1,5 @@
 import '../models/member.dart';
+import '../services/delivery_status.dart' show DeliveryHints;
 import '../services/speed_units.dart';
 
 /// "3:10 pm" (12-hour, locale-neutral, no intl dependency).
@@ -52,8 +53,11 @@ String memberStatusLine(
   UnitSystem units = UnitSystem.imperial,
 }) {
   if (sharingPaused) return 'Location sharing paused';
-  if (m.position == null) return 'No location yet';
+  // A Private circle explains itself: the server knows why a member is silent (no key yet, old app, phone off).
+  if (m.position == null) return DeliveryHints.hintFor(m.id) ?? 'No location yet';
   if (m.status == MemberStatus.stopped) {
+    final String? why = DeliveryHints.hintFor(m.id);
+    if (why != null) return why;
     final DateTime? seen = m.lastSeen;
     return seen == null
         ? 'Updates stopped'
