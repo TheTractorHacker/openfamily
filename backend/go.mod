@@ -4,7 +4,7 @@ go 1.27.3
 
 require (
 	filippo.io/age v1.3.2
-	github.com/boombuler/barcode v1.0.1-0.20190219062509-6c824513bacc
+	github.com/boombuler/barcode v1.1.0
 	github.com/coder/websocket v1.8.15
 	github.com/go-chi/chi/v5 v5.3.1
 	github.com/go-webauthn/webauthn v0.18.2
