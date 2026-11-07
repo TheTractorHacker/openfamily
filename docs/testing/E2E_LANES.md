@@ -26,3 +26,14 @@ grepped for Cleo's coordinates by the script.
 Scenarios (`app/test/e2e_real_server/lanes_e2e_test.dart`): policy, lanes in use (Anna, Ben server; Cleo
 phone), the real sidecar, cross reading and badges, opt-out, `required_server`, an app without the lanes
 capability, and a circle key handed out as the server key.
+
+## Encrypted chat scenario
+
+`app/test/e2e_real_server/chat_e2e_test.dart` runs in the same stack
+(`scripts/e2e-lanes.sh test/e2e_real_server/chat_e2e_test.dart`): three phones
+exchange sealed chat, edit, delete (author and admin, plus a member's forged
+edit/delete that must change nothing), a photo, a removed member, and a member
+in the server lane whose chat still goes on the phone line while the real
+sidecar runs. The database is searched for the message words (`e2ee_items`,
+`chat_messages`, `audit_log`, photo blobs) and the script greps the server log
+for them at the end. Plaintext send answers 409 `chat_encrypted`.

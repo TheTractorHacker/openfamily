@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/TheTractorHacker/openfamily/backend/internal/circles"
 	"github.com/TheTractorHacker/openfamily/backend/internal/config"
@@ -473,6 +474,11 @@ func (s *Server) E2EEPostBatch(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		if err != nil {
+			var pe *pgconn.PgError
+			if errors.As(err, &pe) {
+				// Code and constraint only: never the row (it holds ciphertext) and never a payload.
+				slog.Warn("e2ee item insert failed", "code", pe.Code, "constraint", pe.ConstraintName, "message", pe.Message)
+			}
 			writeError(w, http.StatusInternalServerError, "failed to store items")
 			return
 		}

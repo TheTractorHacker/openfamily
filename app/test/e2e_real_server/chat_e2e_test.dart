@@ -48,6 +48,13 @@ void main() {
   late Db db;
   final Map<Phone, EncryptedChatService> chat = <Phone, EncryptedChatService>{};
 
+  // Runs a chat action as [p] and pushes the sealed item out (the app flushes in the background).
+  Future<T> act<T>(Phone p, Future<T> Function() f) async {
+    final T r = await p.run(f);
+    await p.run(() => p.runtime.flush());
+    return r;
+  }
+
   Future<List<ChatMessage>> read(Phone p) => p.run(() async {
         await p.runtime.flush();
         await p.runtime.catchUp(circle);
@@ -63,7 +70,7 @@ void main() {
     for (final Phone p in <Phone>[a, b, c]) {
       await p.signUpAndLogin(env);
       p.startRuntime();
-      chat[p] = EncryptedChatService(p.runtime);
+      chat[p] = EncryptedChatService(p.runtime, legacy: ApiChatService());
     }
     final Map<String, dynamic> created = await rawJson(env, 'POST', '/circles', body: <String, dynamic>{'name': 'E2E chat'}, token: a.token);
     circle = (created['id'] ?? (created['circle'] as Map<String, dynamic>)['id']) as String;
@@ -85,11 +92,12 @@ void main() {
     }
     server = ServerDevice(env, a);
     await server.enroll();
+    await server.runOnce(); // pins the server key (as the sidecar does on its first run)
   });
 
   group('chat in a private circle', () {
     test('Anna sends, Ben and Cleo read it; local notifications carry the text; the server holds ciphertext only', () async {
-      await a.run(() => chat[a]!.send(circle, '$word1 \u{1F305} dinner at 7?'));
+      await act(a, () => chat[a]!.send(circle, '$word1 \u{1F305} dinner at 7?'));
       for (final Phone p in <Phone>[b, c]) {
         final List<ChatMessage> got = await read(p);
         final ChatMessage m = got.firstWhere((ChatMessage x) => x.body.contains(word1));
@@ -137,10 +145,10 @@ void main() {
     });
 
     test('edit and delete: authors act on their own; the admin deletes anyone\'s; a member\'s forged edit or delete changes nothing', () async {
-      final ChatMessage bm = await b.run(() => chat[b]!.send(circle, '$word2 from Ben'));
+      final ChatMessage bm = await act(b, () => chat[b]!.send(circle, '$word2 from Ben'));
       await read(a);
       await read(c);
-      await b.run(() => chat[b]!.edit(circle, bm.id, '$word2 from Ben (edited)'));
+      await act(b, () => chat[b]!.edit(circle, bm.id, '$word2 from Ben (edited)'));
       expect((await read(a)).any((ChatMessage x) => x.body == '$word2 from Ben (edited)' && x.editedAt != null), isTrue);
       // Cleo forges a delete of Ben's message and an edit of it.
       final String id = bm.id.split(':').last;
@@ -153,24 +161,24 @@ void main() {
       expect(seenByA.any((ChatMessage x) => x.body == '$word2 from Ben (edited)'), isTrue);
       expect(seenByA.any((ChatMessage x) => x.body == 'forged'), isFalse);
       // Anna is admin: her delete is honoured by everybody.
-      await a.run(() => chat[a]!.delete(circle, bm.id));
+      await act(a, () => chat[a]!.delete(circle, bm.id));
       await a.run(() => a.runtime.flush());
       for (final Phone p in <Phone>[a, b, c]) {
         expect((await read(p)).any((ChatMessage x) => x.body.contains(word2)), isFalse, reason: p.name);
       }
       // Ben deletes his own message.
-      final ChatMessage bm2 = await b.run(() => chat[b]!.send(circle, '$word3 mine to delete'));
+      final ChatMessage bm2 = await act(b, () => chat[b]!.send(circle, '$word3 mine to delete'));
       expect((await read(c)).any((ChatMessage x) => x.body.contains(word3)), isTrue);
-      await b.run(() => chat[b]!.delete(circle, bm2.id));
+      await act(b, () => chat[b]!.delete(circle, bm2.id));
       expect((await read(c)).any((ChatMessage x) => x.body.contains(word3)), isFalse);
       // A member cannot delete someone else's message from the app either.
-      final ChatMessage am = await a.run(() => chat[a]!.send(circle, 'admin keeps this'));
+      final ChatMessage am = await act(a, () => chat[a]!.send(circle, 'admin keeps this'));
       await expectLater(c.run(() => chat[c]!.delete(circle, am.id)), throwsA(isA<ChatException>()));
     });
 
     test('photo: encrypted on the phone, opaque at the server, opened by the others', () async {
       final Uint8List jpeg = Uint8List.fromList(<int>[0xff, 0xd8, 0xff, 0xe0, ...List<int>.generate(3000, (int i) => (i * 13 + 5) % 256)]);
-      final ChatMessage m = await a.run(() => chat[a]!.sendPhoto(circle, jpeg));
+      final ChatMessage m = await act(a, () => chat[a]!.sendPhoto(circle, jpeg));
       final ChatMessage got = (await read(b)).firstWhere((ChatMessage x) => x.hasImage);
       expect(await b.run(() => chat[b]!.photo(circle, got.id)), jpeg);
       expect(m.hasImage, isTrue);
@@ -189,7 +197,7 @@ void main() {
         await p.run(() => p.lanes.setLane(circle, E2ee.lineServer, confirmServerFingerprintHex: server.fingerprintHex));
       }
       await a.run(() => a.lanes.maintain(circle));
-      await b.run(() => chat[b]!.send(circle, '$word1 sent from the server lane'));
+      await act(b, () => chat[b]!.send(circle, '$word1 sent from the server lane'));
       await read(a);
       final List<List<dynamic>> rows = await db.query(
           "SELECT key_line FROM e2ee_items WHERE circle_id = '$circle' AND purpose = 'chat' ORDER BY id DESC LIMIT 1");
@@ -229,7 +237,8 @@ void main() {
         await a.service.syncCircleKeys(circle);
         await a.service.bumpEpoch(circle);
       });
-      await a.run(() => chat[a]!.send(circle, 'after Cleo left'));
+      await act(a, () => chat[a]!.send(circle, 'after Cleo left'));
+      await b.run(() => b.service.syncCircleKeys(circle)); // Ben's app does this on open / on a bad_epoch answer
       expect((await read(b)).any((ChatMessage x) => x.body == 'after Cleo left'), isTrue);
       final List<ChatMessage> cleo = await c.run(() async {
         try {

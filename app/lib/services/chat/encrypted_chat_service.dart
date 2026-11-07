@@ -214,6 +214,10 @@ class EncryptedChatService implements ChatService, ChatProtection {
 
   @override
   Future<void> markRead(String circleId, {int? seq}) async {
+    // Old plaintext history (from before encryption) has its own server read marker.
+    try {
+      await legacy?.markRead(circleId);
+    } catch (_) {}
     final int newest = seq ?? await _store.newestCursor(circleId);
     if (newest <= 0) return;
     await _store.markRead(circleId, newest);
