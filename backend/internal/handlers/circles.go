@@ -95,6 +95,8 @@ type circleOut struct {
 	ServerAssist bool   `json:"server_assist"`
 	MemberOptOut  string `json:"member_opt_out"`
 	MyLaneServer  bool   `json:"my_lane_server"`
+	// hasLanesLog: the circle's key log holds processing entries (compat shim input, not serialised).
+	hasLanesLog bool
 	// MinAppVersion is the oldest app that can read this circle (set for
 	// Private circles; additive). UpdateRequired is true when the calling app
 	// reported an older version: the circle's name then also carries an
@@ -326,7 +328,8 @@ func (s *Server) ListCircles(w http.ResponseWriter, r *http.Request) {
 		       cm.role, cm.sharing_enabled, cm.joined_at,
 		       (SELECT count(*) FROM circle_members x WHERE x.circle_id = c.id),
 		       COALESCE(u.family_id = c.id, false), c.expires_at, c.e2ee_mode, c.e2ee_epoch, (c.e2ee_mode = 'private' AND e2ee_server_member_legacy(c.id)),
-		       c.server_assist, c.member_opt_out, (c.e2ee_mode = 'private' AND e2ee_member_server_ok(c.id, cm.user_id))
+		       c.server_assist, c.member_opt_out, (c.e2ee_mode = 'private' AND e2ee_member_server_ok(c.id, cm.user_id)),
+		       (c.e2ee_mode = 'private' AND e2ee_circle_has_lanes_log(c.id))
 		FROM circle_members cm
 		JOIN circles c ON c.id = cm.circle_id
 		JOIN users u ON u.id = cm.user_id
@@ -341,7 +344,7 @@ func (s *Server) ListCircles(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var c circleOut
 		if err := rows.Scan(&c.ID, &c.Name, &c.Icon, &c.CreatedBy, &c.CreatedAt,
-			&c.Role, &c.SharingEnabled, &c.JoinedAt, &c.MemberCount, &c.IsPrimary, &c.ExpiresAt, &c.E2EEMode, &c.E2EEEpoch, &c.E2EEServerMember, &c.ServerAssist, &c.MemberOptOut, &c.MyLaneServer); err != nil {
+			&c.Role, &c.SharingEnabled, &c.JoinedAt, &c.MemberCount, &c.IsPrimary, &c.ExpiresAt, &c.E2EEMode, &c.E2EEEpoch, &c.E2EEServerMember, &c.ServerAssist, &c.MemberOptOut, &c.MyLaneServer, &c.hasLanesLog); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to read circles")
 			return
 		}
@@ -1028,6 +1031,10 @@ func (s *Server) JoinCircle(w http.ResponseWriter, r *http.Request) {
 		if _, err := tx.Exec(r.Context(), `
 			UPDATE users SET family_id = $1, role = $2, updated_at = now() WHERE id = $3`,
 			*familyID, role, uid); err != nil {
+			if isUpdateRequiredErr(err) {
+				writeUpdateRequired(w, nil)
+				return
+			}
 			writeError(w, http.StatusInternalServerError, "failed to join circle")
 			return
 		}
@@ -1039,6 +1046,10 @@ func (s *Server) JoinCircle(w http.ResponseWriter, r *http.Request) {
 		if _, err := tx.Exec(r.Context(), `
 			INSERT INTO circle_members (circle_id, user_id, role) VALUES ($1, $2, $3)
 			ON CONFLICT (circle_id, user_id) DO NOTHING`, circleID, uid, cr); err != nil {
+			if isUpdateRequiredErr(err) {
+				writeUpdateRequired(w, nil)
+				return
+			}
 			writeError(w, http.StatusInternalServerError, "failed to join circle")
 			return
 		}

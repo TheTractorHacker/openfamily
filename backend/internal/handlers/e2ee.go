@@ -393,6 +393,10 @@ func (s *Server) E2EERegisterDevice(w http.ResponseWriter, r *http.Request) {
 	out, err := scanE2EEDevice(tx.QueryRow(ctx, devInsert, req.DeviceID, uid, req.Kind, p.ed, p.x, e2ee.FingerprintHex(p.fp), p.sig,
 		actor, signerPub, int(action), logSig, initial, p.label, req.Kind == "device" || (req.CanUpload && req.Kind != "recovery" && req.Kind != "server"), cleanCaps(req.Caps)))
 	if err != nil {
+		if isUpdateRequiredErr(err) {
+			writeUpdateRequired(w, nil)
+			return
+		}
 		if isUniqueViolation(err) {
 			writeError(w, http.StatusConflict, "key already registered")
 			return
@@ -913,6 +917,10 @@ func (s *Server) verifyCircleAction(w http.ResponseWriter, r *http.Request, tx p
 		return false
 	}
 	if err := appendLog(ctx, tx, action, uid, sa.ActorDeviceID, pub, circleID, subject, uint32(epoch), ref, sig); err != nil {
+		if isUpdateRequiredErr(err) {
+			writeUpdateRequired(w, nil)
+			return false
+		}
 		writeError(w, http.StatusInternalServerError, "failed to log action")
 		return false
 	}

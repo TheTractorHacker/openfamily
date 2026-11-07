@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"github.com/jackc/pgx/v5/pgconn"
 	"encoding/json"
 	"net/http/httptest"
 	"bytes"
@@ -1644,5 +1645,155 @@ func TestInvitePreviewAndStateCarryLegacy(t *testing.T) {
 	st := e.mustCode("A", "GET", "/circles/"+e.circle+"/e2ee/processing", nil, 200)
 	if lg := st["legacy"].(map[string]any); lg["active"] != true {
 		t.Fatalf("state legacy: %v", st["legacy"])
+	}
+}
+
+// ================================== write skew between the guard triggers (serialised)
+
+func (e *srvEnv) oldKeyRow(user string) *tdev {
+	d := newTDev(e.t, e.ids[user])
+	return d
+}
+
+func insertOldKeySQL(ctx context.Context, q interface {
+	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
+}, d *tdev) error {
+	_, err := q.Exec(ctx, `INSERT INTO device_keys (device_id, user_id, kind, ed25519_pub, x25519_pub, fingerprint, signature,
+		registered_by_device_id, registered_by_pub, registration_action, registration_signature, initial, label)
+		VALUES ($1,$2,'device',$3,$4,$5,$6,$1,$3,1,$6,FALSE,'old')`, d.id, d.uid, d.ed, d.x, e2ee.FingerprintHex(d.fp), make([]byte, 64))
+	return err
+}
+
+// log entry vs old-app key: the key is in flight (uncommitted, holding the locks);
+// the policy must wait for it and then refuse. Never both.
+func TestLogEntryVersusOldKeyIsSerialised(t *testing.T) {
+	e := newLaneEnv(t)
+	ctx := context.Background()
+	tx, err := e.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	old := e.oldKeyRow("B")
+	if err := insertOldKeySQL(ctx, tx, old); err != nil {
+		t.Fatal(err)
+	}
+	type res struct {
+		c int
+		m map[string]any
+	}
+	done := make(chan res, 1)
+	go func() {
+		c, m, _ := e.do("A", "PUT", "/circles/"+e.circle+"/e2ee/processing-policy",
+			policyBody(t, e.circle, true, "phone", "allowed", 1, e.a, mkSKWrap(t, e.circle, 1, e.a, e.a), mkSKWrap(t, e.circle, 1, e.a, e.b), mkSKWrap(t, e.circle, 1, e.a, e.c)))
+		done <- res{c, m}
+	}()
+	select {
+	case <-done:
+		t.Fatal("the policy did not wait for the in-flight old-app key")
+	case <-time.After(500 * time.Millisecond):
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	r := <-done
+	if r.c != 409 || r.m["code"] != "update_required_for_lanes" {
+		t.Fatalf("policy beside a just-committed old-app key: %d %v", r.c, r.m)
+	}
+	if e.count(`SELECT count(*) FROM e2ee_log WHERE circle_id = $1 AND action IN (10, 11)`, e.circle) != 0 {
+		t.Fatal("an entry landed beside an old-app key")
+	}
+}
+
+// log entry vs old-app join: same story for membership.
+func TestLogEntryVersusOldAppJoinIsSerialised(t *testing.T) {
+	e := newLaneEnv(t)
+	ctx := context.Background()
+	old := e.oldKeyRow("D")
+	if err := insertOldKeySQL(ctx, e.pool, old); err != nil { // D has an old key and is in no lanes circle
+		t.Fatal(err)
+	}
+	tx, err := e.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `INSERT INTO circle_members (circle_id, user_id, role) VALUES ($1,$2,'member')`, e.circle, e.ids["D"]); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan int, 1)
+	go func() {
+		c, _, _ := e.do("A", "PUT", "/circles/"+e.circle+"/e2ee/processing-policy",
+			policyBody(t, e.circle, true, "phone", "allowed", 1, e.a, mkSKWrap(t, e.circle, 1, e.a, e.a), mkSKWrap(t, e.circle, 1, e.a, e.b), mkSKWrap(t, e.circle, 1, e.a, e.c)))
+		done <- c
+	}()
+	select {
+	case <-done:
+		t.Fatal("the policy did not wait for the in-flight join")
+	case <-time.After(500 * time.Millisecond):
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if c := <-done; c != 409 {
+		t.Fatalf("policy beside a just-committed old-app join: %d", c)
+	}
+	if e.count(`SELECT count(*) FROM e2ee_log WHERE circle_id = $1 AND action IN (10, 11)`, e.circle) != 0 {
+		t.Fatal("an entry landed beside an old-app member")
+	}
+}
+
+// The other way round: a policy is in flight (circle row held), an old-app key
+// registration and an old-app join both queue behind it; afterwards the circle has the
+// entry and NEITHER the key nor the member exists. Never both.
+func TestOldKeyAndJoinVersusLogEntryAreSerialised(t *testing.T) {
+	e := newLaneEnv(t)
+	ctx := context.Background()
+	d := e.oldKeyRow("D")
+	if err := insertOldKeySQL(ctx, e.pool, d); err != nil {
+		t.Fatal(err)
+	}
+	code := e.mustCode("A", "POST", "/circles/"+e.circle+"/invites", map[string]any{}, 201)["code"].(string)
+	tx, err := e.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `SELECT 1 FROM circles WHERE id = $1 FOR UPDATE`, e.circle); err != nil { // the in-flight policy tx
+		t.Fatal(err)
+	}
+	regDone := make(chan int, 1)
+	joinDone := make(chan int, 1)
+	nb := e.oldKeyRow("B")
+	body := regBody(t, nb, "device", e.b, e2ee.ActRegister, false)
+	go func() { c, _, _ := e.do("B", "POST", "/e2ee/devices", body); regDone <- c }()
+	go func() { c, _, _ := e.do("D", "POST", "/circles/join", map[string]string{"code": code}); joinDone <- c }()
+	select {
+	case <-regDone:
+		t.Fatal("registration did not wait")
+	case <-joinDone:
+		t.Fatal("join did not wait")
+	case <-time.After(500 * time.Millisecond):
+	}
+	// The in-flight policy lands its entry (through the real handler) once we release the lock.
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	pc, _, _ := e.do("A", "PUT", "/circles/"+e.circle+"/e2ee/processing-policy",
+		policyBody(t, e.circle, true, "phone", "allowed", 1, e.a, mkSKWrap(t, e.circle, 1, e.a, e.a), mkSKWrap(t, e.circle, 1, e.a, e.b), mkSKWrap(t, e.circle, 1, e.a, e.c)))
+	if pc != 200 && pc != 409 {
+		t.Fatalf("policy: %d", pc)
+	}
+	rc, jc := <-regDone, <-joinDone
+	entries := e.count(`SELECT count(*) FROM e2ee_log WHERE circle_id = $1 AND action IN (10, 11)`, e.circle)
+	oldKey := e.count(`SELECT count(*) FROM device_keys WHERE device_id = $1`, nb.id)
+	member := e.count(`SELECT count(*) FROM circle_members WHERE circle_id = $1 AND user_id = $2`, e.circle, e.ids["D"])
+	// Whichever order they ran in, the state is consistent: with the entry present, no
+	// old key was registered by a member and the old-app user is not a member.
+	if entries > 0 && (oldKey > 0 && rc == 201) {
+		t.Fatalf("entry and a new old-app key coexist (register %d)", rc)
+	}
+	if entries > 0 && member > 0 {
+		t.Fatalf("entry and an old-app member coexist (join %d)", jc)
 	}
 }

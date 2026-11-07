@@ -434,9 +434,21 @@ CREATE OR REPLACE FUNCTION e2ee_circle_has_lanes_log(circ UUID) RETURNS BOOLEAN 
     SELECT EXISTS (SELECT 1 FROM e2ee_log WHERE circle_id = circ AND action IN (10, 11))
 $$ LANGUAGE sql STABLE;
 
+-- The three checks below read each other's tables ("no old-app key among the members"
+-- vs "no processing entry in the circle"), so under READ COMMITTED two concurrent
+-- transactions could each see the other's absence and both commit (write skew).
+-- They are serialised on the circle row (and, for a key or a join, first on the user
+-- row). GLOBAL LOCK ORDER, used by every path that locks more than one thing:
+--     users row  ->  circles rows (by id)  ->  e2ee_log advisory lock  ->  everything else
+-- (the purge function, the revocation trigger, the pref/policy/upgrade handlers and
+-- these triggers all follow it; ingest only share-locks one circle row.)
 CREATE OR REPLACE FUNCTION e2ee_log_lanes_guard() RETURNS trigger AS $$
 BEGIN
-    IF NEW.circle_id IS NOT NULL AND EXISTS (
+    IF NEW.circle_id IS NULL THEN
+        RETURN NEW;
+    END IF;
+    PERFORM 1 FROM circles WHERE id = NEW.circle_id FOR UPDATE;
+    IF EXISTS (
         SELECT 1 FROM live_circle_members m JOIN device_keys d ON d.user_id = m.user_id
          WHERE m.circle_id = NEW.circle_id AND d.kind = 'device' AND d.revoked_at IS NULL AND NOT ('lanes2' = ANY (d.caps))) THEN
         RAISE EXCEPTION 'e2ee_update_required_for_lanes: a member still runs an app that cannot read processing log entries'
@@ -450,7 +462,9 @@ CREATE TRIGGER trg_e2ee_log_lanes_guard BEFORE INSERT ON e2ee_log
 
 CREATE OR REPLACE FUNCTION e2ee_member_lanes_guard() RETURNS trigger AS $$
 BEGIN
-    IF e2ee_circle_has_lanes_log(NEW.circle_id) AND EXISTS (
+    PERFORM 1 FROM users WHERE id = NEW.user_id FOR UPDATE;
+    PERFORM 1 FROM circles WHERE id = NEW.circle_id FOR UPDATE;
+    IF EXISTS (SELECT 1 FROM e2ee_log WHERE circle_id = NEW.circle_id AND action IN (10, 11)) AND EXISTS (
         SELECT 1 FROM device_keys d WHERE d.user_id = NEW.user_id AND d.kind = 'device' AND d.revoked_at IS NULL
            AND NOT ('lanes2' = ANY (d.caps))) THEN
         RAISE EXCEPTION 'e2ee_update_required_for_lanes: update the app to join this circle' USING ERRCODE = 'check_violation';
@@ -463,9 +477,13 @@ CREATE TRIGGER trg_e2ee_member_lanes_guard BEFORE INSERT ON circle_members
 
 CREATE OR REPLACE FUNCTION e2ee_device_lanes_guard() RETURNS trigger AS $$
 BEGIN
-    IF NEW.kind = 'device' AND NOT ('lanes2' = ANY (NEW.caps)) AND EXISTS (
-        SELECT 1 FROM circle_members m WHERE m.user_id = NEW.user_id AND e2ee_circle_has_lanes_log(m.circle_id)) THEN
-        RAISE EXCEPTION 'e2ee_update_required_for_lanes: update the app to register a key' USING ERRCODE = 'check_violation';
+    IF NEW.kind = 'device' AND NOT ('lanes2' = ANY (NEW.caps)) THEN
+        PERFORM 1 FROM users WHERE id = NEW.user_id FOR UPDATE;
+        PERFORM 1 FROM circles WHERE id IN (SELECT circle_id FROM circle_members WHERE user_id = NEW.user_id) ORDER BY id FOR UPDATE;
+        IF EXISTS (SELECT 1 FROM circle_members m WHERE m.user_id = NEW.user_id
+                    AND EXISTS (SELECT 1 FROM e2ee_log l WHERE l.circle_id = m.circle_id AND l.action IN (10, 11))) THEN
+            RAISE EXCEPTION 'e2ee_update_required_for_lanes: update the app to register a key' USING ERRCODE = 'check_violation';
+        END IF;
     END IF;
     RETURN NEW;
 END $$ LANGUAGE plpgsql;
