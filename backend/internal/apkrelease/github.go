@@ -199,6 +199,11 @@ func parseRepo(repo string) (owner, name string, err error) {
 
 func pickAPKAsset(assets []asset) (asset, error) {
 	for _, a := range assets {
+		// orbitly-wear-<ver>.apk is the Wear OS watch app attached to the same release;
+		// it must never be served as the phone APK.
+		if strings.HasPrefix(strings.ToLower(a.Name), "orbitly-wear-") {
+			continue
+		}
 		if strings.EqualFold(filepath.Ext(a.Name), ".apk") {
 			return a, nil
 		}

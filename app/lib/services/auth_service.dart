@@ -2,6 +2,7 @@ import 'api_client.dart';
 import 'background_location_service.dart';
 import 'biometric_service.dart';
 import 'place_service.dart';
+import 'watch/watch_bridge.dart';
 import 'widget_snapshot.dart';
 import 'token_storage.dart';
 
@@ -118,6 +119,8 @@ class AuthService {
     PlaceService.invalidateCache();
     // No family names may linger on the home-screen widget after sign-out.
     await HomeWidgetService.clear();
+    // Nor on a paired watch.
+    await WatchBridge.instance.signedOut();
   }
 
   static Future<void> _loginAndPersist({

@@ -118,6 +118,9 @@ flutter {
 
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+    // Wear OS companion bridge (WatchBridgePlugin.kt). Talks to a paired watch
+    // over the Wearable Data Layer; unused (no-op) without Play services.
+    implementation("com.google.android.gms:play-services-wearable:19.0.0")
 }
 
 // unifiedpush/webpush pull JVM tink; flutter_secure_storage pulls tink-android.

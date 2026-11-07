@@ -49,6 +49,10 @@ class MainActivity : FlutterFragmentActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "app.openfamily/diagnostics")
             .setMethodCallHandler { call, result -> diagnostics.handle(call, result) }
 
+        // Wear OS companion bridge; a no-op without Play services or a paired
+        // watch (see WatchBridgePlugin.kt).
+        WatchBridgePlugin.register(applicationContext, flutterEngine.dartExecutor.binaryMessenger)
+
         // Home-screen widget snapshot store. Never throws into Dart.
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "app.openfamily/widget")
             .setMethodCallHandler { call, result ->
@@ -68,6 +72,11 @@ class MainActivity : FlutterFragmentActivity() {
                     result.success(false)
                 }
             }
+    }
+
+    override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
+        WatchBridgePlugin.unregister()
+        super.cleanUpFlutterEngine(flutterEngine)
     }
 
     // singleTop: a link opened while the app is running arrives here.

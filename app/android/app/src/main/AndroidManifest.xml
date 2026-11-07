@@ -130,5 +130,17 @@
             android:permission="android.permission.FOREGROUND_SERVICE"
             android:exported="false"
             android:foregroundServiceType="location"/>
+    
+        <!-- Wear OS companion (WatchListenerService.kt): commands and connection
+             events from a paired watch. Google Play services binds it; the
+             Data Layer only delivers messages from the paired watch running the
+             same applicationId with the same signature. -->
+        <service
+            android:name=".WatchListenerService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.BIND_LISTENER"/>
+            </intent-filter>
+        </service>
     </application>
 </manifest>
