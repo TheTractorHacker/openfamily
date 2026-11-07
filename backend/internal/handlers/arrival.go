@@ -138,7 +138,7 @@ func arrivalOverdue(enters []time.Time, loc *time.Location, now time.Time, arriv
 
 // arrivalPlaceReadable reports whether the place's circle exposes positions to
 // the server. Places of a Private circle without a server member do not.
-const arrivalReadableSQL = `(c.e2ee_mode = 'off' OR e2ee_server_member(c.id))`
+const arrivalReadableSQL = `NOT e2ee_plaintext_blocked(c.id)`
 
 type arrivalWatchOut struct {
 	PlaceID   string `json:"place_id"`

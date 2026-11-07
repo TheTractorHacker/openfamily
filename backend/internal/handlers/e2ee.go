@@ -60,6 +60,8 @@ type e2eeDeviceOut struct {
 	CreatedAt             time.Time  `json:"created_at"`
 	RevokedAt             *time.Time `json:"revoked_at"`
 	RevokedReason         *string    `json:"revoked_reason,omitempty"`
+	// Caps are self-declared client capabilities ("lanes2"); advisory only.
+	Caps []string `json:"caps"`
 	// Approved is set only where a circle is in context (circle state, pending
 	// queue): whether wraps may be issued to this device in that circle.
 	Approved *bool `json:"approved,omitempty"`
@@ -67,7 +69,7 @@ type e2eeDeviceOut struct {
 
 const e2eeDeviceCols = `d.device_id::text, d.user_id::text, d.kind, d.ed25519_pub, d.x25519_pub, d.fingerprint, d.signature,
 	d.registered_by_device_id::text, d.registered_by_pub, d.registration_action, d.registration_signature, d.initial,
-	d.label, d.created_at, d.revoked_at, d.revoked_reason`
+	d.label, d.created_at, d.revoked_at, d.revoked_reason, d.caps`
 
 // e2eeApprovedExpr is true when wraps may go to device d in circle $N. It is
 // transitive: see migration 000151 (e2ee_device_approved).
@@ -81,7 +83,7 @@ func scanE2EEDevice(row rowScanner, extra ...any) (e2eeDeviceOut, error) {
 	var o e2eeDeviceOut
 	var ed, x, sig, rpub, rsig []byte
 	dest := []any{&o.DeviceID, &o.UserID, &o.Kind, &ed, &x, &o.Fingerprint, &sig, &o.RegisteredByDeviceID, &rpub,
-		&o.RegistrationAction, &rsig, &o.Initial, &o.Label, &o.CreatedAt, &o.RevokedAt, &o.RevokedReason}
+		&o.RegistrationAction, &rsig, &o.Initial, &o.Label, &o.CreatedAt, &o.RevokedAt, &o.RevokedReason, &o.Caps}
 	if err := row.Scan(append(dest, extra...)...); err != nil {
 		return o, err
 	}
@@ -229,14 +231,18 @@ type registerReq struct {
 	// CanUpload lets a "web" or "service" key post sealed items. Phones always
 	// can; recovery keys never; read-only kinds default to false.
 	CanUpload bool `json:"can_upload"`
+	// Caps are the client's self-declared capabilities (unsigned; see
+	// e2ee_processing.go). Unknown values are dropped. A key without "lanes2"
+	// stays phone-only: it is never counted ready for server assistance.
+	Caps []string `json:"caps"`
 }
 
 const devInsert = `INSERT INTO device_keys (device_id, user_id, kind, ed25519_pub, x25519_pub, fingerprint, signature,
-	registered_by_device_id, registered_by_pub, registration_action, registration_signature, initial, label, can_upload)
-	VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+	registered_by_device_id, registered_by_pub, registration_action, registration_signature, initial, label, can_upload, caps)
+	VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
 	RETURNING ` + `device_id::text, user_id::text, kind, ed25519_pub, x25519_pub, fingerprint, signature,
 	registered_by_device_id::text, registered_by_pub, registration_action, registration_signature, initial,
-	label, created_at, revoked_at, revoked_reason`
+	label, created_at, revoked_at, revoked_reason, caps`
 
 // E2EERegisterDevice registers a device identity (public keys only).
 //
@@ -381,7 +387,7 @@ func (s *Server) E2EERegisterDevice(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	out, err := scanE2EEDevice(tx.QueryRow(ctx, devInsert, req.DeviceID, uid, req.Kind, p.ed, p.x, e2ee.FingerprintHex(p.fp), p.sig,
-		actor, signerPub, int(action), logSig, initial, p.label, req.Kind == "device" || (req.CanUpload && req.Kind != "recovery" && req.Kind != "server")))
+		actor, signerPub, int(action), logSig, initial, p.label, req.Kind == "device" || (req.CanUpload && req.Kind != "recovery" && req.Kind != "server"), cleanCaps(req.Caps)))
 	if err != nil {
 		if isUniqueViolation(err) {
 			writeError(w, http.StatusConflict, "key already registered")
@@ -449,8 +455,9 @@ func (s *Server) E2EERotateDevice(w http.ResponseWriter, r *http.Request) {
 	var oldEd []byte
 	var kind string
 	var oldCanUpload bool
-	err = tx.QueryRow(ctx, `SELECT ed25519_pub, kind, can_upload FROM device_keys
-		WHERE device_id = $1 AND user_id = $2 AND revoked_at IS NULL FOR UPDATE`, oldID, uid).Scan(&oldEd, &kind, &oldCanUpload)
+	var oldCaps []string
+	err = tx.QueryRow(ctx, `SELECT ed25519_pub, kind, can_upload, caps FROM device_keys
+		WHERE device_id = $1 AND user_id = $2 AND revoked_at IS NULL FOR UPDATE`, oldID, uid).Scan(&oldEd, &kind, &oldCanUpload, &oldCaps)
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, http.StatusNotFound, "device key not found")
 		return
@@ -475,7 +482,7 @@ func (s *Server) E2EERotateDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out, err := scanE2EEDevice(tx.QueryRow(ctx, devInsert, req.DeviceID, uid, kind, p.ed, p.x, e2ee.FingerprintHex(p.fp), p.sig,
-		oldID, oldEd, int(e2ee.ActRotate), logSig, false, p.label, oldCanUpload))
+		oldID, oldEd, int(e2ee.ActRotate), logSig, false, p.label, oldCanUpload, rotatedCaps(req.Caps, oldCaps)))
 	if err != nil {
 		if isUniqueViolation(err) {
 			writeError(w, http.StatusConflict, "key already registered")
@@ -762,6 +769,9 @@ type wrapsReq struct {
 	// bytes). It is the signed `ref` of the enable/epoch log action; phones check
 	// every unwrapped key against it before accepting it.
 	KeyCommitment string `json:"key_commitment"`
+	// KeyLine is "phone" (default) or "server". For the server line Epoch is the
+	// SK generation.
+	KeyLine string `json:"key_line"`
 	signedAction
 }
 
@@ -770,9 +780,18 @@ type wrapsReq struct {
 // member that is APPROVED in this circle, and carry a valid wrapper signature.
 // It returns how many rows were inserted and whether any wrap targets one of the
 // caller's own keys. Existing wraps are never overwritten.
-func (s *Server) insertWraps(ctx context.Context, tx pgx.Tx, circleID string, epoch int, callerID, publisherUserID string, wraps []wrapIn) (inserted int, selfWrapped bool, msg string) {
+func (s *Server) insertWraps(ctx context.Context, tx pgx.Tx, circleID string, line e2ee.Line, epoch int, callerID, publisherUserID string, wraps []wrapIn) (inserted int, selfWrapped bool, msg string) {
 	if len(wraps) > e2eeMaxWrapsPerReq {
 		return 0, false, "too many wraps in one request"
+	}
+	if !line.Valid() || epoch < 1 {
+		return 0, false, "invalid key line or generation"
+	}
+	var legacyCK, policyOn, hasServerLane bool
+	if err := tx.QueryRow(ctx, `SELECT server_legacy_ck, server_assist,
+		EXISTS (SELECT 1 FROM e2ee_processing_pref p WHERE p.circle_id = circles.id AND p.lane = 'server')
+		FROM circles WHERE id = $1`, circleID).Scan(&legacyCK, &policyOn, &hasServerLane); err != nil {
+		return 0, false, "failed to store wraps"
 	}
 	seen := map[string]bool{}
 	for _, w := range wraps {
@@ -792,16 +811,31 @@ func (s *Server) insertWraps(ctx context.Context, tx pgx.Tx, circleID string, ep
 		if !ok {
 			return 0, false, "wrapper must be an active device of the caller"
 		}
-		var recipientUser string
+		var recipientUser, recipientKind string
 		var approved bool
-		err := tx.QueryRow(ctx, `SELECT d.user_id::text, `+e2eeApprovedExpr("$1")+` FROM device_keys d
+		err := tx.QueryRow(ctx, `SELECT d.user_id::text, d.kind, `+e2eeApprovedExpr("$1")+` FROM device_keys d
 			JOIN live_circle_members m ON m.user_id = d.user_id AND m.circle_id = $1
-			WHERE d.device_id = $2 AND d.revoked_at IS NULL`, circleID, w.RecipientDeviceID).Scan(&recipientUser, &approved)
+			WHERE d.device_id = $2 AND d.revoked_at IS NULL`, circleID, w.RecipientDeviceID).Scan(&recipientUser, &recipientKind, &approved)
 		if err != nil {
 			return 0, false, "recipient must be an active device of a circle member"
 		}
 		if !approved {
 			return 0, false, "recipient device is waiting for approval"
+		}
+		// The phone key is never wrapped to a server device (a legacy trusted-
+		// server circle is the one flagged exception until its admin upgrades it);
+		// the server key only while the policy is on and a member is in lane
+		// server, and only by a phone. The database trigger repeats this.
+		if recipientKind == "server" {
+			if !(line == e2ee.LinePhone && legacyCK) {
+				if e2ee.CheckWrapRecipient(line, recipientKind, policyOn, hasServerLane) != nil {
+					return 0, false, "this key line may not be wrapped to a server device"
+				}
+			}
+			var wk string
+			if tx.QueryRow(ctx, `SELECT kind FROM device_keys WHERE device_id = $1`, w.WrapperDeviceID).Scan(&wk) != nil || wk != "device" {
+				return 0, false, "a server device's wrap must be made by a phone key"
+			}
 		}
 		// Only the epoch's publisher may issue the key to other people; anyone may
 		// wrap only to their OWN other keys (new phone, recovery identity). A
@@ -809,16 +843,21 @@ func (s *Server) insertWraps(ctx context.Context, tx pgx.Tx, circleID string, ep
 		if recipientUser != callerID && callerID != publisherUserID {
 			return 0, false, "only the publisher of this epoch may wrap its key for other members"
 		}
-		if err := e2ee.VerifyWrapSignature(wrapperEd, circleID, uint32(epoch), w.RecipientDeviceID, w.WrapperDeviceID, blob, sig); err != nil {
+		if line == e2ee.LineServer {
+			if err := e2ee.VerifyWrapSignatureLine(wrapperEd, circleID, line, uint32(epoch), w.RecipientDeviceID, w.WrapperDeviceID, blob, sig); err != nil {
+				return 0, false, "wrap signature does not verify"
+			}
+		} else if e2ee.VerifyWrapSignature(wrapperEd, circleID, uint32(epoch), w.RecipientDeviceID, w.WrapperDeviceID, blob, sig) != nil &&
+			e2ee.VerifyWrapSignatureLine(wrapperEd, circleID, line, uint32(epoch), w.RecipientDeviceID, w.WrapperDeviceID, blob, sig) != nil {
 			return 0, false, "wrap signature does not verify"
 		}
 		ct, err := tx.Exec(ctx, `INSERT INTO circle_key_wraps
-			(circle_id, epoch, recipient_device_id, wrapper_device_id, wrapper_ed25519_pub, wrapped_key, signature)
-			VALUES ($1,$2,$3,$4,$5,$6,$7)
-			ON CONFLICT (circle_id, epoch, recipient_device_id) DO UPDATE SET
+			(circle_id, key_line, epoch, recipient_device_id, wrapper_device_id, wrapper_ed25519_pub, wrapped_key, signature)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+			ON CONFLICT (circle_id, key_line, epoch, recipient_device_id) DO UPDATE SET
 			  wrapper_device_id = EXCLUDED.wrapper_device_id, wrapper_ed25519_pub = EXCLUDED.wrapper_ed25519_pub,
 			  wrapped_key = EXCLUDED.wrapped_key, signature = EXCLUDED.signature, created_at = now()`,
-			circleID, epoch, w.RecipientDeviceID, w.WrapperDeviceID, wrapperEd, blob, sig)
+			circleID, line.String(), epoch, w.RecipientDeviceID, w.WrapperDeviceID, wrapperEd, blob, sig)
 		if err != nil {
 			return 0, false, "failed to store wraps"
 		}
@@ -954,7 +993,7 @@ func (s *Server) commitEpoch(w http.ResponseWriter, r *http.Request, tx pgx.Tx, 
 		writeError(w, http.StatusBadRequest, "key_commitment must be 32 bytes, base64")
 		return false
 	}
-	_, self, msg := s.insertWraps(ctx, tx, circleID, req.Epoch, uid, uid, req.Wraps)
+	_, self, msg := s.insertWraps(ctx, tx, circleID, e2ee.LinePhone, req.Epoch, uid, uid, req.Wraps)
 	if msg != "" {
 		writeError(w, http.StatusBadRequest, msg)
 		return false
@@ -992,6 +1031,15 @@ func (s *Server) E2EESubmitWraps(w http.ResponseWriter, r *http.Request) {
 	if !decodeE2EEBody(w, r, &req) {
 		return
 	}
+	line := e2ee.LinePhone
+	if req.KeyLine != "" {
+		l, err := e2ee.ParseLine(req.KeyLine)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "key_line must be phone or server")
+			return
+		}
+		line = l
+	}
 	tx, mode, cur, ok := s.e2eeCircleTx(w, r, m.CircleID)
 	if !ok {
 		return
@@ -1001,14 +1049,30 @@ func (s *Server) E2EESubmitWraps(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "circle is not private")
 		return
 	}
-	if req.Epoch < 1 || req.Epoch > cur {
-		writeError(w, http.StatusConflict, "epoch must be between 1 and the current epoch")
-		return
-	}
 	var publisher string
-	_ = tx.QueryRow(r.Context(), `SELECT user_id::text FROM e2ee_log WHERE circle_id = $1 AND epoch = $2 AND action IN (5, 6)
-		ORDER BY seq DESC LIMIT 1`, m.CircleID, req.Epoch).Scan(&publisher)
-	n, _, msg := s.insertWraps(r.Context(), tx, m.CircleID, req.Epoch, uid, publisher, req.Wraps)
+	if line == e2ee.LineServer {
+		var assist bool
+		var gen int
+		if err := tx.QueryRow(r.Context(), `SELECT server_assist, e2ee_server_gen FROM circles WHERE id = $1`, m.CircleID).Scan(&assist, &gen); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to store wraps")
+			return
+		}
+		if !assist || req.Epoch < 1 || req.Epoch > gen {
+			writeError(w, http.StatusConflict, "server assistance is off or the generation does not exist")
+			return
+		}
+		// The publisher of an SK generation is the admin whose signed policy created it.
+		_ = tx.QueryRow(r.Context(), `SELECT user_id::text FROM e2ee_log WHERE circle_id = $1 AND action = $3 AND epoch = $2
+			ORDER BY seq ASC LIMIT 1`, m.CircleID, req.Epoch, int(e2ee.ActProcessingPolicy)).Scan(&publisher)
+	} else {
+		if req.Epoch < 1 || req.Epoch > cur {
+			writeError(w, http.StatusConflict, "epoch must be between 1 and the current epoch")
+			return
+		}
+		_ = tx.QueryRow(r.Context(), `SELECT user_id::text FROM e2ee_log WHERE circle_id = $1 AND epoch = $2 AND action IN (5, 6)
+			ORDER BY seq DESC LIMIT 1`, m.CircleID, req.Epoch).Scan(&publisher)
+	}
+	n, _, msg := s.insertWraps(r.Context(), tx, m.CircleID, line, req.Epoch, uid, publisher, req.Wraps)
 	if msg != "" {
 		writeError(w, http.StatusBadRequest, msg)
 		return
@@ -1018,7 +1082,7 @@ func (s *Server) E2EESubmitWraps(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if n > 0 {
-		s.auditCircle(r.Context(), uid, m.CircleID, "e2ee.wraps_added", itoa(n)+" wrap(s) at epoch "+itoa(req.Epoch), clientIP(r))
+		s.auditCircle(r.Context(), uid, m.CircleID, "e2ee.wraps_added", itoa(n)+" wrap(s) at "+line.String()+" key "+itoa(req.Epoch), clientIP(r))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "stored": n})
 }
@@ -1141,6 +1205,8 @@ type wrapOut struct {
 	WrappedKey        string    `json:"wrapped_key"`
 	Signature         string    `json:"signature"`
 	CreatedAt         time.Time `json:"created_at"`
+	// KeyLine is "phone" or "server"; for "server" Epoch is the SK generation.
+	KeyLine string `json:"key_line"`
 }
 
 // E2EEMyWraps returns the wrapped circle keys addressed to one of the caller's
@@ -1159,13 +1225,25 @@ func (s *Server) E2EEMyWraps(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "device_id required")
 		return
 	}
+	// key_line: absent = phone wraps only (an old app never sees an SK wrap and
+	// cannot mistake a generation for an epoch); "server" or "all" for lanes apps.
+	lf := r.URL.Query().Get("key_line")
+	switch lf {
+	case "":
+		lf = "phone"
+	case "phone", "server", "all":
+	default:
+		writeError(w, http.StatusBadRequest, "key_line must be phone, server or all")
+		return
+	}
 	rows, err := s.Pool.Query(r.Context(), `
 		SELECT k.epoch, k.recipient_device_id::text, k.wrapper_device_id::text, k.wrapper_ed25519_pub,
-		       k.wrapped_key, k.signature, k.created_at
+		       k.wrapped_key, k.signature, k.created_at, k.key_line
 		FROM circle_key_wraps k
 		JOIN device_keys d ON d.device_id = k.recipient_device_id
 		WHERE k.circle_id = $1 AND k.recipient_device_id = $2 AND d.user_id = $3 AND d.revoked_at IS NULL
-		ORDER BY k.epoch DESC`, m.CircleID, dev, uid)
+		  AND ($4 = 'all' OR k.key_line = $4)
+		ORDER BY k.key_line, k.epoch DESC`, m.CircleID, dev, uid, lf)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load wraps")
 		return
@@ -1175,7 +1253,7 @@ func (s *Server) E2EEMyWraps(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var o wrapOut
 		var ed, blob, sig []byte
-		if err := rows.Scan(&o.Epoch, &o.RecipientDeviceID, &o.WrapperDeviceID, &ed, &blob, &sig, &o.CreatedAt); err != nil {
+		if err := rows.Scan(&o.Epoch, &o.RecipientDeviceID, &o.WrapperDeviceID, &ed, &blob, &sig, &o.CreatedAt, &o.KeyLine); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to load wraps")
 			return
 		}
@@ -1205,16 +1283,28 @@ func (s *Server) E2EEPending(w http.ResponseWriter, r *http.Request) {
 	if !s.allowKey(w, "e2eeread:user:"+uid, e2eeReadPerUser, e2eeReadWindow) {
 		return
 	}
+	// key_line=server lists the keys lacking a wrap of the CURRENT SK generation
+	// (never the server-kind key itself: it is wrapped by explicit decision).
+	line := r.URL.Query().Get("key_line")
+	if line != "" && line != "phone" && line != "server" {
+		writeError(w, http.StatusBadRequest, "key_line must be phone or server")
+		return
+	}
+	if line == "" {
+		line = "phone"
+	}
 	rows, err := s.Pool.Query(r.Context(), `
 		SELECT `+e2eeDeviceCols+`, `+e2eeApprovedExpr("$1")+`, u.name
 		FROM circles c
 		JOIN live_circle_members cm ON cm.circle_id = c.id
 		JOIN users u ON u.id = cm.user_id
 		JOIN device_keys d ON d.user_id = cm.user_id AND d.revoked_at IS NULL
-		WHERE c.id = $1 AND c.e2ee_mode = 'private'
+		WHERE c.id = $1 AND c.e2ee_mode = 'private' AND ($2 = 'phone' OR (c.server_assist AND d.kind <> 'server'))
 		  AND NOT EXISTS (SELECT 1 FROM circle_key_wraps k
-		                  WHERE k.circle_id = c.id AND k.epoch = c.e2ee_epoch AND k.recipient_device_id = d.device_id)
-		ORDER BY d.created_at LIMIT 200`, m.CircleID)
+		                  WHERE k.circle_id = c.id AND k.key_line = $2
+		                    AND k.epoch = CASE WHEN $2 = 'server' THEN c.e2ee_server_gen ELSE c.e2ee_epoch END
+		                    AND k.recipient_device_id = d.device_id)
+		ORDER BY d.created_at LIMIT 200`, m.CircleID, line)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load pending devices")
 		return

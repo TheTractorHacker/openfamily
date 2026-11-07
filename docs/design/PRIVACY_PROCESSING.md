@@ -1,6 +1,6 @@
 # ADR: Per-member privacy and where data is processed (server-assisted vs phone-only)
 
-Status: **PROPOSED** (design only; no code in this change). Extends `docs/design/E2EE.md` (phases 1 to 3 and "Trusted-server mode").
+Status: **ACCEPTED**; phase 1 (crypto, section 17) and phase 2 (server, section 18) are implemented; phases 3 to 7 are open. Extends `docs/design/E2EE.md` (phases 1 to 3 and "Trusted-server mode").
 Audience: the maintainer, and the agents that will implement the phases in section 13.
 
 Everything below was checked against `E2EE.md`, `backend/internal/handlers/e2ee_server_member.go`, `backend/internal/handlers/e2ee_channel.go`,
@@ -449,3 +449,40 @@ Caller duties the library does not do: sender approval and registration chain (`
 
 Vector file format (`lanes.json`, hex strings, `line`/`lane` as 0/1): top-level `circle_id`, `ck_hex`, `sk_hex`, identities `sender`, `admin`, `recipient` (`user_id`, `device_id`, `ed_seed_hex`, `ed_pub_hex`, `x_secret_hex`, `x_pub_hex`), `server_device_id`, `server_fingerprint_hex`; positive arrays `items`, `wraps`, `prefs`, `policies` (inputs plus expected `payload_hex` / `blob_hex` / `message_hex` / `sig_hex` / `commitment_hex` / log ref and log action message); and `negative.{items,wraps,prefs,policies}`: each entry has the inputs of the verifying function and MUST be rejected. Negative coverage: line or gen tampered in header, CK payload or wrap replayed as SK (signature replay, re-signed with v3 AAD, re-signed legacy v1 AAD), identical key bytes relabelled across lines, signature made for the other line inside a server payload, unknown line/version, wrong sender/device/purpose/seq, wrong or short commitment, consent moved across circle/user/gen/lane/nonce/server device, wrong server fingerprint, legacy consent signature offered as new, policy field flips including `member_opt_out` and unknown `member_opt_out`.
 
+
+## 18. Phase 2 API (implemented: server)
+
+Migration `000220_processing_lanes` (up and down, idempotent; the number differs from the `000187` sketched in section 6). Code: `backend/internal/handlers/e2ee_processing.go`, `e2ee_channel.go`, `e2ee_server_member.go`, `e2ee.go`; Authz queries in `backend/internal/circles/circles.go`; tests `e2ee_processing_db_test.go`.
+
+### 18.1 Storage and database rules
+
+* `circles`: `server_assist`, `server_assist_default`, `member_opt_out` (`allowed` | `required_server`, needs `server_assist`), `e2ee_server_gen`, `e2ee_server_commitment`, `e2ee_server_rekey_required`, `server_legacy_ck`, `server_legacy_epoch_max`. They mirror signed statements; nothing sets them but the verified handlers.
+* `circle_key_wraps.key_line` and `e2ee_items.key_line` (`phone` | `server`); PK of wraps is `(circle_id, key_line, epoch, recipient_device_id)`; for the server line `epoch` is the SK generation. `device_keys.caps TEXT[]` (`lanes2`).
+* `e2ee_processing_pref` (current lane per member; no row = phone) and `e2ee_processing_statements` (append-only copy of every signed pref/policy with its log seq).
+* Trigger `e2ee_wrap_guard`: `CK` is refused for any `kind='server'` recipient (INSERT and UPDATE) unless the circle still carries the legacy flag; `SK` to a server key only while `server_assist` and at least one pref has `lane='server'`. `device_keys.kind` is immutable. Trigger `e2ee_item_guard`: a `server` item needs policy on and an author in lane server; in a `required_server` circle every phone-line item needs an author in lane server; epochs closed by the legacy upgrade accept nothing. Last server-lane pref gone, policy turned off, mode change, member removed, key revoked: SK wraps of the server key / prefs are removed and `e2ee_server_rekey_required` is set (member removal, revoke) so both lines rotate.
+* Functions: `e2ee_server_assist(circle)` (policy on, pinned key active and approved, holds the CURRENT SK generation, no SK rotation pending), `e2ee_pref_lane_server`, `e2ee_member_server_ok(circle, user)` (legacy all-consent rule OR assist AND own lane), `e2ee_member_plaintext_ok(circle, user)` (normal circle OR server ok), `e2ee_server_member_legacy` (the old rule, only for circles flagged `server_legacy_ck`). `e2ee_plaintext_blocked(circle)` stays circle-level (places, geofences, bubbles) and is lifted only for a legacy circle: in a lanes circle phones evaluate places. `e2ee_server_member` is a compatibility alias, no longer an authorization gate.
+
+### 18.2 Endpoints (all under the signed-in user API; log signatures use action codes 10 and 11 with `epoch = sk_gen`)
+
+| Route | Who | Body / result |
+|---|---|---|
+| `PUT /e2ee/devices/{id}/caps` | owner of that active key | `{"caps":["lanes2"]}`; unknown values dropped. Registration and rotate also accept `caps` (rotate inherits). |
+| `GET /circles/{id}/e2ee/processing` | any member | policy (+ signed statement), `in_effect`, per member `{lane (verified in Go), since, sk_gen_ok, lanes2, pref statement}`, `members_server`, `members_phone_only`, `all_members_lanes2`, `not_ready`, `legacy`, `my_lane` |
+| `PUT /circles/{id}/e2ee/processing-policy` | circle admin only | `{server_assist, default_for_new, member_opt_out, sk_gen, commitment, nonce, signature, actor_device_id, log_signature, wraps[]}` (statement = section 17). Turning on needs `sk_gen = last + 1`, SK wraps incl. the caller's own device, every member's app `lanes2` (409 `members_not_ready` + `not_ready`), a pinned approved server key. Same generation = settings only (commitment must equal the stored one). Next generation = rotation (clears `rekey`). Off keeps the generation. |
+| `PUT /circles/{id}/e2ee/processing-pref` | the member (own) | `{lane, sk_gen, server_device_id, server_fingerprint (b64 32), nonce (b64 16), approver_device_id, signature, log_signature}`; phone lane uses the zero UUID and a zero fingerprint. The user is never read from the body. Lane server needs policy on, the pinned key, an existing generation, an approved active phone key with `lanes2`. Withdrawal (lane phone) is never refused. |
+| `POST /circles/{id}/e2ee/processing-upgrade` | circle admin | legacy trusted-server circles only (section 11): one transaction with CK epoch N+1 (`epoch`, `key_commitment`, `epoch_wraps`, epoch `actor_device_id`/`log_signature`, no server wrap) and `policy` (assist on, generation 1, SK wraps). Verified legacy consents become `lane=server` prefs (`legacy=true`), old consent rows are removed, items with epoch <= N are relabelled `key_line=server`, epoch N is closed to new items. |
+| `POST /circles/{id}/e2ee/wraps` | existing | gains `key_line` (`phone` default | `server`); SK wraps follow the publisher rule (the admin whose policy created the generation). |
+| `POST /circles/{id}/e2ee/batch` | existing | items gain `key_line` (empty = v1 phone). v2 items must declare their line, and header line/generation must equal the declared ones. |
+| `GET /circles/{id}/e2ee/items`, `.../wraps`, `.../pending` | existing | `key_line` filter; **absent means phone only**, so an old app never sees SK data. A server-kind key reading items gets the server line only (legacy circles excepted). |
+| `DELETE /circles/{id}/e2ee/server-copies?scope=mine|circle` | member / admin | now also deletes `key_line=server` items (own devices, or all for the circle); returns `items_deleted`. Phone-line items are never touched. |
+| `GET /api/admin/e2ee/keys` | platform admin | per circle `server_assist`, `members_server_assisted`, `members_phone_only`, `legacy_trusted_server` (counts only). The admin member list carries `keeps_data_on_phone` and omits that member's position (owner decision Q2). |
+
+Old routes: `PUT .../server-consent` works only for circles still flagged legacy (otherwise 409 `use_processing_pref`). `GET /circles` keeps `e2ee_server_member` (true only for a legacy all-consented circle, so old apps stay private in a lanes circle) and adds `server_assist`, `member_opt_out`, `my_lane_server`.
+
+### 18.3 Trust and authorization rules
+
+1. Whether the server may WRITE or READ a member's plaintext is decided per user. Writers (`/internal/e2ee/ingest`, item relay) re-verify in Go: policy statement vs circle columns, the member's pref signature against an active phone key naming exactly the pinned server key, and that the pref is the member's latest `processing_pref` entry in the key log (a planted or replayed row fails). SQL (`e2ee_member_plaintext_ok`) gates reads: Authz visibility, live fan-out circles, check-in and SOS positions, crash alerts, geofencing, Home Assistant, admin map.
+2. No endpoint writes another user's pref; circle-wide settings need the circle admin role; the platform admin has no circle power and sees counts only.
+3. The phone key is never wrapped to a server key (legacy circles excepted until upgraded); the server key only by a phone, while policy is on and a member chose the server lane.
+4. `required_server`: the server refuses to relay phone-line items from members who have not signed the server lane; withdrawal of consent is always accepted.
+5. Capability gate: `lanes2` is self-declared and unsigned, so it protects against honest old apps (they stay phone-only, are never counted ready, cannot choose the server lane) and is not a security boundary.

@@ -25,7 +25,10 @@ type srvEnv struct {
 	s *tdev // the OpenFamily server device (owned by A's account)
 }
 
-func newSrvEnv(t *testing.T) *srvEnv {
+func newSrvEnv(t *testing.T) *srvEnv { return newSrvEnvOpt(t, true) }
+
+// newSrvEnvOpt: legacy = the circle is in the pre-lanes trusted-server mode.
+func newSrvEnvOpt(t *testing.T, legacy bool) *srvEnv {
 	t.Setenv("E2EE_SERVER_INGEST_TOKEN", testServerToken)
 	e := newChanEnv(t)
 	e.route("PUT", "/internal/e2ee/server-device", e.srv.E2EEPinServerDevice)
@@ -36,7 +39,20 @@ func newSrvEnv(t *testing.T) *srvEnv {
 	e.route("DELETE", "/circles/{id}/e2ee/server-consent", e.srv.E2EEDeleteServerConsent)
 	e.route("DELETE", "/circles/{id}/e2ee/server-copies", e.srv.E2EEPurgeServerCopies)
 	e.route("GET", "/circles", e.srv.ListCircles)
+	e.route("PUT", "/e2ee/devices/{id}/caps", e.srv.E2EEPutDeviceCaps)
+	e.route("GET", "/circles/{id}/e2ee/processing", e.srv.E2EEProcessingState)
+	e.route("PUT", "/circles/{id}/e2ee/processing-policy", e.srv.E2EEPutProcessingPolicy)
+	e.route("PUT", "/circles/{id}/e2ee/processing-pref", e.srv.E2EEPutProcessingPref)
+	e.route("POST", "/circles/{id}/e2ee/processing-upgrade", e.srv.E2EEUpgradeProcessing)
+	e.route("GET", "/admin/e2ee/keys", e.srv.AdminE2EEKeys)
 	t.Cleanup(func() { _, _ = e.pool.Exec(context.Background(), `DELETE FROM e2ee_server_device`) })
+	// These tests cover the pre-lanes trusted-server mode. Only circles that existed
+	// before migration 220 can be in it (the migration flags them); simulate that.
+	if legacy {
+		if _, err := e.pool.Exec(context.Background(), `UPDATE circles SET server_legacy_ck = TRUE WHERE id = $1`, e.circle); err != nil {
+			t.Fatal(err)
+		}
+	}
 	s := newTDev(t, e.ids["A"])
 	e.mustCode("A", "POST", "/e2ee/devices", regBody(t, s, "server", e.a, e2ee.ActRegister, false), 201)
 	return &srvEnv{chanEnv: e, s: s}

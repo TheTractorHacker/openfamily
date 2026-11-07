@@ -39,6 +39,12 @@ type e2eeAdminCircle struct {
 	UpdatedAt     *time.Time `json:"updated_at"`
 	Members       int        `json:"members"`
 	WrappedKeys   int        `json:"wrapped_keys"`
+	// Lanes (counts only; the platform admin sees no per-member choice):
+	// members whose server may read them vs members who keep data on their phone.
+	ServerAssist     bool `json:"server_assist"`
+	MembersServer    int  `json:"members_server_assisted"`
+	MembersPhoneOnly int  `json:"members_phone_only"`
+	LegacyTrusted    bool `json:"legacy_trusted_server"`
 }
 
 func loadE2EEAdmin(ctx context.Context, pool *pgxpool.Pool, includeRevoked bool) ([]e2eeAdminDevice, []e2eeAdminCircle, error) {
@@ -68,7 +74,10 @@ func loadE2EEAdmin(ctx context.Context, pool *pgxpool.Pool, includeRevoked bool)
 	crow, err := pool.Query(ctx, `
 		SELECT c.id::text, c.name, c.e2ee_mode, c.e2ee_epoch, c.e2ee_rekey_required, c.e2ee_updated_at,
 		       (SELECT count(*) FROM circle_members m WHERE m.circle_id = c.id),
-		       (SELECT count(*) FROM circle_key_wraps k WHERE k.circle_id = c.id AND k.epoch = c.e2ee_epoch)
+		       (SELECT count(*) FROM circle_key_wraps k WHERE k.circle_id = c.id AND k.key_line = 'phone' AND k.epoch = c.e2ee_epoch),
+		       c.server_assist, c.server_legacy_ck,
+		       (SELECT count(*) FROM live_circle_members m WHERE m.circle_id = c.id AND c.e2ee_mode = 'private' AND e2ee_member_server_ok(c.id, m.user_id)),
+		       (SELECT count(*) FROM live_circle_members m WHERE m.circle_id = c.id AND c.e2ee_mode = 'private' AND NOT e2ee_member_server_ok(c.id, m.user_id))
 		FROM circles c WHERE c.e2ee_mode <> 'off' OR c.e2ee_epoch > 0
 		ORDER BY c.name, c.id LIMIT 2000`)
 	if err != nil {
@@ -78,7 +87,8 @@ func loadE2EEAdmin(ctx context.Context, pool *pgxpool.Pool, includeRevoked bool)
 	cs := []e2eeAdminCircle{}
 	for crow.Next() {
 		var c e2eeAdminCircle
-		if err := crow.Scan(&c.ID, &c.Name, &c.Mode, &c.Epoch, &c.RekeyRequired, &c.UpdatedAt, &c.Members, &c.WrappedKeys); err != nil {
+		if err := crow.Scan(&c.ID, &c.Name, &c.Mode, &c.Epoch, &c.RekeyRequired, &c.UpdatedAt, &c.Members, &c.WrappedKeys,
+			&c.ServerAssist, &c.LegacyTrusted, &c.MembersServer, &c.MembersPhoneOnly); err != nil {
 			return nil, nil, err
 		}
 		cs = append(cs, c)
@@ -129,8 +139,8 @@ func PrintE2EEFingerprints(ctx context.Context, pool *pgxpool.Pool, out io.Write
 	if len(cs) > 0 {
 		fmt.Fprintln(out, "\nCircles with encryption state")
 		for _, c := range cs {
-			fmt.Fprintf(out, "  %s  %q mode=%s epoch=%d rekey_required=%v members=%d wrapped_devices=%d\n",
-				c.ID, c.Name, c.Mode, c.Epoch, c.RekeyRequired, c.Members, c.WrappedKeys)
+			fmt.Fprintf(out, "  %s  %q mode=%s epoch=%d rekey_required=%v members=%d wrapped_devices=%d server_assist=%v server_assisted=%d phone_only=%d\n",
+				c.ID, c.Name, c.Mode, c.Epoch, c.RekeyRequired, c.Members, c.WrappedKeys, c.ServerAssist, c.MembersServer, c.MembersPhoneOnly)
 		}
 	}
 	return nil

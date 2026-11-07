@@ -370,6 +370,13 @@ func main() {
 		r.Put("/circles/{id}/e2ee/server-consent", srv.E2EEPutServerConsent)
 		r.Delete("/circles/{id}/e2ee/server-consent", srv.E2EEDeleteServerConsent)
 		r.Delete("/circles/{id}/e2ee/server-copies", srv.E2EEPurgeServerCopies)
+		// Per-member processing lanes (docs/design/PRIVACY_PROCESSING.md): the admin
+		// sets the circle policy, each member only their OWN lane.
+		r.Put("/e2ee/devices/{id}/caps", srv.E2EEPutDeviceCaps)
+		r.Get("/circles/{id}/e2ee/processing", srv.E2EEProcessingState)
+		r.Put("/circles/{id}/e2ee/processing-policy", srv.E2EEPutProcessingPolicy)
+		r.Put("/circles/{id}/e2ee/processing-pref", srv.E2EEPutProcessingPref)
+		r.Post("/circles/{id}/e2ee/processing-upgrade", srv.E2EEUpgradeProcessing)
 		r.Get("/e2ee/log", srv.E2EELog)
 
 		r.Post("/families", srv.CreateFamily)

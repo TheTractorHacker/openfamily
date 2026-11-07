@@ -594,3 +594,7 @@ Not reviewed by an external cryptographer; the formats should be audited before 
 ## Alternatives considered
 
 The previous options (A status quo, B history only, C full E2EE, D client geofence + relay) are retained for history; the maintainer chose C/D, phased and opt-in per circle, accepting the feature loss listed above for circles that opt in.
+
+## Update: per-member processing lanes (server side implemented)
+
+The trusted-server mode described above is now the **legacy** mode. Circles that were already in it stay in it until their admin runs "Upgrade privacy controls" (`POST /circles/{id}/e2ee/processing-upgrade`); every other circle uses per-member lanes with a phone key (never wrapped to the server) and a server key, see `docs/design/PRIVACY_PROCESSING.md` sections 17 and 18. The server device is never again wrapped the phone key in a non-legacy circle.

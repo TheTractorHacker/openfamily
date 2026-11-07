@@ -70,7 +70,7 @@ func (s *Server) haEventPayload(ctx context.Context, integ *haIntegration, ev ha
 	}
 	rows, err := s.Pool.Query(ctx, `
 		SELECT m.circle_id::text, (m.sharing_enabled AND NOT `+pausedExprSQL("m.user_id")+`),
-		       NOT e2ee_plaintext_blocked(m.circle_id), u.name
+		       e2ee_member_plaintext_ok(m.circle_id, m.user_id), u.name
 		FROM live_circle_members m
 		JOIN live_circle_members v ON v.circle_id = m.circle_id AND v.user_id = $1
 		JOIN users u ON u.id = m.user_id

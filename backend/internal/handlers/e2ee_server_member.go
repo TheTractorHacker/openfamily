@@ -87,8 +87,13 @@ type serverDeviceInfo struct {
 
 // pinnedServerDevice returns the active pinned server key, or nil.
 func (s *Server) pinnedServerDevice(ctx context.Context) (*serverDeviceInfo, error) {
+	return pinnedServerDeviceQ(ctx, s.Pool)
+}
+
+// pinnedServerDeviceQ is pinnedServerDevice on any querier (pool or transaction).
+func pinnedServerDeviceQ(ctx context.Context, q rowQuerier) (*serverDeviceInfo, error) {
 	var i serverDeviceInfo
-	err := s.Pool.QueryRow(ctx, `
+	err := q.QueryRow(ctx, `
 		SELECT d.device_id::text, d.user_id::text, d.label, d.fingerprint
 		FROM e2ee_server_device sd JOIN device_keys d ON d.device_id = sd.device_id
 		WHERE d.kind = 'server' AND d.revoked_at IS NULL`).Scan(&i.DeviceID, &i.OwnerUserID, &i.Label, &i.Fingerprint)
@@ -177,7 +182,7 @@ func (s *Server) verifyServerConsents(ctx context.Context, circleID string, dev 
 	if !all || len(st.Required) == 0 {
 		return st, nil
 	}
-	if err := s.Pool.QueryRow(ctx, `SELECT e2ee_server_member($1::uuid)`, circleID).Scan(&st.ServerMember); err != nil {
+	if err := s.Pool.QueryRow(ctx, `SELECT e2ee_server_member_legacy($1::uuid)`, circleID).Scan(&st.ServerMember); err != nil {
 		return consentStatus{}, err
 	}
 	return st, nil
@@ -240,7 +245,7 @@ func (s *Server) E2EEServerMemberState(w http.ResponseWriter, r *http.Request) {
 	// wraps it after all members consented).
 	var wrapped bool
 	_ = s.Pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM circle_key_wraps w JOIN circles c ON c.id = w.circle_id AND w.epoch = c.e2ee_epoch
-		WHERE w.circle_id = $1 AND w.recipient_device_id = $2)`, m.CircleID, dev.DeviceID).Scan(&wrapped)
+		WHERE w.circle_id = $1 AND w.key_line = 'phone' AND w.recipient_device_id = $2)`, m.CircleID, dev.DeviceID).Scan(&wrapped)
 	mine := false
 	for _, u := range st.Consented {
 		if u == uid {
@@ -268,6 +273,9 @@ func (s *Server) E2EEServerMemberState(w http.ResponseWriter, r *http.Request) {
 		cr.Close()
 	}
 	out["consents"] = consents
+	var legacyCircle bool
+	_ = s.Pool.QueryRow(ctx, `SELECT server_legacy_ck FROM circles WHERE id = $1`, m.CircleID).Scan(&legacyCircle)
+	out["legacy"] = legacyCircle
 	out["server_member"], out["device"], out["wrapped"] = st.ServerMember, dev, wrapped
 	out["required"], out["consented"], out["my_consent"] = nonNil(st.Required), nonNil(st.Consented), mine
 	writeJSON(w, http.StatusOK, out)
@@ -314,6 +322,13 @@ func (s *Server) E2EEPutServerConsent(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	if !s.circleIsPrivate(ctx, m.CircleID) {
 		writeE2EECode(w, http.StatusConflict, "circle_not_private", "circle is not end-to-end encrypted")
+		return
+	}
+	// The all-members consent exists only for circles that were already in the old
+	// trusted-server mode. Every other circle uses per-member lanes (processing-pref).
+	var legacy bool
+	if err := s.Pool.QueryRow(ctx, `SELECT server_legacy_ck FROM circles WHERE id = $1`, m.CircleID).Scan(&legacy); err != nil || !legacy {
+		writeE2EECode(w, http.StatusConflict, "use_processing_pref", "this circle uses per-member processing lanes; sign a processing preference instead")
 		return
 	}
 	dev, err := s.pinnedServerDevice(ctx)
@@ -446,6 +461,16 @@ func (s *Server) E2EEPurgeServerCopies(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to purge")
 		return
 	}
+	// The server-line ciphertext (readable by the server's SK) goes too; phone-line
+	// ciphertext is never touched. scope=mine only ever matches the caller's own keys.
+	itemsTag, err := tx.Exec(ctx, `
+		DELETE FROM e2ee_items i
+		WHERE i.circle_id = $1 AND i.key_line = 'server'
+		  AND ($2 = 'circle' OR i.device_id IN (SELECT device_id FROM device_keys WHERE user_id = $3))`, m.CircleID, scope, uid)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to purge")
+		return
+	}
 	// A last-known position is touched only if it IS one of the purged points (same
 	// user, same instant). It is then recomputed from the newest remaining location
 	// of any source (another server-member circle, a plaintext circle), or removed
@@ -492,7 +517,8 @@ func (s *Server) E2EEPurgeServerCopies(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.auditCircle(ctx, uid, m.CircleID, "e2ee.server_copies_purged", "scope "+scope, clientIP(r))
-	writeJSON(w, http.StatusOK, map[string]any{"locations_deleted": nDeleted, "last_positions_deleted": removed, "last_positions_recomputed": repositioned})
+	writeJSON(w, http.StatusOK, map[string]any{"locations_deleted": nDeleted, "items_deleted": itemsTag.RowsAffected(),
+		"last_positions_deleted": removed, "last_positions_recomputed": repositioned})
 }
 
 // ----------------------------------------------------------- internal API
@@ -599,14 +625,17 @@ func (s *Server) E2EEServerIngest(w http.ResponseWriter, r *http.Request) {
 		writeE2EECode(w, http.StatusForbidden, "not_the_server_device", "that key is not the pinned, active server device")
 		return
 	}
-	st, err := s.verifyServerConsents(ctx, req.CircleID, dev)
+	// Per-user gate: only members whose VERIFIED lane is server (legacy circle:
+	// every member, after the all-consent check) are ever written. A phone-lane
+	// member, a member without a pref, or a row planted in the database is not.
+	lanes, err := s.ingestLanes(ctx, req.CircleID, dev)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to verify consents")
 		return
 	}
-	if !st.ServerMember {
+	if len(lanes) == 0 {
 		writeE2EECode(w, http.StatusConflict, "not_a_server_member_circle",
-			"this circle is not readable by the server: it needs the server key's wrap and every member's consent")
+			"this circle is not readable by the server: it needs the server key's wrap and a member whose own signed choice is the server lane")
 		return
 	}
 
@@ -660,6 +689,10 @@ func (s *Server) E2EEServerIngest(w http.ResponseWriter, r *http.Request) {
 		}
 		if senderOK[p.SenderDeviceID] == "" || senderOK[p.SenderDeviceID] != p.UserID {
 			rejected["sender_not_allowed"]++
+			continue
+		}
+		if !lanes[p.UserID] {
+			rejected["lane_not_server"]++
 			continue
 		}
 		dv, ok := userDevice[p.UserID]

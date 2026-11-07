@@ -86,7 +86,15 @@ type circleOut struct {
 	E2EEEpoch int    `json:"e2ee_epoch"`
 	// E2EEServerMember: the circle is Private AND an approved, consented
 	// OpenFamily server device can read it (trusted-server mode).
+	// Old clients read this as "the server may read the whole circle": it is true
+	// ONLY for a legacy all-members-consented circle, so an app that predates the
+	// lanes stays private (phone-only) in a lanes circle.
 	E2EEServerMember bool `json:"e2ee_server_member"`
+	// ServerAssist is the admin policy; MemberOptOut is "allowed" or
+	// "required_server"; MyLaneServer is the caller's own verified-in-SQL lane.
+	ServerAssist  bool   `json:"server_assist"`
+	MemberOptOut  string `json:"member_opt_out"`
+	MyLaneServer  bool   `json:"my_lane_server"`
 }
 
 type circleMemberOut struct {
@@ -311,7 +319,8 @@ func (s *Server) ListCircles(w http.ResponseWriter, r *http.Request) {
 		SELECT c.id, c.name, c.icon, c.created_by, c.created_at,
 		       cm.role, cm.sharing_enabled, cm.joined_at,
 		       (SELECT count(*) FROM circle_members x WHERE x.circle_id = c.id),
-		       COALESCE(u.family_id = c.id, false), c.expires_at, c.e2ee_mode, c.e2ee_epoch, (c.e2ee_mode = 'private' AND e2ee_server_member(c.id))
+		       COALESCE(u.family_id = c.id, false), c.expires_at, c.e2ee_mode, c.e2ee_epoch, (c.e2ee_mode = 'private' AND e2ee_server_member_legacy(c.id)),
+		       c.server_assist, c.member_opt_out, (c.e2ee_mode = 'private' AND e2ee_member_server_ok(c.id, cm.user_id))
 		FROM circle_members cm
 		JOIN circles c ON c.id = cm.circle_id
 		JOIN users u ON u.id = cm.user_id
@@ -326,7 +335,7 @@ func (s *Server) ListCircles(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var c circleOut
 		if err := rows.Scan(&c.ID, &c.Name, &c.Icon, &c.CreatedBy, &c.CreatedAt,
-			&c.Role, &c.SharingEnabled, &c.JoinedAt, &c.MemberCount, &c.IsPrimary, &c.ExpiresAt, &c.E2EEMode, &c.E2EEEpoch, &c.E2EEServerMember); err != nil {
+			&c.Role, &c.SharingEnabled, &c.JoinedAt, &c.MemberCount, &c.IsPrimary, &c.ExpiresAt, &c.E2EEMode, &c.E2EEEpoch, &c.E2EEServerMember, &c.ServerAssist, &c.MemberOptOut, &c.MyLaneServer); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to read circles")
 			return
 		}

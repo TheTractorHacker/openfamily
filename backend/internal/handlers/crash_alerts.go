@@ -67,7 +67,7 @@ func (s *Server) PostCrashAlert(w http.ResponseWriter, r *http.Request) {
 	lat, lon := req.Lat, req.Lon
 	// Private circle: no plaintext position is stored; the alert still goes out.
 	withheld := false
-	if fid, ferr := s.familyIDForUser(ctx, claims.UserID); ferr == nil && s.circleBlocksPlaintext(ctx, fid) {
+	if fid, ferr := s.familyIDForUser(ctx, claims.UserID); ferr == nil && fid != "" && !s.memberPlaintextOK(ctx, fid, claims.UserID) {
 		lat, lon, withheld = nil, nil, true
 	}
 	if !withheld && (lat == nil || lon == nil) {

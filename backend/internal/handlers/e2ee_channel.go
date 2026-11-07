@@ -72,6 +72,10 @@ type e2eeItemIn struct {
 	Epoch      int    `json:"epoch"`
 	SizeBucket int    `json:"size_bucket"`
 	Ciphertext string `json:"ciphertext"`
+	// KeyLine is "phone" or "server" (routing metadata, see PRIVACY_PROCESSING.md
+	// 5.2). Empty means a v1 item (phone line). For a v2 item Epoch is the
+	// generation of the line's key.
+	KeyLine string `json:"key_line,omitempty"`
 }
 
 type e2eeBatchReq struct {
@@ -99,6 +103,7 @@ type e2eeItemOut struct {
 	Epoch      int       `json:"epoch"`
 	SizeBucket int       `json:"size_bucket"`
 	Ciphertext string    `json:"ciphertext"`
+	KeyLine    string    `json:"key_line"`
 	ReceivedAt time.Time `json:"received_at"` // truncated to the minute
 }
 
@@ -144,7 +149,7 @@ func checkE2EEItem(it e2eeItemIn, currentEpoch int) ([]byte, string) {
 // circleModes reports how many live circles of the user are private and standard.
 func (s *Server) circleModes(ctx context.Context, userID string) (private, standard int, err error) {
 	err = s.Pool.QueryRow(ctx, `
-		SELECT count(*) FILTER (WHERE e2ee_plaintext_blocked(c.id)), count(*) FILTER (WHERE NOT e2ee_plaintext_blocked(c.id))
+		SELECT count(*) FILTER (WHERE NOT e2ee_member_plaintext_ok(c.id, m.user_id)), count(*) FILTER (WHERE e2ee_member_plaintext_ok(c.id, m.user_id))
 		FROM live_circle_members m JOIN circles c ON c.id = m.circle_id
 		WHERE m.user_id = $1`, userID).Scan(&private, &standard)
 	return
@@ -199,6 +204,110 @@ func (s *Server) circleBlocksPlaintext(ctx context.Context, circleID string) boo
 	return blocked
 }
 
+// memberPlaintextOK reports whether plaintext of this ONE member may exist for
+// the circle: a normal circle, a legacy trusted-server circle whose members all
+// consented, or a lanes circle whose server may read this member (their own
+// signed lane is server). Fails closed: an error, an unknown circle or an empty
+// id answers false for a private circle and true only for a normal one.
+func (s *Server) memberPlaintextOK(ctx context.Context, circleID, userID string) bool {
+	if circleID == "" || userID == "" {
+		return false
+	}
+	var ok bool
+	if err := s.Pool.QueryRow(ctx, `SELECT e2ee_member_plaintext_ok($1::uuid, $2::uuid)`, circleID, userID).Scan(&ok); err != nil {
+		return false
+	}
+	return ok
+}
+
+// itemCircle is the circle state an item is validated against.
+type itemCircle struct {
+	Epoch, ServerGen, LegacyMax int
+	ServerAssist                bool
+	OptOut                      string
+}
+
+// checkE2EEItemLine validates one item without touching the database (the
+// author's lane is passed in, already verified). It parses the payload header
+// with the Phase 1 functions, so line and generation are those the sender
+// signed. It returns the decoded ciphertext, the line, or an error code.
+func checkE2EEItemLine(it e2eeItemIn, c itemCircle, laneServer, devLanes2 bool) ([]byte, e2ee.Line, string) {
+	maxB, ok := e2eeMaxBucket[it.Purpose]
+	if !ok {
+		return nil, 0, "bad_purpose"
+	}
+	if it.Seq <= 0 || it.Seq >= 1<<53 {
+		return nil, 0, "bad_seq"
+	}
+	if it.Epoch < 1 || (it.KeyLine != "server" && it.Epoch > c.Epoch) {
+		return nil, 0, "bad_epoch"
+	}
+	if !validBucket(it.SizeBucket) || it.SizeBucket > maxB {
+		return nil, 0, "bad_size_bucket"
+	}
+	ct, err := base64.StdEncoding.DecodeString(it.Ciphertext)
+	if err != nil || len(ct) < 6 {
+		return nil, 0, "bad_ciphertext_length"
+	}
+	h, err := e2ee.ParsePayloadHeader(ct)
+	if err != nil {
+		return nil, 0, "bad_header"
+	}
+	want := ciphertextLen(it.SizeBucket)
+	declared := e2ee.LinePhone
+	switch it.KeyLine {
+	case "":
+		if h.Version != e2ee.MsgVersion {
+			return nil, 0, "bad_header" // a v2 item must declare its line
+		}
+	case "phone", "server":
+		declared, _ = e2ee.ParseLine(it.KeyLine)
+		if h.Version != e2ee.MsgVersionV2 && !(declared == e2ee.LinePhone && h.Version == e2ee.MsgVersion) {
+			return nil, 0, "bad_header"
+		}
+	default:
+		return nil, 0, "bad_key_line"
+	}
+	if h.Version == e2ee.MsgVersionV2 {
+		want = 1 + 1 + 4 + e2ee.NonceLen + it.SizeBucket + e2ee.TagLen
+	}
+	if len(ct) != want {
+		return nil, 0, "bad_ciphertext_length"
+	}
+	if h.Line != declared || int(h.Gen) != it.Epoch || it.Epoch < 1 {
+		return nil, 0, "bad_header"
+	}
+	if declared == e2ee.LineServer {
+		// Server line: policy on, a generation that exists, an app that declared
+		// the capability, and an author whose OWN verified lane is server.
+		if !c.ServerAssist || c.ServerGen < 1 {
+			return nil, 0, "server_line_off"
+		}
+		if it.Epoch > c.ServerGen {
+			return nil, 0, "bad_epoch"
+		}
+		if !devLanes2 {
+			return nil, 0, "device_lacks_lanes2"
+		}
+		if !laneServer {
+			return nil, 0, "lane_not_server"
+		}
+		return ct, declared, ""
+	}
+	if it.Epoch > c.Epoch {
+		return nil, 0, "bad_epoch"
+	}
+	if c.LegacyMax > 0 && it.Epoch <= c.LegacyMax {
+		return nil, 0, "legacy_epoch_closed"
+	}
+	if c.OptOut == "required_server" && !laneServer {
+		// The owner decision of ADR 16.1: the server does not relay phone-lane
+		// items from members of a required_server circle.
+		return nil, 0, "required_server"
+	}
+	return ct, declared, ""
+}
+
 // E2EEPostBatch accepts a batch of sealed items from one of the caller's sender
 // devices. POST /circles/{id}/e2ee/batch.
 func (s *Server) E2EEPostBatch(w http.ResponseWriter, r *http.Request) {
@@ -236,8 +345,9 @@ func (s *Server) E2EEPostBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var mode string
-	var curEpoch int
-	if err := tx.QueryRow(ctx, `SELECT e2ee_mode, e2ee_epoch FROM circles WHERE id = $1`, m.CircleID).Scan(&mode, &curEpoch); err != nil {
+	var ic itemCircle
+	if err := tx.QueryRow(ctx, `SELECT e2ee_mode, e2ee_epoch, server_assist, e2ee_server_gen, server_legacy_epoch_max, member_opt_out
+		FROM circles WHERE id = $1`, m.CircleID).Scan(&mode, &ic.Epoch, &ic.ServerAssist, &ic.ServerGen, &ic.LegacyMax, &ic.OptOut); err != nil {
 		writeError(w, http.StatusNotFound, "circle not found")
 		return
 	}
@@ -249,10 +359,10 @@ func (s *Server) E2EEPostBatch(w http.ResponseWriter, r *http.Request) {
 	// approved in this circle. Someone else's device answers 404 (no probing).
 	var owner string
 	var kind string
-	var canUpload, active, approved bool
+	var canUpload, active, approved, devLanes2 bool
 	err = tx.QueryRow(ctx, `
-		SELECT d.user_id::text, d.kind, d.can_upload, d.revoked_at IS NULL, `+e2eeApprovedExpr("$2")+`
-		FROM device_keys d WHERE d.device_id = $1`, req.DeviceID, m.CircleID).Scan(&owner, &kind, &canUpload, &active, &approved)
+		SELECT d.user_id::text, d.kind, d.can_upload, d.revoked_at IS NULL, `+e2eeApprovedExpr("$2")+`, 'lanes2' = ANY(d.caps)
+		FROM device_keys d WHERE d.device_id = $1`, req.DeviceID, m.CircleID).Scan(&owner, &kind, &canUpload, &active, &approved, &devLanes2)
 	if err != nil || owner != uid {
 		writeError(w, http.StatusNotFound, "device not found")
 		return
@@ -281,12 +391,18 @@ func (s *Server) E2EEPostBatch(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC()
 	coarse := now.Truncate(time.Minute)
 
+	// The author's verified lane (Go re-verifies the signed pref against the
+	// pinned server key; SQL alone is never trusted for a write decision).
+	laneServer := false
+	if ic.ServerAssist {
+		laneServer = s.verifiedLaneServer(ctx, tx, m.CircleID, uid)
+	}
 	results := make([]e2eeItemResult, 0, len(req.Items))
 	var stored []e2eeItemOut
 	var wake bool
 	placeCount := -1
 	for _, it := range req.Items {
-		ct, code := checkE2EEItem(it, curEpoch)
+		ct, line, code := checkE2EEItemLine(it, ic, laneServer, devLanes2)
 		if code != "" {
 			results = append(results, e2eeItemResult{Seq: it.Seq, Status: "rejected", Error: code})
 			continue
@@ -318,10 +434,10 @@ func (s *Server) E2EEPostBatch(w http.ResponseWriter, r *http.Request) {
 		}
 		var id int64
 		err := tx.QueryRow(ctx, `
-			INSERT INTO e2ee_items (circle_id, device_id, seq, purpose, epoch, size_bucket, ciphertext, received_at, expires_at)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+			INSERT INTO e2ee_items (circle_id, device_id, seq, purpose, epoch, size_bucket, ciphertext, received_at, expires_at, key_line)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
 			ON CONFLICT (circle_id, device_id, seq) DO NOTHING
-			RETURNING id`, m.CircleID, req.DeviceID, it.Seq, it.Purpose, it.Epoch, it.SizeBucket, ct, coarse, expires).Scan(&id)
+			RETURNING id`, m.CircleID, req.DeviceID, it.Seq, it.Purpose, it.Epoch, it.SizeBucket, ct, coarse, expires, line.String()).Scan(&id)
 		if errors.Is(err, pgx.ErrNoRows) {
 			results = append(results, e2eeItemResult{Seq: it.Seq, Status: "duplicate"})
 			continue
@@ -335,7 +451,7 @@ func (s *Server) E2EEPostBatch(w http.ResponseWriter, r *http.Request) {
 		}
 		results = append(results, e2eeItemResult{Seq: it.Seq, Status: "stored", ID: id})
 		stored = append(stored, e2eeItemOut{Type: "e2ee_item", CircleID: m.CircleID, ID: id, DeviceID: req.DeviceID, Seq: it.Seq,
-			Purpose: it.Purpose, Epoch: it.Epoch, SizeBucket: it.SizeBucket, Ciphertext: it.Ciphertext, ReceivedAt: coarse})
+			Purpose: it.Purpose, Epoch: it.Epoch, SizeBucket: it.SizeBucket, Ciphertext: it.Ciphertext, KeyLine: line.String(), ReceivedAt: coarse})
 		if e2eeWakePurposes[it.Purpose] {
 			wake = true
 		}
@@ -447,9 +563,21 @@ func (s *Server) E2EEListItems(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad as_device")
 		return
 	}
+	// key_line: absent = "phone" (old apps see exactly what they always saw);
+	// "server" or "all" are for lanes-aware clients.
+	lineFilter := q.Get("key_line")
+	switch lineFilter {
+	case "":
+		lineFilter = "phone"
+	case "phone", "server", "all":
+	default:
+		writeError(w, http.StatusBadRequest, "key_line must be phone, server or all")
+		return
+	}
 	ctx := r.Context()
 	var mode string
-	if err := s.Pool.QueryRow(ctx, `SELECT e2ee_mode FROM circles WHERE id = $1`, m.CircleID).Scan(&mode); err != nil {
+	var legacy bool
+	if err := s.Pool.QueryRow(ctx, `SELECT e2ee_mode, server_legacy_ck FROM circles WHERE id = $1`, m.CircleID).Scan(&mode, &legacy); err != nil {
 		writeError(w, http.StatusNotFound, "circle not found")
 		return
 	}
@@ -470,14 +598,23 @@ func (s *Server) E2EEListItems(w http.ResponseWriter, r *http.Request) {
 		writeE2EECode(w, http.StatusForbidden, "no_approved_device", "no approved device key for this circle")
 		return
 	}
+	// A server-kind key reads the server line only (metadata minimisation; it can
+	// open nothing else), except in a legacy circle where it still holds CK.
+	if pullDev != "" && !legacy {
+		var pk string
+		if s.Pool.QueryRow(ctx, `SELECT kind FROM device_keys WHERE device_id = $1`, pullDev).Scan(&pk) == nil && pk == "server" {
+			lineFilter = "server"
+		}
+	}
 	rows, err := s.Pool.Query(ctx, `
-		SELECT id, device_id::text, seq, purpose, epoch, size_bucket, ciphertext, received_at
+		SELECT id, device_id::text, seq, purpose, epoch, size_bucket, ciphertext, received_at, key_line
 		FROM e2ee_items
 		WHERE circle_id = $1 AND id > $2
 		  AND (expires_at IS NULL OR expires_at > now())
 		  AND (cardinality($3::text[]) = 0 OR purpose = ANY($3))
 		  AND ($4 = '' OR device_id::text = $4)
-		ORDER BY id LIMIT $5`, m.CircleID, after, purposes, devFilter, limit+1)
+		  AND ($6 = 'all' OR key_line = $6)
+		ORDER BY id LIMIT $5`, m.CircleID, after, purposes, devFilter, limit+1, lineFilter)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load items")
 		return
@@ -488,7 +625,7 @@ func (s *Server) E2EEListItems(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var it e2eeItemOut
 		var ct []byte
-		if err := rows.Scan(&it.ID, &it.DeviceID, &it.Seq, &it.Purpose, &it.Epoch, &it.SizeBucket, &ct, &it.ReceivedAt); err != nil {
+		if err := rows.Scan(&it.ID, &it.DeviceID, &it.Seq, &it.Purpose, &it.Epoch, &it.SizeBucket, &ct, &it.ReceivedAt, &it.KeyLine); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to load items")
 			return
 		}

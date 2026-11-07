@@ -86,7 +86,10 @@ func (s *Server) AdminListFamilyMembers(w http.ResponseWriter, r *http.Request) 
 		SELECT u.id, u.email, u.name, u.role, u.totp_enabled, u.created_at, u.updated_at,
 		       u.avatar_data IS NOT NULL, u.avatar_version, u.avatar_updated_at,
 		       mp.lat, mp.lon, mp.ts, mp.battery_pct, mp.speed_mps, mp.motion_state, mp.accuracy_meters,
-		       d.last_seen
+		       d.last_seen,
+		       (EXISTS (SELECT 1 FROM live_circle_members km JOIN circles kc ON kc.id = km.circle_id
+		                 WHERE km.user_id = u.id AND kc.e2ee_mode = 'private')
+		        AND NOT EXISTS (SELECT 1 FROM live_circle_members km WHERE km.user_id = u.id AND e2ee_member_plaintext_ok(km.circle_id, km.user_id)))
 		FROM users u
 		LEFT JOIN member_positions mp ON mp.user_id = u.id
 		LEFT JOIN (
@@ -101,18 +104,18 @@ func (s *Server) AdminListFamilyMembers(w http.ResponseWriter, r *http.Request) 
 	}
 	defer rows.Close()
 
-	members := []models.MemberWithLocation{}
+	members := []adminFamilyMember{}
 	for rows.Next() {
-		var m models.MemberWithLocation
+		var m adminFamilyMember
 		if err := rows.Scan(&m.ID, &m.Email, &m.Name, &m.Role, &m.TOTPEnabled, &m.CreatedAt, &m.UpdatedAt,
 			&m.HasAvatar, &m.AvatarVersion, &m.AvatarUpdatedAt,
 			&m.Lat, &m.Lon, &m.TS, &m.BatteryPct, &m.SpeedMPS, &m.MotionState, &m.AccuracyMeters,
-			&m.LastSeenAt); err != nil {
+			&m.LastSeenAt, &m.KeepsDataOnPhone); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to scan member")
 			return
 		}
-		if redact {
-			redactAdminLocation(&m)
+		if redact || m.KeepsDataOnPhone {
+			redactAdminLocation(&m.MemberWithLocation)
 		}
 		members = append(members, m)
 	}
@@ -139,12 +142,22 @@ func (s *Server) AdminListFamilyMembers(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, members)
 }
 
+// adminFamilyMember adds the privacy lane to a member row: a member who keeps
+// their data on their phone (every circle they are in is Private and the server
+// may not read them) has no position here, and the flag lets the map say so
+// ("keeps data on phone") instead of "no signal". Owner decision Q2.
+type adminFamilyMember struct {
+	models.MemberWithLocation
+	KeepsDataOnPhone bool `json:"keeps_data_on_phone"`
+}
+
 // adminMember is a member tagged with their family id and family name, for the
 // platform-wide single-map render. MemberWithLocation already carries the
 // member's family_id (via the embedded User.FamilyID); this adds family_name.
 type adminMember struct {
 	models.MemberWithLocation
-	FamilyName *string `json:"family_name"`
+	FamilyName       *string `json:"family_name"`
+	KeepsDataOnPhone bool    `json:"keeps_data_on_phone"`
 }
 
 // AdminListMembers returns every member across every family, each tagged with
@@ -166,7 +179,10 @@ func (s *Server) AdminListMembers(w http.ResponseWriter, r *http.Request) {
 		       u.avatar_data IS NOT NULL, u.avatar_version, u.avatar_updated_at,
 		       mp.lat, mp.lon, mp.ts, mp.battery_pct, mp.speed_mps, mp.motion_state, mp.accuracy_meters,
 		       d.last_seen,
-		       u.family_id, f.name
+		       u.family_id, f.name,
+		       (EXISTS (SELECT 1 FROM live_circle_members km JOIN circles kc ON kc.id = km.circle_id
+		                 WHERE km.user_id = u.id AND kc.e2ee_mode = 'private')
+		        AND NOT EXISTS (SELECT 1 FROM live_circle_members km WHERE km.user_id = u.id AND e2ee_member_plaintext_ok(km.circle_id, km.user_id)))
 		FROM users u
 		LEFT JOIN member_positions mp ON mp.user_id = u.id
 		LEFT JOIN (
@@ -189,12 +205,12 @@ func (s *Server) AdminListMembers(w http.ResponseWriter, r *http.Request) {
 			&m.HasAvatar, &m.AvatarVersion, &m.AvatarUpdatedAt,
 			&m.Lat, &m.Lon, &m.TS, &m.BatteryPct, &m.SpeedMPS, &m.MotionState, &m.AccuracyMeters,
 			&m.LastSeenAt,
-			&m.FamilyID, &familyName); err != nil {
+			&m.FamilyID, &familyName, &m.KeepsDataOnPhone); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to scan member")
 			return
 		}
 		m.FamilyName = familyName
-		if redact {
+		if redact || m.KeepsDataOnPhone {
 			redactAdminLocation(&m.MemberWithLocation)
 		}
 		members = append(members, m)

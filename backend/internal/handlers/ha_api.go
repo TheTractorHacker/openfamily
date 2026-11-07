@@ -138,7 +138,7 @@ func (s *Server) HAMembers(w http.ResponseWriter, r *http.Request) {
 	var order []string
 	rows, err := s.Pool.Query(ctx, `
 		SELECT m.user_id::text, u.name, m.circle_id::text,
-		       (m.sharing_enabled AND NOT `+pausedExprSQL("m.user_id")+`)
+		       (m.sharing_enabled AND NOT `+pausedExprSQL("m.user_id")+`), e2ee_member_plaintext_ok(m.circle_id, m.user_id)
 		FROM live_circle_members m JOIN users u ON u.id = m.user_id
 		WHERE m.circle_id = ANY($1::uuid[]) ORDER BY u.name, m.user_id`, ids)
 	if err != nil {
@@ -147,8 +147,8 @@ func (s *Server) HAMembers(w http.ResponseWriter, r *http.Request) {
 	}
 	for rows.Next() {
 		var uid, name, cid string
-		var sharing bool
-		if err := rows.Scan(&uid, &name, &cid, &sharing); err != nil {
+		var sharing, memberReadable bool
+		if err := rows.Scan(&uid, &name, &cid, &sharing, &memberReadable); err != nil {
 			rows.Close()
 			writeError(w, http.StatusInternalServerError, "server_error")
 			return
@@ -159,7 +159,7 @@ func (s *Server) HAMembers(w http.ResponseWriter, r *http.Request) {
 			users[uid] = a
 			order = append(order, uid)
 		}
-		if !readable[cid] {
+		if !memberReadable { // per member: only a member whose own lane lets the server read them
 			a.blocked = true
 		} else if sharing {
 			a.shareCircle[cid] = true
