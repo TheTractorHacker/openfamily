@@ -363,3 +363,54 @@ class ServerMemberState {
             .toList(),
       );
 }
+
+/// The server's deployment profile as the app sees it (GET /e2ee/server-device;
+/// docs/design/PRIVACY_PROCESSING.md section 21). Advice and wording only: it
+/// never signs or consents for anybody. An older server sends none of these
+/// fields, which reads as [unknown] and gets the careful (hosted) wording.
+class ServerProfile {
+  const ServerProfile({
+    this.known = false,
+    this.profile = '',
+    this.effective = 'cloud',
+    this.recommendedLane = 'phone',
+    this.dataAtRestKey = false,
+    this.enabled = false,
+    this.device,
+  });
+
+  /// False when the server sent no profile fields (an older server).
+  final bool known;
+
+  /// 'home' | 'cloud' | '' (nobody chose yet).
+  final String profile;
+
+  /// What to act on: 'home' only when the owner chose it, otherwise 'cloud'.
+  final String effective;
+
+  /// 'server' only for a home server with an enrolled key; otherwise 'phone'.
+  final String recommendedLane;
+  final bool dataAtRestKey;
+
+  /// The server runs the trusted-server component (has an ingest token).
+  final bool enabled;
+  final ServerDeviceInfo? device;
+
+  bool get isHome => effective == 'home';
+  bool get serverRecommended => isHome && recommendedLane == 'server';
+
+  static const ServerProfile unknown = ServerProfile();
+
+  factory ServerProfile.fromJson(Map<String, dynamic> j) {
+    final bool has = j.containsKey('profile_effective');
+    return ServerProfile(
+      known: has,
+      profile: (j['deployment_profile'] as String?) ?? '',
+      effective: j['profile_effective'] == 'home' ? 'home' : 'cloud',
+      recommendedLane: j['recommended_lane'] == 'server' ? 'server' : 'phone',
+      dataAtRestKey: j['data_at_rest_key'] == true,
+      enabled: j['enabled'] == true,
+      device: ServerDeviceInfo.fromJson(j['device']),
+    );
+  }
+}

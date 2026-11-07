@@ -25,7 +25,7 @@ import { DawarichSettingsCard } from './DawarichSettingsCard'
 import { IntegrationsCard } from './IntegrationsCard'
 import { ThemeAccentCard } from './ThemeAccentCard'
 import { UnitsDefaultCard } from './UnitsDefaultCard'
-import { TrustedServerDefaultCard } from './TrustedServerDefaultCard'
+import { DeploymentProfileCard, ServerSetupCard } from './ServerSetupCard'
 import { DomainSettingsCard } from './DomainSettingsCard'
 import { MapStyleCard } from './MapStyleCard'
 import './pages.css'
@@ -325,6 +325,8 @@ export function SettingsPage({ email, onLogout }: SettingsPageProps) {
         </div>
       </div>
 
+      {isPlatformAdmin && <ServerSetupCard />}
+
       <div className="wb-settings-grid">
         <div className="wb-settings-col">
           <Card>
@@ -345,7 +347,7 @@ export function SettingsPage({ email, onLogout }: SettingsPageProps) {
           {isPlatformAdmin && <TwilioSettingsCard />}
           {isPlatformAdmin && <ThemeAccentCard />}
           {isPlatformAdmin && <UnitsDefaultCard />}
-          {isPlatformAdmin && <TrustedServerDefaultCard />}
+          {isPlatformAdmin && <DeploymentProfileCard />}
           {isPlatformAdmin && <MapStyleCard />}
           {isPlatformAdmin && <DawarichSettingsCard />}
           <IntegrationsCard />

@@ -18,6 +18,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/TheTractorHacker/openfamily/backend/internal/atrest"
 	"github.com/TheTractorHacker/openfamily/backend/internal/circles"
 	"github.com/TheTractorHacker/openfamily/backend/internal/middleware"
 )
@@ -133,7 +134,31 @@ func scanHA(row pgx.Row) (*haIntegration, error) {
 	err := row.Scan(&i.ID, &i.UserID, &i.Name, &i.Scopes, &i.CircleIDs, &i.CreatedAt, &i.LastUsedAt,
 		&i.WebhookURL, &i.WebhookSecret, &i.AllowPrivate, &i.WebhookEvents, &i.WebhookCursor, &i.WebhookFailures,
 		&i.LastDeliveryAt, &i.LastDeliveryOK, &i.LastDeliveryCode, &i.LastDeliveryError, &i.LastDeliveryEvent)
+	if err == nil {
+		err = i.openSecret()
+	}
 	return &i, err
+}
+
+const haSecretLabel = "ha_integrations.webhook_secret"
+
+// openSecret turns the stored webhook secret (sealed when OPENFAMILY_DATA_KEY is
+// configured, plaintext otherwise or on older rows) into the usable value.
+func (i *haIntegration) openSecret() error {
+	v, err := atrest.Open(haSecretLabel, i.WebhookSecret)
+	if err != nil {
+		return err
+	}
+	i.WebhookSecret = v
+	return nil
+}
+
+func haSealSecret(v string) string {
+	out, err := atrest.Seal(haSecretLabel, v)
+	if err != nil {
+		return v
+	}
+	return out
 }
 
 // haTokenJSON is the management representation. The token and webhook secret
@@ -262,7 +287,7 @@ func (s *Server) CreateHAToken(w http.ResponseWriter, r *http.Request) {
 		SELECT $1, $2, $3, $4, $5, $6::uuid[], $7, (SELECT token_version FROM users WHERE id = $1)
 		WHERE (SELECT count(*) FROM ha_integrations WHERE user_id = $1 AND revoked_at IS NULL) < $8
 		RETURNING `+haCols,
-		claims.UserID, name, haHashToken(token), hint, scopes, ids, secret, haMaxActiveTokens)
+		claims.UserID, name, haHashToken(token), hint, scopes, ids, haSealSecret(secret), haMaxActiveTokens)
 	integ, err := scanHA(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, http.StatusConflict, "too many active tokens; revoke one first")
@@ -305,6 +330,10 @@ func (s *Server) ListHATokens(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed to read tokens")
 			return
 		}
+		if err := i.openSecret(); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to read tokens")
+			return
+		}
 		out = append(out, i.json(hint))
 	}
 	if rows.Err() != nil {
@@ -334,6 +363,10 @@ func (s *Server) loadOwnHA(w http.ResponseWriter, r *http.Request, userID string
 		return nil, "", false
 	}
 	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load token")
+		return nil, "", false
+	}
+	if err := i.openSecret(); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load token")
 		return nil, "", false
 	}
@@ -474,7 +507,7 @@ func (s *Server) UpdateHAToken(w http.ResponseWriter, r *http.Request) {
 		       webhook_failures = CASE WHEN $8 THEN 0 ELSE webhook_failures END,
 		       webhook_next_attempt = CASE WHEN $8 THEN NULL ELSE webhook_next_attempt END
 		WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL`,
-		integ.ID, claims.UserID, integ.Name, integ.WebhookURL, integ.WebhookSecret, integ.AllowPrivate, nonNilStrings(integ.WebhookEvents), urlChanged)
+		integ.ID, claims.UserID, integ.Name, integ.WebhookURL, haSealSecret(integ.WebhookSecret), integ.AllowPrivate, nonNilStrings(integ.WebhookEvents), urlChanged)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update token")
 		return

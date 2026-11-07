@@ -126,6 +126,9 @@ abstract class ProcessingController {
 
   Future<void> upgradeLegacy(String circleId);
   Future<void> endLegacyAccess(String circleId);
+
+  /// The server's deployment profile and pinned key; never throws for an older server ([ServerProfile.unknown]).
+  Future<ServerProfile> serverProfile();
 }
 
 class LanesProcessingController implements ProcessingController {
@@ -213,4 +216,13 @@ class LanesProcessingController implements ProcessingController {
 
   @override
   Future<void> endLegacyAccess(String circleId) => lanes.endLegacyServerAccess(circleId);
+
+  @override
+  Future<ServerProfile> serverProfile() async {
+    try {
+      return await lanes.api.serverProfile();
+    } catch (_) {
+      return ServerProfile.unknown;
+    }
+  }
 }

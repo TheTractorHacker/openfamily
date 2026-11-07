@@ -1,4 +1,5 @@
 import 'package:openfamily/services/e2ee/e2ee_crypto.dart';
+import 'package:openfamily/services/e2ee/e2ee_models.dart' show ServerProfile;
 import 'package:openfamily/services/e2ee/lanes_service.dart' show LanesNotReady;
 import 'package:openfamily/services/e2ee/lanes_store.dart';
 import 'package:openfamily/services/e2ee/processing_controller.dart';
@@ -16,6 +17,8 @@ class FakeProcessingController implements ProcessingController {
   final String me;
   final List<String> calls = <String>[];
   Object? failWith;
+  ServerProfile profile = ServerProfile.unknown;
+  Object? loadFails;
 
   static ProcessingSnapshot snapshot({
     String me = pA,
@@ -75,6 +78,8 @@ class FakeProcessingController implements ProcessingController {
   @override
   Future<ProcessingSnapshot> load(String circleId, {bool force = false}) async {
     calls.add('load');
+    final Object? lf = loadFails;
+    if (lf != null) throw lf;
     return snap;
   }
 
@@ -111,4 +116,7 @@ class FakeProcessingController implements ProcessingController {
 
   @override
   Future<void> endLegacyAccess(String circleId) async => calls.add('end-legacy');
+
+  @override
+  Future<ServerProfile> serverProfile() async => profile;
 }

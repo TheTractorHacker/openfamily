@@ -13,6 +13,7 @@ import '../services/server_config.dart';
 import '../theme/app_theme.dart';
 import '../widgets/ds/ds.dart';
 import '../widgets/circle_widgets.dart';
+import '../widgets/add_server_sheet.dart';
 import '../widgets/trusted_server_prompt.dart';
 import 'processing_screen.dart';
 
@@ -144,6 +145,10 @@ class _CircleDetailScreenState extends State<CircleDetailScreen> {
         // Lead the person to the processing screen, where each choice needs an explicit confirmation. Nothing is signed here.
         await Navigator.of(context).push<void>(MaterialPageRoute<void>(
             builder: (_) => ProcessingScreen(circle: _circle, service: svc)));
+      } else if (on && mounted) {
+        // Offer the one-tap sheet right after the circle becomes private; it explains itself
+        // when the server is not set up. Nothing is signed unless the person taps OK.
+        await showAddServerSheet(context, circle: _circle.copyWith(e2eeMode: 'private'));
       }
     } on NeedsCrossSignatureException catch (e) {
       if (mounted) {
@@ -177,6 +182,11 @@ class _CircleDetailScreenState extends State<CircleDetailScreen> {
     );
   }
 
+  Future<void> _addServer() async {
+    await showAddServerSheet(context, circle: _circle);
+    await _loadE2ee();
+  }
+
   Widget _privateCard() {
     final CircleE2eeState? st = _e2eeState;
     if (st == null || !_circle.isAdmin) return _deliveryRow();
@@ -199,6 +209,15 @@ class _CircleDetailScreenState extends State<CircleDetailScreen> {
             value: st.isPrivate,
             onChanged: _e2eeBusy ? null : _togglePrivate,
           ),
+          if (st.isPrivate)
+            DsListRow(
+              key: const Key('circle-add-server'),
+              leading: DsListRow.iconTile(context, Icons.dns_outlined),
+              title: 'Add server to this circle',
+              subtitle: 'Lets your own server keep history, trips and driving reports. Takes three taps.',
+              chevron: true,
+              onTap: _addServer,
+            ),
         ],
       ),
     );
@@ -808,6 +827,16 @@ class _CircleDetailScreenState extends State<CircleDetailScreen> {
         icon: Icons.person_add_alt_1,
         label: 'New invite code',
       ),
+      if (_circle.isAdmin && (_e2eeState?.isPrivate ?? false)) ...<Widget>[
+        const SizedBox(height: AppSpace.sm),
+        DsPillButton(
+          key: const Key('invite-add-server'),
+          style: DsPillStyle.tonal,
+          onPressed: _busy ? null : _addServer,
+          icon: Icons.dns_outlined,
+          label: 'Add server to this circle',
+        ),
+      ],
     ];
   }
 }

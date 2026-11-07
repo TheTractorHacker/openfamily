@@ -7,6 +7,7 @@ import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:openfamily/models/circle.dart';
 import 'package:openfamily/services/api_client.dart';
+import 'package:openfamily/services/e2ee/add_server_flow.dart';
 import 'package:openfamily/services/e2ee/e2ee_api.dart';
 import 'package:openfamily/services/e2ee/e2ee_crypto.dart';
 import 'package:openfamily/services/e2ee/e2ee_models.dart';
@@ -15,6 +16,7 @@ import 'package:openfamily/services/e2ee/lanes_service.dart';
 import 'package:openfamily/services/e2ee/lanes_store.dart';
 import 'package:openfamily/services/e2ee/lanes_wire.dart';
 import 'package:openfamily/services/e2ee/private_channel.dart';
+import 'package:openfamily/services/e2ee/processing_controller.dart';
 import 'package:openfamily/services/e2ee/private_runtime.dart';
 
 import 'harness.dart';
@@ -189,6 +191,34 @@ void main() {
       // the sidecar + the new fix: 3 rows, none for Cleo.
       expect(await db.locationsOf(b.userId), 3);
       expect(await db.locationsOf(c.userId), 0);
+    });
+  });
+
+  group('scenario 2c: the one-button "Add server to this circle" flow', () {
+    test('Cleo adds the server in three steps against the real server, signs only her own lane, then removes it again', () async {
+      final AddServerFlow flow = AddServerFlow(LanesProcessingController(c.lanes));
+      // Step 1 + 2: the plan comes from the verified key log; the words are the server key's, as the admin page shows them.
+      final AddServerPlan plan = await c.run(() => flow.plan(circle));
+      expect(plan.state, AddServerState.ready, reason: 'policy is on, the key is pinned and approved, Cleo is a member');
+      expect(plan.snapshot.serverKeyFingerprint, server.fingerprintHex);
+      expect(plan.words.split(' '), hasLength(4), reason: 'four short groups');
+      expect(plan.profile.known, isTrue, reason: 'GET /e2ee/server-device carries the deployment profile');
+      expect(plan.profile.effective, anyOf('home', 'cloud'));
+      expect(plan.profile.device?.fingerprint, server.fingerprintHex);
+      expect(plan.adminTurnsOn, isFalse, reason: 'a normal member never publishes the circle policy');
+      // Step 3.
+      final ProcessingSnapshot after = await c.run(() => flow.confirm(circle, plan));
+      expect(after.me?.lane, E2ee.lineServer);
+      expect(await c.run(() => c.store.status(circle)), LaneStatus.serverAssisted);
+      // Everyone else is untouched: nobody was opted in by Cleo's tap.
+      expect(await a.run(() => a.store.status(circle)), LaneStatus.serverAssisted);
+      final AddServerPlan again = await c.run(() => flow.plan(circle));
+      expect(again.state, AddServerState.alreadyAdded);
+      // Remove server: back to the phone lane, own copies deleted.
+      await c.run(() => flow.remove(circle, deleteCopies: true));
+      expect(await c.run(() => c.store.status(circle)), LaneStatus.phoneOnly);
+      expect(await db.locationsOf(c.userId), 0);
+      expect((await c.run(() => flow.plan(circle))).state, AddServerState.ready);
     });
   });
 

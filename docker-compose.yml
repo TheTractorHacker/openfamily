@@ -85,6 +85,14 @@ services:
       # Generate once: openssl rand -hex 32  (>= 32 characters; shared with the
       # e2ee-server-device container only).
       E2EE_SERVER_INGEST_TOKEN: ${E2EE_SERVER_INGEST_TOKEN:-}
+      # Where does this server run? home = hardware you own (NAS, mini PC at home);
+      # cloud = a VPS or hosted server. EMPTY is treated as cloud (the careful side)
+      # until the admin chooses in Settings. See docs/server-setup.md.
+      DEPLOYMENT_PROFILE: ${DEPLOYMENT_PROFILE:-}
+      # Cloud servers: seals a few stored secrets (SMS token, webhook secrets) so a stolen
+      # disk or database dump is useless without it. >= 32 chars, openssl rand -base64 32.
+      # KEEP A COPY OUTSIDE THE SERVER; once used, the server will not start without it.
+      OPENFAMILY_DATA_KEY: ${OPENFAMILY_DATA_KEY:-}
       VERBOSE_PUSH: ${VERBOSE_PUSH:-false}
       DIRECT_PUSH: ${DIRECT_PUSH:-true}
       PLATFORM_ADMIN_EMAIL: ${PLATFORM_ADMIN_EMAIL:-}

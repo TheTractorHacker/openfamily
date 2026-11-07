@@ -38,6 +38,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/TheTractorHacker/openfamily/backend/internal/circles"
+	"github.com/TheTractorHacker/openfamily/backend/internal/atrest"
 	"github.com/TheTractorHacker/openfamily/backend/internal/e2ee"
 )
 
@@ -197,6 +198,13 @@ func (s *Server) E2EEServerDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := map[string]any{"enabled": serverMemberEnabled(), "device": nil, "trusted_server_default": false}
+	// Deployment profile (section 21): what the one-tap "Add server" sheet says and preselects.
+	// "profile" is "" while nobody chose; "effective" is what the app acts on (unset = cloud).
+	profile, _, effective := s.DeploymentProfile(r.Context())
+	out["deployment_profile"] = profile
+	out["profile_effective"] = effective
+	out["data_at_rest_key"] = atrest.Enabled()
+	out["recommended_lane"] = "phone"
 	if serverMemberEnabled() {
 		dev, err := s.pinnedServerDevice(r.Context())
 		if err != nil {
@@ -207,6 +215,7 @@ func (s *Server) E2EEServerDevice(w http.ResponseWriter, r *http.Request) {
 			out["device"] = dev
 			// Only a recommendation: true only while the mode is usable at all.
 			out["trusted_server_default"] = s.trustedServerDefaultSetting(r.Context())
+			out["recommended_lane"] = recommendedLane(effective, true)
 		}
 	}
 	writeJSON(w, http.StatusOK, out)
