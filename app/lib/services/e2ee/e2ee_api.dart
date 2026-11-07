@@ -31,6 +31,9 @@ abstract class E2eeApi {
   Future<bool> trustedServerDefault() async => false;
   Future<void> putServerConsent(String circleId, Map<String, dynamic> body) async =>
       throw UnsupportedError('server mode is not available');
+
+  /// Deployment profile and the pinned server key (GET /e2ee/server-device). Older servers: [ServerProfile.unknown].
+  Future<ServerProfile> serverProfile() async => ServerProfile.unknown;
   Future<void> deleteServerConsent(String circleId) async {}
   Future<int> purgeServerCopies(String circleId, {bool wholeCircle = false}) async => 0;
 
@@ -139,6 +142,12 @@ class ApiE2eeApi implements E2eeApi {
   Future<bool> trustedServerDefault() async {
     final dynamic r = await ApiClient.get('/e2ee/server-device');
     return r is Map<String, dynamic> && r['trusted_server_default'] == true;
+  }
+
+  @override
+  Future<ServerProfile> serverProfile() async {
+    final dynamic r = await ApiClient.get('/e2ee/server-device');
+    return r is Map<String, dynamic> ? ServerProfile.fromJson(r) : ServerProfile.unknown;
   }
 
   @override

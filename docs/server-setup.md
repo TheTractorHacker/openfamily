@@ -27,7 +27,7 @@ The choice changes advice and defaults only. Nobody is added to anything by it.
   unprotected by accident. Losing it loses only those secrets, not your locations.
 * Change the key later: generate a new one, keep it safe, then
   `docker compose exec api server data-key generate` (prints a new key) and
-  `docker compose exec api server data-key rewrap NEW_KEY`, put NEW_KEY in `.env`, restart.
+  `printf '%s\n' "$NEW_KEY" | docker compose exec -T api server data-key rewrap --stdin`, put NEW_KEY in `.env`, restart.
 * Turn on encrypted backups (`docs/backup-restore.md`).
 
 **What stays readable in the database while the server runs:** locations, speed, heading, trips, driving

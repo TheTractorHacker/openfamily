@@ -109,8 +109,10 @@ type column struct{ Table, Col, Key string }
 // Columns lists every protected column (label = table.column). The Key is the
 // primary-key expression used to update a row.
 var Columns = []column{
-	{"dawarich_settings", "api_key", "id"},
-	{"dawarich_user_map", "api_key", "user_id"},
+	// Dawarich API keys are deliberately NOT listed: they already use the auth.SealSecret
+	// format (key derived from JWT_SECRET) on every path. Sealing them here as well would
+	// break auth.OpenSecret. Only columns whose every reader and writer goes through atrest
+	// belong in this list (TestColumnsAreCoveredByHandlers pins that).
 	{"sms_settings", "auth_token", "id"},
 	{"ha_integrations", "webhook_secret", "id"},
 }

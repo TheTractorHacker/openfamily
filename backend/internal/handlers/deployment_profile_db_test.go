@@ -4,8 +4,10 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/TheTractorHacker/openfamily/backend/internal/atrest"
+	"github.com/TheTractorHacker/openfamily/backend/internal/auth"
 )
 
 // Deployment profile (docs/design/PRIVACY_PROCESSING.md section 21). Needs TEST_DATABASE_URL.
@@ -133,5 +135,54 @@ func TestProtectedSecretsAreSealedInTheDatabase(t *testing.T) {
 	atrest.SetDefault(nil)
 	if _, _, err := e.srv.readSMSSettings(ctx); err == nil {
 		t.Fatal("sealed value read without the key")
+	}
+}
+
+// Every column listed in atrest.Columns must have all of its readers and writers go through
+// atrest, and the Dawarich keys (auth.SealSecret format) must stay out of the list and
+// survive enabling protection, sealing existing rows and a rewrap.
+func TestColumnsAreCoveredAndDawarichKeyRoundTrips(t *testing.T) {
+	for _, c := range atrest.Columns {
+		if strings.HasPrefix(c.Table, "dawarich") {
+			t.Fatalf("%s must not be in atrest.Columns (it uses auth.SealSecret)", c.Table)
+		}
+	}
+	e := newSrvEnv(t)
+	ctx := context.Background()
+	t.Cleanup(func() { atrest.SetDefault(nil); _, _ = e.pool.Exec(ctx, `DELETE FROM dawarich_settings; DELETE FROM at_rest_keys`) })
+	_, _ = e.pool.Exec(ctx, `DELETE FROM dawarich_settings; DELETE FROM at_rest_keys`)
+
+	if e.srv.TM == nil {
+		e.srv.TM = auth.NewTokenManager("test-secret-test-secret-test-secret-00", time.Hour, time.Hour)
+	}
+	sealed, err := e.srv.sealDawarichKey("dawarich-key-123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.pool.Exec(ctx, `INSERT INTO dawarich_settings (id, base_url, api_key) VALUES (1, 'http://d', $1)`, sealed); err != nil {
+		t.Fatal(err)
+	}
+	const k1 = "0123456789abcdef0123456789abcdef-one"
+	t.Setenv("OPENFAMILY_DATA_KEY", k1)
+	if _, err := atrest.Load(ctx, e.pool); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := atrest.SealExisting(ctx, e.pool); err != nil {
+		t.Fatal(err)
+	}
+	row, ok, err := e.srv.readDawarich(ctx)
+	if err != nil || !ok || row.APIKey != "dawarich-key-123" {
+		t.Fatalf("dawarich key after enabling at-rest: %+v %v", row, err)
+	}
+	const k2 = "0123456789abcdef0123456789abcdef-two"
+	if err := atrest.Rewrap(ctx, e.pool, k1, k2); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("OPENFAMILY_DATA_KEY", k2)
+	if _, err := atrest.Load(ctx, e.pool); err != nil {
+		t.Fatal(err)
+	}
+	if row, _, err := e.srv.readDawarich(ctx); err != nil || row.APIKey != "dawarich-key-123" {
+		t.Fatalf("dawarich key after rewrap: %+v %v", row, err)
 	}
 }
