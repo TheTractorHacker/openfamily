@@ -49,6 +49,15 @@ text (MIT / BSD-style / Apache-2.0 / MPL-2.0).
 | github.com/minio/minio-go/v7 | v7.4.1 | Apache-2.0 |
 | github.com/rs/xid | v1.6.0 | MIT |
 | github.com/zeebo/xxh3 | v1.1.0 | BSD-2-Clause |
+| github.com/go-webauthn/webauthn | v0.18.2 | BSD-3-Clause |
+| github.com/fxamacker/cbor/v2 | v2.9.4 | MIT |
+| github.com/go-viper/mapstructure/v2 | v2.5.0 | MIT |
+| github.com/go-webauthn/x | v0.3.1 | BSD-3-Clause |
+| github.com/google/go-tpm | v0.9.8 | Apache-2.0 |
+| github.com/google/uuid | v1.6.0 | BSD-3-Clause |
+| github.com/philhofer/fwd | v1.2.0 | MIT |
+| github.com/tinylib/msgp | v1.6.4 | MIT |
+| github.com/x448/float16 | v0.8.4 | MIT |
 | go.yaml.in/yaml/v3 | v3.0.5 | MIT, Apache-2.0 |
 | golang.org/x/net | v0.60.0 | BSD-3-Clause |
 | gopkg.in/ini.v1 | v1.67.3 | Apache-2.0 |
@@ -65,19 +74,21 @@ license gate rather than listed here.
 
 | Package | Version | License |
 |---|---|---|
+| require-from-string | 2.0.2 | MIT |
+| bidi-js | 1.1.0 | MIT |
 | @noble/ciphers | 2.4.0 | MIT |
 | @noble/curves | 2.4.0 | MIT |
 | @noble/hashes | 2.4.0 | MIT |
 | @mapbox/jsonlint-lines-primitives | 2.0.3 | MIT |
 | @mapbox/point-geometry | 1.1.0 | ISC |
 | @mapbox/tiny-sdf | 2.3.0 | BSD-2-Clause |
-| @mapbox/unitbezier | 0.0.1 | BSD-2-Clause |
-| @mapbox/vector-tile | 2.0.5 | BSD-3-Clause |
-| pbf | 4.0.2 | BSD-3-Clause |
+| @mapbox/unitbezier | 1.0.0 | BSD-2-Clause |
+| @mapbox/vector-tile | 3.0.0 | BSD-3-Clause |
+| pbf | 5.1.2 | BSD-3-Clause |
 | @mapbox/whoots-js | 3.1.0 | ISC |
 | @maplibre/geojson-vt | 6.3.0 | ISC |
 | @maplibre/maplibre-gl-leaflet | 0.1.4 | ISC |
-| @maplibre/maplibre-gl-style-spec | 24.10.0 | ISC |
+| @maplibre/maplibre-gl-style-spec | 26.5.1 | ISC |
 | @mapbox/unitbezier | 1.0.0 | BSD-2-Clause |
 | @maplibre/mlt | 1.3.0 | (MIT OR Apache-2.0) |
 | @maplibre/vt-pbf | 4.3.3 | MIT |
@@ -91,8 +102,8 @@ license gate rather than listed here.
 | kdbush | 4.1.0 | ISC |
 | leaflet | 1.9.4 | BSD-2-Clause |
 | loose-envify | 1.4.0 | MIT |
-| maplibre-gl | 5.24.0 | BSD-3-Clause |
-| pbf | 4.0.2 | BSD-3-Clause |
+| maplibre-gl | 6.16.0 | BSD-3-Clause |
+| pbf | 5.1.2 | BSD-3-Clause |
 | minimist | 1.2.8 | MIT |
 | murmurhash-js | 1.0.0 | MIT |
 | pbf | 5.1.2 | BSD-3-Clause |
@@ -126,6 +137,11 @@ The Flutter SDK itself (BSD-3-Clause) and the packages it provides (`flutter`, `
 | battery_plus_platform_interface | 2.0.1 | BSD-style |
 | boolean_selector | 2.1.2 | BSD-style |
 | characters | 1.4.1 | BSD-style |
+| bip39 | 1.0.6 | BSD-3-Clause |
+| convert | 3.1.2 | BSD-3-Clause |
+| cryptography | 2.9.0 | Apache-2.0 |
+| hex | 0.2.0 | MIT |
+| pointycastle | 3.9.1 | MIT |
 | clock | 1.1.2 | Apache-2.0 |
 | code_assets | 1.2.1 | BSD-style |
 | collection | 1.19.1 | BSD-style |
