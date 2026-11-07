@@ -104,8 +104,19 @@ jobs:
         run: |
           udid=$(xcrun simctl list devices available \
             | awk -F'[()]' '/iPhone/ && /Shutdown/ {print $2; exit}')
+          rm -rf "$RUNNER_TEMP/rt.xcresult"
+          set +e
           xcodebuild test \
+            -resultBundlePath "$RUNNER_TEMP/rt.xcresult" \
             -workspace ios/Runner.xcworkspace \
             -scheme Runner \
             -destination "platform=iOS Simulator,id=$udid" \
             CODE_SIGNING_ALLOWED=NO
+          rc=$?
+          if [ $rc -ne 0 ]; then
+            echo "::group::xcresult test failures"
+            xcrun xcresulttool get test-results tests --path "$RUNNER_TEMP/rt.xcresult" | grep -E '"(name|result|text)"' | head -80 || true
+            xcrun xcresulttool get test-results summary --path "$RUNNER_TEMP/rt.xcresult" | head -120 || true
+            echo "::endgroup::"
+          fi
+          exit $rc

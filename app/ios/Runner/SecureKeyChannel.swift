@@ -255,7 +255,9 @@ final class SecureKeyChannel {
     if enclave { attrs[kSecAttrTokenID as String] = kSecAttrTokenIDSecureEnclave }
     var genErr: Unmanaged<CFError>?
     guard let key = SecKeyCreateRandomKey(attrs as CFDictionary, &genErr) else {
-      throw KeyError(code: "keystore", detail: enclave ? "enclave keygen" : "keygen")
+      let status = genErr.map { CFErrorGetCode($0.takeRetainedValue()) } ?? 0
+      throw KeyError(
+        code: "keystore", detail: (enclave ? "enclave keygen " : "keygen ") + "\(status)")
     }
     return key
   }
