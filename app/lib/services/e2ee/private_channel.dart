@@ -42,7 +42,7 @@ class ChannelPurpose {
 
   /// Largest padded plaintext the server accepts per purpose (mirrors the Go side).
   static const Map<String, int> maxBucket = <String, int>{
-    fix: 1024, event: 1024, checkin: 1024, chat: 4096, place: 4096, history: 69632,
+    fix: 1024, event: 1024, checkin: 1024, chat: 8192, place: 4096, history: 69632,
     trip: 1024, drive: 4096, week: 1024,
   };
 }
@@ -463,7 +463,9 @@ class ChannelSealer {
     DateTime? at,
     int? maxEpoch,
   }) async {
-    final LaneChoice choice = await _choice(circleId);
+    // Chat is sealed under the phone key line ONLY, whatever this member's lane is:
+    // never wrapped to the server device, never readable by the sidecar.
+    final LaneChoice choice = purpose == ChannelPurpose.chat ? LaneChoice.phone : await _choice(circleId);
     final int tsMs = (at ?? clock.now()).toUtc().millisecondsSinceEpoch;
     final Uint8List bodyBytes = Uint8List.fromList(utf8.encode(jsonEncode(body)));
     if (choice.line == E2ee.lineServer) {
@@ -858,6 +860,8 @@ class ChannelReceiver {
     }
     if (hdr.gen != item.epoch) throw const ItemRejected(ItemRejection.malformed);
     final int line = hdr.line;
+    // A chat item on the server line is never valid (phone key line only).
+    if (item.purpose == ChannelPurpose.chat && line != E2ee.linePhone) throw const ItemRejected(ItemRejection.laneMismatch);
     // The server's routing label must agree with the signed header.
     if (item.declaredLine != null && item.declaredLine != line) throw const ItemRejected(ItemRejection.laneMismatch);
 

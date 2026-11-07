@@ -14,7 +14,7 @@ It is delivered in **phases and opt-in per circle** ("Private circle"):
 | 2 | Live fixes, history, places, arrival/departure events and SOS positions move into the encrypted channel; place evaluation runs on the phones. Server-side trips, driving report and weekly summary are unavailable in a Private circle. | implemented; phone background behaviour not yet verified on devices (see phase-2 section) |
 | 3 | Web viewer and Dawarich bridge as approved read-only *device members* (API contract below). | implemented (browser viewer, `e2ee-bridge`, phone approval screen); not yet exercised against a live Dawarich or on a physical phone |
 | 3b | Optional **trusted-server mode**: the OpenFamily server as an approved, per-member-consented device so the server can read (and store plaintext for) a circle again. Off by default. | implemented; not exercised on a physical phone or a live deployment (see "Trusted-server mode") |
-| 4 | Media (chat photos); encrypted chat; phone-side trips. | future |
+| 4 | Media (chat photos); encrypted chat; phone-side trips. | encrypted chat and its photos: implemented, see `E2EE_CHAT.md`; phone-side trips: future |
 
 Existing circles keep working exactly as today. A circle switched to Private mode only gets keys in phase 1. The toggle is OFF by default,
 admin-only, and the UI says honestly what changes now and what will be unavailable later.
@@ -286,7 +286,7 @@ Bodies (keys are short on purpose; unknown keys are ignored):
 | `place` | `{id, name, lat, lon, r, type, addr, en, ex, del}` | newest signed `ts` per `id` wins; `del:true` is a tombstone. Bucket 4096, at most 2000 per circle |
 | `history` | `{pts:[[ts_ms, lat, lon, acc?], ...]}` | sealed track chunks for retention and re-install. Up to bucket 69632 |
 | `checkin` | `{k:"sos"|"help"|"checkin", lat?, lon?, note?}` | position of an alert, which the server withholds from its plaintext alert. Bucket 1024 |
-| `chat` | reserved | chat stays plaintext in this release |
+| `chat` | implemented: sealed chat, see `E2EE_CHAT.md` | phone key line only, bucket up to 8192, TTL 30 days (`E2EE_CHAT_TTL_DAYS`) |
 
 ### Server API (ciphertext only)
 
@@ -569,7 +569,7 @@ Residual risks (new in phase 2):
 * **Epoch rollback detection is heuristic** (per-device monotonic rule plus a 10-minute grace circle-wide): a slow honest phone that never fetched the new key for more than 10 minutes has its live items refused until it syncs.
 * **A removed member** keeps old keys and everything already downloaded; a new epoch is required (the server flags it), and new members cannot read older epochs unless an admin phone re-wraps them (the app wraps all held epochs to new devices).
 * **Mixed users** are visible in plaintext to the server through their standard circles.
-* **Chat** is still plaintext; chat photos too.
+* **Chat** in a Private circle is end-to-end encrypted (`E2EE_CHAT.md`), photos included. Chat in other circles is plaintext.
 * **On-device plaintext** (history store, parked fixes) is protected only by the OS app sandbox.
 * **Background execution** (Doze, OEM task killers, the vault in a headless isolate, push wake-up reaching a session-less isolate) is unverified on real devices.
 * Phase-2 formats (like phase 1) are not reviewed by an external cryptographer.

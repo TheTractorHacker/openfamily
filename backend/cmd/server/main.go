@@ -357,6 +357,9 @@ func main() {
 		r.Post("/circles/{id}/chat/photo", srv.SendChatPhoto)
 		r.Get("/circles/{id}/chat/{msgId}/photo", srv.GetChatPhoto)
 		r.Get("/chat/unread", srv.ChatUnread)
+		r.Delete("/circles/{id}/chat/history", srv.DeleteChatPlaintextHistory)
+		r.Post("/circles/{id}/e2ee/blobs", srv.E2EEPostBlob)
+		r.Get("/circles/{id}/e2ee/blobs/{blobId}", srv.E2EEGetBlob)
 
 		// End-to-end encryption foundation (docs/design/E2EE.md): public device
 		// keys and ciphertext wraps only; the server never holds a private key.

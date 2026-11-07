@@ -319,6 +319,8 @@ func newAuthzFixture(t *testing.T, routes []parsedRoute) *authzFixture {
 		f.bMember.id, f.famB, "tok-"+tag)
 	f.ids["chat"] = one(`INSERT INTO chat_messages (circle_id, sender_id, body) VALUES ($1,$2,'BSECRETCHAT') RETURNING id`,
 		f.famB, f.bAdmin.id)
+	f.ids["blob"] = one(`INSERT INTO e2ee_blobs (circle_id, uploader_id, size_bytes, data, expires_at)
+		VALUES ($1,$2,4,'\x01020304', now() + interval '1 day') RETURNING id`, f.famB, f.bAdmin.id)
 	f.ids["invite"] = one(`INSERT INTO invite_codes (code, family_id, circle_id, created_by) VALUES ($1,$2,$2,$3) RETURNING id`,
 		"BINV"+strings.ToUpper(tag), f.famB, f.bAdmin.id)
 	f.ids["share_link"] = one(`INSERT INTO share_links (user_id, token_hash, label, expires_at)
@@ -427,6 +429,8 @@ func (f *authzFixture) victimID(t *testing.T, rt parsedRoute, param string) stri
 		return f.ids["invite"]
 	case "msgId":
 		return f.ids["chat"]
+	case "blobId":
+		return f.ids["blob"]
 	case "eventId":
 		return f.ids["trip_event"]
 	case "placeId":

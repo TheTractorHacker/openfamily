@@ -1,3 +1,6 @@
+/// Delivery state of a message this phone sent (encrypted chat).
+enum ChatSendState { sent, sending, failed }
+
 /// One family-chat message, from `GET /circles/{id}/chat` or a live `chat`
 /// WebSocket frame.
 class ChatMessage {
@@ -11,6 +14,9 @@ class ChatMessage {
     required this.createdAt,
     this.hasImage = false,
     this.editedAt,
+    this.sendState = ChatSendState.sent,
+    this.encrypted = false,
+    this.legacy = false,
   });
 
   final String id;
@@ -28,6 +34,20 @@ class ChatMessage {
 
   /// Set once the sender has edited the text.
   final DateTime? editedAt;
+
+  /// Encrypted chat only: sending (queued), sent, or failed (tap to retry).
+  final ChatSendState sendState;
+
+  /// True when the message travelled end-to-end encrypted.
+  final bool encrypted;
+
+  /// True for a plaintext message written before the circle turned private.
+  final bool legacy;
+
+  ChatMessage asLegacy() => ChatMessage(
+        id: id, seq: seq, circleId: circleId, senderId: senderId, senderName: senderName, body: body,
+        createdAt: createdAt, hasImage: hasImage, editedAt: editedAt, legacy: true,
+      );
 
   factory ChatMessage.fromJson(Map<String, dynamic> json) {
     return ChatMessage(

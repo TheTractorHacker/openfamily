@@ -22,6 +22,11 @@ abstract class E2eeApi {
   Future<void> approve(String circleId, Map<String, dynamic> body);
   Future<({List<LogEntry> entries, LogHead head})> log(int after);
 
+  /// Declares capabilities of one of the caller's own phone keys (monotonic on
+  /// the server). Used to tell the circle "this app reads encrypted chat" for a
+  /// key that was registered before the capability existed.
+  Future<void> putCaps(String deviceId, List<String> caps) async {}
+
   // Trusted-server mode. Defaults keep older fakes (and servers without the
   // mode) working: the mode simply reports as off.
   Future<ServerMemberState> serverMemberState(String circleId) async => ServerMemberState.off;
@@ -73,6 +78,11 @@ class ApiE2eeApi implements E2eeApi {
           .cast<Map<String, dynamic>>()
           .map(DeviceKey.fromJson)
           .toList();
+
+  @override
+  Future<void> putCaps(String deviceId, List<String> caps) async {
+    await ApiClient.put('/e2ee/devices/$deviceId/caps', body: <String, dynamic>{'caps': caps});
+  }
 
   @override
   Future<DeviceKey> register(Map<String, dynamic> body) async =>

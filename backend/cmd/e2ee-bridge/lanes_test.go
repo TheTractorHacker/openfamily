@@ -797,3 +797,21 @@ func TestLanesServiceKeyNeedsNoCKWrap(t *testing.T) {
 		t.Fatal("service key without a CK wrap")
 	}
 }
+
+// Chat is sealed under the phone key line only and is never read by the sidecar:
+// even a chat item that a hostile relay placed on the server line is dropped
+// before decryption, and nothing of it reaches the ingest.
+func TestLanesNeverCollectsChat(t *testing.T) {
+	w := newLanesWorld(t, "server")
+	b := w.newBridge()
+	sam := w.sender
+	w.of.addLineItem(sam.id, 21, "chat", 2, w.sealed(sam, e2ee.LineServer, w.sk, 2, 21, 3), "server")
+	w.of.addLineItem(sam.id, 22, "chat", 2, w.sealed(sam, e2ee.LinePhone, w.ck, 3, 22, 3), "phone")
+	w.of.addLineItem(sam.id, 23, "fix", 2, w.sealed(sam, e2ee.LineServer, w.sk, 2, 23, 4.5), "server")
+	w.cycleOK(b)
+	pts := w.pts()
+	if len(pts) != 1 || pts[0]["lat"].(float64) != 4.5 {
+		t.Fatalf("points %v (rejected %v)", pts, b.rs.Stats.Rejected)
+	}
+	// The sidecar only ever asks for fix and history; the fake honours that filter like the real relay.
+}

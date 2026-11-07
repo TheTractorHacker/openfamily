@@ -78,6 +78,7 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _sending = false;
   String? _error;
   String? _sendError;
+  ChatCircleInfo _info = const ChatCircleInfo();
 
   ChatService get _svc => widget.service ?? ChatService.instance;
 
@@ -130,8 +131,16 @@ class _ChatScreenState extends State<ChatScreen> {
     try {
       final String me = await _svc.myUserId();
       final ChatPage page = await _svc.messages(widget.circleId);
+      ChatCircleInfo info = const ChatCircleInfo();
+      try {
+        final ChatProtection? prot = protectionOf(_svc);
+        if (prot != null) info = await prot.info(widget.circleId);
+      } catch (_) {
+        // The banner is informational; the chat itself still works.
+      }
       if (!mounted) return;
       setState(() {
+        _info = info;
         _me = me;
         ChatEvents.selfUserId = me;
         _messages.clear();
@@ -173,7 +182,10 @@ class _ChatScreenState extends State<ChatScreen> {
   void _replace(ChatMessage m) {
     final int i = _messages.indexWhere((ChatMessage x) => x.id == m.id);
     if (i < 0) return;
-    setState(() => _messages[i] = m);
+    setState(() {
+      _messages[i] = m;
+      _messages.sort((ChatMessage a, ChatMessage b) => b.seq.compareTo(a.seq));
+    });
   }
 
   void _remove(String id) {
@@ -288,6 +300,10 @@ class _ChatScreenState extends State<ChatScreen> {
 
   void _messageActions(ChatMessage m) {
     final bool mine = m.senderId == _me;
+    if (m.sendState == ChatSendState.failed && mine) {
+      unawaited(_retry(m));
+      return;
+    }
     if (!mine && !widget.isAdmin) return;
     showModalBottomSheet<void>(
       context: context,
@@ -295,7 +311,7 @@ class _ChatScreenState extends State<ChatScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
-            if (mine)
+            if (mine && !m.legacy)
               ListTile(
                 key: const Key('chat-action-edit'),
                 leading: const Icon(Icons.edit_outlined),
@@ -321,6 +337,99 @@ class _ChatScreenState extends State<ChatScreen> {
               },
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _retry(ChatMessage m) async {
+    try {
+      await protectionOf(_svc)?.retry(widget.circleId, m.id);
+      if (mounted) {
+        _replace(ChatMessage(
+            id: m.id, seq: m.seq, circleId: m.circleId, senderId: m.senderId, senderName: m.senderName, body: m.body,
+            createdAt: m.createdAt, hasImage: m.hasImage, editedAt: m.editedAt, encrypted: true, sendState: ChatSendState.sending));
+      }
+    } catch (e) {
+      if (mounted) setState(() => _sendError = describeChatError(e).message);
+    }
+  }
+
+  Future<void> _deleteLegacy() async {
+    final bool? yes = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext ctx) => AlertDialog(
+        title: const Text('Delete old unencrypted messages?'),
+        content: const Text(
+            'Messages written before this circle was encrypted are still stored readable on the server. '
+            'This removes all of them for everyone. New encrypted messages are not affected.'),
+        actions: <Widget>[
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(
+              key: const Key('chat-legacy-confirm'),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Delete')),
+        ],
+      ),
+    );
+    if (yes != true || !mounted) return;
+    try {
+      await protectionOf(_svc)?.deleteLegacyHistory(widget.circleId);
+      if (!mounted) return;
+      setState(() {
+        _messages.removeWhere((ChatMessage x) => x.legacy);
+        _ids.removeWhere((String id) => !_messages.any((ChatMessage x) => x.id == id));
+        _info = ChatCircleInfo(
+            encrypted: _info.encrypted, waitingForKey: _info.waitingForKey, outdatedMembers: _info.outdatedMembers);
+      });
+    } catch (e) {
+      if (mounted) setState(() => _sendError = describeChatError(e).message);
+    }
+  }
+
+  Widget _banner(BuildContext context) {
+    final ColorScheme cs = Theme.of(context).colorScheme;
+    final List<Widget> rows = <Widget>[
+      Row(children: <Widget>[
+        Icon(Icons.lock_outline, size: 16, color: cs.primary),
+        const SizedBox(width: 6),
+        const Expanded(
+          child: Text('Encrypted. Only people in this circle can read this.',
+              key: Key('chat-encrypted-banner')),
+        ),
+      ]),
+      if (_info.waitingForKey)
+        const Padding(
+          padding: EdgeInsets.only(top: 4),
+          child: Text('Waiting for the circle key. Messages will appear once this phone has it.',
+              key: Key('chat-waiting-key')),
+        ),
+      for (final String n in _info.outdatedMembers)
+        Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: Text('$n needs to update OpenFamily to read encrypted chat.', key: Key('chat-outdated-$n')),
+        ),
+      if (_info.hasLegacyHistory)
+        Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: Row(children: <Widget>[
+            const Expanded(child: Text('Older messages were sent before encryption and are marked.', key: Key('chat-legacy-note'))),
+            if (widget.isAdmin)
+              TextButton(
+                key: const Key('chat-legacy-delete'),
+                onPressed: _deleteLegacy,
+                child: const Text('Delete them'),
+              ),
+          ]),
+        ),
+    ];
+    return Material(
+      color: cs.surfaceContainerHighest,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: AppSpace.md, vertical: AppSpace.xs),
+        child: DefaultTextStyle.merge(
+          style: AppType.secondary,
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: rows),
         ),
       ),
     );
@@ -441,6 +550,7 @@ class _ChatScreenState extends State<ChatScreen> {
       body: SafeArea(
         child: Column(
           children: <Widget>[
+            if (_info.encrypted) _banner(context),
             Expanded(child: _body()),
             if (_sendError != null)
               Padding(
@@ -514,6 +624,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 mine: mine,
                 showName: !sameAsOlder,
                 onLongPress: () => _messageActions(m),
+                onRetry: m.sendState == ChatSendState.failed ? () => _retry(m) : null,
                 photo: m.hasImage ? _photoBytes(m.id) : null,
               ),
             ),
@@ -641,9 +752,11 @@ class _Bubble extends StatelessWidget {
     required this.showName,
     this.photo,
     this.onLongPress,
+    this.onRetry,
   });
 
   final VoidCallback? onLongPress;
+  final VoidCallback? onRetry;
   final ChatMessage message;
   final bool mine;
   final bool showName;
@@ -699,12 +812,27 @@ class _Bubble extends StatelessWidget {
             if (message.body.isNotEmpty)
               Text(message.body, style: AppType.body.copyWith(color: fg)),
             Text(
-              message.editedAt != null
-                  ? '${_time(message.createdAt)} · edited'
-                  : _time(message.createdAt),
+              <String>[
+                _time(message.createdAt),
+                if (message.editedAt != null) 'edited',
+                if (message.sendState == ChatSendState.sending) 'sending',
+              ].join(' · '),
+              key: message.sendState == ChatSendState.sending ? const Key('chat-sending') : null,
               style: AppType.secondary
                   .copyWith(color: fg.withValues(alpha: 0.7), fontSize: 11),
             ),
+            if (message.legacy)
+              Text('Sent before encryption',
+                  key: const Key('chat-legacy-label'),
+                  style: AppType.secondary.copyWith(color: fg.withValues(alpha: 0.7), fontSize: 11)),
+            if (message.sendState == ChatSendState.failed)
+              GestureDetector(
+                key: const Key('chat-retry'),
+                onTap: onRetry,
+                child: Text('Not sent. Tap to try again.',
+                    style: AppType.secondary
+                        .copyWith(color: Theme.of(context).colorScheme.error, fontSize: 11)),
+              ),
           ],
         ),
       ),

@@ -505,6 +505,17 @@ class ApiClient {
     return _avatarBytesFromResponse(response, label: 'photo');
   }
 
+  /// GET raw bytes (sealed chat attachments) with the usual auth/refresh flow.
+  static Future<Uint8List> getBytes(String path) async {
+    final http.Response response = await _sendResponse(
+      'GET',
+      _uri(path),
+      accept: 'application/octet-stream, application/json',
+    );
+    _ensureSuccess(response);
+    return response.bodyBytes;
+  }
+
   // ---------------------------------------------------------------------------
   // Generic verbs (for later pieces)
   // ---------------------------------------------------------------------------

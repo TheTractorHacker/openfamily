@@ -102,7 +102,7 @@ class E2eeService {
   final Future<String> Function() userIdProvider;
 
   /// Capabilities advertised in device registration (see [kCapLanes]).
-  static const List<String> capabilities = <String>[kCapLanes];
+  static const List<String> capabilities = <String>[kCapLanes, kCapChat];
 
   static const String _seedName = 'identity_seed';
   static const String _deviceName = 'device_id';
