@@ -123,6 +123,10 @@ class FakeCircle {
 
   /// The server line key must rotate (member removed / key revoked); cleared by a new generation.
   bool skRekey = false;
+
+  /// Old trusted-server mode (server_legacy_ck): the circle can be upgraded by its admin.
+  bool legacy = false;
+  bool endedLegacyAccess = false;
 }
 
 class FakeE2eeClient implements E2eeApi {
@@ -412,7 +416,26 @@ class FakeE2eeClient implements E2eeApi {
       serverFingerprint: srv?.fingerprint,
       rekeyRequired: c.skRekey,
       inEffect: srv != null && c.assist && c.skWraps.containsKey('${c.skGen}/${srv.deviceId}'),
+      legacy: c.legacy,
     );
+  }
+
+  @override
+  Future<void> endLegacyServerAccess(String circleId) async {
+    final FakeCircle c = s.circles[circleId]!;
+    if (c.admin != uid) throw StateError('403');
+    c.endedLegacyAccess = true;
+  }
+
+  @override
+  Future<void> upgradeProcessing(String circleId, Map<String, dynamic> body) async {
+    final FakeCircle c = s.circles[circleId]!;
+    if (c.admin != uid) throw StateError('403');
+    if (!c.legacy) throw StateError('409 not_legacy');
+    final Map<String, dynamic> pol = (body['policy'] as Map<String, dynamic>);
+    await _epoch(circleId, <String, dynamic>{...body, 'wraps': body['epoch_wraps']}, E2ee.actEpoch, enabling: false);
+    c.legacy = false;
+    await putProcessingPolicy(circleId, pol);
   }
 
   @override

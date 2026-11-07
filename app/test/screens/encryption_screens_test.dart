@@ -215,7 +215,7 @@ void main() {
       await t.tap(toggle());
       await t.pump(const Duration(milliseconds: 300));
       expect(find.textContaining('encrypted on each phone'), findsOneWidget);
-      expect(find.textContaining('trips, driving reports'), findsOneWidget);
+      expect(find.textContaining('Trips, driving reports'), findsOneWidget);
       await t.tap(find.text('Turn on'));
       await t.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 600)));
       await t.pump(const Duration(milliseconds: 300));

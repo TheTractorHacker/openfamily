@@ -582,6 +582,23 @@ class E2eeService {
     return epoch;
   }
 
+  /// Builds (but does not send) the next circle key epoch: the request body
+  /// with the wraps under `epoch_wraps` and a commit step that stores the key on
+  /// this phone. Used by the legacy upgrade, which sends it together with the
+  /// signed policy in one request. The phone line is never wrapped to a server key.
+  Future<({int epoch, Map<String, dynamic> body, Future<void> Function() commit})> prepareNextEpoch(String circleId) async {
+    final LocalIdentity me = (await identity())!;
+    final CircleE2eeState st = await api.circleState(circleId);
+    final int epoch = st.epoch + 1;
+    final Uint8List key = E2ee.randomBytes(32);
+    final List<Map<String, dynamic>> wraps = <Map<String, dynamic>>[
+      for (final DeviceKey k in await _recipients(st, me)) await _wrapTo(me, circleId, epoch, key, k)
+    ];
+    final Map<String, dynamic> b = await _epochBody(me, E2ee.actEpoch, circleId, epoch, key, wraps);
+    b['epoch_wraps'] = b.remove('wraps');
+    return (epoch: epoch, body: b, commit: () => vault.write(_ckName(circleId, epoch), key));
+  }
+
   Future<void> disableCircle(String circleId) async {
     final LocalIdentity me = (await identity())!;
     final CircleE2eeState st = await api.circleState(circleId);

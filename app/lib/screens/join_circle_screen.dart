@@ -6,6 +6,7 @@ import '../services/e2ee/e2ee_app.dart';
 import '../services/pending_invite.dart';
 import '../theme/app_theme.dart';
 import '../widgets/ds/ds.dart';
+import '../widgets/processing_widgets.dart';
 
 /// The join-a-family flow, reached from the map's `+` action sheet, the
 /// family switcher's `+` chip, and onboarding.
@@ -158,6 +159,15 @@ class _JoinCircleScreenState extends State<JoinCircleScreen> {
           ),
         ),
         if (_error != null) DsMessage(_error!),
+        const SizedBox(height: AppSpace.lg),
+        const ProcessingNote(
+          noteKey: Key('join-processing-note'),
+          icon: Icons.info_outline,
+          text: 'If the circle is a Private circle, its admin may allow server processing. You then choose for your own data '
+              'after joining, and the safe choice (Phone only) is equal to the other. Some circles require server processing; '
+              'in that case you will be asked to give your own consent or leave. The server operator can read the data of '
+              'members who allow it.',
+        ),
       ],
     );
   }

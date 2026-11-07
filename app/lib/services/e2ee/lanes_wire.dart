@@ -17,6 +17,8 @@ class LanesPaths {
   static String state(String circle) => '/circles/$circle/e2ee/processing';
   static String policy(String circle) => '/circles/$circle/e2ee/processing-policy';
   static String pref(String circle) => '/circles/$circle/e2ee/processing-pref';
+  static String upgrade(String circle) => '/circles/$circle/e2ee/processing-upgrade';
+  static String legacyAccess(String circle) => '/circles/$circle/e2ee/legacy-server-access';
 
   /// Existing wrap routes; the line travels in the body / records (`key_line`).
   static String wraps(String circle) => '/circles/$circle/e2ee/wraps';
@@ -201,6 +203,7 @@ class ProcessingServerState {
     this.serverFingerprint,
     this.rekeyRequired = false,
     this.inEffect = false,
+    this.legacy = false,
   });
 
   static const ProcessingServerState off = ProcessingServerState();
@@ -224,6 +227,10 @@ class ProcessingServerState {
   /// `in_effect`: the server says assistance is in effect, i.e. it holds the current SK.
   final bool inEffect;
 
+  /// `legacy`: the circle is still in the old trusted-server mode (the server
+  /// holds the phone key of some epochs). An admin can upgrade it.
+  final bool legacy;
+
   factory ProcessingServerState.fromJson(Map<String, dynamic> j) {
     final Object? sd = j['device'];
     final Object? pol = j['policy'];
@@ -236,9 +243,11 @@ class ProcessingServerState {
       final int? lane = m[LanesFields.lane] is String ? _laneOrNull(m[LanesFields.lane] as String) : null;
       if (lane != null) claimed.add(ClaimedMember(uid, lane, _ms(m['since'])));
       final PrefStatement? p = PrefStatement.tryParse(m['pref'], userId: uid);
-      if (p != null) prefs.add(PrefStatement(
-          userId: p.userId, lane: p.lane, skGen: p.skGen, serverDeviceId: p.serverDeviceId, nonce: p.nonce,
-          approverDeviceId: p.approverDeviceId, signature: p.signature, sinceMs: _ms(m['since'])));
+      if (p != null) {
+        prefs.add(PrefStatement(
+            userId: p.userId, lane: p.lane, skGen: p.skGen, serverDeviceId: p.serverDeviceId, nonce: p.nonce,
+            approverDeviceId: p.approverDeviceId, signature: p.signature, sinceMs: _ms(m['since'])));
+      }
     }
     return ProcessingServerState(
       serverAssist: polMap['server_assist'] == true,
@@ -250,6 +259,7 @@ class ProcessingServerState {
       serverFingerprint: sd is Map<String, dynamic> ? sd['fingerprint'] as String? : null,
       rekeyRequired: polMap['rekey_required'] == true,
       inEffect: j['in_effect'] == true,
+      legacy: j['legacy'] == true,
     );
   }
 

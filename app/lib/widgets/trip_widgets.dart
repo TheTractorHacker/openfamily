@@ -136,7 +136,9 @@ class TripCard extends StatelessWidget {
 
   final Trip trip;
   final UnitSystem units;
-  final VoidCallback onTap;
+
+  /// Null for a trip a member's phone shared (no server detail to open).
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {

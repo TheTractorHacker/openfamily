@@ -139,7 +139,7 @@ class _TrustedServerScreenState extends State<TrustedServerScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Trusted server')),
+      appBar: AppBar(title: const Text('Old trusted-server mode')),
       body: SafeArea(
         child: _loading
             ? const Center(child: CircularProgressIndicator())
@@ -243,15 +243,12 @@ class _TrustedServerScreenState extends State<TrustedServerScreen> {
                   key: Key('server-you-allowed'), style: AppType.secondary),
             if (allOk && !_ss.wrapped) ...<Widget>[
               const SizedBox(height: AppSpace.sm),
-              DsPillButton(
-                key: const Key('server-share'),
-                label: 'Give the server the circle key',
-                icon: Icons.vpn_key,
-                onPressed: _busy ? null : () => _run(() => _svc.shareKeyWithServer(widget.circle.id), 'Key shared with the server'),
+              Text(
+                'Everyone allowed it, but this phone no longer gives the server the circle key. Ask a circle admin to upgrade this '
+                'circle (Server processing > Upgrade this circle): then each member decides for their own data.',
+                key: const Key('server-use-upgrade'),
+                style: AppType.secondary.copyWith(color: cs.onSurfaceVariant),
               ),
-              const SizedBox(height: AppSpace.xs),
-              Text('Everyone allowed it. The server can read the circle once the key reaches it.',
-                  style: AppType.secondary.copyWith(color: cs.onSurfaceVariant)),
             ],
           ],
           if (ready) ...<Widget>[
