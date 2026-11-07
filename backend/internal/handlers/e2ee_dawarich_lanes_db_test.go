@@ -180,12 +180,17 @@ func TestPlantedPositionOfPhoneLaneMemberIsNotServed(t *testing.T) {
 	}
 	// Recompute after a purge: B's newest remaining location is a tagged row of a circle B
 	// is not server-readable in; it must not become the last position. The older untagged one wins.
-	e.ingest(e.point("fix", e.b, now, 10, 1))
+	// The fixture seeds every user a last-known position (lat 10) stamped with the wall clock at
+	// setup; the ingest upsert only moves it forward, so the ingested point must be newer than that.
+	nowB := time.Now().UTC().Truncate(time.Millisecond)
+	e.ingest(e.point("fix", e.b, nowB, 10, 1))
+	var mts time.Time
+	if err := e.pool.QueryRow(ctx, `SELECT ts FROM member_positions WHERE user_id = $1`, e.ids["B"]).Scan(&mts); err != nil || !mts.Equal(nowB) {
+		t.Fatalf("test premise: B's last position is the ingested point (ts %v, want %v, err %v)", mts, nowB, err)
+	}
 	dev := e.userDevice("B")
-	e.locAt(dev, now.Add(-time.Hour), 77, "99999999-9999-4999-8999-999999999999")
-	e.locAt(dev, now.Add(-2*time.Hour), 33, nil)
-	// pin the last position to exactly the ingested point (an async presence writer may touch ts)
-	e.sql(`UPDATE member_positions SET ts = $2, lat = 10 WHERE user_id = $1`, e.ids["B"], now)
+	e.locAt(dev, nowB.Add(-time.Hour), 77, "99999999-9999-4999-8999-999999999999")
+	e.locAt(dev, nowB.Add(-2*time.Hour), 33, nil)
 	e.mustCode("B", "DELETE", "/circles/"+e.circle+"/e2ee/server-copies", nil, 200)
 	if lat, ok := e.lastLat("B"); !ok || lat != 33 {
 		t.Fatalf("last position after purge = %v %v, want 33", lat, ok)
