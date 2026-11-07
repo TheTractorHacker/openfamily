@@ -503,6 +503,7 @@ class FamilyService {
           ChatEvents.selfUserId = id;
           // Catch up the chat badge after every (re)connect.
           unawaited(ChatEvents.refreshUnread());
+          ChatEvents.notifyReconnected();
           onUserId?.call(id);
         }
         return true;
@@ -529,6 +530,10 @@ class FamilyService {
         return _applyAvatar(map);
       case 'chat':
         return ChatEvents.handleFrame(map);
+      case 'chat_edit':
+        return ChatEvents.handleEditFrame(map);
+      case 'chat_delete':
+        return ChatEvents.handleDeleteFrame(map);
       case 'chat_read':
         return ChatEvents.handleReadFrame(map);
       case 'alert':

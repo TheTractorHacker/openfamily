@@ -38,8 +38,18 @@ abstract class ChatService {
   static ChatService instance = ApiChatService();
 
   Future<String> myUserId();
-  Future<ChatPage> messages(String circleId, {int? before, int limit = 50});
-  Future<ChatMessage> send(String circleId, String body);
+  Future<ChatPage> messages(String circleId,
+      {int? before, int? after, int limit = 50});
+
+  /// [clientId] makes a retry idempotent: the server returns the already
+  /// stored message instead of creating a duplicate.
+  Future<ChatMessage> send(String circleId, String body, {String? clientId});
+
+  /// Edits the caller's own message.
+  Future<ChatMessage> edit(String circleId, String messageId, String body);
+
+  /// Deletes the caller's own message (or any message, for a circle admin).
+  Future<void> delete(String circleId, String messageId);
   Future<void> markRead(String circleId, {int? seq});
 
   /// Posts a JPEG/PNG photo message.
@@ -69,13 +79,15 @@ class ApiChatService implements ChatService {
       _wrap(() async => (await ApiClient.getProfile()).id);
 
   @override
-  Future<ChatPage> messages(String circleId, {int? before, int limit = 50}) =>
+  Future<ChatPage> messages(String circleId,
+          {int? before, int? after, int limit = 50}) =>
       _wrap(() async {
         final dynamic raw = await ApiClient.get(
           '/circles/$circleId/chat',
           query: <String, String>{
             'limit': '$limit',
             if (before != null) 'before': '$before',
+            if (after != null) 'after': '$after',
           },
         );
         final Map<String, dynamic> map = raw as Map<String, dynamic>;
@@ -91,9 +103,23 @@ class ApiChatService implements ChatService {
       });
 
   @override
-  Future<ChatMessage> send(String circleId, String body) => _wrap(() async =>
-      ChatMessage.fromJson(await ApiClient.post('/circles/$circleId/chat',
+  Future<ChatMessage> send(String circleId, String body, {String? clientId}) =>
+      _wrap(() async => ChatMessage.fromJson(await ApiClient.post(
+          '/circles/$circleId/chat',
+          body: <String, dynamic>{
+            'body': body,
+            if (clientId != null) 'client_id': clientId,
+          }) as Map<String, dynamic>));
+
+  @override
+  Future<ChatMessage> edit(String circleId, String messageId, String body) =>
+      _wrap(() async => ChatMessage.fromJson(await ApiClient.patch(
+          '/circles/$circleId/chat/$messageId',
           body: <String, dynamic>{'body': body}) as Map<String, dynamic>));
+
+  @override
+  Future<void> delete(String circleId, String messageId) =>
+      _wrap(() => ApiClient.delete('/circles/$circleId/chat/$messageId'));
 
   @override
   Future<ChatMessage> sendPhoto(String circleId, Uint8List bytes,
@@ -147,6 +173,45 @@ class ChatEvents {
     final ChatReader r = ChatReader.fromJson(frame);
     if (circle.isEmpty || r.userId.isEmpty) return false;
     _reads.add((circle, r));
+    return true;
+  }
+
+  static final StreamController<ChatMessage> _edits =
+      StreamController<ChatMessage>.broadcast();
+
+  /// A message was edited (live `chat_edit` frame).
+  static Stream<ChatMessage> get edits => _edits.stream;
+
+  static final StreamController<(String, String)> _deletes =
+      StreamController<(String, String)>.broadcast();
+
+  /// A message was deleted: (circleId, messageId).
+  static Stream<(String, String)> get deletes => _deletes.stream;
+
+  static final StreamController<void> _reconnects =
+      StreamController<void>.broadcast();
+
+  /// Fires when the live socket (re)connects, so an open chat can fetch what
+  /// it missed.
+  static Stream<void> get reconnects => _reconnects.stream;
+  static void notifyReconnected() => _reconnects.add(null);
+
+  static bool handleEditFrame(Map<String, dynamic> frame) {
+    final Object? raw = frame['message'];
+    if (raw is! Map<String, dynamic>) return false;
+    final ChatMessage msg = ChatMessage.fromJson(raw);
+    if (msg.id.isEmpty) return false;
+    _edits.add(msg);
+    return true;
+  }
+
+  static bool handleDeleteFrame(Map<String, dynamic> frame) {
+    final String circle = frame['circle_id'] as String? ?? '';
+    final String id = frame['id'] as String? ?? '';
+    if (circle.isEmpty || id.isEmpty) return false;
+    _deletes.add((circle, id));
+    // Whatever was unread may have just vanished; the server knows.
+    unawaited(refreshUnread());
     return true;
   }
 
