@@ -209,12 +209,16 @@ $$ LANGUAGE sql STABLE;
 
 -- Removes the server's plaintext copies of one member that came from one circle:
 -- the tagged locations, a last-known position that IS one of those points, and
--- the member's own server-line location trail (fix, history). Shared channel
--- items (place, chat, checkin, event) are never touched: other members need them.
+-- all of the member's own server-line items (they are readable by the server).
 CREATE OR REPLACE FUNCTION e2ee_purge_user_server_copies(circ UUID, usr UUID) RETURNS VOID AS $$
 DECLARE
     tss TIMESTAMPTZ[];
 BEGIN
+    -- Serialise with ingest: ingest holds this circle row FOR SHARE for its whole
+    -- batch, so a purge waits for an in-flight batch to commit and then removes what
+    -- it wrote; an ingest that starts later waits for this transaction and then sees
+    -- the member's lane gone. Lock order everywhere: circles (by id) before anything else.
+    PERFORM 1 FROM circles WHERE id = circ FOR UPDATE;
     WITH del AS (
         DELETE FROM locations l USING devices d
          WHERE d.id = l.device_id AND d.user_id = usr AND l.e2ee_circle_id = circ
@@ -231,8 +235,12 @@ BEGIN
         -- no other location remains: a last position that was one of the purged points goes
         DELETE FROM member_positions WHERE user_id = usr AND ts = ANY (tss);
     END IF;
+    -- Every server-line item of ANY purpose the member authored is readable by the
+    -- server under SK (check-ins and events carry positions, places and chats carry
+    -- place and message data): all of them go. Phones keep what they already pulled;
+    -- members who had not pulled them yet lose them.
     DELETE FROM e2ee_items i USING device_keys k
-     WHERE i.circle_id = circ AND i.key_line = 'server' AND i.purpose IN ('fix', 'history', 'trip', 'drive', 'week')
+     WHERE i.circle_id = circ AND i.key_line = 'server'
        AND k.device_id = i.device_id AND k.user_id = usr;
 END $$ LANGUAGE plpgsql;
 
@@ -372,6 +380,11 @@ DECLARE
     r RECORD;
 BEGIN
     IF OLD.revoked_at IS NULL AND NEW.revoked_at IS NOT NULL THEN
+        -- Lock every private circle of this user up front, in id order (this trigger is
+        -- named to fire before e2ee_device_revoked, which updates the same rows), so
+        -- concurrent revocations cannot deadlock and ingest is serialised (see purge).
+        PERFORM 1 FROM circles WHERE e2ee_mode = 'private'
+                 AND id IN (SELECT circle_id FROM circle_members WHERE user_id = NEW.user_id) ORDER BY id FOR UPDATE;
         DELETE FROM e2ee_processing_pref WHERE approver_device_id = NEW.device_id;
         FOR r IN SELECT circle_id, user_id FROM e2ee_server_consents WHERE approver_device_id = NEW.device_id LOOP
             DELETE FROM e2ee_server_consents WHERE circle_id = r.circle_id AND user_id = r.user_id;
@@ -380,8 +393,8 @@ BEGIN
     END IF;
     RETURN NEW;
 END $$ LANGUAGE plpgsql;
-DROP TRIGGER IF EXISTS trg_e2ee_processing_key_revoked ON device_keys;
-CREATE TRIGGER trg_e2ee_processing_key_revoked AFTER UPDATE OF revoked_at ON device_keys
+DROP TRIGGER IF EXISTS trg_e2ee_aa_processing_key_revoked ON device_keys;
+CREATE TRIGGER trg_e2ee_aa_processing_key_revoked AFTER UPDATE OF revoked_at ON device_keys
     FOR EACH ROW EXECUTE FUNCTION e2ee_processing_key_revoked();
 
 -- Member removal / key revocation request a new generation of BOTH lines.

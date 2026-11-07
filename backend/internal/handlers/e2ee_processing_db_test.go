@@ -802,23 +802,30 @@ func TestPurgeScopeMineAndCircleLeavePhoneLineAlone(t *testing.T) {
 	e.post("B", e.b, e.circle, 201, e.sealV2(e.b, e.serverLine(), 1, 1, "history"), e.sealV2(e.b, e.phoneLine(), 1, 2, "history"),
 		e.sealV2(e.b, e.serverLine(), 1, 3, "chat"), e.sealV2(e.b, e.serverLine(), 1, 4, "place"), e.sealV2(e.b, e.serverLine(), 1, 5, "checkin"))
 	e.post("A", e.a, e.circle, 201, e.sealV2(e.a, e.serverLine(), 1, 1, "history"), e.sealV2(e.a, e.phoneLine(), 1, 2, "history"))
+	e.post("A", e.a, e.circle, 201, e.sealV2(e.a, e.serverLine(), 1, 3, "chat"), e.sealV2(e.a, e.serverLine(), 1, 4, "place"))
 	m := e.mustCode("B", "DELETE", "/circles/"+e.circle+"/e2ee/server-copies", nil, 200)
-	if m["locations_deleted"].(float64) != 1 || m["items_deleted"].(float64) != 1 {
+	// scope=mine removes ALL of B's own server-line items (history, chat, place, checkin).
+	if m["locations_deleted"].(float64) != 1 || m["items_deleted"].(float64) != 4 {
 		t.Fatalf("scope=mine: %v", m)
 	}
 	if e.count(`SELECT count(*) FROM e2ee_items WHERE circle_id = $1 AND device_id = $2 AND key_line = 'phone'`, e.circle, e.b.id) != 1 {
 		t.Fatal("B's phone-line item was deleted")
 	}
-	if e.count(`SELECT count(*) FROM e2ee_items WHERE circle_id = $1 AND device_id = $2 AND key_line = 'server'`, e.circle, e.a.id) != 1 {
+	if e.count(`SELECT count(*) FROM e2ee_items WHERE circle_id = $1 AND device_id = $2 AND key_line = 'server'`, e.circle, e.a.id) != 3 {
 		t.Fatal("A's server-line item was deleted by B")
 	}
-	// L4: shared channel items other members still need are never deleted by a purge.
-	if e.count(`SELECT count(*) FROM e2ee_items WHERE circle_id = $1 AND device_id = $2 AND key_line = 'server' AND purpose IN ('chat','place','checkin')`, e.circle, e.b.id) != 3 {
-		t.Fatal("a purge deleted shared channel items (chat/place/checkin)")
+	if e.count(`SELECT count(*) FROM e2ee_items WHERE circle_id = $1 AND device_id = $2 AND key_line = 'server'`, e.circle, e.b.id) != 0 {
+		t.Fatal("scope=mine left server-readable items of the author")
 	}
 	e.mustCode("B", "DELETE", "/circles/"+e.circle+"/e2ee/server-copies?scope=circle", nil, 403)
+	e.post("B", e.b, e.circle, 201, e.sealV2(e.b, e.serverLine(), 1, 8, "chat"), e.sealV2(e.b, e.serverLine(), 1, 9, "history"))
 	m = e.mustCode("A", "DELETE", "/circles/"+e.circle+"/e2ee/server-copies?scope=circle", nil, 200)
-	if m["items_deleted"].(float64) != 1 || m["locations_deleted"].(float64) != 1 {
+	// The admin purge removes B's trail (history) but NOT B's shared chat item; A's own go (3).
+	if e.count(`SELECT count(*) FROM e2ee_items WHERE circle_id = $1 AND device_id = $2 AND key_line = 'server' AND purpose = 'chat'`, e.circle, e.b.id) != 1 ||
+		e.count(`SELECT count(*) FROM e2ee_items WHERE circle_id = $1 AND device_id = $2 AND key_line = 'server' AND purpose = 'history'`, e.circle, e.b.id) != 0 {
+		t.Fatal("admin scope=circle must delete others' trail only, keeping their shared items")
+	}
+	if m["items_deleted"].(float64) != 4 || m["locations_deleted"].(float64) != 1 {
 		t.Fatalf("scope=circle: %v", m)
 	}
 	if e.count(`SELECT count(*) FROM e2ee_items WHERE circle_id = $1 AND key_line = 'phone'`, e.circle) != 2 {
@@ -1034,11 +1041,11 @@ func TestServerCopiesDeletedWhenTheLaneEnds(t *testing.T) {
 	e.seedCopies("A", e.a, now)
 	e.wantCopies("B", e.b, 2, 1, 2, 1, "seeded")
 	e.setLane("B", e.b, "phone", 0, 200)
-	e.wantCopies("B", e.b, 0, 0, 0, 1, "after leaving the server lane")
+	e.wantCopies("B", e.b, 0, 0, 0, 0, "after leaving the server lane")
 	e.wantCopies("A", e.a, 2, 1, 2, 1, "A untouched by B leaving")
 	// policy off removes everyone's
 	e.mustCode("A", "PUT", "/circles/"+e.circle+"/e2ee/processing-policy", policyBody(t, e.circle, false, "phone", "allowed", 1, e.a), 200)
-	e.wantCopies("A", e.a, 0, 0, 0, 1, "after the policy was turned off")
+	e.wantCopies("A", e.a, 0, 0, 0, 0, "after the policy was turned off")
 }
 
 func TestServerCopiesDeletedOnMemberRemovalAndKeyRevoke(t *testing.T) {
@@ -1047,13 +1054,13 @@ func TestServerCopiesDeletedOnMemberRemovalAndKeyRevoke(t *testing.T) {
 	e.seedCopies("B", e.b, now)
 	e.seedCopies("A", e.a, now)
 	e.sql(`DELETE FROM circle_members WHERE circle_id = $1 AND user_id = $2`, e.circle, e.ids["B"])
-	e.wantCopies("B", e.b, 0, 0, 0, 1, "after removal")
+	e.wantCopies("B", e.b, 0, 0, 0, 0, "after removal")
 	// A's phone key is revoked: the pref it signed goes and so do A's copies.
 	e.mustCode("A", "DELETE", "/e2ee/devices/"+e.a.id, simpleAction(t, e2ee.ActRevoke, e.a, "", 0, e.a.id, e.a.fp), 200)
 	if e.count(`SELECT count(*) FROM e2ee_processing_pref WHERE circle_id = $1 AND user_id = $2`, e.circle, e.ids["A"]) != 0 {
 		t.Fatal("a pref signed by a revoked key survived")
 	}
-	e.wantCopies("A", e.a, 0, 0, 0, 1, "after the signing key was revoked")
+	e.wantCopies("A", e.a, 0, 0, 0, 0, "after the signing key was revoked")
 }
 
 func TestLegacyConsentWithdrawalDeletesCopies(t *testing.T) {
@@ -1331,4 +1338,85 @@ func TestResultPurposesAndPolicyHistory(t *testing.T) {
 	e.mustCode("A", "GET", "/circles/"+e.circle+"/e2ee/wraps?device_id="+e.a.id+"&key_line=all", nil, 200)
 	e.mustCode("A", "GET", "/circles/"+e.circle+"/e2ee/items?key_line=all", nil, 200)
 	e.mustCode("A", "GET", "/circles/"+e.circle+"/e2ee/pending?key_line=server", nil, 200)
+}
+
+
+// Concurrency: every purge path waits for an in-flight ingest batch (which holds the
+// circle row FOR SHARE) and then removes what that batch wrote.
+func (e *srvEnv) inflightIngest(t *testing.T) (write func(), commit func()) {
+	t.Helper()
+	ctx := context.Background()
+	tx, err := e.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = tx.Rollback(ctx) })
+	if _, err := tx.Exec(ctx, `SELECT 1 FROM circles WHERE id = $1 FOR SHARE`, e.circle); err != nil {
+		t.Fatal(err)
+	}
+	var dev string
+	if err := e.pool.QueryRow(ctx, `INSERT INTO devices (user_id, platform, name) VALUES ($1, 'android', 'x') RETURNING id::text`, e.ids["B"]).Scan(&dev); err != nil {
+		t.Fatal(err)
+	}
+	write = func() {
+		if _, err := tx.Exec(ctx, `INSERT INTO locations (device_id, ts, geom, source, e2ee_circle_id) VALUES ($1, now(), ST_SetSRID(ST_MakePoint(5, 6), 4326), 'e2ee_server', $2)`, dev, e.circle); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return write, func() {
+		if err := tx.Commit(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func (e *srvEnv) purgeWaitsForIngest(t *testing.T, name string, purge func()) {
+	t.Helper()
+	write, commit := e.inflightIngest(t)
+	done := make(chan struct{})
+	go func() { purge(); close(done) }()
+	select {
+	case <-done:
+		t.Fatalf("%s did not wait for the in-flight ingest batch", name)
+	case <-time.After(500 * time.Millisecond):
+	}
+	write() // a row the batch writes while the purge is queued
+	commit()
+	select {
+	case <-done:
+	case <-time.After(20 * time.Second):
+		t.Fatalf("%s never finished", name)
+	}
+	if n := e.count(`SELECT count(*) FROM locations l JOIN devices d ON d.id = l.device_id WHERE d.user_id = $1 AND l.e2ee_circle_id = $2`, e.ids["B"], e.circle); n != 0 {
+		t.Fatalf("%s: %d row(s) written by the in-flight batch survived the purge", name, n)
+	}
+}
+
+func TestPurgeOnKeyRevocationSerialisesWithIngest(t *testing.T) {
+	e := readyLanes(t)
+	e.purgeWaitsForIngest(t, "key revocation", func() {
+		e.do("B", "DELETE", "/e2ee/devices/"+e.b.id, simpleAction(t, e2ee.ActRevoke, e.b, "", 0, e.b.id, e.b.fp))
+	})
+}
+
+func TestPurgeOnMemberRemovalSerialisesWithIngest(t *testing.T) {
+	e := readyLanes(t)
+	e.purgeWaitsForIngest(t, "member removal", func() {
+		_, _ = e.pool.Exec(context.Background(), `DELETE FROM circle_members WHERE circle_id = $1 AND user_id = $2`, e.circle, e.ids["B"])
+	})
+}
+
+// A bare pref change (no circle lock taken by the caller) is serialised by the purge itself.
+func TestPurgeOnPrefChangeSerialisesWithIngest(t *testing.T) {
+	e := readyLanes(t)
+	e.purgeWaitsForIngest(t, "pref change", func() {
+		_, _ = e.pool.Exec(context.Background(), `UPDATE e2ee_processing_pref SET lane = 'phone' WHERE circle_id = $1 AND user_id = $2`, e.circle, e.ids["B"])
+	})
+}
+
+func TestPurgeOnPolicyOffSerialisesWithIngest(t *testing.T) {
+	e := readyLanes(t)
+	e.purgeWaitsForIngest(t, "policy off", func() {
+		e.do("A", "PUT", "/circles/"+e.circle+"/e2ee/processing-policy", policyBody(t, e.circle, false, "phone", "allowed", 1, e.a))
+	})
 }
