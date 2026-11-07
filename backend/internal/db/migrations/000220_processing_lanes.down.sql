@@ -22,7 +22,7 @@ DROP TRIGGER IF EXISTS trg_e2ee_policy_turned_off ON circles;
 DROP TRIGGER IF EXISTS trg_e2ee_processing_mode_changed ON circles;
 DROP TRIGGER IF EXISTS trg_e2ee_processing_pref_member_removed ON circle_members;
 DROP TRIGGER IF EXISTS trg_e2ee_device_kind_immutable ON device_keys;
-DROP TRIGGER IF EXISTS trg_e2ee_processing_key_revoked ON device_keys;
+DROP TRIGGER IF EXISTS trg_e2ee_aa_processing_key_revoked ON device_keys;
 
 CREATE OR REPLACE FUNCTION e2ee_member_removed() RETURNS trigger AS $$
 BEGIN

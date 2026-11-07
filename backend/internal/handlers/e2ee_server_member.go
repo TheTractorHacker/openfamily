@@ -439,6 +439,11 @@ func (s *Server) E2EEPurgeServerCopies(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback(ctx)
+	// Serialise with ingest (it holds this row FOR SHARE for its batch).
+	if _, err := tx.Exec(ctx, `SELECT 1 FROM circles WHERE id = $1 FOR UPDATE`, m.CircleID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to purge")
+		return
+	}
 	rows, err := tx.Query(ctx, `
 		DELETE FROM locations l USING devices d
 		WHERE d.id = l.device_id AND l.e2ee_circle_id = $1 AND ($2 = 'circle' OR d.user_id = $3)
@@ -465,14 +470,16 @@ func (s *Server) E2EEPurgeServerCopies(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to purge")
 		return
 	}
-	// The server-line LOCATION TRAIL (fix, history) goes too. Shared channel items
-	// (place, chat, checkin, event) and every phone-line item are never touched here:
-	// other members still need them (use DELETE .../items for those). scope=mine
-	// only ever matches the caller's own keys.
+	// scope=mine: ALL of the caller's own server-line items (any purpose; the server can
+	// read them under SK). scope=circle (admin): other members' location trail only
+	// (fix, history, trip, drive, week) plus the admin's own server-line items; shared
+	// channel items of others (place, chat, checkin, event) are never deleted by an
+	// admin purge, nor is any phone-line item (use DELETE .../items for those).
+	// Members who had not pulled a deleted item yet lose it; phones keep what they pulled.
 	itemsTag, err := tx.Exec(ctx, `
 		DELETE FROM e2ee_items i
-		WHERE i.circle_id = $1 AND i.key_line = 'server' AND i.purpose IN ('fix', 'history', 'trip', 'drive', 'week')
-		  AND ($2 = 'circle' OR i.device_id IN (SELECT device_id FROM device_keys WHERE user_id = $3))`, m.CircleID, scope, uid)
+		WHERE i.circle_id = $1 AND i.key_line = 'server'
+		  AND (($2 = 'circle' AND i.purpose IN ('fix', 'history', 'trip', 'drive', 'week')) OR i.device_id IN (SELECT device_id FROM device_keys WHERE user_id = $3))`, m.CircleID, scope, uid)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to purge")
 		return
