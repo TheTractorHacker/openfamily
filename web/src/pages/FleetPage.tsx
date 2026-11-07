@@ -8,7 +8,7 @@ import { getFleetHealth } from '../lib/api'
 import { isAccessDenied, useAsync } from '../lib/useAsync'
 import { AccessDenied, Badge, Button, Card, EmptyState, ErrorState, Spinner } from '../components/primitives'
 import { formatRelativeTime } from '../lib/format'
-import { batteryLabel, deviceFindings, memberHealth, summarize, type Health } from '../lib/fleet'
+import { batteryLabel, bestVersion, deviceFindings, reportNote, memberHealth, summarize, type Health } from '../lib/fleet'
 import type { FleetDevice, FleetMember } from '../lib/types'
 import './pages.css'
 import './FleetPage.css'
@@ -26,8 +26,8 @@ function pushText(d: FleetDevice): string {
   return ok ? `Delivered ${ok}` : `Registered (${d.push_transport || 'provider'}), none sent yet`
 }
 
-function DeviceDetail({ d, now }: { d: FleetDevice; now: number }) {
-  const findings = deviceFindings(d, now)
+function DeviceDetail({ d, now, m }: { d: FleetDevice; now: number; m: FleetMember }) {
+  const findings = deviceFindings(d, now, m.in_private_circle ? m.last_activity_at : null)
   const locText = { always: 'Always', while_in_use: 'Only while in use', denied: 'Denied', unknown: 'Not reported' }[d.loc_permission]
   return (
     <div className="wb-fleet-device">
@@ -35,12 +35,18 @@ function DeviceDetail({ d, now }: { d: FleetDevice; now: number }) {
         <span className="wb-fleet-device-name">{d.name || (d.platform === 'ios' ? 'iPhone' : 'Android phone')}</span>
         <Badge tone="neutral">{d.platform}</Badge>
         <span className="wb-fleet-sub">
-          {d.diag_reported_at ? `Self-report ${formatRelativeTime(d.diag_reported_at)}` : 'No self-report yet (app older than this feature)'}
+          {d.diag_reported_at ? `Health report ${formatRelativeTime(d.diag_reported_at)}` : reportNote(d)}
         </span>
       </div>
+      {m.in_private_circle && (
+        <p className="wb-fleet-sub">
+          Private circle: updates are encrypted, so the server only knows when one arrived. Last update received{' '}
+          {formatRelativeTime(m.last_private_update_at ?? m.last_activity_at)}.
+        </p>
+      )}
       <dl className="wb-fleet-facts">
         <div><dt>Last seen</dt><dd>{formatRelativeTime(d.last_seen)}</dd></div>
-        <div><dt>App version</dt><dd>{d.app_version || 'Unknown'}</dd></div>
+        <div><dt>App version</dt><dd>{bestVersion(d)}</dd></div>
         <div><dt>OS</dt><dd>{d.os_version || 'Not reported'}</dd></div>
         <div><dt>Battery optimisation</dt><dd>{batteryLabel(d.battery_opt)}</dd></div>
         <div><dt>Location permission</dt><dd>{locText}</dd></div>
@@ -72,11 +78,11 @@ function MemberRow({ m, now, open, onToggle }: { m: FleetMember; now: number; op
         </span>
         <Badge tone={TONE[health]} dot>{LABEL[health]}</Badge>
         <span className="wb-fleet-cell">
-          <strong>{formatRelativeTime(m.last_report_at ?? newest?.last_seen)}</strong>
+          <strong>{formatRelativeTime(m.last_activity_at ?? m.last_report_at ?? newest?.last_seen)}</strong>
           <br />last heard
         </span>
         <span className="wb-fleet-cell is-secondary">
-          <strong>{newest?.app_version || '—'}</strong>
+          <strong>{newest ? bestVersion(newest) : '—'}</strong>
           <br />{newest?.os_version || 'OS not reported'}
         </span>
         <span className="wb-fleet-chev" aria-hidden="true">›</span>
@@ -84,7 +90,7 @@ function MemberRow({ m, now, open, onToggle }: { m: FleetMember; now: number; op
       {open && (
         <div className="wb-fleet-detail">
           {m.devices.map((d) => (
-            <DeviceDetail key={d.id} d={d} now={now} />
+            <DeviceDetail key={d.id} d={d} now={now} m={m} />
           ))}
         </div>
       )}

@@ -167,7 +167,9 @@ class DiagnosticsProbe {
     return Uri.tryParse(base)?.host ?? '';
   }
 
-  static Future<DiagFacts> collect({PackageVersion? version}) async {
+  /// [light] skips the server round trip and the Private-store/key-store checks:
+  /// enough for the health report, and nothing in it can hang.
+  static Future<DiagFacts> collect({PackageVersion? version, bool light = false}) async {
     final Map<String, dynamic>? n = await nativeState();
     final bool? serviceOn = await _try(() => Geolocator.isLocationServiceEnabled());
     final bool whenInUse = await _try(() async => (await Permission.locationWhenInUse.status).isGranted) ?? false;
@@ -181,7 +183,7 @@ class DiagnosticsProbe {
     final bool? notif = await _try(() async => (await Permission.notification.status).isGranted);
     final List<ConnectivityResult>? net = await _try(() => Connectivity().checkConnectivity());
     final bool? online = net == null ? null : !(net.isEmpty || net.every((ConnectivityResult r) => r == ConnectivityResult.none));
-    final ServerView sv = online == false ? const ServerView(state: ServerState.unreachable) : await server();
+    final ServerView sv = light ? const ServerView(state: ServerState.unknown) : online == false ? const ServerView(state: ServerState.unreachable) : await server();
     final int? outbox = await _try(() => LocationOutbox.size());
     final bool? bg = _android ? await _try(() => BackgroundLocationService.isRunning()) : null;
     final String? deviceId = await _try(() => TokenStorage.readDeviceId());
@@ -189,11 +191,12 @@ class DiagnosticsProbe {
     bool? storeExcluded;
     String storeError = '';
     try {
+      if (light) throw StateError('light');
       await PrivateStore.files();
       storeExcluded = PrivateStore.status.backupExcluded;
       storeError = PrivateStore.status.error;
     } catch (_) {}
-    final bool hasPrivate = sv.privateCircles > 0 || ((await _try(() => PrivateRuntime.instance.privateCircles()))?.isNotEmpty ?? false);
+    final bool hasPrivate = !light && sv.privateCircles > 0 || ((await _try(() => PrivateRuntime.instance.privateCircles()))?.isNotEmpty ?? false);
     bool? vaultOk;
     String vaultDetail = '';
     bool needsUnlock = false, userAuth = false;

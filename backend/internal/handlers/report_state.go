@@ -3,8 +3,11 @@ package handlers
 import (
 	"context"
 	"log/slog"
+	"net/http"
 	"sync"
 	"time"
+
+	"github.com/TheTractorHacker/openfamily/backend/internal/middleware"
 )
 
 // Server-side liveness bookkeeping. Everything stored here is metadata the
@@ -100,5 +103,41 @@ func (s *Server) notePushResult(ctx context.Context, deviceID string, ok bool) {
 	defer cancel()
 	if _, err := s.Pool.Exec(ctx, `UPDATE devices SET `+col+` = now() WHERE id = $1`, deviceID); err != nil {
 		slog.Debug("push result", "err", err)
+	}
+}
+
+var liveTouch sync.Map // "user|device" -> time.Time of the last devices.last_seen write
+
+const liveTouchEvery = 10 * time.Minute
+
+// touchPrivateLiveness bumps devices.last_seen for the phone behind an
+// end-to-end encrypted upload or poll. Private circles upload under their own
+// E2EE device ids, so the normal location routes never touch devices, and the
+// Fleet page and the "phone went silent" alert would see a healthy phone as
+// quiet. The device is the one named by X-Device-Id (it must belong to the
+// caller), else the caller's most recently seen device of the request's
+// platform. At most one write per device per 10 minutes; no coordinate or
+// ciphertext is read or written.
+func (s *Server) touchPrivateLiveness(r *http.Request, userID string) {
+	if s == nil || s.Pool == nil || userID == "" {
+		return
+	}
+	dev := middleware.DeviceIDHeader(r)
+	platform := middleware.AppInfoFromContext(r.Context()).Platform
+	key := userID + "|" + dev + "|" + platform
+	now := time.Now()
+	if v, ok := liveTouch.Load(key); ok && now.Sub(v.(time.Time)) < liveTouchEvery {
+		return
+	}
+	liveTouch.Store(key, now)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
+	defer cancel()
+	if _, err := s.Pool.Exec(ctx, `
+		UPDATE devices SET last_seen = now() WHERE user_id = $1 AND id = (
+		  CASE WHEN $2 <> '' THEN (SELECT id FROM devices WHERE id = NULLIF($2,'')::uuid AND user_id = $1)
+		       ELSE (SELECT id FROM devices WHERE user_id = $1 AND ($3 = '' OR platform = $3)
+		             ORDER BY last_seen DESC NULLS LAST, created_at DESC LIMIT 1) END)`,
+		userID, dev, platform); err != nil {
+		slog.Debug("private liveness", "err", err)
 	}
 }

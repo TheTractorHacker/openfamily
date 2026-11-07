@@ -7,6 +7,7 @@ import 'package:geolocator/geolocator.dart';
 
 import 'api_client.dart';
 import 'device_service.dart';
+import 'diagnostics/diagnostics_reporter.dart';
 import 'e2ee/private_runtime.dart';
 import 'fix_quality.dart';
 import 'live_boost.dart';
@@ -220,7 +221,10 @@ class LocationReporter {
   /// posted within the last interval (that already refreshed it server-side)
   /// or while another request is in flight. Never throws.
   Future<void> _sendHeartbeat() async {
-    if (!_active || _posting) return;
+    if (!_active) return;
+    // Phone health report for the admin Fleet page: self-throttled to 30 min.
+    unawaited(DiagnosticsAutoReport.maybeReport());
+    if (_posting) return;
     final DateTime? lastPost = _lastPostTime;
     if (lastPost != null &&
         DateTime.now().toUtc().difference(lastPost) < _heartbeatInterval) {

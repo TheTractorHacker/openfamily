@@ -115,6 +115,14 @@ func RecordAppVersion(pool *pgxpool.Pool) func(http.Handler) http.Handler {
 			if info := AppInfoFromContext(r.Context()); info.Known && pool != nil {
 				if c := ClaimsFromContext(r.Context()); c != nil && c.UserID != "" {
 					ver := info.Version.String()
+					dev := DeviceIDHeader(r)
+					if info.Platform != "" || dev != "" {
+						if rec.due("dev|"+c.UserID+"|"+dev+"|"+info.Platform+"|"+ver, time.Now()) {
+							ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 2*time.Second)
+							_ = TouchDeviceVersion(ctx, pool, c.UserID, dev, info.Platform, ver)
+							cancel()
+						}
+					}
 					if rec.due(c.UserID+"|"+ver+"|"+info.Platform, time.Now()) {
 						ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 2*time.Second)
 						_, _ = pool.Exec(ctx, `
@@ -129,4 +137,43 @@ func RecordAppVersion(pool *pgxpool.Pool) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// HeaderDeviceID names the caller's own devices.id (sent by the app so the
+// server can attribute a request to one phone; always checked against the
+// caller before use).
+const HeaderDeviceID = "X-Device-Id"
+
+// DeviceIDHeader returns X-Device-Id when it is a well-formed UUID, else "".
+func DeviceIDHeader(r *http.Request) string {
+	v := strings.ToLower(strings.TrimSpace(r.Header.Get(HeaderDeviceID)))
+	if len(v) != 36 {
+		return ""
+	}
+	for i, ch := range v {
+		switch {
+		case i == 8 || i == 13 || i == 18 || i == 23:
+			if ch != '-' {
+				return ""
+			}
+		case (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f'):
+		default:
+			return ""
+		}
+	}
+	return v
+}
+
+// TouchDeviceVersion stores the app version on the caller's device: the one
+// named by deviceID (only if it belongs to userID), else the user's most
+// recently seen device of that platform. It never writes a coordinate.
+func TouchDeviceVersion(ctx context.Context, pool *pgxpool.Pool, userID, deviceID, platform, version string) error {
+	_, err := pool.Exec(ctx, `
+		UPDATE devices SET app_version = $4
+		WHERE app_version IS DISTINCT FROM $4 AND user_id = $1 AND id = (
+		  CASE WHEN $2 <> '' THEN (SELECT id FROM devices WHERE id = NULLIF($2,'')::uuid AND user_id = $1)
+		       ELSE (SELECT id FROM devices WHERE user_id = $1 AND platform = $3
+		             ORDER BY last_seen DESC NULLS LAST, created_at DESC LIMIT 1) END)`,
+		userID, deviceID, platform, version)
+	return err
 }

@@ -453,6 +453,7 @@ export interface FleetDevice {
   notif_permission: 'granted' | 'denied' | 'unknown'
   bg_service: boolean | null
   diag_reported_at: string | null
+  client_version?: string
 }
 
 export interface FleetMember {
@@ -462,6 +463,8 @@ export interface FleetMember {
   last_report_at: string | null
   last_ws_at: string | null
   in_private_circle: boolean
+  last_activity_at?: string | null
+  last_private_update_at?: string | null
   devices: FleetDevice[]
 }
 

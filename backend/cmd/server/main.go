@@ -732,7 +732,7 @@ func cors(allowedOrigin string) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if allowedOrigin != "" {
 				w.Header().Set("Access-Control-Allow-Origin", allowedOrigin)
-				w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-App-Version, X-App-Platform")
+				w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-App-Version, X-App-Platform, X-Device-Id")
 				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 			}
 			if r.Method == http.MethodOptions {

@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:openfamily/services/diagnostics/diag_model.dart';
 import 'package:openfamily/services/diagnostics/diagnostics_probe.dart';
@@ -207,5 +208,40 @@ void main() {
     expect(b.keys, isNot(contains('token')));
     final Map<String, dynamic> r = DiagnosticsReporter.body(healthy(restricted: true, ignoring: false));
     expect(r['battery_opt'], 'restricted');
+  });
+
+  // Mirrors of the server's enum lists (backend/internal/handlers/diagnostics.go).
+  // If the app ever sends a value the server rejects (400), the report never
+  // arrives and the Fleet page says "not reported" forever.
+  const Set<String> serverBattery = <String>{'unrestricted', 'optimized', 'restricted', 'unknown'};
+  const Set<String> serverLoc = <String>{'always', 'while_in_use', 'denied', 'unknown'};
+  const Set<String> serverNotif = <String>{'granted', 'denied', 'unknown'};
+
+  test('every report the app can build passes the server validation', () {
+    for (final String? loc in <String?>['always', 'while_in_use', 'denied', null]) {
+      for (final bool? ignoring in <bool?>[true, false, null]) {
+        for (final bool? restricted in <bool?>[true, false, null]) {
+          final Map<String, dynamic> b = DiagnosticsReporter.body(healthy(location: loc, ignoring: ignoring, restricted: restricted));
+          expect(serverBattery, contains(b['battery_opt']));
+          expect(serverLoc, contains(b['loc_permission']));
+          expect(serverNotif, contains(b['notif_permission']));
+          expect((b['os_version'] as String).length, lessThanOrEqualTo(64));
+          expect(((b['app_version'] ?? '') as String).length, lessThanOrEqualTo(64));
+          expect(b['outbox_pending'] ?? 0, inInclusiveRange(0, 100000));
+          expect(utf8.encode(jsonEncode(b)).length, lessThan(4096));
+        }
+      }
+    }
+  });
+
+  test('a report is due on first run, after an update, and after 30 minutes only', () {
+    const int min = 60000;
+    bool due(int? last, int now, String? lastV, String v) =>
+        DiagnosticsAutoReport.due(lastMs: last, nowMs: now, lastVersion: lastV, version: v);
+    expect(due(null, 1000, null, '0.23.0'), isTrue);
+    expect(due(0, 10 * min, '0.23.0', '0.23.0'), isFalse);
+    expect(due(0, 30 * min, '0.23.0', '0.23.0'), isTrue);
+    expect(due(0, 1 * min, '0.21.1', '0.23.0'), isTrue, reason: 'version change');
+    expect(due(0, 1 * min, null, ''), isFalse, reason: 'unknown version must not force reports');
   });
 }

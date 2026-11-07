@@ -13,9 +13,12 @@ export interface Finding {
 const HOUR = 3_600_000
 
 /** Findings for one phone, worst first. `now` is injected for tests. */
-export function deviceFindings(d: FleetDevice, now: number): Finding[] {
+export function deviceFindings(d: FleetDevice, now: number, activityAt?: string | null): Finding[] {
   const out: Finding[] = []
-  const seen = d.last_seen ? new Date(d.last_seen).getTime() : NaN
+  // activityAt: for a Private-circle member, the newest encrypted update or live connection. Their
+  // uploads never touch devices.last_seen on older servers, so a working phone must not look dead.
+  const times = [d.last_seen, activityAt].map((t) => (t ? new Date(t).getTime() : NaN)).filter((n) => !Number.isNaN(n))
+  const seen = times.length ? Math.max(...times) : NaN
   if (Number.isNaN(seen)) out.push({ level: 'bad', text: 'Has never reported' })
   else if (now - seen > 24 * HOUR) out.push({ level: 'bad', text: 'Not seen for over a day' })
   else if (now - seen > 4 * HOUR) out.push({ level: 'warn', text: 'Quiet for several hours' })
@@ -44,7 +47,7 @@ export function memberHealth(m: FleetMember, now: number): Health {
   let best: Health = 'bad'
   const rank = { ok: 0, warn: 1, bad: 2, unknown: 3 } as const
   for (const d of m.devices) {
-    const f = deviceFindings(d, now)
+    const f = deviceFindings(d, now, m.in_private_circle ? m.last_activity_at : null)
     const level: Health = f.some((x) => x.level === 'bad') ? 'bad' : f.length > 0 ? 'warn' : 'ok'
     if (rank[level] < rank[best]) best = level
   }
@@ -75,4 +78,20 @@ export function batteryLabel(v: FleetDevice['battery_opt']): string {
     default:
       return 'Not reported'
   }
+}
+
+/** Best known app version: what the phone reported, else what the server last saw it send. */
+export function bestVersion(d: FleetDevice): string {
+  const v = d.app_version && d.app_version !== '0.1.0' ? d.app_version : d.client_version || d.app_version
+  return v || 'Unknown'
+}
+
+/** Why there is no health report from this phone, in plain words. */
+export function reportNote(d: FleetDevice): string {
+  if (d.diag_reported_at) return ''
+  const v = /^v?(\d+)\.(\d+)/.exec(bestVersion(d))
+  const older = v != null && (Number(v[1]) === 0 && Number(v[2]) < 19)
+  return older
+    ? 'This app version is older than the health report feature. Ask them to update the app.'
+    : 'The app has not sent a health report yet. It sends one when it is opened, so ask them to open the app.'
 }
