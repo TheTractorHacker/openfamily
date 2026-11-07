@@ -2,6 +2,7 @@ import 'dart:async';
 
 import '../models/circle.dart';
 import 'api_client.dart';
+import 'app_compat.dart';
 
 export 'api_client.dart' show SessionExpiredException;
 
@@ -91,8 +92,12 @@ class ApiCircleService implements CircleService {
       _wrap(() async => (await ApiClient.getProfile()).id);
 
   @override
-  Future<List<Circle>> listCircles() => _wrap(() async =>
-      _rows(await ApiClient.get('/circles')).map(Circle.fromJson).toList());
+  Future<List<Circle>> listCircles() => _wrap(() async {
+        final List<Circle> list =
+            _rows(await ApiClient.get('/circles')).map(Circle.fromJson).toList();
+        AppCompat.noteCircles(list.map((Circle c) => c.needsNewerApp));
+        return list;
+      });
 
   @override
   Future<Circle> createCircle(String name, String? icon,

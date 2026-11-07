@@ -38,6 +38,7 @@ import type {
   AdminSession,
   AuditPage,
   FleetResponse,
+  AdminCompat,
 } from './types'
 
 const API_BASE = '/api'
@@ -868,4 +869,13 @@ export function testHaWebhook(id: string): Promise<{ ok: boolean; status_code: n
 
 export function getFleetHealth(): Promise<FleetResponse> {
   return request<FleetResponse>('/api/admin/fleet')
+}
+
+export function getAdminCompat(): Promise<AdminCompat> {
+  return request<AdminCompat>('/api/admin/compat')
+}
+
+/** Sets the minimum-version override ("" clears it) and/or write enforcement. */
+export function saveAdminCompat(body: { min_supported_override?: string; enforce_writes?: boolean }): Promise<AdminCompat> {
+  return request<AdminCompat>('/api/admin/compat', { method: 'PUT', body })
 }

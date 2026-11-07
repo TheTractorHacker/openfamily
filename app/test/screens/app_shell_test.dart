@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:openfamily/screens/app_shell.dart';
+import 'package:openfamily/services/app_compat.dart';
 import 'package:openfamily/theme/app_theme.dart';
 
 class _Counter extends StatefulWidget {
@@ -141,5 +142,18 @@ void main() {
     nav.pop();
     await tester.pumpAndSettle();
     expect(find.text('cir 0'), findsOneWidget);
+  });
+
+  testWidgets('shows the update banner above the tabs when required', (
+    tester,
+  ) async {
+    AppCompat.debugReset();
+    addTearDown(AppCompat.debugReset);
+    await _pumpShell(tester, _shell());
+    expect(find.byKey(const Key('update-banner-text')), findsNothing);
+    AppCompat.state.value = const CompatState(status: CompatStatus.required);
+    await tester.pump();
+    expect(find.textContaining('Update required'), findsOneWidget);
+    expect(find.text('loc 0'), findsOneWidget);
   });
 }

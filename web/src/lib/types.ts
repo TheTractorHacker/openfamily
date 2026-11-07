@@ -569,3 +569,40 @@ export interface BackupSettingsSubmit {
   secret_access_key?: string
   clear_credentials?: boolean
 }
+
+/** GET /api/admin/compat: which app versions are in use and the support window. */
+export type AppCompatStatus = 'ok' | 'recommended' | 'required' | 'unknown'
+
+export interface AdminCompatVersion {
+  app_version: string
+  platform: string
+  users: number
+  last_seen: string
+  status: AppCompatStatus
+}
+
+export interface AdminCompatUser {
+  user_id: string
+  name: string
+  email: string
+  app_version: string
+  platform: string
+  last_seen: string
+}
+
+export interface AdminCompat {
+  policy: {
+    min_supported_version: string
+    latest_version: string
+    window: string[]
+    window_size: number
+    source: 'window' | 'env' | 'admin'
+    env_min_supported: string
+    override: string
+    enforce_writes: boolean
+  }
+  versions: AdminCompatVersion[]
+  outside_window: AdminCompatUser[]
+  users_total: number
+  users_with_version: number
+}

@@ -96,6 +96,7 @@ func main() {
 	srv.TileURL = cfg.TileURL
 	srv.SatelliteTileURL = cfg.SatelliteTileURL
 	srv.MapStyleURL = cfg.MapStyleURL
+	srv.MinSupportedAppVersion = cfg.MinSupportedAppVersion
 	srv.RequireAdminMFA = cfg.RequireAdminMFA
 	srv.APNsConfigured = cfg.APNsKeyFile != ""
 	srv.IOSTeamID = cfg.IOSTeamID
@@ -221,12 +222,18 @@ func main() {
 	r.Use(mid.SecurityHeaders)
 	r.Use(mid.LimitBody(mid.BodyLimitFor))
 	r.Use(cors(cfg.AllowedOrigin))
+	// App-compatibility handshake (docs/api-compat.md): parse X-App-Version,
+	// advertise X-OpenFamily-Compat. Never rejects a request.
+	r.Use(mid.AppVersion(srv.CompatPolicy))
 
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
 	r.Get("/config", srv.GetConfig)
+	// Lightweight app-compatibility probe (public, no database read beyond a
+	// cached settings row).
+	r.Get("/compat", srv.GetCompat)
 	// Trusted-server mode (docs/design/E2EE.md): the server-device sidecar. Not
 	// user routes: each handler authenticates a dedicated bearer token (404 when the
 	// mode is not configured) and re-derives the phones' consent before it writes.
@@ -274,6 +281,7 @@ func main() {
 		r.Use(mid.NoStore)
 		r.Use(mid.RequireAuth(tm))
 		r.Use(mid.RequireTokenVersion(pool))
+		r.Use(mid.RecordAppVersion(pool))
 
 		r.Get("/me", srv.GetMe)
 		// Release the server runs, for signed-in users only (not on /healthz).
@@ -466,6 +474,7 @@ func main() {
 	r.Group(func(r chi.Router) {
 		r.Use(mid.NoStore)
 		r.Use(mid.RequireAuthOrDeviceIngestKey(tm, pool))
+		r.Use(mid.RecordAppVersion(pool))
 
 		r.Post("/devices/heartbeat", srv.HeartbeatDevice)
 		// Built-in direct push channel: SSE stream + delivery ack.
@@ -501,6 +510,8 @@ func main() {
 		r.Use(mid.RequirePlatformAdmin(pool))
 		r.Use(mid.RequireAdminMFA(pool, cfg.RequireAdminMFA))
 
+		r.Get("/api/admin/compat", srv.AdminGetCompat)
+		r.Put("/api/admin/compat", srv.AdminPutCompat)
 		r.Get("/api/admin/families", srv.AdminListFamilies)
 		r.Post("/api/admin/families", srv.AdminCreateFamily)
 		r.Patch("/api/admin/families/{id}", srv.AdminRenameFamily)
@@ -678,7 +689,7 @@ func cors(allowedOrigin string) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if allowedOrigin != "" {
 				w.Header().Set("Access-Control-Allow-Origin", allowedOrigin)
-				w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+				w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-App-Version, X-App-Platform")
 				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 			}
 			if r.Method == http.MethodOptions {

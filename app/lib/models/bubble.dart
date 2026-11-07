@@ -135,12 +135,21 @@ class BubbleList {
   final List<BubbleAboutMe> aboutMe;
 
   factory BubbleList.fromJson(Map<String, dynamic> json) {
-    List<T> parse<T>(Object? v, T Function(Map<String, dynamic>) f) => v is List
-        ? <T>[
-            for (final Object? e in v)
-              if (e is Map<String, dynamic>) f(e),
-          ]
-        : <T>[];
+    // One malformed entry (a field this app version does not understand)
+    // must not blank the whole list.
+    List<T> parse<T>(Object? v, T Function(Map<String, dynamic>) f) {
+      if (v is! List) return <T>[];
+      final List<T> out = <T>[];
+      for (final Object? e in v) {
+        if (e is! Map<String, dynamic>) continue;
+        try {
+          out.add(f(e));
+        } catch (_) {
+          // skip
+        }
+      }
+      return out;
+    }
     return BubbleList(
       mine: parse(json['bubbles'], Bubble.fromJson),
       aboutMe: parse(json['about_me'], BubbleAboutMe.fromJson),
