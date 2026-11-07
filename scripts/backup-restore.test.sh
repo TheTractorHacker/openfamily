@@ -150,7 +150,8 @@ grep -q "does not match" "$work/wk.out" || { echo "FAIL: unexpected wrong-key er
 
 echo "--- negative: tampered local object is rejected by the checksum before decryption"
 obj="$(ls "$work/local/"*.dump.age | head -1)"
-printf 'X' | dd of="$obj" bs=1 seek=100 conv=notrunc 2>/dev/null
+cur="$(dd if="$obj" bs=1 skip=100 count=1 2>/dev/null | od -An -tu1 | tr -d ' ')"   # always change the byte (a fixed value could equal it)
+printf "\\$(printf '%03o' $(( (cur + 1) % 256 )))" | dd of="$obj" bs=1 seek=100 conv=notrunc 2>/dev/null
 if scripts/verify-backup.sh --from-local latest >"$work/tamper.out" 2>&1; then echo "FAIL: tampered backup accepted" >&2; exit 1; fi
 grep -q "CHECKSUM MISMATCH" "$work/tamper.out" || { echo "FAIL: tamper not reported as checksum mismatch" >&2; cat "$work/tamper.out" >&2; exit 1; }
 

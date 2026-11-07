@@ -147,10 +147,14 @@ again; the saved key is never sent to a different address, so a hijacked admin
 session cannot point the test at a host it controls to collect it. Credentials
 from `.env` likewise pin the endpoint, plain-HTTP and private-network settings
 to `.env` (read-only in the panel). Keys saved by earlier builds have no
-fingerprint and must be entered once more. IPv6 transition addresses (NAT64,
-6to4, Teredo, IPv4-compatible) are refused unless *Allow private network
-address* is on, and the IPv4 address they embed is checked with the same rules,
-so metadata or LAN targets cannot be disguised that way.
+fingerprint and must be entered once more. IPv6 is an allowlist: only
+global unicast (2000::/3, not the documentation range) is accepted; with *Allow
+private network address* also ULA (fc00::/7) and ::1. Link-local, multicast,
+unspecified and any other range are always refused. IPv6 transition addresses
+(NAT64 64:ff9b::/96, 6to4, Teredo, IPv4-compatible) are refused unless private
+addresses are allowed, and the IPv4 address they embed is checked with the IPv4
+rules; the local-use NAT64 range 64:ff9b:1::/48 is always refused. IPv4-mapped
+addresses are converted to IPv4 before any check.
 
 ### Quick start 2: with environment variables
 
