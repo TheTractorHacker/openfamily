@@ -214,6 +214,7 @@ func main() {
 	// or was interrupted during ingest.
 	go srv.ReconcileGeofences(ctx)
 	go srv.RunCirclePurge(ctx)
+	go srv.RunSessionSweep(ctx)
 	go srv.RunUserRetention(ctx)
 	go srv.RunE2EEItemPurge(ctx)
 	if err := srv.EnsureCrashSchema(ctx); err != nil {
@@ -605,6 +606,8 @@ func main() {
 		r.Get("/api/admin/audit/actions", srv.AdminListAuditActions)
 		r.Get("/api/admin/audit/export", srv.AdminExportAudit)
 		r.Get("/api/admin/sessions", srv.AdminListSessions)
+		r.Get("/api/admin/settings/security", srv.AdminGetSecuritySettings)
+		r.Put("/api/admin/settings/security", srv.AdminPutSecuritySettings)
 		r.Post("/api/admin/sessions/bulk-revoke", srv.AdminBulkRevokeSessions)
 		r.Delete("/api/admin/sessions/{id}", srv.AdminRevokeSession)
 		r.Get("/api/admin/activity", srv.AdminActivityFeed)

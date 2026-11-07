@@ -8,6 +8,7 @@ import 'package:http/http.dart' as http;
 
 import '../models/user_profile.dart';
 import 'app_compat.dart';
+import 'device_service.dart';
 import 'perf/perf_monitor.dart';
 import 'server_config.dart';
 import 'session_diary.dart';
@@ -667,6 +668,11 @@ class ApiClient {
       headers['X-App-Version'] = AppCompat.version;
       headers['X-App-Platform'] = _platformName();
     }
+    // Lets the server replace this install's previous sign-in instead of
+    // stacking a new session on every login.
+    try {
+      headers['X-Install-Id'] = await DeviceService.installId();
+    } catch (_) {}
     if (auth) {
       final String? token = await TokenStorage.readAccessToken();
       if (token != null) {

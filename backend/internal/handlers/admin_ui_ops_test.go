@@ -173,3 +173,52 @@ func TestAdminHideStaleDevices(t *testing.T) {
 		t.Fatalf("bad days: %d", code)
 	}
 }
+
+func TestLoginReplacesSameInstallAndSweepsIdle(t *testing.T) {
+	fx := newAlertFixture(t)
+	ctx := context.Background()
+	t.Cleanup(func() { _, _ = fx.pool.Exec(ctx, `DELETE FROM refresh_sessions WHERE family_id LIKE 'hy-%'`) })
+	mk := func(jti, uid, ageSQL string) {
+		if _, err := fx.pool.Exec(ctx, `INSERT INTO refresh_sessions (jti, family_id, user_id, created_at, expires_at)
+			VALUES ($1,$1,$2, now() - `+ageSQL+`::interval, now() + interval '10 days')`, jti, uid); err != nil {
+			t.Fatal(err)
+		}
+	}
+	revoked := func(jti string) (b bool) {
+		_ = fx.pool.QueryRow(ctx, `SELECT revoked_at IS NOT NULL FROM refresh_sessions WHERE jti = $1`, jti).Scan(&b)
+		return
+	}
+	login := func(jti, install string) {
+		mk(jti, fx.c, "'0 seconds'")
+		req := httptest.NewRequest("POST", "/auth/login", nil)
+		if install != "" {
+			req.Header.Set("X-Install-Id", install)
+		}
+		fx.srv.tagSessionClient(req, fx.c, jti)
+	}
+	login("hy-1", "install-phone-1")
+	login("hy-2", "install-phone-2")
+	login("hy-3", "install-phone-1") // same phone signs in again
+	if !revoked("hy-1") || revoked("hy-2") || revoked("hy-3") {
+		t.Fatalf("replace: 1=%v 2=%v 3=%v", revoked("hy-1"), revoked("hy-2"), revoked("hy-3"))
+	}
+	login("hy-4", "") // no install id: nothing is guessed
+	if revoked("hy-2") || revoked("hy-3") {
+		t.Fatal("anonymous login revoked others")
+	}
+	// Idle sweep: default 14 days.
+	mk("hy-old", fx.c, "'20 days'")
+	if _, err := fx.srv.SweepIdleSessions(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if !revoked("hy-old") || revoked("hy-3") {
+		t.Fatalf("sweep: old=%v fresh=%v", revoked("hy-old"), revoked("hy-3"))
+	}
+	// Cap per user.
+	_, _ = fx.pool.Exec(ctx, `UPDATE security_settings SET max_sessions_per_user = 2 WHERE id = 1`)
+	t.Cleanup(func() { _, _ = fx.pool.Exec(ctx, `UPDATE security_settings SET max_sessions_per_user = 20 WHERE id = 1`) })
+	login("hy-5", "")
+	if !revoked("hy-2") || revoked("hy-5") || revoked("hy-4") {
+		t.Fatalf("cap: 2=%v 4=%v 5=%v", revoked("hy-2"), revoked("hy-4"), revoked("hy-5"))
+	}
+}

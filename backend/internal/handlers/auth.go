@@ -206,6 +206,7 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.tagSession(r, jti)
+	s.tagSessionClient(r, user.ID, jti)
 	// Opportunistic cleanup of long-expired rows; never blocks login.
 	go func() { _ = s.refreshSessions().Purge(context.Background()) }()
 	amr := ""
