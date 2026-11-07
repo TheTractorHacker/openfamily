@@ -1,0 +1,113 @@
+name: iOS unsigned IPA (sideload)
+
+# Builds an UNSIGNED .ipa for sideloading (AltStore, Sideloadly, ...) and attaches
+# it to the repository's own GitHub release for the tag. Needs NO secrets and
+# never touches the signed TestFlight path (ios-release.yml). The file is named
+# "-unsigned" on purpose: it cannot be installed as is, a sideloading tool must
+# re-sign it with the user's own Apple ID. Caveats: docs/design/IOS_RELEASE.md.
+
+on:
+  push:
+    tags: ['v*']
+    branches: ['ci/ios-unsigned-test'] # build-only dry run, never uploads
+  workflow_dispatch:
+
+permissions:
+  contents: write # only used to attach the .ipa to this repo's release
+
+concurrency:
+  group: ios-unsigned-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  ipa:
+    runs-on: macos-15
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: '3.47.0'
+          cache: true
+
+      - name: Version
+        id: ver
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            V="${GITHUB_REF_NAME#v}"
+          else
+            V="0.0.0-dev"
+          fi
+          BASE="${V%%-*}"
+          IFS=. read -r MA MI PA <<<"$BASE"
+          CODE=$(( (MA*1000000 + MI*1000 + PA)*100 + 99 ))
+          echo "name=$V" >> "$GITHUB_OUTPUT"
+          echo "base=$BASE" >> "$GITHUB_OUTPUT"
+          echo "code=$CODE" >> "$GITHUB_OUTPUT"
+          echo "Version $V (CFBundleShortVersionString $BASE, CFBundleVersion $CODE)"
+
+      - name: Dependencies
+        run: flutter pub get
+
+      - name: Build (release, no code signing)
+        run: |
+          flutter build ios --release --no-codesign \
+            --build-name='${{ steps.ver.outputs.base }}' --build-number='${{ steps.ver.outputs.code }}'
+
+      - name: Package unsigned .ipa
+        id: pkg
+        run: |
+          set -euo pipefail
+          V='${{ steps.ver.outputs.name }}'
+          APP=build/ios/iphoneos/Runner.app
+          test -d "$APP"
+          # Prove it really is unsigned: no embedded provisioning profile.
+          if [ -e "$APP/embedded.mobileprovision" ]; then echo "unexpected provisioning profile"; exit 1; fi
+          rm -rf ../dist _ipa && mkdir -p ../dist _ipa/Payload
+          cp -R "$APP" _ipa/Payload/Runner.app
+          OUT="$PWD/../dist/openfamily-$V-unsigned.ipa"
+          (cd _ipa && zip -qry "$OUT" Payload)
+          unzip -l "$OUT" | grep -q 'Payload/Runner.app/Info.plist'
+          (cd ../dist && shasum -a 256 "openfamily-$V-unsigned.ipa" | tee "openfamily-$V-unsigned.ipa.sha256")
+          codesign -dv "$APP" 2>&1 | head -5 || true
+
+      - name: Keep build files
+        uses: actions/upload-artifact@v4
+        with:
+          name: openfamily-${{ steps.ver.outputs.name }}-unsigned-ipa
+          path: dist/*
+          if-no-files-found: error
+
+      # Only a tag build of THIS repository uploads, only with the workflow's own
+      # GITHUB_TOKEN, only to this repository's release for that tag.
+      - name: Attach to the GitHub release
+        if: github.ref_type == 'tag' && github.repository == 'TheTractorHacker/openfamily'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+          V: ${{ steps.ver.outputs.name }}
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          # apk.yml creates the release for the tag; wait for it (up to 60 min)
+          # instead of creating one here, which would race with it.
+          for i in $(seq 1 60); do
+            gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1 && break
+            echo "release $TAG not there yet ($i/60)"; sleep 60
+          done
+          gh release view "$TAG" --repo "$REPO" >/dev/null
+          SHA=$(cut -d' ' -f1 "dist/openfamily-$V-unsigned.ipa.sha256")
+          gh release upload "$TAG" --repo "$REPO" --clobber \
+            "dist/openfamily-$V-unsigned.ipa" "dist/openfamily-$V-unsigned.ipa.sha256"
+          NOTES=$(gh release view "$TAG" --repo "$REPO" --json body -q .body)
+          case "$NOTES" in *"openfamily-$V-unsigned.ipa"*) exit 0;; esac
+          gh release edit "$TAG" --repo "$REPO" --notes "$NOTES
+
+          iOS UNSIGNED build (sideload only, re-sign with AltStore/Sideloadly; see docs/design/IOS_RELEASE.md): \`openfamily-$V-unsigned.ipa\`
+          SHA256: \`$SHA\`"
