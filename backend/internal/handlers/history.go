@@ -193,6 +193,10 @@ func (s *Server) AdminGetMemberHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if s.memberKeepsDataOnPhone(r.Context(), memberID) {
+		writeE2EECode(w, http.StatusForbidden, "keeps_data_on_phone", "this member keeps their data on their phone")
+		return
+	}
 	out, err := s.buildMemberHistory(r.Context(), memberID, targetFamily, from, to)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load history")

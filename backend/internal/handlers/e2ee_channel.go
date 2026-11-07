@@ -51,6 +51,8 @@ const (
 // chunk may be up to the Pad limit (65535 bytes of payload).
 var e2eeMaxBucket = map[string]int{
 	"fix": 1024, "event": 1024, "checkin": 1024, "chat": 4096, "place": 4096, "history": 69632,
+	// phone-computed results (ADR 8.4), retained like history
+	"trip": 1024, "drive": 4096, "week": 1024,
 }
 
 // e2eeWakePurposes are the purposes that trigger a content-free wake-up push.
@@ -300,7 +302,9 @@ func checkE2EEItemLine(it e2eeItemIn, c itemCircle, laneServer, devLanes2 bool) 
 	if c.LegacyMax > 0 && it.Epoch <= c.LegacyMax {
 		return nil, 0, "legacy_epoch_closed"
 	}
-	if c.OptOut == "required_server" && !laneServer {
+	// Check-ins (SOS) and events are exempt: help requests must never be blocked
+	// by a consent or server-key problem.
+	if c.OptOut == "required_server" && !laneServer && it.Purpose != "checkin" && it.Purpose != "event" {
 		// The owner decision of ADR 16.1: the server does not relay phone-lane
 		// items from members of a required_server circle.
 		return nil, 0, "required_server"
@@ -347,7 +351,7 @@ func (s *Server) E2EEPostBatch(w http.ResponseWriter, r *http.Request) {
 	var mode string
 	var ic itemCircle
 	if err := tx.QueryRow(ctx, `SELECT e2ee_mode, e2ee_epoch, server_assist, e2ee_server_gen, server_legacy_epoch_max, member_opt_out
-		FROM circles WHERE id = $1`, m.CircleID).Scan(&mode, &ic.Epoch, &ic.ServerAssist, &ic.ServerGen, &ic.LegacyMax, &ic.OptOut); err != nil {
+		FROM circles WHERE id = $1 FOR UPDATE`, m.CircleID).Scan(&mode, &ic.Epoch, &ic.ServerAssist, &ic.ServerGen, &ic.LegacyMax, &ic.OptOut); err != nil {
 		writeError(w, http.StatusNotFound, "circle not found")
 		return
 	}
@@ -395,7 +399,10 @@ func (s *Server) E2EEPostBatch(w http.ResponseWriter, r *http.Request) {
 	// pinned server key; SQL alone is never trusted for a write decision).
 	laneServer := false
 	if ic.ServerAssist {
-		laneServer = s.verifiedLaneServer(ctx, tx, m.CircleID, uid)
+		// Policy signed by a still-current circle admin with a live key, AND the
+		// author's own verified lane. If the policy does not verify, nothing is relayed
+		// on the server line and no author counts as lane server.
+		laneServer = s.policyVerified(ctx, tx, m.CircleID) && s.verifiedLaneServer(ctx, tx, m.CircleID, uid)
 	}
 	results := make([]e2eeItemResult, 0, len(req.Items))
 	var stored []e2eeItemOut
@@ -424,7 +431,7 @@ func (s *Server) E2EEPostBatch(w http.ResponseWriter, r *http.Request) {
 		case "fix", "event":
 			t := now.Add(e2eeLiveTTL())
 			expires = &t
-		case "history", "checkin", "chat":
+		case "history", "checkin", "chat", "trip", "drive", "week":
 			d := retentionDays
 			if it.Purpose != "history" {
 				d = int(checkinRetention / (24 * time.Hour))

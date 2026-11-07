@@ -57,6 +57,12 @@ DO $$ BEGIN
     ALTER TABLE e2ee_items ADD CONSTRAINT e2ee_items_key_line_chk CHECK (key_line IN ('phone', 'server'));
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 CREATE INDEX IF NOT EXISTS e2ee_items_circle_line ON e2ee_items (circle_id, key_line, id);
+-- Phone-computed result items (ADR 8.4): trip, drive, week.
+ALTER TABLE e2ee_items DROP CONSTRAINT IF EXISTS e2ee_items_purpose_check;
+DO $$ BEGIN
+    ALTER TABLE e2ee_items ADD CONSTRAINT e2ee_items_purpose_check
+        CHECK (purpose IN ('fix', 'event', 'place', 'history', 'checkin', 'chat', 'trip', 'drive', 'week'));
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- The current preference of each member (no row = phone). legacy = converted
 -- from an OFE2EE1-SERVERCONSENT row by the admin upgrade (signature is then the
@@ -74,6 +80,9 @@ CREATE TABLE IF NOT EXISTS e2ee_processing_pref (
     legacy             BOOLEAN NOT NULL DEFAULT FALSE,
     log_seq            BIGINT,
     signed_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    -- Legacy conversions are valid only for a bounded time after the upgrade; the
+    -- member must sign a fresh pref before then. NULL = no expiry (a signed pref).
+    valid_until        TIMESTAMPTZ,
     PRIMARY KEY (circle_id, user_id),
     CHECK (lane = 'phone' OR (sk_gen >= 1 AND server_device_id IS NOT NULL))
 );
@@ -98,6 +107,8 @@ CREATE TABLE IF NOT EXISTS e2ee_processing_statements (
     created_at         TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_e2ee_processing_statements_circle ON e2ee_processing_statements (circle_id, log_seq);
+-- A signed statement can be submitted once: a replayed nonce is refused.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_e2ee_processing_statements_nonce ON e2ee_processing_statements (nonce) WHERE nonce IS NOT NULL;
 
 -- ---------------------------------------------------------------- functions
 
@@ -137,6 +148,7 @@ CREATE OR REPLACE FUNCTION e2ee_pref_lane_server(circ UUID, usr UUID) RETURNS BO
           JOIN e2ee_server_device sd ON sd.device_id = p.server_device_id
           JOIN device_keys sk ON sk.device_id = sd.device_id AND sk.kind = 'server' AND sk.revoked_at IS NULL
          WHERE c.id = circ AND c.e2ee_mode = 'private' AND c.server_assist AND p.lane = 'server'
+           AND (p.valid_until IS NULL OR p.valid_until > now())
            AND p.sk_gen BETWEEN 1 AND c.e2ee_server_gen)
 $$ LANGUAGE sql STABLE;
 
@@ -186,6 +198,43 @@ $$ LANGUAGE sql STABLE;
 CREATE OR REPLACE FUNCTION e2ee_plaintext_blocked(circ UUID) RETURNS BOOLEAN AS $$
     SELECT EXISTS (SELECT 1 FROM circles WHERE id = circ AND e2ee_mode = 'private') AND NOT e2ee_server_member_legacy(circ)
 $$ LANGUAGE sql STABLE;
+
+-- The member keeps their data on their phone: they sit in at least one live
+-- Private circle and the server may read them through none of their circles.
+CREATE OR REPLACE FUNCTION e2ee_keeps_data_on_phone(usr UUID) RETURNS BOOLEAN AS $$
+    SELECT EXISTS (SELECT 1 FROM live_circle_members km JOIN circles kc ON kc.id = km.circle_id
+                    WHERE km.user_id = usr AND kc.e2ee_mode = 'private')
+       AND NOT EXISTS (SELECT 1 FROM live_circle_members km WHERE km.user_id = usr AND e2ee_member_plaintext_ok(km.circle_id, km.user_id))
+$$ LANGUAGE sql STABLE;
+
+-- Removes the server's plaintext copies of one member that came from one circle:
+-- the tagged locations, a last-known position that IS one of those points, and
+-- the member's own server-line location trail (fix, history). Shared channel
+-- items (place, chat, checkin, event) are never touched: other members need them.
+CREATE OR REPLACE FUNCTION e2ee_purge_user_server_copies(circ UUID, usr UUID) RETURNS VOID AS $$
+DECLARE
+    tss TIMESTAMPTZ[];
+BEGIN
+    WITH del AS (
+        DELETE FROM locations l USING devices d
+         WHERE d.id = l.device_id AND d.user_id = usr AND l.e2ee_circle_id = circ
+        RETURNING l.ts)
+    SELECT array_agg(ts) INTO tss FROM del;
+    IF tss IS NOT NULL THEN
+        UPDATE member_positions mp SET lat = n.lat, lon = n.lon, ts = n.ts, device_id = n.device_id,
+               accuracy_meters = n.acc, speed_mps = n.spd, battery_pct = n.bat, heading_deg = NULL, motion_state = NULL
+          FROM (SELECT ST_Y(l.geom) AS lat, ST_X(l.geom) AS lon, l.ts, l.device_id, l.accuracy_meters AS acc,
+                       l.speed_mps AS spd, l.battery_pct AS bat
+                  FROM locations l JOIN devices d ON d.id = l.device_id
+                 WHERE d.user_id = usr ORDER BY l.ts DESC LIMIT 1) n
+         WHERE mp.user_id = usr AND mp.ts = ANY (tss);
+        -- no other location remains: a last position that was one of the purged points goes
+        DELETE FROM member_positions WHERE user_id = usr AND ts = ANY (tss);
+    END IF;
+    DELETE FROM e2ee_items i USING device_keys k
+     WHERE i.circle_id = circ AND i.key_line = 'server' AND i.purpose IN ('fix', 'history', 'trip', 'drive', 'week')
+       AND k.device_id = i.device_id AND k.user_id = usr;
+END $$ LANGUAGE plpgsql;
 
 -- ------------------------------------------------------------------ triggers
 
@@ -245,7 +294,7 @@ BEGIN
         IF c.server_legacy_epoch_max > 0 AND NEW.epoch <= c.server_legacy_epoch_max THEN
             RAISE EXCEPTION 'e2ee_legacy_epoch_closed: this key epoch is closed' USING ERRCODE = 'check_violation';
         END IF;
-        IF c.member_opt_out = 'required_server' AND NOT e2ee_pref_lane_server(NEW.circle_id, u) THEN
+        IF c.member_opt_out = 'required_server' AND NEW.purpose NOT IN ('checkin', 'event') AND NOT e2ee_pref_lane_server(NEW.circle_id, u) THEN
             RAISE EXCEPTION 'e2ee_required_server: this circle requires the server lane' USING ERRCODE = 'check_violation';
         END IF;
     END IF;
@@ -259,6 +308,11 @@ CREATE TRIGGER trg_e2ee_item_guard BEFORE INSERT ON e2ee_items
 -- server key's SK wraps are revoked.
 CREATE OR REPLACE FUNCTION e2ee_pref_server_lane_changed() RETURNS trigger AS $$
 BEGIN
+    -- Leaving the server lane (or the pref disappearing) removes the server's copies
+    -- of this member in the same transaction.
+    IF OLD.lane = 'server' AND (TG_OP = 'DELETE' OR NEW.lane <> 'server') THEN
+        PERFORM e2ee_purge_user_server_copies(OLD.circle_id, OLD.user_id);
+    END IF;
     IF NOT EXISTS (SELECT 1 FROM e2ee_processing_pref p WHERE p.circle_id = OLD.circle_id AND p.lane = 'server') THEN
         DELETE FROM circle_key_wraps w USING device_keys d
          WHERE w.circle_id = OLD.circle_id AND w.key_line = 'server' AND d.device_id = w.recipient_device_id AND d.kind = 'server';
@@ -303,11 +357,32 @@ CREATE TRIGGER trg_e2ee_processing_mode_changed BEFORE UPDATE OF e2ee_mode ON ci
 CREATE OR REPLACE FUNCTION e2ee_processing_pref_member_removed() RETURNS trigger AS $$
 BEGIN
     DELETE FROM e2ee_processing_pref WHERE circle_id = OLD.circle_id AND user_id = OLD.user_id;
+    PERFORM e2ee_purge_user_server_copies(OLD.circle_id, OLD.user_id);
     RETURN OLD;
 END $$ LANGUAGE plpgsql;
 DROP TRIGGER IF EXISTS trg_e2ee_processing_pref_member_removed ON circle_members;
 CREATE TRIGGER trg_e2ee_processing_pref_member_removed AFTER DELETE ON circle_members
     FOR EACH ROW EXECUTE FUNCTION e2ee_processing_pref_member_removed();
+
+-- A revoked phone key can no longer stand behind a pref: the prefs it signed go
+-- (their owners fall back to phone) and the server's copies with them. A legacy
+-- consent signed by it is dropped and its owner's copies are removed too.
+CREATE OR REPLACE FUNCTION e2ee_processing_key_revoked() RETURNS trigger AS $$
+DECLARE
+    r RECORD;
+BEGIN
+    IF OLD.revoked_at IS NULL AND NEW.revoked_at IS NOT NULL THEN
+        DELETE FROM e2ee_processing_pref WHERE approver_device_id = NEW.device_id;
+        FOR r IN SELECT circle_id, user_id FROM e2ee_server_consents WHERE approver_device_id = NEW.device_id LOOP
+            DELETE FROM e2ee_server_consents WHERE circle_id = r.circle_id AND user_id = r.user_id;
+            PERFORM e2ee_purge_user_server_copies(r.circle_id, r.user_id);
+        END LOOP;
+    END IF;
+    RETURN NEW;
+END $$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS trg_e2ee_processing_key_revoked ON device_keys;
+CREATE TRIGGER trg_e2ee_processing_key_revoked AFTER UPDATE OF revoked_at ON device_keys
+    FOR EACH ROW EXECUTE FUNCTION e2ee_processing_key_revoked();
 
 -- Member removal / key revocation request a new generation of BOTH lines.
 CREATE OR REPLACE FUNCTION e2ee_member_removed() RETURNS trigger AS $$

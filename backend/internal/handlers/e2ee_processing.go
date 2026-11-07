@@ -15,6 +15,7 @@ package handlers
 
 import (
 	"bytes"
+	"errors"
 	"context"
 	"encoding/base64"
 	"net/http"
@@ -69,40 +70,64 @@ type rowQuerier interface {
 
 // ------------------------------------------------------------ verification
 
-// prefRow is one stored processing_pref joined with its approver's key.
-type prefRow struct {
-	Lane          string
-	SKGen         int
-	ServerDevice  string
-	ServerFP      []byte
-	Nonce         []byte
-	Sig           []byte
-	Legacy        bool
-	LogSeq        *int64
-	ApproverPub   []byte
-	CircleSKGen   int
-	CircleAssist  bool
-	CircleLegacyK bool
+type querier interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 }
 
-func loadPrefRow(ctx context.Context, q rowQuerier, circleID, userID string) (prefRow, bool) {
-	var p prefRow
-	var srv *string
-	err := q.QueryRow(ctx, `
-		SELECT p.lane, p.sk_gen, p.server_device_id::text, p.server_fingerprint, p.nonce, p.signature, p.legacy, p.log_seq,
-		       ak.ed25519_pub, c.e2ee_server_gen, c.server_assist
+// legacyPrefTTL bounds a pref converted from a legacy consent: the member must
+// sign a fresh pref within this time after the upgrade or the lane reverts to phone.
+const legacyPrefTTL = 30 * 24 * time.Hour
+
+// prefRow is one stored processing_pref joined with its (active) approver key.
+type prefRow struct {
+	UserID       string
+	Lane         string
+	SKGen        int
+	ServerDevice string
+	ServerFP     []byte
+	Nonce        []byte
+	Sig          []byte
+	Legacy       bool
+	LogSeq       *int64
+	ApproverID   string
+	ApproverPub  []byte
+	SignedAt     time.Time
+	SQLServerOK  bool // e2ee_pref_lane_server (SQL view, not trusted for writes)
+	CircleSKGen  int
+	CircleAssist bool
+}
+
+// loadPrefs loads the prefs of one user (userID != "") or of the whole circle
+// in ONE query. Prefs whose approver key is revoked or not a phone key, and
+// expired legacy conversions, are not returned.
+func loadPrefs(ctx context.Context, q querier, circleID, userID string) (map[string]prefRow, error) {
+	rows, err := q.Query(ctx, `
+		SELECT p.user_id::text, p.lane, p.sk_gen, p.server_device_id::text, p.server_fingerprint, p.nonce, p.signature, p.legacy, p.log_seq,
+		       p.approver_device_id::text, ak.ed25519_pub, p.signed_at, e2ee_pref_lane_server(p.circle_id, p.user_id),
+		       c.e2ee_server_gen, c.server_assist
 		FROM e2ee_processing_pref p
 		JOIN circles c ON c.id = p.circle_id
 		JOIN device_keys ak ON ak.device_id = p.approver_device_id AND ak.user_id = p.user_id AND ak.kind = 'device' AND ak.revoked_at IS NULL
-		WHERE p.circle_id = $1 AND p.user_id = $2`, circleID, userID).
-		Scan(&p.Lane, &p.SKGen, &srv, &p.ServerFP, &p.Nonce, &p.Sig, &p.Legacy, &p.LogSeq, &p.ApproverPub, &p.CircleSKGen, &p.CircleAssist)
+		WHERE p.circle_id = $1 AND ($2 = '' OR p.user_id::text = $2) AND (p.valid_until IS NULL OR p.valid_until > now())`, circleID, userID)
 	if err != nil {
-		return p, false
+		return nil, err
 	}
-	if srv != nil {
-		p.ServerDevice = *srv
+	defer rows.Close()
+	out := map[string]prefRow{}
+	for rows.Next() {
+		var p prefRow
+		var srv *string
+		if err := rows.Scan(&p.UserID, &p.Lane, &p.SKGen, &srv, &p.ServerFP, &p.Nonce, &p.Sig, &p.Legacy, &p.LogSeq,
+			&p.ApproverID, &p.ApproverPub, &p.SignedAt, &p.SQLServerOK, &p.CircleSKGen, &p.CircleAssist); err != nil {
+			return nil, err
+		}
+		if srv != nil {
+			p.ServerDevice = *srv
+		}
+		out[p.UserID] = p
 	}
-	return p, true
+	return out, rows.Err()
 }
 
 // verifyServerPref is true only if the stored pref is a valid lane-server
@@ -123,49 +148,91 @@ func verifyServerPref(p prefRow, circleID, userID string, dev *serverDeviceInfo)
 	return e2ee.VerifyProcessingPref(p.ApproverPub, circleID, userID, e2ee.LineServer, uint32(p.SKGen), dev.DeviceID, dev.fp, p.Nonce, p.Sig) == nil
 }
 
+type logRef struct {
+	seq int64
+	ref []byte
+}
+
+// latestPrefLog returns each member's newest processing_pref entry of the key log (one query).
+func latestPrefLog(ctx context.Context, q querier, circleID, userID string) (map[string]logRef, error) {
+	rows, err := q.Query(ctx, `SELECT DISTINCT ON (user_id) user_id::text, seq, ref FROM e2ee_log
+		WHERE circle_id = $1 AND action = $2 AND ($3 = '' OR user_id::text = $3) ORDER BY user_id, seq DESC`,
+		circleID, int(e2ee.ActProcessingPref), userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]logRef{}
+	for rows.Next() {
+		var u string
+		var l logRef
+		if err := rows.Scan(&u, &l.seq, &l.ref); err != nil {
+			return nil, err
+		}
+		out[u] = l
+	}
+	return out, rows.Err()
+}
+
 // prefLogMatches checks that the pref is the member's LATEST pref in the key
 // log (a replayed old statement, or a row planted in the database, is not).
-// Legacy conversions have no log entry and are covered by their consent signature.
-func prefLogMatches(ctx context.Context, q rowQuerier, p prefRow, circleID, userID string, dev *serverDeviceInfo) bool {
+// Legacy conversions have no log entry; they are covered by their consent
+// signature and their expiry.
+func prefLogMatches(p prefRow, l logRef, haveLog bool, circleID, userID string, dev *serverDeviceInfo) bool {
 	if p.Legacy {
 		return true
 	}
-	if p.LogSeq == nil || dev == nil {
-		return false
-	}
-	var seq int64
-	var ref []byte
-	if q.QueryRow(ctx, `SELECT seq, ref FROM e2ee_log WHERE circle_id = $1 AND user_id = $2 AND action = $3
-		ORDER BY seq DESC LIMIT 1`, circleID, userID, int(e2ee.ActProcessingPref)).Scan(&seq, &ref) != nil || seq != *p.LogSeq {
+	if p.LogSeq == nil || dev == nil || !haveLog || l.seq != *p.LogSeq {
 		return false
 	}
 	msg, err := e2ee.ProcessingPrefMessage(circleID, userID, e2ee.LineServer, uint32(p.SKGen), dev.DeviceID, dev.fp, p.Nonce)
-	return err == nil && bytes.Equal(ref, e2ee.ProcessingRef(msg))
+	return err == nil && bytes.Equal(l.ref, e2ee.ProcessingRef(msg))
 }
 
-// verifiedLaneServer answers whether userID's lane in the circle is VERIFIED
-// server. Every write decision about server-readable data goes through it (or
-// through the legacy consent check): SQL alone is never trusted.
-func (s *Server) verifiedLaneServer(ctx context.Context, q rowQuerier, circleID, userID string) bool {
-	if e2ee.CheckID(circleID) != nil || e2ee.CheckID(userID) != nil {
-		return false
+// verifiedLaneSet returns the members (all, or just userID) whose lane is
+// VERIFIED server. Every write decision about server-readable data goes through
+// it (or the legacy consent check): SQL alone is never trusted. It costs a
+// constant number of queries however many members the circle has.
+func verifiedLaneSet(ctx context.Context, q querier, circleID, userID string, dev *serverDeviceInfo) (map[string]bool, error) {
+	out := map[string]bool{}
+	if dev == nil || e2ee.CheckID(circleID) != nil {
+		return out, nil
 	}
-	var ok bool
-	if q.QueryRow(ctx, `SELECT e2ee_pref_lane_server($1::uuid, $2::uuid)`, circleID, userID).Scan(&ok) != nil || !ok {
+	prefs, err := loadPrefs(ctx, q, circleID, userID)
+	if err != nil || len(prefs) == 0 {
+		return out, err
+	}
+	logs, err := latestPrefLog(ctx, q, circleID, userID)
+	if err != nil {
+		return out, err
+	}
+	for u, p := range prefs {
+		l, have := logs[u]
+		if p.Lane == "server" && p.SQLServerOK && verifyServerPref(p, circleID, u, dev) && prefLogMatches(p, l, have, circleID, u, dev) {
+			out[u] = true
+		}
+	}
+	return out, nil
+}
+
+// verifiedLaneServer answers whether userID's lane in the circle is VERIFIED server.
+func (s *Server) verifiedLaneServer(ctx context.Context, q querier, circleID, userID string) bool {
+	if e2ee.CheckID(userID) != nil {
 		return false
 	}
 	dev, err := pinnedServerDeviceQ(ctx, q)
 	if err != nil || dev == nil {
 		return false
 	}
-	p, found := loadPrefRow(ctx, q, circleID, userID)
-	return found && verifyServerPref(p, circleID, userID, dev) && prefLogMatches(ctx, q, p, circleID, userID, dev)
+	set, err := verifiedLaneSet(ctx, q, circleID, userID, dev)
+	return err == nil && set[userID]
 }
 
 // policyVerified re-verifies the latest signed processing_policy against the
-// circle's mirrored columns, so flipping the columns alone (a planted row) does
-// not switch assistance on for ingest.
-func (s *Server) policyVerified(ctx context.Context, q rowQuerier, circleID string) bool {
+// circle's mirrored columns (a planted flip of the columns alone does not
+// count), requires that the signer is STILL a circle admin and that the signing
+// key is not revoked.
+func (s *Server) policyVerified(ctx context.Context, q querier, circleID string) bool {
 	var assist bool
 	var gen int
 	var def, optOut string
@@ -188,7 +255,9 @@ func (s *Server) policyVerified(ctx context.Context, q rowQuerier, circleID stri
 		return false
 	}
 	var pub []byte
-	if q.QueryRow(ctx, `SELECT ed25519_pub FROM device_keys WHERE device_id = $1 AND user_id = $2 AND kind = 'device'`, actor, uid).Scan(&pub) != nil {
+	if q.QueryRow(ctx, `SELECT k.ed25519_pub FROM device_keys k
+		JOIN circle_members m ON m.user_id = k.user_id AND m.circle_id = $3 AND m.role = 'admin'
+		WHERE k.device_id = $1 AND k.user_id = $2 AND k.kind = 'device' AND k.revoked_at IS NULL`, actor, uid, circleID).Scan(&pub) != nil {
 		return false
 	}
 	dl, e1 := e2ee.ParseLine(def)
@@ -201,18 +270,20 @@ func (s *Server) policyVerified(ctx context.Context, q rowQuerier, circleID stri
 
 // ingestLanes returns the users the server may ingest for the circle, or an
 // empty set. Legacy circle: every member (all consented, re-verified). Lanes
-// circle: only members whose own signed lane is server (re-verified).
-func (s *Server) ingestLanes(ctx context.Context, circleID string, dev *serverDeviceInfo) (map[string]bool, error) {
+// circle: only members whose own signed lane is server (re-verified). Call it
+// inside the transaction that writes, with the circle row locked, so a lane
+// withdrawal committed meanwhile is seen.
+func (s *Server) ingestLanes(ctx context.Context, q querier, circleID string, dev *serverDeviceInfo) (map[string]bool, error) {
 	out := map[string]bool{}
 	if dev == nil || e2ee.CheckID(circleID) != nil {
 		return out, nil
 	}
 	var legacy, assist bool
-	if err := s.Pool.QueryRow(ctx, `SELECT server_legacy_ck, server_assist FROM circles WHERE id = $1`, circleID).Scan(&legacy, &assist); err != nil {
+	if err := q.QueryRow(ctx, `SELECT server_legacy_ck, server_assist FROM circles WHERE id = $1`, circleID).Scan(&legacy, &assist); err != nil {
 		return out, err
 	}
 	if legacy && !assist {
-		st, err := s.verifyServerConsents(ctx, circleID, dev)
+		st, err := s.verifyServerConsents(ctx, q, circleID, dev)
 		if err != nil || !st.ServerMember {
 			return out, err
 		}
@@ -225,30 +296,13 @@ func (s *Server) ingestLanes(ctx context.Context, circleID string, dev *serverDe
 		return out, nil
 	}
 	var ok bool
-	if err := s.Pool.QueryRow(ctx, `SELECT e2ee_server_assist($1::uuid)`, circleID).Scan(&ok); err != nil || !ok {
+	if err := q.QueryRow(ctx, `SELECT e2ee_server_assist($1::uuid)`, circleID).Scan(&ok); err != nil || !ok {
 		return out, err
 	}
-	if !s.policyVerified(ctx, s.Pool, circleID) {
+	if !s.policyVerified(ctx, q, circleID) {
 		return out, nil
 	}
-	rows, err := s.Pool.Query(ctx, `SELECT user_id::text FROM e2ee_processing_pref WHERE circle_id = $1 AND lane = 'server'`, circleID)
-	if err != nil {
-		return out, err
-	}
-	var cand []string
-	for rows.Next() {
-		var u string
-		if rows.Scan(&u) == nil {
-			cand = append(cand, u)
-		}
-	}
-	rows.Close()
-	for _, u := range cand {
-		if s.verifiedLaneServer(ctx, s.Pool, circleID, u) {
-			out[u] = true
-		}
-	}
-	return out, nil
+	return verifiedLaneSet(ctx, q, circleID, "", dev)
 }
 
 // membersLackingLanes2 lists live members with no active phone key that
@@ -306,14 +360,20 @@ func (s *Server) E2EEPutDeviceCaps(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "device key not found")
 		return
 	}
-	caps := cleanCaps(req.Caps)
-	tag, err := s.Pool.Exec(r.Context(), `UPDATE device_keys SET caps = $3 WHERE device_id = $1 AND user_id = $2 AND revoked_at IS NULL`, id, uid, caps)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to save")
+	// Monotonic: a capability can be added, never removed (a stolen session cannot
+	// downgrade readiness; an app that really lost the capability re-registers its
+	// key). An empty list changes nothing. Residual: a session thief can still ADD
+	// lanes2 to an old app, which only makes that user's own app the weak link.
+	var caps []string
+	err := s.Pool.QueryRow(r.Context(), `UPDATE device_keys SET caps =
+		(SELECT COALESCE(array_agg(DISTINCT c ORDER BY c), '{}') FROM unnest(caps || $3::text[]) c)
+		WHERE device_id = $1 AND user_id = $2 AND revoked_at IS NULL RETURNING caps`, id, uid, cleanCaps(req.Caps)).Scan(&caps)
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "device key not found")
 		return
 	}
-	if tag.RowsAffected() == 0 {
-		writeError(w, http.StatusNotFound, "device key not found")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to save")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "caps": caps})
@@ -403,6 +463,31 @@ func (s *Server) E2EEProcessingState(w http.ResponseWriter, r *http.Request) {
 		ps.Commitment, ps.Nonce, ps.Signature = base64.StdEncoding.EncodeToString(pcommit), base64.StdEncoding.EncodeToString(pnonce), base64.StdEncoding.EncodeToString(psig)
 		policy["statement"] = ps
 	}
+	// Earlier policy statements (oldest first, bounded) so phones can verify and open SK
+	// wraps of older generations.
+	history := []policyStatementOut{}
+	if hr, err := s.Pool.Query(ctx, `SELECT * FROM (SELECT log_seq, user_id::text, actor_device_id::text, lane, default_for_new, member_opt_out, sk_gen, commitment, nonce, signature
+		FROM e2ee_processing_statements WHERE circle_id = $1 AND kind = 'policy' ORDER BY log_seq DESC LIMIT $2) x ORDER BY log_seq`, m.CircleID, maxStatementsOut); err == nil {
+		for hr.Next() {
+			var h policyStatementOut
+			var lane string
+			var dflt, quot *string
+			var hc, hn, hs []byte
+			if hr.Scan(&h.LogSeq, &h.AdminUserID, &h.ActorDeviceID, &lane, &dflt, &quot, &h.SKGen, &hc, &hn, &hs) == nil {
+				h.ServerAssist = lane == "server"
+				if dflt != nil {
+					h.DefaultForNew = *dflt
+				}
+				if quot != nil {
+					h.MemberOptOut = *quot
+				}
+				h.Commitment, h.Nonce, h.Signature = base64.StdEncoding.EncodeToString(hc), base64.StdEncoding.EncodeToString(hn), base64.StdEncoding.EncodeToString(hs)
+				history = append(history, h)
+			}
+		}
+		hr.Close()
+	}
+	policy["history"] = history
 	rows, err := s.Pool.Query(ctx, `
 		SELECT cm.user_id::text, u.name, cm.role,
 		       EXISTS (SELECT 1 FROM device_keys d WHERE d.user_id = cm.user_id AND d.kind = 'device' AND d.revoked_at IS NULL AND 'lanes2' = ANY(d.caps))
@@ -424,41 +509,47 @@ func (s *Server) E2EEProcessingState(w http.ResponseWriter, r *http.Request) {
 	}
 	rows.Close()
 	serverCount, notReady := 0, []string{}
+	// Constant number of queries however many members: prefs, newest log refs, verification.
+	var verified map[string]bool
+	var prefs map[string]prefRow
+	var legacyConsented map[string]bool
+	if legacy {
+		legacyConsented = map[string]bool{}
+		if dev != nil {
+			if st, err := s.verifyServerConsents(ctx, s.Pool, m.CircleID, dev); err == nil && st.ServerMember {
+				for _, c := range st.Consented {
+					legacyConsented[c] = true
+				}
+			}
+		}
+	} else if prefs, err = loadPrefs(ctx, s.Pool, m.CircleID, ""); err == nil {
+		verified, err = verifiedLaneSet(ctx, s.Pool, m.CircleID, "", dev)
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load preferences")
+		return
+	}
 	for _, mo := range members {
 		if !mo.Lanes2 {
 			notReady = append(notReady, mo.UserID)
 		}
-		p, found := loadPrefRow(ctx, s.Pool, m.CircleID, mo.UserID)
-		var rawPref prefStatementOut
-		var signedAt time.Time
-		var approver string
-		if s.Pool.QueryRow(ctx, `SELECT approver_device_id::text, signed_at FROM e2ee_processing_pref WHERE circle_id = $1 AND user_id = $2`, m.CircleID, mo.UserID).Scan(&approver, &signedAt) == nil {
-			rawPref = prefStatementOut{Lane: p.Lane, SKGen: p.SKGen, ServerDeviceID: p.ServerDevice, ApproverDeviceID: approver,
+		if p, found := prefs[mo.UserID]; found {
+			st := prefStatementOut{Lane: p.Lane, SKGen: p.SKGen, ServerDeviceID: p.ServerDevice, ApproverDeviceID: p.ApproverID,
 				Signature: base64.StdEncoding.EncodeToString(p.Sig), Legacy: p.Legacy, LogSeq: p.LogSeq}
 			if len(p.ServerFP) == 32 {
-				rawPref.ServerFingerprint = base64.StdEncoding.EncodeToString(p.ServerFP)
+				st.ServerFingerprint = base64.StdEncoding.EncodeToString(p.ServerFP)
 			}
 			if len(p.Nonce) == 16 {
-				rawPref.Nonce = base64.StdEncoding.EncodeToString(p.Nonce)
+				st.Nonce = base64.StdEncoding.EncodeToString(p.Nonce)
 			}
-			mo.Pref = &rawPref
-			mo.Since = &signedAt
+			since := p.SignedAt
+			mo.Pref, mo.Since = &st, &since
 		}
-		if legacy {
-			// Legacy circle: the lane is server only while the whole circle is a
-			// verified server-member circle.
-			if dev != nil {
-				if st, err := s.verifyServerConsents(ctx, m.CircleID, dev); err == nil && st.ServerMember {
-					for _, c := range st.Consented {
-						if c == mo.UserID {
-							mo.Lane = "server"
-						}
-					}
-				}
-			}
-		} else if found && s.verifiedLaneServer(ctx, s.Pool, m.CircleID, mo.UserID) {
+		if legacy && legacyConsented[mo.UserID] {
 			mo.Lane = "server"
-			mo.SKGenOK = p.SKGen >= 1 && p.SKGen <= gen
+		} else if verified[mo.UserID] {
+			mo.Lane = "server"
+			mo.SKGenOK = true
 		}
 		mo.Processed = mo.Lane
 		if mo.Lane == "server" {
@@ -542,6 +633,10 @@ func (s *Server) applyPolicy(w http.ResponseWriter, r *http.Request, tx pgx.Tx, 
 		req.ActorDeviceID, uid).Scan(&pub, &kind) != nil || kind != "device" {
 		writeError(w, http.StatusBadRequest, "actor_device_id must be one of your active phone keys")
 		return false
+	}
+	var nonceSeen bool
+	if tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM e2ee_processing_statements WHERE nonce = $1)`, nonce).Scan(&nonceSeen) != nil || nonceSeen {
+		return s.policyErr(w, http.StatusConflict, "nonce_reused", "this statement was already submitted")
 	}
 	msg, err := e2ee.ProcessingPolicyMessage(circleID, uid, req.ServerAssist, defLine, optOut, uint32(req.SKGen), commit, nonce)
 	if err != nil {
@@ -777,6 +872,12 @@ func (s *Server) E2EEPutProcessingPref(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "preference signature does not verify")
 		return
 	}
+	// Replay protection: a signed statement (identified by its nonce) is accepted once.
+	var seen bool
+	if tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM e2ee_processing_statements WHERE nonce = $1)`, nonce).Scan(&seen) != nil || seen {
+		s.policyErr(w, http.StatusConflict, "nonce_reused", "this statement was already submitted")
+		return
+	}
 	subject := ""
 	var serverDev any
 	var serverFP any
@@ -821,13 +922,20 @@ func (s *Server) E2EEPutProcessingPref(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to log preference")
 		return
 	}
+	// The new log entry must be newer than the member's current pref (true by
+	// construction, since entries are append-only; checked anyway).
+	var curSeq *int64
+	if e := tx.QueryRow(ctx, `SELECT log_seq FROM e2ee_processing_pref WHERE circle_id = $1 AND user_id = $2`, m.CircleID, uid).Scan(&curSeq); e == nil && curSeq != nil && seq <= *curSeq {
+		s.policyErr(w, http.StatusConflict, "stale_statement", "the log entry is not newer than the current preference")
+		return
+	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO e2ee_processing_pref (circle_id, user_id, lane, sk_gen, server_device_id, server_fingerprint, nonce, approver_device_id, signature, legacy, log_seq, signed_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,FALSE,$10, now())
 		ON CONFLICT (circle_id, user_id) DO UPDATE SET lane = EXCLUDED.lane, sk_gen = EXCLUDED.sk_gen,
 		  server_device_id = EXCLUDED.server_device_id, server_fingerprint = EXCLUDED.server_fingerprint, nonce = EXCLUDED.nonce,
 		  approver_device_id = EXCLUDED.approver_device_id, signature = EXCLUDED.signature, legacy = FALSE,
-		  log_seq = EXCLUDED.log_seq, signed_at = now()`,
+		  log_seq = EXCLUDED.log_seq, signed_at = now(), valid_until = NULL`,
 		m.CircleID, uid, lane.String(), req.SKGen, serverDev, serverFP, nonce, req.ApproverDeviceID, sig, seq); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to store preference")
 		return
@@ -836,6 +944,10 @@ func (s *Server) E2EEPutProcessingPref(w http.ResponseWriter, r *http.Request) {
 		(log_seq, circle_id, user_id, kind, lane, sk_gen, server_device_id, server_fingerprint, nonce, actor_device_id, signature)
 		VALUES ($1,$2,$3,'pref',$4,$5,$6,$7,$8,$9,$10)`,
 		seq, m.CircleID, uid, lane.String(), req.SKGen, serverDev, serverFP, nonce, req.ApproverDeviceID, sig); err != nil {
+		if isUniqueViolation(err) {
+			s.policyErr(w, http.StatusConflict, "nonce_reused", "this statement was already submitted")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "failed to store preference")
 		return
 	}
@@ -925,6 +1037,15 @@ func (s *Server) E2EEUpgradeProcessing(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusConflict, map[string]any{"error": "some members' apps do not support this yet", "code": "members_not_ready", "not_ready": lacking})
 		return
 	}
+	// Were the old every-member rule satisfied (all consented, key current)? Only then
+	// do the consents carry over; otherwise every member starts phone-lane and must
+	// sign a fresh pref (a consent given to "the circle" is not consent for one
+	// member's data when somebody else's was missing).
+	var allConsented bool
+	if err := tx.QueryRow(ctx, `SELECT e2ee_server_member_legacy($1::uuid)`, m.CircleID).Scan(&allConsented); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to upgrade")
+		return
+	}
 	// (1) from here on the server can never be wrapped the phone key.
 	if _, err := tx.Exec(ctx, `UPDATE circles SET server_legacy_ck = FALSE WHERE id = $1`, m.CircleID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to upgrade")
@@ -953,9 +1074,11 @@ func (s *Server) E2EEUpgradeProcessing(w http.ResponseWriter, r *http.Request) {
 	crow, err := tx.Query(ctx, `
 		SELECT sc.user_id::text, sc.approver_device_id::text, sc.signature, ak.ed25519_pub
 		FROM e2ee_server_consents sc
+		-- carry over only if the old every-member rule held when the upgrade ran
+		JOIN (SELECT $3::boolean AS ok) gate ON gate.ok
 		JOIN live_circle_members m ON m.circle_id = sc.circle_id AND m.user_id = sc.user_id
 		JOIN device_keys ak ON ak.device_id = sc.approver_device_id AND ak.user_id = sc.user_id AND ak.kind = 'device' AND ak.revoked_at IS NULL
-		WHERE sc.circle_id = $1 AND sc.server_device_id = $2`, m.CircleID, dev.DeviceID)
+		WHERE sc.circle_id = $1 AND sc.server_device_id = $2`, m.CircleID, dev.DeviceID, allConsented)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to upgrade")
 		return
@@ -979,12 +1102,12 @@ func (s *Server) E2EEUpgradeProcessing(w http.ResponseWriter, r *http.Request) {
 	crow.Close()
 	for _, c := range convs {
 		if _, err := tx.Exec(ctx, `INSERT INTO e2ee_processing_pref
-			(circle_id, user_id, lane, sk_gen, server_device_id, server_fingerprint, approver_device_id, signature, legacy)
-			VALUES ($1,$2,'server',1,$3,$4,$5,$6,TRUE)
+			(circle_id, user_id, lane, sk_gen, server_device_id, server_fingerprint, approver_device_id, signature, legacy, valid_until)
+			VALUES ($1,$2,'server',1,$3,$4,$5,$6,TRUE, now() + $7::interval)
 			ON CONFLICT (circle_id, user_id) DO UPDATE SET lane = 'server', sk_gen = 1, server_device_id = EXCLUDED.server_device_id,
 			  server_fingerprint = EXCLUDED.server_fingerprint, nonce = NULL, approver_device_id = EXCLUDED.approver_device_id,
-			  signature = EXCLUDED.signature, legacy = TRUE, log_seq = NULL, signed_at = now()`,
-			m.CircleID, c.user, dev.DeviceID, dev.fp, c.approver, c.sig); err != nil {
+			  signature = EXCLUDED.signature, legacy = TRUE, log_seq = NULL, signed_at = now(), valid_until = EXCLUDED.valid_until`,
+			m.CircleID, c.user, dev.DeviceID, dev.fp, c.approver, c.sig, itoa(int(legacyPrefTTL.Hours()))+" hours"); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to upgrade")
 			return
 		}
@@ -1011,3 +1134,56 @@ func (s *Server) E2EEUpgradeProcessing(w http.ResponseWriter, r *http.Request) {
 }
 
 // ------------------------------------------------------------------- helpers
+
+// E2EEFinishLegacyAccess is DELETE /circles/{id}/e2ee/legacy-server-access: after
+// the upgrade the server still holds the phone key of the epochs up to N (it read
+// that history before). When the admin has had the server ingest what it needs,
+// this removes the server's wraps of those epochs, so the server can no longer
+// open ANY phone-key data. Admin only; irreversible (a phone cannot re-wrap CK to
+// the server any more).
+func (s *Server) E2EEFinishLegacyAccess(w http.ResponseWriter, r *http.Request) {
+	uid, m, ok := s.requireCircleAdmin(w, r)
+	if !ok {
+		return
+	}
+	if !s.allowKey(w, "e2eeupgrade:user:"+uid, upgradeOpsHour, time.Hour) {
+		return
+	}
+	ctx := r.Context()
+	tx, mode, _, ok := s.e2eeCircleTx(w, r, m.CircleID)
+	if !ok {
+		return
+	}
+	defer tx.Rollback(ctx)
+	var legacy bool
+	var maxN int
+	if err := tx.QueryRow(ctx, `SELECT server_legacy_ck, server_legacy_epoch_max FROM circles WHERE id = $1`, m.CircleID).Scan(&legacy, &maxN); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load circle")
+		return
+	}
+	if mode != "private" || legacy || maxN < 1 {
+		writeE2EECode(w, http.StatusConflict, "not_upgraded", "only an upgraded circle holds old phone-key wraps for the server")
+		return
+	}
+	tag, err := tx.Exec(ctx, `DELETE FROM circle_key_wraps w USING device_keys d
+		WHERE w.circle_id = $1 AND w.key_line = 'phone' AND d.device_id = w.recipient_device_id AND d.kind = 'server'`, m.CircleID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to remove wraps")
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to commit")
+		return
+	}
+	s.auditCircle(ctx, uid, m.CircleID, "e2ee.legacy_server_access_ended", itoa(int(tag.RowsAffected()))+" old phone-key wrap(s) of the server key removed", clientIP(r))
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "wraps_removed": tag.RowsAffected()})
+}
+
+// memberKeepsDataOnPhone fails closed: an error counts as "keeps data on phone".
+func (s *Server) memberKeepsDataOnPhone(ctx context.Context, userID string) bool {
+	var keeps bool
+	if err := s.Pool.QueryRow(ctx, `SELECT e2ee_keeps_data_on_phone($1::uuid)`, userID).Scan(&keeps); err != nil {
+		return true
+	}
+	return keeps
+}

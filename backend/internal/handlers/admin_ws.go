@@ -23,6 +23,7 @@ type adminWsMember struct {
 	wsMember
 	FamilyID   *string `json:"family_id,omitempty"`
 	FamilyName *string `json:"family_name,omitempty"`
+	KeepsDataOnPhone bool `json:"keeps_data_on_phone"`
 }
 
 // AdminStream serves the platform-admin live WebSocket stream at /api/admin/ws.
@@ -198,7 +199,7 @@ func (s *Server) adminMembersSnapshot(ctx context.Context) ([]adminWsMember, err
 		       u.avatar_data IS NOT NULL, u.avatar_version, u.avatar_updated_at,
 		       mp.lat, mp.lon, mp.ts, mp.battery_pct, mp.speed_mps, mp.motion_state, mp.accuracy_meters,
 		       d.last_seen,
-		       u.family_id, f.name
+		       u.family_id, f.name, e2ee_keeps_data_on_phone(u.id)
 		FROM users u
 		LEFT JOIN member_positions mp ON mp.user_id = u.id
 		LEFT JOIN (
@@ -228,10 +229,14 @@ func (s *Server) adminMembersSnapshot(ctx context.Context) ([]adminWsMember, err
 			lastSeenAt      *time.Time
 			familyID        *string
 			familyName      *string
+			keeps           bool
 		)
 		if err := rows.Scan(&id, &email, &name, &role, &hasAvatar, &avatarVersion, &avatarUpdatedAt,
-			&lat, &lon, &ts, &battery, &speed, &motion, &accuracy, &lastSeenAt, &familyID, &familyName); err != nil {
+			&lat, &lon, &ts, &battery, &speed, &motion, &accuracy, &lastSeenAt, &familyID, &familyName, &keeps); err != nil {
 			return nil, err
+		}
+		if keeps { // the member keeps their data on their phone: no position for the platform admin
+			lat, lon, ts, battery, speed, motion, accuracy = nil, nil, nil, nil, nil, nil, nil
 		}
 		m := adminWsMember{
 			wsMember: wsMember{
@@ -253,6 +258,7 @@ func (s *Server) adminMembersSnapshot(ctx context.Context) ([]adminWsMember, err
 			},
 			FamilyID:   familyID,
 			FamilyName: familyName,
+			KeepsDataOnPhone: keeps,
 		}
 		members = append(members, m)
 	}

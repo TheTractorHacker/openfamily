@@ -44,6 +44,7 @@ func newSrvEnvOpt(t *testing.T, legacy bool) *srvEnv {
 	e.route("PUT", "/circles/{id}/e2ee/processing-policy", e.srv.E2EEPutProcessingPolicy)
 	e.route("PUT", "/circles/{id}/e2ee/processing-pref", e.srv.E2EEPutProcessingPref)
 	e.route("POST", "/circles/{id}/e2ee/processing-upgrade", e.srv.E2EEUpgradeProcessing)
+	e.route("DELETE", "/circles/{id}/e2ee/legacy-server-access", e.srv.E2EEFinishLegacyAccess)
 	e.route("GET", "/admin/e2ee/keys", e.srv.AdminE2EEKeys)
 	t.Cleanup(func() { _, _ = e.pool.Exec(context.Background(), `DELETE FROM e2ee_server_device`) })
 	// These tests cover the pre-lanes trusted-server mode. Only circles that existed

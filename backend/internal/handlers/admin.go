@@ -87,9 +87,7 @@ func (s *Server) AdminListFamilyMembers(w http.ResponseWriter, r *http.Request) 
 		       u.avatar_data IS NOT NULL, u.avatar_version, u.avatar_updated_at,
 		       mp.lat, mp.lon, mp.ts, mp.battery_pct, mp.speed_mps, mp.motion_state, mp.accuracy_meters,
 		       d.last_seen,
-		       (EXISTS (SELECT 1 FROM live_circle_members km JOIN circles kc ON kc.id = km.circle_id
-		                 WHERE km.user_id = u.id AND kc.e2ee_mode = 'private')
-		        AND NOT EXISTS (SELECT 1 FROM live_circle_members km WHERE km.user_id = u.id AND e2ee_member_plaintext_ok(km.circle_id, km.user_id)))
+		       e2ee_keeps_data_on_phone(u.id)
 		FROM users u
 		LEFT JOIN member_positions mp ON mp.user_id = u.id
 		LEFT JOIN (
@@ -180,9 +178,7 @@ func (s *Server) AdminListMembers(w http.ResponseWriter, r *http.Request) {
 		       mp.lat, mp.lon, mp.ts, mp.battery_pct, mp.speed_mps, mp.motion_state, mp.accuracy_meters,
 		       d.last_seen,
 		       u.family_id, f.name,
-		       (EXISTS (SELECT 1 FROM live_circle_members km JOIN circles kc ON kc.id = km.circle_id
-		                 WHERE km.user_id = u.id AND kc.e2ee_mode = 'private')
-		        AND NOT EXISTS (SELECT 1 FROM live_circle_members km WHERE km.user_id = u.id AND e2ee_member_plaintext_ok(km.circle_id, km.user_id)))
+		       e2ee_keeps_data_on_phone(u.id)
 		FROM users u
 		LEFT JOIN member_positions mp ON mp.user_id = u.id
 		LEFT JOIN (

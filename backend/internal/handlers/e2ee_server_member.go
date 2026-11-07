@@ -141,12 +141,12 @@ type consentStatus struct {
 // verifyServerConsents derives the server-member state of a circle AND re-verifies
 // every consent signature in Go. It fails closed: any member without a valid
 // consent, or any database/crypto problem, answers "not a server member".
-func (s *Server) verifyServerConsents(ctx context.Context, circleID string, dev *serverDeviceInfo) (consentStatus, error) {
+func (s *Server) verifyServerConsents(ctx context.Context, q querier, circleID string, dev *serverDeviceInfo) (consentStatus, error) {
 	var st consentStatus
 	if dev == nil || e2ee.CheckID(circleID) != nil {
 		return st, nil
 	}
-	rows, err := s.Pool.Query(ctx, `
+	rows, err := q.Query(ctx, `
 		SELECT m.user_id::text,
 		       COALESCE((SELECT encode(k.ed25519_pub, 'hex') FROM e2ee_server_consents sc
 		                   JOIN device_keys k ON k.device_id = sc.approver_device_id AND k.user_id = m.user_id
@@ -182,7 +182,7 @@ func (s *Server) verifyServerConsents(ctx context.Context, circleID string, dev 
 	if !all || len(st.Required) == 0 {
 		return st, nil
 	}
-	if err := s.Pool.QueryRow(ctx, `SELECT e2ee_server_member_legacy($1::uuid)`, circleID).Scan(&st.ServerMember); err != nil {
+	if err := q.QueryRow(ctx, `SELECT e2ee_server_member_legacy($1::uuid)`, circleID).Scan(&st.ServerMember); err != nil {
 		return consentStatus{}, err
 	}
 	return st, nil
@@ -236,7 +236,7 @@ func (s *Server) E2EEServerMemberState(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, out)
 		return
 	}
-	st, err := s.verifyServerConsents(ctx, m.CircleID, dev)
+	st, err := s.verifyServerConsents(ctx, s.Pool, m.CircleID, dev)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load consents")
 		return
@@ -389,6 +389,10 @@ func (s *Server) E2EEDeleteServerConsent(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if tag.RowsAffected() > 0 {
+		if _, err := tx.Exec(ctx, `SELECT e2ee_purge_user_server_copies($1::uuid, $2::uuid)`, m.CircleID, uid); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to withdraw consent")
+			return
+		}
 		if _, err := tx.Exec(ctx, `UPDATE circles SET e2ee_rekey_required = TRUE, e2ee_updated_at = now()
 			WHERE id = $1 AND e2ee_mode = 'private'`, m.CircleID); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to withdraw consent")
@@ -461,11 +465,13 @@ func (s *Server) E2EEPurgeServerCopies(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to purge")
 		return
 	}
-	// The server-line ciphertext (readable by the server's SK) goes too; phone-line
-	// ciphertext is never touched. scope=mine only ever matches the caller's own keys.
+	// The server-line LOCATION TRAIL (fix, history) goes too. Shared channel items
+	// (place, chat, checkin, event) and every phone-line item are never touched here:
+	// other members still need them (use DELETE .../items for those). scope=mine
+	// only ever matches the caller's own keys.
 	itemsTag, err := tx.Exec(ctx, `
 		DELETE FROM e2ee_items i
-		WHERE i.circle_id = $1 AND i.key_line = 'server'
+		WHERE i.circle_id = $1 AND i.key_line = 'server' AND i.purpose IN ('fix', 'history', 'trip', 'drive', 'week')
 		  AND ($2 = 'circle' OR i.device_id IN (SELECT device_id FROM device_keys WHERE user_id = $3))`, m.CircleID, scope, uid)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to purge")
@@ -628,7 +634,20 @@ func (s *Server) E2EEServerIngest(w http.ResponseWriter, r *http.Request) {
 	// Per-user gate: only members whose VERIFIED lane is server (legacy circle:
 	// every member, after the all-consent check) are ever written. A phone-lane
 	// member, a member without a pref, or a row planted in the database is not.
-	lanes, err := s.ingestLanes(ctx, req.CircleID, dev)
+	// The lane check runs INSIDE the transaction that writes, with the circle row
+	// share-locked: a lane withdrawal (which locks the row exclusively and purges
+	// the member's copies) either commits before we look, or waits for us.
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to begin transaction")
+		return
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `SELECT 1 FROM circles WHERE id = $1 FOR SHARE`, req.CircleID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to lock circle")
+		return
+	}
+	lanes, err := s.ingestLanes(ctx, tx, req.CircleID, dev)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to verify consents")
 		return
@@ -674,7 +693,7 @@ func (s *Server) E2EEServerIngest(w http.ResponseWriter, r *http.Request) {
 		// user, who is a live member that is currently sharing in this circle.
 		if _, seen := senderOK[p.SenderDeviceID]; !seen {
 			var owner string
-			err := s.Pool.QueryRow(ctx, `
+			err := tx.QueryRow(ctx, `
 				SELECT d.user_id::text FROM device_keys d
 				JOIN live_circle_members m ON m.user_id = d.user_id AND m.circle_id = $2
 				WHERE d.device_id = $1 AND d.kind = 'device' AND d.can_upload AND d.revoked_at IS NULL
@@ -697,14 +716,14 @@ func (s *Server) E2EEServerIngest(w http.ResponseWriter, r *http.Request) {
 		}
 		dv, ok := userDevice[p.UserID]
 		if !ok {
-			dv, err = s.serverIngestDevice(ctx, p.UserID)
+			dv, err = s.serverIngestDevice(ctx, tx, p.UserID)
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "failed to store location")
 				return
 			}
 			userDevice[p.UserID] = dv
 		}
-		tag, err := s.Pool.Exec(ctx, `
+		tag, err := tx.Exec(ctx, `
 			INSERT INTO locations (device_id, ts, geom, accuracy_meters, altitude_meters, speed_mps, battery_pct, source, e2ee_circle_id)
 			VALUES ($1, $2, ST_SetSRID(ST_MakePoint($3, $4), 4326), $5, $6, $7, $8, $9, $10)
 			ON CONFLICT (device_id, ts) DO NOTHING`,
@@ -730,7 +749,7 @@ func (s *Server) E2EEServerIngest(w http.ResponseWriter, r *http.Request) {
 	// Last-known position: only ever forward in time, never from an old backfill.
 	for uid, lf := range newest {
 		dv := userDevice[uid]
-		if _, err := s.Pool.Exec(ctx, `
+		if _, err := tx.Exec(ctx, `
 			INSERT INTO member_positions (user_id, lat, lon, ts, battery_pct, speed_mps, accuracy_meters, device_id, updated_at)
 			VALUES ($1,$2,$3,$4,$5,$6,$7,$8, now())
 			ON CONFLICT (user_id) DO UPDATE SET lat = EXCLUDED.lat, lon = EXCLUDED.lon, ts = EXCLUDED.ts,
@@ -741,6 +760,10 @@ func (s *Server) E2EEServerIngest(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed to store member position")
 			return
 		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to commit")
+		return
 	}
 	// Live fixes behave like a plaintext fix: geofences/bubbles, battery alerts and
 	// the live fan-out (the server is the single evaluator for this circle).
@@ -769,9 +792,9 @@ func (s *Server) E2EEServerIngest(w http.ResponseWriter, r *http.Request) {
 
 // serverIngestDevice returns the devices row that carries a user's server-
 // decrypted positions: their most recently used device, or a placeholder.
-func (s *Server) serverIngestDevice(ctx context.Context, userID string) (string, error) {
+func (s *Server) serverIngestDevice(ctx context.Context, q rowQuerier, userID string) (string, error) {
 	var id string
-	err := s.Pool.QueryRow(ctx, `SELECT id::text FROM devices WHERE user_id = $1
+	err := q.QueryRow(ctx, `SELECT id::text FROM devices WHERE user_id = $1
 		ORDER BY last_seen DESC NULLS LAST, created_at DESC LIMIT 1`, userID).Scan(&id)
 	if err == nil {
 		return id, nil
@@ -779,7 +802,7 @@ func (s *Server) serverIngestDevice(ctx context.Context, userID string) (string,
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return "", err
 	}
-	err = s.Pool.QueryRow(ctx, `INSERT INTO devices (user_id, platform, name) VALUES ($1, 'android', 'Private circle (server copy)')
+	err = q.QueryRow(ctx, `INSERT INTO devices (user_id, platform, name) VALUES ($1, 'android', 'Private circle (server copy)')
 		RETURNING id::text`, userID).Scan(&id)
 	return id, err
 }

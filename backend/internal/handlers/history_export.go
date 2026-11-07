@@ -75,6 +75,10 @@ func (s *Server) AdminExportMemberHistory(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusForbidden, "admin location access is disabled on this server")
 		return
 	}
+	if s.memberKeepsDataOnPhone(r.Context(), memberID) {
+		writeE2EECode(w, http.StatusForbidden, "keeps_data_on_phone", "this member keeps their data on their phone")
+		return
+	}
 	var name string
 	_ = s.Pool.QueryRow(r.Context(), `SELECT name FROM users WHERE id = $1`, memberID).Scan(&name)
 

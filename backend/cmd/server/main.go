@@ -377,6 +377,7 @@ func main() {
 		r.Put("/circles/{id}/e2ee/processing-policy", srv.E2EEPutProcessingPolicy)
 		r.Put("/circles/{id}/e2ee/processing-pref", srv.E2EEPutProcessingPref)
 		r.Post("/circles/{id}/e2ee/processing-upgrade", srv.E2EEUpgradeProcessing)
+		r.Delete("/circles/{id}/e2ee/legacy-server-access", srv.E2EEFinishLegacyAccess)
 		r.Get("/e2ee/log", srv.E2EELog)
 
 		r.Post("/families", srv.CreateFamily)

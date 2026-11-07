@@ -208,12 +208,32 @@ func TestLanesMigrationIdempotentAndDown(t *testing.T) {
 	if e.count(`SELECT count(*) FROM circles WHERE id = $1 AND server_assist AND e2ee_server_gen = 1`, e.circle) != 1 {
 		t.Fatal("policy state changed by re-running the migration")
 	}
-	// The down migration applies cleanly and restores the old schema (rolled back here).
+	// The down migration REFUSES while lanes data exists (it would delete it silently).
 	tx, err := e.pool.Begin(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := tx.Exec(context.Background(), string(down)); err == nil || !strings.Contains(err.Error(), "refusing to drop processing lanes") {
+		t.Fatalf("down migration with lanes data: %v", err)
+	}
+	_ = tx.Rollback(context.Background())
+	// After the data is gone it applies cleanly and restores the old schema (rolled back here).
+	tx, err = e.pool.Begin(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer tx.Rollback(context.Background())
+	for _, q := range []string{
+		`UPDATE circles SET member_opt_out = 'allowed' WHERE member_opt_out <> 'allowed'`,
+		`UPDATE circles SET server_assist = FALSE, server_legacy_epoch_max = 0 WHERE server_assist OR server_legacy_epoch_max > 0`,
+		`DELETE FROM e2ee_processing_pref`,
+		`DELETE FROM circle_key_wraps WHERE key_line = 'server'`,
+		`DELETE FROM e2ee_items WHERE key_line = 'server'`,
+	} {
+		if _, err := tx.Exec(context.Background(), q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
 	if _, err := tx.Exec(context.Background(), string(down)); err != nil {
 		t.Fatalf("down migration: %v", err)
 	}
@@ -696,7 +716,7 @@ func TestRequiredServerRefusesPhoneLaneItems(t *testing.T) {
 		d    *tdev
 	}{{"B", e.b}, {"C", e.c}} {
 		rs := results(e.mustCode(u.name, "POST", "/circles/"+e.circle+"/e2ee/batch", map[string]any{"sender_device_id": u.d.id,
-			"items": []any{e.seal(t, u.d, e.circle, "fix", 1, 1, []byte("x")), e.sealV2(u.d, e.phoneLine(), 1, 2, "event")}}, 200))
+			"items": []any{e.seal(t, u.d, e.circle, "fix", 1, 1, []byte("x")), e.sealV2(u.d, e.phoneLine(), 1, 2, "history")}}, 200))
 		for _, r := range rs {
 			if r["status"] != "rejected" || r["error"] != "required_server" {
 				t.Fatalf("%s: phone-lane item relayed in a required_server circle: %v", u.name, r)
@@ -706,6 +726,14 @@ func TestRequiredServerRefusesPhoneLaneItems(t *testing.T) {
 	if e.count(`SELECT count(*) FROM e2ee_items WHERE circle_id = $1 AND device_id IN ($2,$3)`, e.circle, e.b.id, e.c.id) != 0 {
 		t.Fatal("items stored")
 	}
+	// L2: check-ins (SOS) and events are never blocked by the rule.
+	for i, purpose := range []string{"checkin", "event"} {
+		if r := results(e.mustCode("C", "POST", "/circles/"+e.circle+"/e2ee/batch", map[string]any{"sender_device_id": e.c.id,
+			"items": []any{e.sealV2(e.c, e.phoneLine(), 1, int64(50+i), purpose)}}, 201)); r[0]["status"] != "stored" {
+			t.Fatalf("%s blocked in a required_server circle: %v", purpose, r)
+		}
+	}
+	e.sql(`DELETE FROM e2ee_items WHERE circle_id = $1 AND device_id = $2`, e.circle, e.c.id)
 	err := e.sqlErr(`INSERT INTO e2ee_items (circle_id, device_id, seq, purpose, epoch, size_bucket, ciphertext, received_at)
 		VALUES ($1,$2,99,'fix',1,256,'\x00',now())`, e.circle, e.b.id)
 	if err == nil || !strings.Contains(err.Error(), "e2ee_required_server") {
@@ -771,7 +799,8 @@ func TestPurgeScopeMineAndCircleLeavePhoneLineAlone(t *testing.T) {
 	e := readyLanes(t)
 	now := time.Now()
 	e.ingest(e.point("history", e.a, now.Add(-time.Hour), 1, 2), e.point("history", e.b, now.Add(-time.Hour), 3, 4))
-	e.post("B", e.b, e.circle, 201, e.sealV2(e.b, e.serverLine(), 1, 1, "history"), e.sealV2(e.b, e.phoneLine(), 1, 2, "history"))
+	e.post("B", e.b, e.circle, 201, e.sealV2(e.b, e.serverLine(), 1, 1, "history"), e.sealV2(e.b, e.phoneLine(), 1, 2, "history"),
+		e.sealV2(e.b, e.serverLine(), 1, 3, "chat"), e.sealV2(e.b, e.serverLine(), 1, 4, "place"), e.sealV2(e.b, e.serverLine(), 1, 5, "checkin"))
 	e.post("A", e.a, e.circle, 201, e.sealV2(e.a, e.serverLine(), 1, 1, "history"), e.sealV2(e.a, e.phoneLine(), 1, 2, "history"))
 	m := e.mustCode("B", "DELETE", "/circles/"+e.circle+"/e2ee/server-copies", nil, 200)
 	if m["locations_deleted"].(float64) != 1 || m["items_deleted"].(float64) != 1 {
@@ -782,6 +811,10 @@ func TestPurgeScopeMineAndCircleLeavePhoneLineAlone(t *testing.T) {
 	}
 	if e.count(`SELECT count(*) FROM e2ee_items WHERE circle_id = $1 AND device_id = $2 AND key_line = 'server'`, e.circle, e.a.id) != 1 {
 		t.Fatal("A's server-line item was deleted by B")
+	}
+	// L4: shared channel items other members still need are never deleted by a purge.
+	if e.count(`SELECT count(*) FROM e2ee_items WHERE circle_id = $1 AND device_id = $2 AND key_line = 'server' AND purpose IN ('chat','place','checkin')`, e.circle, e.b.id) != 3 {
+		t.Fatal("a purge deleted shared channel items (chat/place/checkin)")
 	}
 	e.mustCode("B", "DELETE", "/circles/"+e.circle+"/e2ee/server-copies?scope=circle", nil, 403)
 	m = e.mustCode("A", "DELETE", "/circles/"+e.circle+"/e2ee/server-copies?scope=circle", nil, 200)
@@ -950,4 +983,352 @@ func TestProcessingStateReportsVerifiedLanes(t *testing.T) {
 	if st["members_server"].(float64) != 2 {
 		t.Fatalf("planted pref counted: %v", st["members"])
 	}
+}
+
+// ============================================================ review fixes
+
+func (e *srvEnv) upgradeBody(skServer bool) map[string]any {
+	ew := []any{mkWrap(e.t, e.circle, 2, e.a, e.a, e.key), mkWrap(e.t, e.circle, 2, e.a, e.b, e.key), mkWrap(e.t, e.circle, 2, e.a, e.c, e.key)}
+	sw := []map[string]any{mkSKWrap(e.t, e.circle, 1, e.a, e.a), mkSKWrap(e.t, e.circle, 1, e.a, e.b), mkSKWrap(e.t, e.circle, 1, e.a, e.c)}
+	if skServer {
+		sw = append(sw, mkSKWrap(e.t, e.circle, 1, e.a, e.s))
+	}
+	body := epochBody(e.t, e2ee.ActEpoch, e.circle, 2, e.a, ew[0].(map[string]any))
+	body["epoch_wraps"] = ew
+	body["policy"] = policyBody(e.t, e.circle, true, "phone", "allowed", 1, e.a, sw...)
+	return body
+}
+
+// seedCopies gives a member server copies: ingested points plus server-line trail items.
+func (e *srvEnv) seedCopies(user string, d *tdev, now time.Time) {
+	e.t.Helper()
+	if c, m, raw := e.ingest(e.point("history", d, now.Add(-time.Hour), 40.1, -80.1), e.point("fix", d, now, 40.2, -80.2)); c != 200 || m["stored"].(float64) != 2 {
+		e.t.Fatalf("seed: %d %s", c, raw)
+	}
+	e.post(user, d, e.circle, 201, e.sealV2(d, e.serverLine(), 1, 71, "history"), e.sealV2(d, e.serverLine(), 1, 72, "fix"), e.sealV2(d, e.serverLine(), 1, 73, "chat"))
+}
+
+func (e *srvEnv) copiesOf(user string, d *tdev) (locs, pos, trail, shared int) {
+	locs = e.count(`SELECT count(*) FROM locations l JOIN devices dv ON dv.id = l.device_id WHERE dv.user_id = $1 AND l.e2ee_circle_id = $2`, e.ids[user], e.circle)
+	pos = e.count(`SELECT count(*) FROM member_positions WHERE user_id = $1 AND lat <> 10`, e.ids[user])
+	trail = e.count(`SELECT count(*) FROM e2ee_items WHERE circle_id = $1 AND device_id = $2 AND key_line = 'server' AND purpose IN ('fix','history')`, e.circle, d.id)
+	shared = e.count(`SELECT count(*) FROM e2ee_items WHERE circle_id = $1 AND device_id = $2 AND key_line = 'server' AND purpose = 'chat'`, e.circle, d.id)
+	return
+}
+
+func (e *srvEnv) wantCopies(user string, d *tdev, locs, pos, trail, shared int, why string) {
+	e.t.Helper()
+	l, p, tr, sh := e.copiesOf(user, d)
+	if l != locs || p != pos || tr != trail || sh != shared {
+		e.t.Fatalf("%s: copies of %s = locations %d, last position %d, trail %d, shared %d; want %d %d %d %d", why, user, l, p, tr, sh, locs, pos, trail, shared)
+	}
+}
+
+// M2: leaving the server lane, policy off, member removal and key revocation delete
+// the member's server copies in the same transaction; shared channel items stay.
+func TestServerCopiesDeletedWhenTheLaneEnds(t *testing.T) {
+	// pref -> phone
+	e := readyLanes(t)
+	now := time.Now()
+	e.seedCopies("B", e.b, now)
+	e.seedCopies("A", e.a, now)
+	e.wantCopies("B", e.b, 2, 1, 2, 1, "seeded")
+	e.setLane("B", e.b, "phone", 0, 200)
+	e.wantCopies("B", e.b, 0, 0, 0, 1, "after leaving the server lane")
+	e.wantCopies("A", e.a, 2, 1, 2, 1, "A untouched by B leaving")
+	// policy off removes everyone's
+	e.mustCode("A", "PUT", "/circles/"+e.circle+"/e2ee/processing-policy", policyBody(t, e.circle, false, "phone", "allowed", 1, e.a), 200)
+	e.wantCopies("A", e.a, 0, 0, 0, 1, "after the policy was turned off")
+}
+
+func TestServerCopiesDeletedOnMemberRemovalAndKeyRevoke(t *testing.T) {
+	e := readyLanes(t)
+	now := time.Now()
+	e.seedCopies("B", e.b, now)
+	e.seedCopies("A", e.a, now)
+	e.sql(`DELETE FROM circle_members WHERE circle_id = $1 AND user_id = $2`, e.circle, e.ids["B"])
+	e.wantCopies("B", e.b, 0, 0, 0, 1, "after removal")
+	// A's phone key is revoked: the pref it signed goes and so do A's copies.
+	e.mustCode("A", "DELETE", "/e2ee/devices/"+e.a.id, simpleAction(t, e2ee.ActRevoke, e.a, "", 0, e.a.id, e.a.fp), 200)
+	if e.count(`SELECT count(*) FROM e2ee_processing_pref WHERE circle_id = $1 AND user_id = $2`, e.circle, e.ids["A"]) != 0 {
+		t.Fatal("a pref signed by a revoked key survived")
+	}
+	e.wantCopies("A", e.a, 0, 0, 0, 1, "after the signing key was revoked")
+}
+
+func TestLegacyConsentWithdrawalDeletesCopies(t *testing.T) {
+	e := readyEnv(t)
+	if c, m, _ := e.ingest(e.point("fix", e.b, time.Now(), 40.3, -80.3)); c != 200 || m["stored"].(float64) != 1 {
+		t.Fatal("seed")
+	}
+	e.mustCode("B", "DELETE", "/circles/"+e.circle+"/e2ee/server-consent", nil, 200)
+	if e.count(`SELECT count(*) FROM locations l JOIN devices d ON d.id = l.device_id WHERE d.user_id = $1 AND l.e2ee_circle_id = $2`, e.ids["B"], e.circle) != 0 {
+		t.Fatal("legacy consent withdrawal left server copies")
+	}
+}
+
+// M2: the platform-admin paths honour the lane gate.
+func TestPlatformAdminPathsHideMembersWhoKeepDataOnPhone(t *testing.T) {
+	e := readyLanes(t)
+	e.route("GET", "/api/admin/members/{id}/history", e.srv.AdminGetMemberHistory)
+	e.route("GET", "/api/admin/members/{id}/history/export", e.srv.AdminExportMemberHistory)
+	e.srv.AdminLocationAccess = true // the operator opted in; the lane gate still applies
+	now := time.Now().UTC()
+	// C keeps data on the phone but has an old plaintext row (from before) and a last position.
+	var dev string
+	if err := e.pool.QueryRow(context.Background(), `INSERT INTO devices (user_id, platform, name) VALUES ($1, 'android', 'x') RETURNING id::text`, e.ids["C"]).Scan(&dev); err != nil {
+		t.Fatal(err)
+	}
+	e.locAt(dev, now.Add(-time.Minute), 41.5, nil)
+	e.sql(`UPDATE member_positions SET lat = 41.5, lon = 5, ts = $2 WHERE user_id = $1`, e.ids["C"], now.Add(-time.Minute))
+	q := "?from=" + now.Add(-time.Hour).Format(time.RFC3339) + "&to=" + now.Add(time.Hour).Format(time.RFC3339)
+	for _, p := range []string{"/api/admin/members/" + e.ids["C"] + "/history" + q, "/api/admin/members/" + e.ids["C"] + "/history/export" + q + "&format=csv"} {
+		if c, _, raw := e.do("A", "GET", p, nil); c != 403 || !strings.Contains(string(raw), "keeps_data_on_phone") {
+			t.Fatalf("%s: %d %s", p, c, raw)
+		}
+	}
+	// A server-lane member is still readable by the admin paths.
+	e.ingest(e.point("fix", e.b, now, 40.5, -80.5))
+	if c, _, raw := e.do("A", "GET", "/api/admin/members/"+e.ids["B"]+"/history"+q, nil); c != 200 {
+		t.Fatalf("server-lane member history: %d %s", c, raw)
+	}
+	snap, err := e.srv.adminMembersSnapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range snap {
+		if m.ID == e.ids["C"] && (m.Lat != nil || m.Lon != nil || m.TS != nil || !m.KeepsDataOnPhone) {
+			t.Fatalf("admin snapshot exposes a member who keeps data on phone: %+v", m)
+		}
+		if m.ID == e.ids["B"] && (m.Lat == nil || m.KeepsDataOnPhone) {
+			t.Fatalf("admin snapshot hides a server-lane member: %+v", m)
+		}
+	}
+}
+
+// M3: a legacy consent carries over only if the old every-member rule held.
+func TestUpgradeDoesNotCarryOverAPartialConsent(t *testing.T) {
+	e := newSrvEnv(t)
+	e.pin()
+	e.wrapServer()
+	e.consent("A", e.a, 200) // A consented, B and C did not
+	e.declareLanes2("A", e.a)
+	e.declareLanes2("B", e.b)
+	e.declareLanes2("C", e.c)
+	r := e.mustCode("A", "POST", "/circles/"+e.circle+"/e2ee/processing-upgrade", e.upgradeBody(false), 200)
+	if r["converted"].(float64) != 0 {
+		t.Fatalf("a partial consent was converted: %v", r)
+	}
+	if c, _, raw := e.ingest(e.point("fix", e.a, time.Now(), 40.4, -80.4)); c != 409 {
+		t.Fatalf("A was ingested after the upgrade without a fresh pref: %d %s", c, raw)
+	}
+	// A signs a fresh pref (and the server gets SK): now A is ingested; B is not.
+	e.setLane("A", e.a, "server", 1, 200)
+	e.wrapSKToServer(1, 200)
+	if c, m, raw := e.ingest(e.point("fix", e.a, time.Now(), 40.4, -80.4), e.point("fix", e.b, time.Now(), 40.5, -80.5)); c != 200 || m["stored"].(float64) != 1 || rejectedCount(m, "lane_not_server") != 1 {
+		t.Fatalf("%d %s", c, raw)
+	}
+}
+
+// M3: converted prefs expire, and die with their signing key.
+func TestLegacyConvertedPrefsAreBounded(t *testing.T) {
+	e := readyEnv(t)
+	e.declareLanes2("A", e.a)
+	e.declareLanes2("B", e.b)
+	e.declareLanes2("C", e.c)
+	e.mustCode("A", "POST", "/circles/"+e.circle+"/e2ee/processing-upgrade", e.upgradeBody(true), 200)
+	var until *time.Time
+	if err := e.pool.QueryRow(context.Background(), `SELECT valid_until FROM e2ee_processing_pref WHERE circle_id = $1 AND user_id = $2`, e.circle, e.ids["B"]).Scan(&until); err != nil || until == nil ||
+		until.Before(time.Now().Add(29*24*time.Hour)) || until.After(time.Now().Add(31*24*time.Hour)) {
+		t.Fatalf("legacy pref validity: %v %v", until, err)
+	}
+	now := time.Now()
+	if c, m, _ := e.ingest(e.point("fix", e.b, now, 40.6, -80.6)); c != 200 || m["stored"].(float64) != 1 {
+		t.Fatal("converted pref not usable")
+	}
+	e.sql(`UPDATE e2ee_processing_pref SET valid_until = now() - interval '1 minute' WHERE circle_id = $1 AND user_id = $2`, e.circle, e.ids["B"])
+	if c, m, _ := e.ingest(e.point("fix", e.b, now.Add(time.Second), 40.7, -80.7), e.point("fix", e.c, now.Add(time.Second), 40.8, -80.8)); c != 200 || m["stored"].(float64) != 1 || rejectedCount(m, "lane_not_server") != 1 {
+		t.Fatalf("expired converted pref still used: %v", m)
+	}
+	// Re-signing makes B usable again and removes the expiry.
+	e.setLane("B", e.b, "server", 1, 200)
+	if e.count(`SELECT count(*) FROM e2ee_processing_pref WHERE circle_id = $1 AND user_id = $2 AND valid_until IS NULL AND NOT legacy`, e.circle, e.ids["B"]) != 1 {
+		t.Fatal("fresh pref did not replace the converted one")
+	}
+	// Revoking C's signing key kills the converted pref and removes C's copies.
+	e.mustCode("C", "DELETE", "/e2ee/devices/"+e.c.id, simpleAction(t, e2ee.ActRevoke, e.c, "", 0, e.c.id, e.c.fp), 200)
+	if e.count(`SELECT count(*) FROM e2ee_processing_pref WHERE circle_id = $1 AND user_id = $2`, e.circle, e.ids["C"]) != 0 ||
+		e.count(`SELECT count(*) FROM locations l JOIN devices d ON d.id = l.device_id WHERE d.user_id = $1 AND l.e2ee_circle_id = $2`, e.ids["C"], e.circle) != 0 {
+		t.Fatal("converted pref or copies survived the key revocation")
+	}
+}
+
+// L1: the admin can end the server's access to the old phone-key epochs.
+func TestFinishLegacyServerAccess(t *testing.T) {
+	e := readyEnv(t)
+	e.declareLanes2("A", e.a)
+	e.declareLanes2("B", e.b)
+	e.declareLanes2("C", e.c)
+	fin := "/circles/" + e.circle + "/e2ee/legacy-server-access"
+	e.mustCode("A", "DELETE", fin, nil, 409) // still legacy
+	e.mustCode("A", "POST", "/circles/"+e.circle+"/e2ee/processing-upgrade", e.upgradeBody(true), 200)
+	holds := `SELECT count(*) FROM circle_key_wraps w JOIN device_keys d ON d.device_id = w.recipient_device_id WHERE w.circle_id = $1 AND d.kind = 'server' AND w.key_line = 'phone'`
+	if e.count(holds, e.circle) == 0 {
+		t.Fatal("test premise: the server still holds the epoch-1 phone key")
+	}
+	e.mustCode("B", "DELETE", fin, nil, 403)
+	r := e.mustCode("A", "DELETE", fin, nil, 200)
+	if r["wraps_removed"].(float64) < 1 || e.count(holds, e.circle) != 0 {
+		t.Fatalf("%v", r)
+	}
+	// SK keeps working.
+	if c, m, _ := e.ingest(e.point("fix", e.b, time.Now(), 40.9, -80.9)); c != 200 || m["stored"].(float64) != 1 {
+		t.Fatal("ending old-epoch access broke server-lane ingest")
+	}
+}
+
+// L5: the policy signer must still be a circle admin; a lane withdrawal committed
+// while an ingest batch waits is honoured; the item relay uses the same checks.
+func TestPolicySignerMustStillBeAdmin(t *testing.T) {
+	e := readyLanes(t)
+	now := time.Now()
+	e.sql(`UPDATE circle_members SET role = 'member' WHERE circle_id = $1 AND user_id = $2`, e.circle, e.ids["A"])
+	if c, _, raw := e.ingest(e.point("fix", e.b, now, 40.1, -80.1)); c != 409 {
+		t.Fatalf("ingest under a policy whose signer is no longer an admin: %d %s", c, raw)
+	}
+	rs := results(e.mustCode("B", "POST", "/circles/"+e.circle+"/e2ee/batch", map[string]any{"sender_device_id": e.b.id,
+		"items": []any{e.sealV2(e.b, e.serverLine(), 1, 1, "fix")}}, 200))
+	if rs[0]["status"] != "rejected" {
+		t.Fatalf("server-line relay under a stale policy: %v", rs)
+	}
+	e.sql(`UPDATE circle_members SET role = 'admin' WHERE circle_id = $1 AND user_id = $2`, e.circle, e.ids["A"])
+	if c, m, _ := e.ingest(e.point("fix", e.b, now, 40.1, -80.1)); c != 200 || m["stored"].(float64) != 1 {
+		t.Fatal("ingest did not resume")
+	}
+}
+
+func TestMidBatchLaneWithdrawalIsHonoured(t *testing.T) {
+	e := readyLanes(t)
+	ctx := context.Background()
+	tx, err := e.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	// A pref change in flight: it holds the circle row exclusively.
+	if _, err := tx.Exec(ctx, `SELECT 1 FROM circles WHERE id = $1 FOR UPDATE`, e.circle); err != nil {
+		t.Fatal(err)
+	}
+	type res struct {
+		code int
+		m    map[string]any
+	}
+	done := make(chan res, 1)
+	go func() {
+		c, m, _ := e.ingest(e.point("fix", e.b, time.Now(), 40.1, -80.1), e.point("fix", e.a, time.Now(), 40.2, -80.2))
+		done <- res{c, m}
+	}()
+	select {
+	case <-done:
+		t.Fatal("ingest did not wait for the in-flight pref change")
+	case <-time.After(500 * time.Millisecond):
+	}
+	if _, err := tx.Exec(ctx, `UPDATE e2ee_processing_pref SET lane = 'phone' WHERE circle_id = $1 AND user_id = $2`, e.circle, e.ids["B"]); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	r := <-done
+	if r.code != 200 || r.m["stored"].(float64) != 1 || rejectedCount(r.m, "lane_not_server") != 1 {
+		t.Fatalf("a point of a member who withdrew mid-batch landed: %d %v", r.code, r.m)
+	}
+	if e.count(`SELECT count(*) FROM locations l JOIN devices d ON d.id = l.device_id WHERE d.user_id = $1 AND l.e2ee_circle_id = $2`, e.ids["B"], e.circle) != 0 {
+		t.Fatal("B has server copies")
+	}
+}
+
+// L6: capabilities are monotonic.
+func TestCapsCannotBeDowngraded(t *testing.T) {
+	e := newLaneEnv(t)
+	r := e.mustCode("B", "PUT", "/e2ee/devices/"+e.b.id+"/caps", map[string]any{"caps": []string{}}, 200)
+	if cs, _ := r["caps"].([]any); len(cs) != 1 || cs[0] != "lanes2" {
+		t.Fatalf("an empty list cleared the capability: %v", r)
+	}
+	e.mustCode("B", "PUT", "/e2ee/devices/"+e.b.id+"/caps", map[string]any{"caps": []string{"unknown"}}, 200)
+	if e.count(`SELECT count(*) FROM device_keys WHERE device_id = $1 AND caps = ARRAY['lanes2']`, e.b.id) != 1 {
+		t.Fatal("caps changed")
+	}
+}
+
+// L7: a signed statement is accepted once.
+func TestStatementsCannotBeReplayed(t *testing.T) {
+	e := newLaneEnv(t)
+	pol := "/circles/" + e.circle + "/e2ee/processing-policy"
+	pb := policyBody(t, e.circle, true, "phone", "allowed", 1, e.a, mkSKWrap(t, e.circle, 1, e.a, e.a))
+	e.mustCode("A", "PUT", pol, pb, 200)
+	// Replaying the very same policy body (same nonce) is refused even where it would otherwise be a no-op.
+	if c, m, _ := e.do("A", "PUT", pol, pb); c != 409 || m["code"] != "nonce_reused" {
+		t.Fatalf("policy replay: %d %v", c, m)
+	}
+	pref := "/circles/" + e.circle + "/e2ee/processing-pref"
+	body := e.prefBody(e.b, "server", 1)
+	e.mustCode("B", "PUT", pref, body, 200)
+	e.setLane("B", e.b, "phone", 0, 200)
+	if c, m, _ := e.do("B", "PUT", pref, body); c != 409 || m["code"] != "nonce_reused" {
+		t.Fatalf("pref replay (re-enabling the server lane with an old statement): %d %v", c, m)
+	}
+	if e.count(`SELECT count(*) FROM e2ee_processing_pref WHERE circle_id = $1 AND user_id = $2 AND lane = 'server'`, e.circle, e.ids["B"]) != 0 {
+		t.Fatal("replayed pref took effect")
+	}
+}
+
+// L8: the state endpoint reports every member with a fixed number of queries; correctness with many members.
+func TestProcessingStateManyMembers(t *testing.T) {
+	e := readyLanes(t)
+	st := e.mustCode("A", "GET", "/circles/"+e.circle+"/e2ee/processing", nil, 200)
+	ms := st["members"].([]any)
+	lanes := map[string]string{}
+	for _, x := range ms {
+		mm := x.(map[string]any)
+		lanes[mm["user_id"].(string)] = mm["lane"].(string)
+	}
+	if lanes[e.ids["A"]] != "server" || lanes[e.ids["B"]] != "server" || lanes[e.ids["C"]] != "phone" {
+		t.Fatalf("lanes: %v", lanes)
+	}
+}
+
+// Phone-computed result purposes are ordinary items: same lane rules, and a new
+// signed-policy history is served.
+func TestResultPurposesAndPolicyHistory(t *testing.T) {
+	e := readyLanes(t)
+	for i, p := range []string{"trip", "drive", "week"} {
+		r := results(e.post("B", e.b, e.circle, 201, e.sealV2(e.b, e.serverLine(), 1, int64(90+i), p), e.sealV2(e.b, e.phoneLine(), 1, int64(95+i), p)))
+		if r[0]["status"] != "stored" || r[1]["status"] != "stored" {
+			t.Fatalf("%s: %v", p, r)
+		}
+	}
+	// C (phone lane) may not seal results under SK.
+	rs := results(e.mustCode("C", "POST", "/circles/"+e.circle+"/e2ee/batch", map[string]any{"sender_device_id": e.c.id,
+		"items": []any{e.sealV2(e.c, e.serverLine(), 1, 1, "trip")}}, 200))
+	if rs[0]["status"] != "rejected" {
+		t.Fatalf("%v", rs)
+	}
+	// Leaving the lane removes B's server-line results as part of the copies.
+	e.setLane("B", e.b, "phone", 0, 200)
+	if e.count(`SELECT count(*) FROM e2ee_items WHERE circle_id = $1 AND device_id = $2 AND key_line = 'server' AND purpose IN ('trip','drive','week')`, e.circle, e.b.id) != 0 {
+		t.Fatal("server-line results survived leaving the lane")
+	}
+	// Rotate to generation 2, then the history shows both generations.
+	e.mustCode("A", "PUT", "/circles/"+e.circle+"/e2ee/processing-policy",
+		policyBody(t, e.circle, true, "phone", "allowed", 2, e.a, mkSKWrap(t, e.circle, 2, e.a, e.a), mkSKWrap(t, e.circle, 2, e.a, e.s)), 200)
+	st := e.mustCode("C", "GET", "/circles/"+e.circle+"/e2ee/processing", nil, 200)
+	h := st["policy"].(map[string]any)["history"].([]any)
+	if len(h) != 2 || h[0].(map[string]any)["sk_gen"].(float64) != 1 || h[1].(map[string]any)["sk_gen"].(float64) != 2 {
+		t.Fatalf("policy history: %v", h)
+	}
+	// Query values the phone sends.
+	e.mustCode("A", "GET", "/circles/"+e.circle+"/e2ee/wraps?device_id="+e.a.id+"&key_line=all", nil, 200)
+	e.mustCode("A", "GET", "/circles/"+e.circle+"/e2ee/items?key_line=all", nil, 200)
+	e.mustCode("A", "GET", "/circles/"+e.circle+"/e2ee/pending?key_line=server", nil, 200)
 }

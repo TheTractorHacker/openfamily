@@ -1,4 +1,17 @@
 -- 000220_processing_lanes.down.sql
+-- REFUSES to run while lanes data exists: it would silently delete server-line
+-- items, relabelled legacy history, prefs (and the converted consents). Turn the
+-- policy off, purge the server copies and remove the prefs first.
+DO $$ BEGIN
+    IF EXISTS (SELECT 1 FROM e2ee_items WHERE key_line = 'server')
+       OR EXISTS (SELECT 1 FROM circle_key_wraps WHERE key_line = 'server')
+       OR EXISTS (SELECT 1 FROM e2ee_items WHERE purpose IN ('trip', 'drive', 'week'))
+       OR EXISTS (SELECT 1 FROM e2ee_processing_pref)
+       OR EXISTS (SELECT 1 FROM circles WHERE server_assist OR server_legacy_epoch_max > 0) THEN
+        RAISE EXCEPTION 'refusing to drop processing lanes: server-line data, prefs or an upgraded circle exist; clean them up first';
+    END IF;
+END $$;
+
 -- Restores the pre-lanes functions (migration 000165). Server-line wraps and
 -- items are deleted (they cannot be read without the lanes code); key_line
 -- columns are dropped. Lane-server data on the server (plaintext copies) stays.
@@ -9,6 +22,7 @@ DROP TRIGGER IF EXISTS trg_e2ee_policy_turned_off ON circles;
 DROP TRIGGER IF EXISTS trg_e2ee_processing_mode_changed ON circles;
 DROP TRIGGER IF EXISTS trg_e2ee_processing_pref_member_removed ON circle_members;
 DROP TRIGGER IF EXISTS trg_e2ee_device_kind_immutable ON device_keys;
+DROP TRIGGER IF EXISTS trg_e2ee_processing_key_revoked ON device_keys;
 
 CREATE OR REPLACE FUNCTION e2ee_member_removed() RETURNS trigger AS $$
 BEGIN
@@ -56,6 +70,9 @@ CREATE OR REPLACE FUNCTION e2ee_plaintext_blocked(circ UUID) RETURNS BOOLEAN AS 
     SELECT EXISTS (SELECT 1 FROM circles WHERE id = circ AND e2ee_mode = 'private') AND NOT e2ee_server_member(circ)
 $$ LANGUAGE sql STABLE;
 
+DROP FUNCTION IF EXISTS e2ee_keeps_data_on_phone(UUID);
+DROP FUNCTION IF EXISTS e2ee_purge_user_server_copies(UUID, UUID);
+DROP FUNCTION IF EXISTS e2ee_processing_key_revoked();
 DROP FUNCTION IF EXISTS e2ee_member_plaintext_ok(UUID, UUID);
 DROP FUNCTION IF EXISTS e2ee_member_server_ok(UUID, UUID);
 DROP FUNCTION IF EXISTS e2ee_server_assist(UUID);
@@ -69,6 +86,7 @@ DROP FUNCTION IF EXISTS e2ee_policy_turned_off();
 DROP FUNCTION IF EXISTS e2ee_processing_mode_changed();
 DROP FUNCTION IF EXISTS e2ee_processing_pref_member_removed();
 
+DROP INDEX IF EXISTS uq_e2ee_processing_statements_nonce;
 DROP TABLE IF EXISTS e2ee_processing_statements;
 DROP TABLE IF EXISTS e2ee_processing_pref;
 
@@ -79,6 +97,8 @@ ALTER TABLE circle_key_wraps ADD CONSTRAINT circle_key_wraps_pkey PRIMARY KEY (c
 ALTER TABLE circle_key_wraps DROP CONSTRAINT IF EXISTS circle_key_wraps_key_line_chk;
 ALTER TABLE circle_key_wraps DROP COLUMN IF EXISTS key_line;
 DROP INDEX IF EXISTS e2ee_items_circle_line;
+ALTER TABLE e2ee_items DROP CONSTRAINT IF EXISTS e2ee_items_purpose_check;
+ALTER TABLE e2ee_items ADD CONSTRAINT e2ee_items_purpose_check CHECK (purpose IN ('fix', 'event', 'place', 'history', 'checkin', 'chat'));
 ALTER TABLE e2ee_items DROP CONSTRAINT IF EXISTS e2ee_items_key_line_chk;
 ALTER TABLE e2ee_items DROP COLUMN IF EXISTS key_line;
 ALTER TABLE device_keys DROP COLUMN IF EXISTS caps;
