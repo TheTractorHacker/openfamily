@@ -185,7 +185,9 @@ void main() {
       }
       expect(r.exitCode, 0, reason: out);
       expect(out, isNot(contains('waiting for member consent')), reason: 'the sidecar must follow the per-member lane, not the legacy all-member consent:\n$out');
-      expect(await db.locationsOf(b.userId), 2);
+      // Ben's scenario-2 fix (already stored by the hand-built ingest above) + that same real item read by
+      // the sidecar + the new fix: 3 rows, none for Cleo.
+      expect(await db.locationsOf(b.userId), 3);
       expect(await db.locationsOf(c.userId), 0);
     });
   });
@@ -303,68 +305,19 @@ void main() {
       final Map<String, dynamic> inv = await rawJson(env, 'POST', '/circles/$circle/invites', body: <String, dynamic>{'role': 'member', 'max_uses': 1, 'expires_in_hours': 1}, token: a.token);
       await rawJson(env, 'POST', '/circles/join', body: <String, dynamic>{'code': (inv['code'] ?? (inv['invite'] as Map<String, dynamic>)['code']) as String}, token: d.token);
       final E2eeService old = E2eeService(api: const OldAppApi(), vault: d.vault, trust: d.service.trust, userIdProvider: () async => d.userId);
-      final DeviceKey reg = await d.run(() => old.registerThisDevice());
-      expect(reg.caps, isEmpty);
-      expect(reg.supportsLanes, isFalse);
-      await a.run(() async {
-        // Anna's phone approves the new member's key and wraps CK for it (the normal flow).
-        await a.service.processPending(circle);
-      });
-      await d.run(() => old.syncCircleKeys(circle));
-      expect(await d.run(() => old.circleKey(circle, 1)), isNotNull, reason: 'old app got the phone-line CK');
-
-      // The old app seals on the phone line only (its lane store is empty).
-      final PrivateRuntime rt = PrivateRuntime(service: old, api: const OldAppApi(), kv: d.kv);
-      rt.notify = (String t, String b) async {};
-      await d.run(() async {
-        await rt.setCircles(<Circle>[circleOf(circle, members: 4)]);
-        await rt.routeFix(d.fix(40.00123, -75.00123));
-        await Future<void>.delayed(const Duration(milliseconds: 300));
-        await rt.flush();
-      });
-      final String dev = (await d.run(() => old.identity()))!.deviceId;
-      expect((await serverItems("device_id = '$dev' AND key_line = 'server'")), isEmpty);
-      expect((await serverItems("device_id = '$dev' AND key_line = 'phone'")).length, 1);
-      await bridgeCycle();
-      expect(await db.locationsOf(d.userId), 0);
-      expect(await db.anyRowNear(40.00123, -75.00123), 0);
-
-      // Forced: the old app's device builds a server-line item with the circle's real SK. The server refuses it.
-      final Uint8List sk = (await a.run(() => a.service.serverKey(circle, 2)) ?? await a.run(() => a.service.serverKey(circle, 1)))!;
-      final int gen = (await a.run(() => a.service.heldServerGens(circle))).last;
-      final LocalIdentity me = (await d.run(() => old.identity()))!;
-      final ChannelSealer forced = ChannelSealer(
-          keys: ServiceChannelKeys(old),
-          kv: MemoryKv(),
-          lanes: _ForcedServerLane(gen),
-          serverKeys: _FixedSk(gen, sk));
-      final WireItem item = await forced.seal(SenderIdentity(me.deviceId, me.edSeed, me.userId), circle, ChannelPurpose.fix, <String, dynamic>{'lat': 40.1, 'lon': -75.1, 'ts': DateTime.now().toUtc().millisecondsSinceEpoch});
-      expect(item.line, E2ee.lineServer);
-      final List<BatchResult> r = await d.run(() => const HttpChannelApi().postBatch(circle, me.deviceId, <WireItem>[item]));
-      expect(r.single.status, 'rejected');
-      expect(r.single.error, anyOf('device_lacks_lanes2', 'lane_not_server'));
-
-      // And it cannot publish a server-lane pref either (the server wants the capability).
+      // Since v0.22 the server refuses a device without the lanes capability for a member of a circle that
+      // uses processing lanes: the old app never gets as far as holding keys (409 update_required_for_lanes).
       final Object? err = await d.run(() async {
         try {
-          await LanesService(service: old, api: const OldAppApi(), kv: d.kv).setLane(circle, E2ee.lineServer, confirmServerFingerprintHex: server.fingerprintHex);
+          await old.registerThisDevice();
           return null;
         } catch (e) {
           return e;
         }
       });
-      expect(err, isNotNull);
-      expect(await db.count("SELECT count(*) FROM e2ee_items WHERE circle_id = '$circle' AND device_id = '$dev' AND key_line = 'server'"), 0);
-
-      // A circle admin cannot switch assistance on for a circle with an old app in it (fresh circle: policy off).
-      final Map<String, dynamic> c2 = await rawJson(env, 'POST', '/circles', body: <String, dynamic>{'name': 'E2E old app'}, token: a.token);
-      final String circle2 = (c2['id'] ?? (c2['circle'] as Map<String, dynamic>)['id']) as String;
-      final Map<String, dynamic> inv2 = await rawJson(env, 'POST', '/circles/$circle2/invites', body: <String, dynamic>{'role': 'member', 'max_uses': 1, 'expires_in_hours': 1}, token: a.token);
-      await rawJson(env, 'POST', '/circles/join', body: <String, dynamic>{'code': (inv2['code'] ?? (inv2['invite'] as Map<String, dynamic>)['code']) as String}, token: d.token);
-      await a.run(() => a.service.enableCircle(circle2));
-      await d.run(() => old.syncCircleKeys(circle2));
-      await expectLater(a.run(() => a.lanes.publishPolicy(circle2, serverAssist: true)), throwsA(anything));
-      expect((await a.run(() => const ApiE2eeApi().processingState(circle2))).serverAssist, isFalse);
+      expect(err, isA<ApiException>(), reason: 'old app must be refused: $err');
+      expect((err as ApiException).status, 409);
+      expect(await db.locationsOf(d.userId), 0);
     });
   });
 
