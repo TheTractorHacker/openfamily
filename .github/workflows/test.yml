@@ -100,6 +100,10 @@ jobs:
           xcrun simctl bootstatus "$udid" -b
           xcrun simctl install "$udid" build/ios/iphonesimulator/Runner.app
           xcrun simctl launch "$udid" app.openfamily
+      # The Keychain refuses every call (errSecMissingEntitlement, -34018) from a
+      # binary with no entitlements at all, which is what CODE_SIGNING_ALLOWED=NO
+      # produces. Ad-hoc signing ("-", no account, no secrets) makes Xcode embed
+      # the simulated application-identifier so the software-key path can run.
       - name: RunnerTests (xcodebuild)
         run: |
           udid=$(xcrun simctl list devices available \
@@ -111,7 +115,8 @@ jobs:
             -workspace ios/Runner.xcworkspace \
             -scheme Runner \
             -destination "platform=iOS Simulator,id=$udid" \
-            CODE_SIGNING_ALLOWED=NO
+            CODE_SIGN_IDENTITY=- CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM=
           rc=$?
           if [ $rc -ne 0 ]; then
             echo "::group::xcresult test failures"

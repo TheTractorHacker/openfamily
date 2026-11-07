@@ -212,13 +212,17 @@ final class SecureKeyChannel {
     return (try createKey(requireUserAuth: false), true)
   }
 
-  private func createKey(requireUserAuth: Bool) throws -> SecKey {
+  /// The Simulator has no Secure Enclave: go straight to the software key there.
+  private static let hasSecureEnclave: Bool = {
     #if targetEnvironment(simulator)
-      let enclaveFirst = false  // the Simulator has no Secure Enclave
+      return false
     #else
-      let enclaveFirst = true
+      return true
     #endif
-    if enclaveFirst, let k = try? generate(requireUserAuth: requireUserAuth, enclave: true) {
+  }()
+
+  private func createKey(requireUserAuth: Bool) throws -> SecKey {
+    if Self.hasSecureEnclave, let k = try? generate(requireUserAuth: requireUserAuth, enclave: true) {
       return k
     }
     return try generate(requireUserAuth: requireUserAuth, enclave: false)
