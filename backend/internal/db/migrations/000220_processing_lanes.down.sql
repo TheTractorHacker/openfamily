@@ -15,6 +15,14 @@ END $$;
 -- Restores the pre-lanes functions (migration 000165). Server-line wraps and
 -- items are deleted (they cannot be read without the lanes code); key_line
 -- columns are dropped. Lane-server data on the server (plaintext copies) stays.
+DROP TRIGGER IF EXISTS trg_e2ee_log_lanes_guard ON e2ee_log;
+DROP TRIGGER IF EXISTS trg_e2ee_member_lanes_guard ON circle_members;
+DROP TRIGGER IF EXISTS trg_e2ee_device_lanes_guard ON device_keys;
+DROP FUNCTION IF EXISTS e2ee_log_lanes_guard();
+DROP FUNCTION IF EXISTS e2ee_member_lanes_guard();
+DROP FUNCTION IF EXISTS e2ee_device_lanes_guard();
+DROP FUNCTION IF EXISTS e2ee_circle_has_lanes_log(UUID);
+DROP INDEX IF EXISTS idx_e2ee_log_circle_lanes;
 DROP TRIGGER IF EXISTS trg_e2ee_wrap_guard ON circle_key_wraps;
 DROP TRIGGER IF EXISTS trg_e2ee_item_guard ON e2ee_items;
 DROP TRIGGER IF EXISTS trg_e2ee_pref_server_lane_changed ON e2ee_processing_pref;

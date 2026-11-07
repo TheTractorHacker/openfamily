@@ -993,6 +993,10 @@ func (s *Server) JoinCircle(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invite code has already been used")
 		return
 	}
+	if oldAppBlocksJoin(r.Context(), tx, circleID, uid) {
+		writeUpdateRequired(w, nil)
+		return
+	}
 	if _, err := circles.New(tx).RequireMember(r.Context(), uid, circleID); err == nil {
 		writeError(w, http.StatusConflict, "already a member of this circle")
 		return

@@ -493,10 +493,19 @@ Old routes: `PUT .../server-consent` works only for circles still flagged legacy
 
 ### 18.2b Join preview, legacy flag, upgrade request shape
 
-* `GET /invites/{code}/preview` (public, per-IP rate limited, generic 404 for unknown, used-up, expired or ended invites) returns exactly `{private, server_assist, member_opt_out ('allowed'|'required_server'), default_for_new ('phone'|'server')}`: the privacy setup only, no name, ids or members. Non-private circles answer `false/false/allowed/phone`.
+* `GET /invites/{code}/preview` (public, per-IP rate limited, generic 404 for unknown, used-up, expired or ended invites) returns exactly `{private, server_assist, member_opt_out ('allowed'|'required_server'), default_for_new ('phone'|'server'), legacy}`: the privacy setup only, no name, ids or members. Non-private circles answer `false/false/allowed/phone`.
 * `GET .../processing` carries `legacy_access_open`: true only on an upgraded circle where the server key still holds wraps of the old phone-key epochs (what `DELETE .../legacy-server-access` removes).
 * `DELETE .../server-copies` returns `locations_deleted` and `items_deleted` (and the last-position counters).
 * `POST .../processing-upgrade` body (verified against the phone client): top level `epoch`, `key_commitment` (base64), `actor_device_id`, `log_signature` (the epoch action), `epoch_wraps` (CK wraps for N+1, none for the server key); `policy` = `{server_assist:true, default_for_new, member_opt_out, sk_gen:1, commitment, nonce, signature, actor_device_id, log_signature, wraps[]}` (SK wraps; unknown extra keys such as `admin_user_id` are ignored).
+
+### 18.2c Old apps and the key log (rule)
+
+An app without `lanes2` cannot parse log actions 10 and 11: it would stop pinning the log head and miss key-change alarms. The server therefore keeps old apps and processing log entries apart. Every refusal is HTTP 409 with `code: "update_required_for_lanes"`, a human-readable `error` ("Update OpenFamily to continue ...") and `not_ready: [user ids]` (empty when the caller themself is the old app):
+* An action-10/11 entry (policy on/edit/rotate, upgrade, any pref) is refused while any live member of the circle has an active phone key without `lanes2`. The check is on keys, not users: a member with one new and one old phone blocks it until the old key is revoked. Turning the policy off is exempt.
+* `POST /circles/join` and `POST /family/join` refuse a user who already has an active phone key without `lanes2` when the circle has such entries (the invite is not consumed). Admin moves and every other path hit the database trigger (a plain 500 error text starting `e2ee_update_required_for_lanes`).
+* A member of such a circle cannot register (`POST /e2ee/devices`) or rotate to a phone key without `lanes2` (send `caps: ["lanes2"]` in the registration body); a user without keys can join, and is stopped at registration. Web, service, server and recovery keys are exempt.
+* Database triggers on `e2ee_log` (entries 10/11), `circle_members` and `device_keys` repeat all three rules for paths the handlers do not cover. There is no server-side `min_app_version` mechanism in this codebase; the 409 body is the signal, and apps should map this code to an "update the app" screen.
+* Invite preview carries `legacy` (true for a legacy trusted-server circle, where the server CAN read everything); `GET .../processing` has `legacy: {active, epoch_max}`.
 
 ### 18.3 Trust and authorization rules
 
