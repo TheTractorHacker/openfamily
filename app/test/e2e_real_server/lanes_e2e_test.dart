@@ -385,26 +385,3 @@ void main() {
     expect(<String>['41.314', '41.315'], isNotEmpty);
   });
 }
-
-class _ForcedServerLane implements LaneSource {
-  _ForcedServerLane(this.gen);
-  final int gen;
-  @override
-  Future<LaneChoice> ownLane(String circleId) async => LaneChoice(E2ee.lineServer, gen);
-  @override
-  Future<bool> serverLaneAllowed(String circleId) async => true;
-  @override
-  Future<List<PrefEntry>> prefsOf(String circleId, String userId) async => <PrefEntry>[];
-  @override
-  Future<bool> serverAssistOn(String circleId) async => true;
-}
-
-class _FixedSk implements ServerKeys {
-  _FixedSk(this.gen, this.key);
-  final int gen;
-  final Uint8List key;
-  @override
-  Future<Uint8List?> serverKey(String circleId, int g) async => g == gen ? key : null;
-  @override
-  Future<int> latestServerGen(String circleId) async => gen;
-}
