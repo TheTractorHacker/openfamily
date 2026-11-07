@@ -18,6 +18,8 @@ func chatEnv(t *testing.T) *circleEnv {
 	e.rt.Post("/circles/{id}/chat/photo", e.srv.SendChatPhoto)
 	e.rt.Get("/circles/{id}/chat/{msgId}/photo", e.srv.GetChatPhoto)
 	e.rt.Get("/chat/unread", e.srv.ChatUnread)
+	e.rt.Patch("/circles/{id}/chat/{msgId}", e.srv.EditChatMessage)
+	e.rt.Delete("/circles/{id}/chat/{msgId}", e.srv.DeleteChatMessage)
 	return e
 }
 
@@ -177,5 +179,66 @@ func TestChatLiveFrameAndPush(t *testing.T) {
 	}
 	if got := fp.sent[0].Title + fp.sent[0].Body; strings.Contains(got, "secret") || strings.Contains(got, "51.5") {
 		t.Fatalf("push leaked message text: %q", got)
+	}
+}
+
+func TestChatEditDeleteIdempotencyCatchUp(t *testing.T) {
+	e := chatEnv(t)
+	c := e.createCircle("A", "V2", "B", "C") // A admin; B, C members; D outsider
+	p := "/circles/" + c + "/chat"
+
+	// Idempotent send: same client_id returns the same message, one row.
+	_, first, _ := e.do("B", "POST", p, map[string]string{"body": "once", "client_id": "k1"})
+	code, again, _ := e.do("B", "POST", p, map[string]string{"body": "once", "client_id": "k1"})
+	if code != 200 || again["id"] != first["id"] {
+		t.Fatalf("retry: code %d, %v vs %v", code, again["id"], first["id"])
+	}
+	var n int
+	_ = e.pool.QueryRow(t.Context(), `SELECT count(*) FROM chat_messages WHERE circle_id=$1`, c).Scan(&n)
+	if n != 1 {
+		t.Fatalf("rows = %d, want 1", n)
+	}
+	// The same client_id from another sender is a different message.
+	e.mustCode("C", "POST", p, map[string]string{"body": "other", "client_id": "k1"}, 201)
+	e.mustCode("B", "POST", p, map[string]string{"body": "x", "client_id": strings.Repeat("a", 65)}, 400)
+
+	id := first["id"].(string)
+	seq := int64(first["seq"].(float64))
+
+	// Edit: only the sender.
+	e.mustCode("C", "PATCH", p+"/"+id, map[string]string{"body": "hijack"}, 404)
+	e.mustCode("A", "PATCH", p+"/"+id, map[string]string{"body": "admin edit"}, 404)
+	e.mustCode("D", "PATCH", p+"/"+id, map[string]string{"body": "x"}, 404)
+	e.mustCode("B", "PATCH", p+"/"+id, map[string]string{"body": "  "}, 400)
+	got := e.mustCode("B", "PATCH", p+"/"+id, map[string]string{"body": "twice"}, 200)
+	if got["body"] != "twice" || got["edited_at"] == nil {
+		t.Fatalf("edit result: %v", got)
+	}
+
+	// Catch-up: only messages newer than `after`, newest first.
+	_, page, _ := e.do("A", "GET", p+"?after="+fmt.Sprint(seq), nil)
+	msgs, _ := page["messages"].([]any)
+	if len(msgs) != 1 || msgs[0].(map[string]any)["body"] != "other" {
+		t.Fatalf("after page: %v", msgs)
+	}
+	e.mustCode("A", "GET", p+"?after=-1", nil, 400)
+
+	// Delete: sender or admin; other members and outsiders get 404.
+	e.mustCode("C", "DELETE", p+"/"+id, nil, 404)
+	e.mustCode("D", "DELETE", p+"/"+id, nil, 404)
+	e.mustCode("B", "DELETE", p+"/"+id, nil, 204)
+	e.mustCode("B", "DELETE", p+"/"+id, nil, 404)
+	_, other, _ := e.do("C", "GET", p, nil)
+	om := other["messages"].([]any)
+	oid := om[0].(map[string]any)["id"].(string)
+	e.mustCode("A", "DELETE", p+"/"+oid, nil, 204) // admin moderation
+	_, after, _ := e.do("A", "GET", p, nil)
+	if l, _ := after["messages"].([]any); len(l) != 0 {
+		t.Fatalf("messages left: %v", l)
+	}
+	// Unread no longer counts deleted messages.
+	_, un, _ := e.do("A", "GET", "/chat/unread", nil)
+	if un["total"].(float64) != 0 {
+		t.Fatalf("unread after delete: %v", un)
 	}
 }
