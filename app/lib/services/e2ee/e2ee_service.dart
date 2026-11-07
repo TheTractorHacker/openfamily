@@ -7,6 +7,7 @@ import 'e2ee_api.dart';
 import 'e2ee_crypto.dart';
 import 'e2ee_models.dart';
 import 'e2ee_trust.dart';
+import 'lanes_wire.dart';
 import 'e2ee_vault.dart';
 
 /// This phone's identity. The private halves ([edSeed], [xSecret]) live only
@@ -100,6 +101,9 @@ class E2eeService {
   final TrustStore trust;
   final Future<String> Function() userIdProvider;
 
+  /// Capabilities advertised in device registration (see [kCapLanes]).
+  static const List<String> capabilities = <String>[kCapLanes];
+
   static const String _seedName = 'identity_seed';
   static const String _deviceName = 'device_id';
   static const String _userName = 'identity_user';
@@ -183,6 +187,9 @@ class E2eeService {
       'actor_device_id': actorDeviceId,
       'log_signature': E2ee.b64(await E2ee.sign(actorEdSeed, msg)),
       'reset': reset,
+      // What this app can read. An old app sends nothing and so can never be
+      // handed a server-line key (the admin screen lists it as "update needed").
+      LanesFields.caps: capabilities,
     };
   }
 
@@ -327,9 +334,167 @@ class E2eeService {
     return out;
   }
 
+  // ------------------------------------------------ server line key (SK)
+  // PRIVACY_PROCESSING sections 5.1 and 5.4. SK has its own generation counter
+  // and its own vault names; CK code paths never touch it.
+
+  String _skName(String circleId, int gen) => 'sk/$circleId/$gen';
+
+  Future<Uint8List?> serverKey(String circleId, int gen) => vault.read(_skName(circleId, gen));
+
+  Future<List<int>> heldServerGens(String circleId) async {
+    final String p = 'sk/$circleId/';
+    final List<int> out = <int>[];
+    for (final String n in await vault.names()) {
+      if (n.startsWith(p)) {
+        final int? g = int.tryParse(n.substring(p.length));
+        if (g != null && g >= 1) out.add(g);
+      }
+    }
+    out.sort();
+    return out;
+  }
+
+  Future<int> latestServerGen(String circleId) async {
+    final List<int> g = await heldServerGens(circleId);
+    return g.isEmpty ? 0 : g.last;
+  }
+
+  /// Stores a freshly generated SK (the admin phone that made it).
+  Future<void> storeServerKey(String circleId, int gen, Uint8List key) async {
+    if (await serverKeyEqualsCircleKey(circleId, key)) {
+      await _raiseSkEqualsCk(circleId);
+      throw StateError('refusing to store a server key that equals a circle key');
+    }
+    await vault.write(_skName(circleId, gen), key);
+  }
+
+  /// A fresh server line key from the CSPRNG, asserted different from every circle key epoch.
+  Future<Uint8List> generateServerKey(String circleId, {CircleE2eeState? state, Uint8List Function()? random}) async {
+    final Uint8List key = (random ?? () => E2ee.randomBytes(32))();
+    if (key.length != 32 || await serverKeyEqualsCircleKey(circleId, key, state: state)) {
+      await _raiseSkEqualsCk(circleId);
+      throw StateError('generated server key collides with a circle key');
+    }
+    return key;
+  }
+
+  /// Alarms raised by the lane checks (never cleared by this class; the UI shows and clears them).
+  final List<E2eeAlarm> laneAlarms = <E2eeAlarm>[];
+
+  /// True when [key] (an SK candidate) is, or commits like, ANY circle key epoch of
+  /// [circleId]: the held epoch keys byte for byte, and the signed epoch commitments
+  /// of the circle state (covers epochs whose bytes this phone does not hold).
+  /// A server line key that equals a CK would hand the server every phone-line item.
+  Future<bool> serverKeyEqualsCircleKey(String circleId, Uint8List key, {CircleE2eeState? state}) async {
+    for (final int e in await heldEpochs(circleId)) {
+      final Uint8List? ck = await circleKey(circleId, e);
+      if (ck != null && E2ee.constEq(ck, key)) return true;
+    }
+    final CircleE2eeState st = state ?? await api.circleState(circleId);
+    for (final EpochRecord rec in st.epochs) {
+      if (rec.epoch >= 1 && E2ee.constEq(await E2ee.keyCommitment(key, circleId, rec.epoch), rec.commitment)) return true;
+    }
+    return false;
+  }
+
+  Future<void> _raiseSkEqualsCk(String circleId) async {
+    final E2eeAlarm a = E2eeAlarm(AlarmKind.serverKeyIsCircleKey, 'Server key refused',
+        'A server key for this circle was identical to the circle key and was NOT used. Someone may be trying to give the server your private data.',
+        circleId: circleId);
+    laneAlarms.add(a);
+    // Recorded on this phone so the alert survives a restart.
+    try {
+      await trust.kv.set('alarm:skck:$circleId', DateTime.now().toUtc().toIso8601String());
+    } catch (_) {}
+  }
+
+  /// One v3 wrap of the server line key.
+  Future<Map<String, dynamic>> wrapServerKeyTo(LocalIdentity me, String circleId, int gen, Uint8List key, DeviceKey to,
+      {Uint8List? wrapperEdSeed, String? wrapperId}) async {
+    final String wid = wrapperId ?? me.deviceId;
+    // Whatever the server claims about the line, never wrap a circle key under the server line.
+    if (await serverKeyEqualsCircleKey(circleId, key)) {
+      await _raiseSkEqualsCk(circleId);
+      throw StateError('refusing to wrap a key that equals a circle key under the server line');
+    }
+    final Uint8List aad = E2ee.wrapAadLine(circleId, E2ee.lineServer, gen, to.deviceId, wid);
+    final Uint8List blob = await E2ee.wrap(key, to.xPub, aad);
+    final Uint8List sig = await E2ee.sign(wrapperEdSeed ?? me.edSeed, E2ee.wrapSigMessageLine(circleId, E2ee.lineServer, gen, to.deviceId, wid, blob));
+    return <String, dynamic>{
+      'recipient_device_id': to.deviceId,
+      'wrapper_device_id': wid,
+      'wrapped_key': E2ee.b64(blob),
+      'signature': E2ee.b64(sig),
+    };
+  }
+
+  /// Keys that get a wrap of the server line. [serverKey] non-null only when the
+  /// caller verified policy on + pinned key + at least one member in lane server.
+  Future<List<DeviceKey>> serverLineRecipients(CircleE2eeState st, LocalIdentity me, {DeviceKey? serverKey}) =>
+      _recipients(st, me, line: E2ee.lineServer, serverKey: serverKey);
+
+  /// How many wraps of server-line keys were refused in the last [syncServerKeys].
+  int rejectedServerWraps = 0;
+
+  /// Opens the server-line wraps addressed to this phone. [commitments] maps an
+  /// SK generation to the commitment from a VERIFIED signed policy record (a
+  /// wrap for a generation without one, or whose key does not match it, is
+  /// refused). Returns the number of new keys stored.
+  Future<int> syncServerKeys(String circleId, Map<int, Uint8List> commitments,
+      {String? asDeviceId, Uint8List? xSecret, Uint8List? xPub}) async {
+    final LocalIdentity me = (await identity())!;
+    final String dev = asDeviceId ?? me.deviceId;
+    final Uint8List sec = xSecret ?? me.xSecret;
+    final Uint8List pub = xPub ?? me.xPub;
+    int n = 0;
+    rejectedServerWraps = 0;
+    for (final WrapRecord w in await api.myWraps(circleId, dev)) {
+      if (w.line != E2ee.lineServer || w.recipientDeviceId != dev) continue;
+      if (await vault.read(_skName(circleId, w.epoch)) != null) continue;
+      final Uint8List? commit = commitments[w.epoch];
+      if (commit == null) {
+        rejectedServerWraps++;
+        continue;
+      }
+      try {
+        final Uint8List key = await E2ee.openWrapLine(
+            circleId,
+            dev,
+            sec,
+            pub,
+            LineWrap(
+                line: w.line,
+                gen: w.epoch,
+                recipientDeviceId: w.recipientDeviceId,
+                wrapperDeviceId: w.wrapperDeviceId,
+                wrapperEdPub: w.wrapperEdPub,
+                blob: w.blob,
+                signature: w.signature),
+            E2ee.lineServer,
+            w.epoch,
+            commit);
+        if (await serverKeyEqualsCircleKey(circleId, key)) {
+          rejectedServerWraps++;
+          await _raiseSkEqualsCk(circleId);
+          continue; // never stored, never used
+        }
+        await vault.write(_skName(circleId, w.epoch), key);
+        n++;
+      } on E2eeAuthException {
+        rejectedServerWraps++;
+      } on E2eeFormatException {
+        rejectedServerWraps++;
+      }
+    }
+    return n;
+  }
+
   Future<Map<String, dynamic>> _wrapTo(LocalIdentity me, String circleId, int epoch, Uint8List key, DeviceKey to,
       {Uint8List? wrapperEdSeed, String? wrapperId}) async {
     final String wid = wrapperId ?? me.deviceId;
+    // Hard rule (PRIVACY_PROCESSING 5.4.1): the phone key CK is NEVER wrapped to a server device.
+    E2ee.checkWrapRecipient(E2ee.linePhone, to.kind, policyOn: false, hasServerLaneMember: false);
     final Uint8List aad = E2ee.wrapAad(circleId, epoch, to.deviceId, wid);
     final Uint8List blob = await E2ee.wrap(key, to.xPub, aad);
     final Uint8List sig = await E2ee.sign(wrapperEdSeed ?? me.edSeed, E2ee.wrapSigMessage(circleId, epoch, to.deviceId, wid, blob));
@@ -353,19 +518,26 @@ class E2eeService {
     };
   }
 
-  /// Keys to wrap a fresh epoch key to: every approved active key whose
+  /// Keys to wrap a fresh key of [line] to: every approved active key whose
   /// registration verifies and that the wrap policy allows automatically.
   /// Others wait in the pending queue until the user confirms.
-  Future<List<DeviceKey>> _recipients(CircleE2eeState st, LocalIdentity me) async {
+  ///
+  /// The phone line (CK) NEVER includes a `server` key (a hard rule, checked
+  /// again on the result). The server line (SK) includes the server key only
+  /// when the caller passes [serverKey], i.e. it already verified that the
+  /// admin policy is on, the key is the pinned one and at least one member is
+  /// in lane server.
+  Future<List<DeviceKey>> _recipients(CircleE2eeState st, LocalIdentity me,
+      {int line = E2ee.linePhone, DeviceKey? serverKey}) async {
     final Set<String> own = st.allDevices.where((DeviceKey k) => k.userId == me.userId).map((DeviceKey k) => k.deviceId).toSet();
     final List<DeviceKey> out = <DeviceKey>[];
-    final DeviceKey? server = await allowedServerKey(st);
     for (final DeviceKey k in st.allDevices) {
       if (k.approved != true) continue;
       if (k.kind == 'server') {
-        // The OpenFamily server key never gets a key automatically: only while it is
-        // the pinned server key AND every member's consent verifies.
-        if (server != null && k.deviceId == server.deviceId) out.add(k);
+        if (line == E2ee.lineServer && serverKey != null && k.deviceId == serverKey.deviceId) {
+          E2ee.checkWrapRecipient(line, k.kind, policyOn: true, hasServerLaneMember: true);
+          out.add(k);
+        }
         continue;
       }
       if (k.deviceId == me.deviceId) {
@@ -374,6 +546,9 @@ class E2eeService {
       }
       final WrapDecisionResult d = await decideWrap(key: k, selfUserId: me.userId, trust: trust, ownKnownDeviceIds: own);
       if (d.decision == WrapDecision.auto) out.add(k);
+    }
+    if (line == E2ee.linePhone && out.any((DeviceKey k) => k.kind == 'server')) {
+      throw StateError('internal error: the phone key line must never be wrapped to a server key');
     }
     return out;
   }
@@ -407,6 +582,23 @@ class E2eeService {
     return epoch;
   }
 
+  /// Builds (but does not send) the next circle key epoch: the request body
+  /// with the wraps under `epoch_wraps` and a commit step that stores the key on
+  /// this phone. Used by the legacy upgrade, which sends it together with the
+  /// signed policy in one request. The phone line is never wrapped to a server key.
+  Future<({int epoch, Map<String, dynamic> body, Future<void> Function() commit})> prepareNextEpoch(String circleId) async {
+    final LocalIdentity me = (await identity())!;
+    final CircleE2eeState st = await api.circleState(circleId);
+    final int epoch = st.epoch + 1;
+    final Uint8List key = E2ee.randomBytes(32);
+    final List<Map<String, dynamic>> wraps = <Map<String, dynamic>>[
+      for (final DeviceKey k in await _recipients(st, me)) await _wrapTo(me, circleId, epoch, key, k)
+    ];
+    final Map<String, dynamic> b = await _epochBody(me, E2ee.actEpoch, circleId, epoch, key, wraps);
+    b['epoch_wraps'] = b.remove('wraps');
+    return (epoch: epoch, body: b, commit: () => vault.write(_ckName(circleId, epoch), key));
+  }
+
   Future<void> disableCircle(String circleId) async {
     final LocalIdentity me = (await identity())!;
     final CircleE2eeState st = await api.circleState(circleId);
@@ -435,6 +627,7 @@ class E2eeService {
     int n = 0;
     rejectedWraps = 0;
     for (final WrapRecord w in await api.myWraps(circleId, dev)) {
+      if (w.line != E2ee.linePhone) continue; // server-line wraps: syncServerKeys
       if (await vault.read(_ckName(circleId, w.epoch)) != null) continue;
       if (w.recipientDeviceId != dev) continue;
       final Uint8List sm = E2ee.wrapSigMessage(circleId, w.epoch, dev, w.wrapperDeviceId, w.blob);
@@ -515,10 +708,10 @@ class E2eeService {
     final Uint8List? k = await circleKey(circleId, st.epoch);
     if (k == null) throw StateError('This phone does not hold the current circle key yet.');
     if (key.kind == 'server') {
-      final DeviceKey? allowed = await allowedServerKey(st);
-      if (allowed == null || allowed.deviceId != key.deviceId) {
-        throw StateError('The server key only gets the circle key after every member has allowed it.');
-      }
+      // The phone key never goes to the server key. The server line key (SK)
+      // is wrapped by LanesService once the admin policy and a member's own
+      // pref allow it.
+      throw StateError('The server key never receives the phone circle key. Use the processing settings (server key line).');
     }
     if (st.epochRecord(st.epoch)?.publisherUserId != me.userId && key.userId != me.userId) {
       throw StateError('Only the admin who published this key epoch can share it with other members.');
@@ -604,15 +797,12 @@ class E2eeService {
   /// and the circle asks for a new key epoch (the server key is not wrapped again).
   Future<void> withdrawServerConsent(String circleId) => api.deleteServerConsent(circleId);
 
-  /// Publisher of the current epoch: gives the server key the circle key, but only
-  /// when every member's consent verifies on this phone.
+  /// Legacy trusted-server action. It used to wrap the CIRCLE key to the server
+  /// key. That is no longer possible: the phone key line is never wrapped to a
+  /// server key (PRIVACY_PROCESSING 5.4.1). The server line key is handled by
+  /// `LanesService` (policy by the admin, pref by each member).
   Future<void> shareKeyWithServer(String circleId) async {
-    final CircleE2eeState st = await api.circleState(circleId);
-    final DeviceKey? key = await allowedServerKey(st);
-    if (key == null) {
-      throw StateError('Not every member has allowed the server yet (or the server key is not the pinned one).');
-    }
-    await confirmWrap(circleId, key);
+    throw StateError('The circle key is never shared with the server. Turn on server processing for this circle instead (each member decides for their own data).');
   }
 
   /// Deletes the plaintext copies the server made from this circle.
@@ -759,6 +949,24 @@ class E2eeService {
           ]);
         } catch (_) {
           // Not a member any more, or the circle is no longer private: skip.
+        }
+      }
+    }
+    // Server-line keys follow the same rule, but a server-kind target never gets one here.
+    final Set<String> skCircles = <String>{};
+    for (final String name in await vault.names()) {
+      if (name.startsWith('sk/')) skCircles.add(name.split('/')[1]);
+    }
+    if (target.kind != 'server') {
+      for (final String c in skCircles) {
+        for (final int gen in await heldServerGens(c)) {
+          final Uint8List? key = await serverKey(c, gen);
+          if (key == null) continue;
+          try {
+            n += await api.submitLineWraps(c, E2ee.lineServer, gen, <Map<String, dynamic>>[
+              await wrapServerKeyTo(me, c, gen, key, target, wrapperEdSeed: wrapperEdSeed, wrapperId: wrapperId)
+            ]);
+          } catch (_) {}
         }
       }
     }

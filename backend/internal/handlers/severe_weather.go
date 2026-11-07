@@ -209,7 +209,7 @@ func (s *Server) weatherCells(ctx context.Context) (map[string][]weatherUser, er
 	rows, err := s.Pool.Query(ctx, `
 		SELECT mp.user_id::text, COALESCE(u.family_id::text, ''), mp.lat, mp.lon
 		FROM member_positions mp JOIN users u ON u.id = mp.user_id
-		WHERE mp.updated_at > now() - interval '6 hours'
+		WHERE mp.updated_at > now() - interval '6 hours' AND NOT e2ee_keeps_data_on_phone(mp.user_id)
 		  AND mp.lat BETWEEN 17 AND 72 AND mp.lon BETWEEN -180 AND -65`)
 	if err != nil {
 		return nil, err

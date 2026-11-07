@@ -1,7 +1,9 @@
 import 'dart:typed_data';
 
 import '../api_client.dart';
+import 'e2ee_crypto.dart';
 import 'e2ee_models.dart';
+import 'lanes_wire.dart';
 
 /// Server calls of the E2EE foundation. Abstract so tests can fake the server.
 /// Every payload is a public key or ciphertext; nothing secret is ever sent.
@@ -27,6 +29,36 @@ abstract class E2eeApi {
       throw UnsupportedError('server mode is not available');
   Future<void> deleteServerConsent(String circleId) async {}
   Future<int> purgeServerCopies(String circleId, {bool wholeCircle = false}) async => 0;
+
+  // Processing lanes (docs/design/PRIVACY_PROCESSING.md section 7 / 17). The
+  // defaults keep older fakes and servers working: no lanes, nothing to do.
+  // Paths and field names live in lanes_wire.dart.
+  Future<ProcessingServerState> processingState(String circleId) async => ProcessingServerState.off;
+
+  /// PUT .../processing/policy (circle admin). [body] = statement fields,
+  /// `log_signature`, and for a new SK generation `sk_wraps` ({gen, wraps}).
+  Future<void> putProcessingPolicy(String circleId, Map<String, dynamic> body) async =>
+      throw UnsupportedError('processing lanes are not available');
+
+  /// PUT .../processing/pref (own pref only; no endpoint writes another user's).
+  Future<void> putProcessingPref(String circleId, Map<String, dynamic> body) async =>
+      throw UnsupportedError('processing lanes are not available');
+
+  /// GET .../pending?key_line=server: approved-or-waiting member keys that lack a
+  /// wrap of the CURRENT SK generation (never the server key itself).
+  Future<List<DeviceKey>> pendingLine(String circleId, int line) async => line == E2ee.linePhone ? pending(circleId) : <DeviceKey>[];
+
+  /// POST wraps of a key line. [gen] is the SK generation for the server line.
+  Future<int> submitLineWraps(String circleId, int line, int gen, List<Map<String, dynamic>> wraps) async =>
+      throw UnsupportedError('processing lanes are not available');
+
+  /// POST .../processing-upgrade (circle admin, legacy trusted-server circles only).
+  Future<void> upgradeProcessing(String circleId, Map<String, dynamic> body) async =>
+      throw UnsupportedError('processing lanes are not available');
+
+  /// DELETE .../legacy-server-access (circle admin, after an upgrade). Irreversible.
+  Future<void> endLegacyServerAccess(String circleId) async =>
+      throw UnsupportedError('processing lanes are not available');
 }
 
 class ApiE2eeApi implements E2eeApi {
@@ -59,10 +91,12 @@ class ApiE2eeApi implements E2eeApi {
 
   @override
   Future<List<WrapRecord>> myWraps(String circleId, String deviceId) async {
-    final dynamic r = await ApiClient.get('/circles/$circleId/e2ee/wraps', query: <String, String>{'device_id': deviceId});
+    // key_line=all: without it the server answers phone-line wraps only (old-app behaviour).
+    final dynamic r = await ApiClient.get('/circles/$circleId/e2ee/wraps', query: <String, String>{'device_id': deviceId, LanesFields.keyLine: 'all'});
     return ((r as Map<String, dynamic>)['wraps'] as List<dynamic>)
         .cast<Map<String, dynamic>>()
-        .map(WrapRecord.fromJson)
+        .map(WrapRecord.tryParse)
+        .whereType<WrapRecord>()
         .toList();
   }
 
@@ -107,7 +141,37 @@ class ApiE2eeApi implements E2eeApi {
   @override
   Future<int> purgeServerCopies(String circleId, {bool wholeCircle = false}) async {
     final dynamic r = await ApiClient.delete('/circles/$circleId/e2ee/server-copies?scope=${wholeCircle ? 'circle' : 'mine'}');
-    return r is Map<String, dynamic> ? ((r['locations_deleted'] as num?)?.toInt() ?? 0) : 0;
+    return r is Map<String, dynamic> ? (((r['items_deleted'] ?? r['locations_deleted']) as num?)?.toInt() ?? 0) : 0;
+  }
+
+  @override
+  Future<List<DeviceKey>> pendingLine(String circleId, int line) async =>
+      _keys(await ApiClient.get('/circles/$circleId/e2ee/pending', query: <String, String>{LanesFields.keyLine: E2ee.lineName(line)}), 'pending');
+
+  @override
+  Future<ProcessingServerState> processingState(String circleId) async => ProcessingServerState.fromJson(
+      (await ApiClient.get(LanesPaths.state(circleId))) as Map<String, dynamic>);
+
+  @override
+  Future<void> putProcessingPolicy(String circleId, Map<String, dynamic> body) =>
+      ApiClient.put(LanesPaths.policy(circleId), body: body);
+
+  @override
+  Future<void> putProcessingPref(String circleId, Map<String, dynamic> body) =>
+      ApiClient.put(LanesPaths.pref(circleId), body: body);
+
+  @override
+  Future<void> upgradeProcessing(String circleId, Map<String, dynamic> body) =>
+      ApiClient.post(LanesPaths.upgrade(circleId), body: body);
+
+  @override
+  Future<void> endLegacyServerAccess(String circleId) => ApiClient.delete(LanesPaths.legacyAccess(circleId));
+
+  @override
+  Future<int> submitLineWraps(String circleId, int line, int gen, List<Map<String, dynamic>> wraps) async {
+    final dynamic r = await ApiClient.post(LanesPaths.wraps(circleId),
+        body: <String, dynamic>{'epoch': gen, LanesFields.keyLine: E2ee.lineName(line), 'wraps': wraps});
+    return ((r as Map<String, dynamic>)['stored'] as num?)?.toInt() ?? 0;
   }
 
   @override

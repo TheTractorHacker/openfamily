@@ -11,6 +11,11 @@ import '../services/speed_units.dart';
 import '../services/trip_report_service.dart';
 import '../services/trips_service.dart';
 import '../theme/app_theme.dart';
+import '../services/e2ee/private_runtime.dart';
+import '../services/processing/primary_lanes.dart';
+import '../services/processing/processing_source.dart';
+import '../widgets/phone_driving_widgets.dart';
+import '../widgets/processing_widgets.dart';
 import '../widgets/private_circle_widgets.dart';
 import '../widgets/driving_event_chips.dart';
 import '../widgets/driving_event_sheet.dart';
@@ -40,6 +45,7 @@ class FamilyDrivingReportScreen extends StatefulWidget {
     this.sharing,
     this.detectionLoader,
     this.optInSync,
+    this.lanes,
   });
 
   final ValueListenable<List<Member>> members;
@@ -69,6 +75,9 @@ class FamilyDrivingReportScreen extends StatefulWidget {
   /// `DrivingEventsService.syncOptIn`). Null = do nothing (tests).
   final Future<bool> Function()? optInSync;
 
+  /// Injected in tests; defaults to the running app's processing lanes.
+  final PrimaryLanesLoader? lanes;
+
   @override
   State<FamilyDrivingReportScreen> createState() => _State();
 }
@@ -95,7 +104,31 @@ class _State extends State<FamilyDrivingReportScreen> {
     widget.circleId?.addListener(_load);
     widget.optInSync?.call();
     _loadPrefs();
-    _load();
+    if (PrivateRuntime.primaryPrivate.value) {
+      _loadLanes();
+    } else {
+      _load();
+    }
+  }
+
+  // Private circle with processing lanes: who computes whose figures.
+  PrimaryLanes? _lanes;
+  bool _lanesLoading = false;
+
+  bool get _hasServerMembers => _lanes?.members.any((MemberProcessing m) => m.origin == ProcessingOrigin.server) ?? false;
+
+  Future<void> _loadLanes() async {
+    setState(() => _lanesLoading = true);
+    PrimaryLanes? l;
+    try {
+      l = await (widget.lanes ?? loadPrimaryLanes)();
+    } catch (_) {}
+    if (!mounted) return;
+    setState(() {
+      _lanes = l;
+      _lanesLoading = false;
+    });
+    if (_hasServerMembers) await _load();
   }
 
   @override
@@ -121,6 +154,7 @@ class _State extends State<FamilyDrivingReportScreen> {
   }
 
   Future<void> _load() async {
+    if (PrivateRuntime.primaryPrivate.value && !_hasServerMembers) return;
     final int seq = ++_seq;
     setState(() {
       _loading = true;
@@ -241,8 +275,110 @@ class _State extends State<FamilyDrivingReportScreen> {
   // ---- build ----
 
   @override
-  Widget build(BuildContext context) =>
-      PrivateFeatureGate(feature: PrivateFeature.drivingReport, builder: _buildScreen);
+  Widget build(BuildContext context) => ValueListenableBuilder<bool>(
+        valueListenable: PrivateRuntime.primaryPrivate,
+        builder: (BuildContext context, bool isPrivate, _) {
+          if (!isPrivate) return _buildScreen(context);
+          if (_lanesLoading) return const Scaffold(body: Center(child: CircularProgressIndicator()));
+          if (_lanes == null) {
+            return Scaffold(
+              appBar: AppBar(title: const Text('Driving report')),
+              body: const SafeArea(child: NotAvailableInPrivate(feature: PrivateFeature.drivingReport)),
+            );
+          }
+          return _buildPrivate(context, _lanes!);
+        },
+      );
+
+  /// Private circle: one card per member from the right source. Server-assisted
+  /// members come from the server report, phone-only members from the results
+  /// their phones shared; a phone that has not shared yet gets a placeholder.
+  Widget _buildPrivate(BuildContext context, PrimaryLanes l) {
+    final String? me = widget.userId.value;
+    final List<MemberProcessing> ms = <MemberProcessing>[
+      ...l.members.where((MemberProcessing m) => m.userId == me),
+      ...l.members.where((MemberProcessing m) => m.userId != me),
+    ];
+    final DateTime start = _anchor, end = periodEndOf(_period, start);
+    return Scaffold(
+      appBar: AppBar(title: const Text('Driving report')),
+      body: SafeArea(
+        child: ValueListenableBuilder<UnitSystem>(
+          valueListenable: UnitPreferenceService.units,
+          builder: (BuildContext context, UnitSystem units, _) => RefreshIndicator(
+            onRefresh: () async {
+              await _loadLanes();
+            },
+            child: ListView(
+              key: const Key('driving-private-list'),
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.all(AppSpace.gutter),
+              children: <Widget>[
+                DsSegmentedTabs(
+                  labels: const <String>['Week', 'Month'],
+                  selected: _period == 'month' ? 1 : 0,
+                  onChanged: (int i) {
+                    final String p = i == 1 ? 'month' : 'week';
+                    setState(() {
+                      _period = p;
+                      _anchor = periodStartOf(p, _now);
+                      _report = null;
+                    });
+                    _load();
+                  },
+                ),
+                const SizedBox(height: AppSpace.md),
+                Text(periodTitle(_period, start, now: _now), style: AppType.secondary),
+                const SizedBox(height: AppSpace.md),
+                for (final MemberProcessing m in ms)
+                  Padding(padding: const EdgeInsets.only(bottom: AppSpace.md), child: _privateMemberCard(context, m, l, units, start, end)),
+                const ProcessingNote(
+                  noteKey: Key('driving-private-note'),
+                  icon: Icons.info_outline,
+                  text: 'Totals across the circle, the per-day chart and the recent-trip list need the server and are not shown here. '
+                      'Each member\'s own figures are shown above, from the server or from their phone.',
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _privateMemberCard(BuildContext context, MemberProcessing m, PrimaryLanes l, UnitSystem units, DateTime from, DateTime to) {
+    final String name = m.userId == widget.userId.value ? 'You' : l.nameOf(m.userId);
+    if (m.origin == ProcessingOrigin.phone) {
+      return PhoneDrivingCard(name: name, member: m, from: from, to: to, units: units, now: _now);
+    }
+    MemberReport? r;
+    for (final MemberReport x in _report?.members ?? const <MemberReport>[]) {
+      if (x.userId == m.userId) r = x;
+    }
+    if (r == null) {
+      return Container(
+        key: Key('driving-server-missing-${m.userId}'),
+        padding: const EdgeInsets.all(AppSpace.lg),
+        decoration: BoxDecoration(color: BrandTheme.of(context).sheet, borderRadius: BorderRadius.circular(AppRadius.lg)),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[
+          Row(children: <Widget>[Expanded(child: Text(name, style: AppType.headline)), const LaneChip(server: true)]),
+          const SizedBox(height: AppSpace.sm),
+          Text(_loading ? 'Loading from the server...' : (_error != null ? 'The server could not be reached.' : 'The server has no drives for $name in this period.'),
+              style: AppType.secondary),
+        ]),
+      );
+    }
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[
+      const Padding(padding: EdgeInsets.only(bottom: AppSpace.xs), child: LaneChip(server: true)),
+      MemberDrivingCard(
+        report: r,
+        member: _memberFor(r.userId, r.name),
+        displayName: name,
+        units: units,
+        onTap: () => _openMember(_memberFor(r!.userId, r.name)),
+      ),
+    ]);
+  }
 
   Widget _buildScreen(BuildContext context) {
     return Scaffold(

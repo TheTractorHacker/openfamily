@@ -30,6 +30,7 @@ import 'welcome_screen.dart';
 import 'notification_settings_screen.dart';
 import 'onboarding_screen.dart';
 import 'performance_screen.dart';
+import 'my_processing_screen.dart';
 import 'privacy_policy_screen.dart';
 import 'security_screen.dart';
 
@@ -493,6 +494,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
               subtitle: 'Two-factor, sessions, password, your data',
               chevron: true,
               onTap: () => push(const SecurityScreen()),
+            ),
+            DsListRow(
+              key: const Key('settings-processing'),
+              leading: DsListRow.iconTile(context, Icons.smartphone),
+              title: 'Where my data is processed',
+              subtitle: 'Don\'t send my data to the server',
+              chevron: true,
+              onTap: () => push(const MyProcessingScreen()),
             ),
             DsToggleRow(
               icon: Icons.fingerprint,

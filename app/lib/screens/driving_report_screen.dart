@@ -6,6 +6,10 @@ import '../models/trip.dart';
 import '../services/speed_units.dart';
 import '../services/trips_service.dart';
 import '../theme/app_theme.dart';
+import '../services/e2ee/private_runtime.dart';
+import '../services/processing/primary_lanes.dart';
+import '../services/processing/processing_source.dart';
+import '../widgets/phone_driving_widgets.dart';
 import '../widgets/private_circle_widgets.dart';
 import '../widgets/ds/ds.dart';
 import '../widgets/trip_widgets.dart';
@@ -16,9 +20,13 @@ const List<String> kReportPeriods = <String>['day', 'week', 'month'];
 /// is a local preference sent with each request; it is never stored on the
 /// server and no alerts are raised.
 class DrivingReportScreen extends StatefulWidget {
-  const DrivingReportScreen({super.key, required this.member, this.api});
+  const DrivingReportScreen({super.key, required this.member, this.api, this.lanes, this.clock});
 
   final Member member;
+
+  /// Injected in tests; defaults to the running app's processing lanes.
+  final PrimaryLanesLoader? lanes;
+  final DateTime Function()? clock;
   final TripsApi? api;
 
   @override
@@ -34,8 +42,28 @@ class _DrivingReportScreenState extends State<DrivingReportScreen> {
   void initState() {
     super.initState();
     UnitPreferenceService.ensureLoaded();
+    if (PrivateRuntime.primaryPrivate.value) _loadLanes();
     UnitPreferenceService.loadThreshold().then((double v) {
       if (mounted) setState(() => _thresholdMps = v);
+    });
+  }
+
+  // Private circle with processing lanes: where this member's figures come from.
+  MemberProcessing? _proc;
+  String _procName = '';
+  bool _lanesLoading = false;
+
+  Future<void> _loadLanes() async {
+    setState(() => _lanesLoading = true);
+    PrimaryLanes? l;
+    try {
+      l = await (widget.lanes ?? loadPrimaryLanes)();
+    } catch (_) {}
+    if (!mounted) return;
+    setState(() {
+      _proc = l?.memberById(widget.member.id);
+      _procName = l?.nameOf(widget.member.id) ?? widget.member.name;
+      _lanesLoading = false;
     });
   }
 
@@ -49,8 +77,60 @@ class _DrivingReportScreenState extends State<DrivingReportScreen> {
   }
 
   @override
-  Widget build(BuildContext context) =>
-      PrivateFeatureGate(feature: PrivateFeature.drivingReport, builder: _buildScreen);
+  Widget build(BuildContext context) => ValueListenableBuilder<bool>(
+        valueListenable: PrivateRuntime.primaryPrivate,
+        builder: (BuildContext context, bool isPrivate, _) {
+          if (!isPrivate) return _buildScreen(context);
+          if (_lanesLoading) {
+            return Scaffold(appBar: AppBar(title: Text('${widget.member.name}\'s driving')), body: const Center(child: CircularProgressIndicator()));
+          }
+          final MemberProcessing? p = _proc;
+          if (p == null) {
+            return Scaffold(
+              appBar: AppBar(title: const Text('Driving report')),
+              body: const SafeArea(child: NotAvailableInPrivate(feature: PrivateFeature.drivingReport)),
+            );
+          }
+          if (p.origin == ProcessingOrigin.server) return _buildScreen(context);
+          return _buildPhoneOnly(context, p);
+        },
+      );
+
+  /// Day / week / month figures a phone-only member's phone computed and shared.
+  Widget _buildPhoneOnly(BuildContext context, MemberProcessing p) {
+    final String name = _procName.isEmpty ? widget.member.name : _procName;
+    final DateTime now = widget.clock?.call() ?? DateTime.now();
+    return DefaultTabController(
+      length: kReportPeriods.length,
+      child: Scaffold(
+        appBar: AppBar(
+          title: Text('$name\'s driving'),
+          bottom: const TabBar(tabs: <Widget>[Tab(text: 'Day'), Tab(text: 'Week'), Tab(text: 'Month')]),
+        ),
+        body: SafeArea(
+          child: ValueListenableBuilder<UnitSystem>(
+            valueListenable: UnitPreferenceService.units,
+            builder: (BuildContext context, UnitSystem units, _) => TabBarView(
+              key: const Key('driving-phone-only'),
+              children: <Widget>[
+                for (final String period in kReportPeriods)
+                  ListView(padding: const EdgeInsets.all(AppSpace.lg), children: <Widget>[
+                    PhoneDrivingCard(
+                      name: name,
+                      member: p,
+                      from: periodStartForKind(period, now),
+                      to: periodEndOf(period, periodStartForKind(period, now)),
+                      units: units,
+                      now: now,
+                    ),
+                  ]),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 
   Widget _buildScreen(BuildContext context) {
     return DefaultTabController(

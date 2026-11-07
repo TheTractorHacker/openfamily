@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../services/api_client.dart';
@@ -6,6 +8,7 @@ import '../services/e2ee/e2ee_app.dart';
 import '../services/pending_invite.dart';
 import '../theme/app_theme.dart';
 import '../widgets/ds/ds.dart';
+import '../widgets/processing_widgets.dart';
 
 /// The join-a-family flow, reached from the map's `+` action sheet, the
 /// family switcher's `+` chip, and onboarding.
@@ -19,7 +22,11 @@ class JoinCircleScreen extends StatefulWidget {
     this.step,
     this.totalSteps = 4,
     this.initialCode,
+    this.previewLoader,
   });
+
+  /// Injected in tests; defaults to `GET /invites/{code}/preview`.
+  final Future<InvitePreview?> Function(String code)? previewLoader;
 
   /// Pre-fills the code field (from an invite link or QR code).
   final String? initialCode;
@@ -50,10 +57,33 @@ class _JoinCircleScreenState extends State<JoinCircleScreen> {
   void initState() {
     super.initState();
     _code.text = widget.initialCode ?? PendingInvite.code ?? '';
+    _schedulePreview(immediate: true);
+  }
+
+  InvitePreview? _preview;
+  Timer? _debounce;
+  int _previewSeq = 0;
+
+  void _schedulePreview({bool immediate = false}) {
+    _debounce?.cancel();
+    final String code = _code.text.trim();
+    if (code.length < 4) {
+      if (_preview != null) setState(() => _preview = null);
+      return;
+    }
+    _debounce = Timer(immediate ? Duration.zero : const Duration(milliseconds: 500), () async {
+      final int seq = ++_previewSeq;
+      InvitePreview? p;
+      try {
+        p = await (widget.previewLoader ?? JoinService.preview)(code);
+      } catch (_) {}
+      if (mounted && seq == _previewSeq) setState(() => _preview = p);
+    });
   }
 
   @override
   void dispose() {
+    _debounce?.cancel();
     _code.dispose();
     super.dispose();
   }
@@ -150,6 +180,7 @@ class _JoinCircleScreenState extends State<JoinCircleScreen> {
           onSubmitted: (_) => _join(),
           onChanged: (_) {
             if (_error != null) setState(() => _error = null);
+            _schedulePreview();
           },
           decoration: const InputDecoration(
             labelText: 'Invite code',
@@ -158,7 +189,35 @@ class _JoinCircleScreenState extends State<JoinCircleScreen> {
           ),
         ),
         if (_error != null) DsMessage(_error!),
+        const SizedBox(height: AppSpace.lg),
+        _setupNote(),
       ],
     );
+  }
+
+  /// One honest line about how the circle behind the code processes data. Without a
+  /// preview (unknown code, offline, old server) the generic note stays.
+  Widget _setupNote() {
+    final InvitePreview? p = _preview;
+    String text;
+    if (p == null) {
+      text = 'If the circle is a Private circle, its admin may allow server processing. You then choose for your own data '
+          'after joining, and the safe choice (Phone only) is equal to the other. Some circles require server processing; '
+          'in that case you will be asked to give your own consent or leave. The server operator can read the data of '
+          'members who allow it.';
+    } else if (!p.isPrivate) {
+      text = 'This is a normal circle, not a Private circle: your position is sent to the server in readable form.';
+    } else if (!p.serverAssist) {
+      text = 'Private circle. Server processing: off. Your phone does the processing and the server cannot read your location.';
+    } else if (p.required) {
+      text = 'Private circle. Server processing: required. To take part you must give your own consent on your phone to let the '
+          'server read your location, trips and driving data, otherwise you cannot share with this circle. Anyone who runs or backs '
+          'up this server can read the data of members who allow it.';
+    } else {
+      text = 'Private circle. Server processing: on, you choose. After joining you decide for your own data; '
+          '"${p.defaultServer ? 'Server processing' : 'Phone only'}" is suggested, but nothing is shared with the server unless you confirm it. '
+          'Anyone who runs or backs up this server can read the data of members who allow it.';
+    }
+    return ProcessingNote(noteKey: const Key('join-processing-note'), icon: Icons.info_outline, text: text);
   }
 }

@@ -258,7 +258,7 @@ func (s *Server) ListLiveShares(w http.ResponseWriter, r *http.Request) {
 		       `+pausedExprSQL("ls.owner_id")+`, mp.lat, mp.lon, mp.ts
 		FROM live_shares ls
 		JOIN users u ON u.id = ls.owner_id
-		LEFT JOIN member_positions mp ON mp.user_id = ls.owner_id
+		LEFT JOIN member_positions mp ON mp.user_id = ls.owner_id AND NOT e2ee_keeps_data_on_phone(ls.owner_id)
 		WHERE ls.viewer_id = $1 AND ls.expires_at > now()
 		  AND EXISTS (SELECT 1 FROM live_circle_members a JOIN live_circle_members b ON b.circle_id = a.circle_id
 		              WHERE a.user_id = ls.viewer_id AND b.user_id = ls.owner_id)

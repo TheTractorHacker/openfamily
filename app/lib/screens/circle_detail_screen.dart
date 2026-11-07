@@ -73,14 +73,14 @@ class _CircleDetailScreenState extends State<CircleDetailScreen> {
               'stores and forwards ciphertext only and cannot read where anyone is.\n\n'
               'Still visible to the server: who is in the circle, when phones are online and how often '
               'they upload. Chat messages are not end-to-end encrypted in this version.\n\n'
-              'Not available in this circle: trips, driving reports, the weekly summary, the admin map, '
-              'Dawarich export, and place alerts made by the server (your phones work out arrivals and '
-              'departures instead). SOS reaches your circle, but the server and any SMS contact cannot '
-              'be told the position.\n\n'
-              'Optional later: if you run this server yourself you can let it join as a trusted member '
-              '(Encryption keys > this circle > Trusted server). Every member must allow it, and then the '
-              'server CAN read this circle again and keeps plaintext copies; the circle then shows '
-              '"Server can read" instead of "End-to-end encrypted".\n\n'
+              'Trips, driving reports and the weekly summary: members who keep their data on their phone get them '
+              'calculated by their own phone (it may use more battery and data and can arrive late). The admin map, '
+              'Dawarich export and place alerts made by the server only work for members who allow server processing; '
+              'your phones work out arrivals and departures. SOS reaches your circle, but the server and any SMS contact '
+              'cannot be told the position.\n\n'
+              'Optional later: a circle admin can turn on server processing (Encryption keys > this circle > Server '
+              'processing). Each member then decides for themselves whether the server may read their data; the server '
+              'operator can read the data of members who allow it. Nobody can opt in another member.\n\n'
               'Existing places are re-encrypted and the server copies deleted. Location history the server '
               'already holds stays until each person deletes it in their settings. Every member needs the '
               'latest app and an approved phone. If every phone and the recovery phrase are lost, encrypted '
@@ -143,8 +143,8 @@ class _CircleDetailScreenState extends State<CircleDetailScreen> {
             title: 'Private circle (end-to-end encrypted)',
             subtitle: st.isPrivate
                 ? (_circle.e2eeServerMember
-                    ? 'On (key epoch ${st.epoch}), TRUSTED SERVER: the OpenFamily server can read this circle (every member allowed it). Withdraw under Encryption keys > Trusted server.'
-                    : 'On (key epoch ${st.epoch}). Positions, history, places and events are end-to-end encrypted. Trips, driving reports and the weekly summary are not available here.')
+                    ? 'On (key epoch ${st.epoch}), OLD TRUSTED-SERVER MODE: the OpenFamily server can read this circle (every member allowed it). An admin can upgrade it under Encryption keys > Server processing.'
+                    : 'On (key epoch ${st.epoch}). Positions, history, places and events are end-to-end encrypted. Server processing is optional and each member decides for their own data (Encryption keys > Server processing).')
                 : 'Off. Turning it on encrypts locations so the server cannot read them. Some server features are not available in private circles.',
             value: st.isPrivate,
             onChanged: _e2eeBusy ? null : _togglePrivate,

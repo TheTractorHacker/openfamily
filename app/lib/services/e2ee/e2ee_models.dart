@@ -25,6 +25,7 @@ class DeviceKey {
     this.revokedReason,
     this.approved,
     this.userName,
+    this.caps = const <String>[],
   });
 
   final String deviceId;
@@ -53,6 +54,13 @@ class DeviceKey {
   final bool? approved;
   final String? userName;
 
+  /// Capabilities the app advertised at registration (e.g. `lanes2`). Self
+  /// reported by that key's owner and relayed by the server: it gates whether
+  /// an admin may enable server assistance, it never grants access to anything.
+  final List<String> caps;
+
+  bool get supportsLanes => caps.contains(kCapLanes);
+
   bool get isRecovery => kind == 'recovery';
   bool get isActive => revokedAt == null;
   bool get isRoot => registeredByDeviceId == deviceId;
@@ -79,8 +87,12 @@ class DeviceKey {
         revokedReason: j['revoked_reason'] as String?,
         approved: j['approved'] as bool?,
         userName: j['user_name'] as String?,
+        caps: j['caps'] is List ? (j['caps'] as List<dynamic>).whereType<String>().toList() : const <String>[],
       );
 }
+
+/// Capability string of the processing-lanes format (v2 items, SK wraps).
+const String kCapLanes = 'lanes2';
 
 class CircleE2eeMember {
   const CircleE2eeMember({
@@ -189,7 +201,12 @@ class WrapRecord {
     required this.wrapperEdPub,
     required this.blob,
     required this.signature,
+    this.line = E2ee.linePhone,
   });
+
+  /// Key line of the wrap (0 phone = CK, 1 server = SK). For the server line
+  /// [epoch] is the SK generation. A missing `key_line` is the phone line.
+  final int line;
   final int epoch;
   final String recipientDeviceId;
   final String wrapperDeviceId;
@@ -204,7 +221,18 @@ class WrapRecord {
         wrapperEdPub: E2ee.unb64(j['wrapper_ed25519_pub'] as String),
         blob: E2ee.unb64(j['wrapped_key'] as String),
         signature: E2ee.unb64(j['signature'] as String),
+        line: j['key_line'] == null ? E2ee.linePhone : E2ee.parseLine(j['key_line'] as String),
       );
+
+  /// Null for a malformed record, including an unknown key line (fail closed:
+  /// a wrap we cannot classify is never used).
+  static WrapRecord? tryParse(Map<String, dynamic> j) {
+    try {
+      return WrapRecord.fromJson(j);
+    } catch (_) {
+      return null;
+    }
+  }
 }
 
 /// One entry of the key transparency log. Redacted entries (about people the

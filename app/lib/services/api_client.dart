@@ -126,6 +126,12 @@ class ApiClient {
     return data as Map<String, dynamic>;
   }
 
+  /// GET /invites/{code}/preview (public): how the circle behind an invite processes data.
+  static Future<Map<String, dynamic>> invitePreview(String code) async {
+    final dynamic data = await _send('GET', _uri('/invites/${Uri.encodeComponent(code)}/preview'), auth: false);
+    return data as Map<String, dynamic>;
+  }
+
   /// POST /family/join → join a family by invite code.
   static Future<Map<String, dynamic>> joinFamily(String code) async {
     final dynamic data = await _send(

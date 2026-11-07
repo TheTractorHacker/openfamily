@@ -116,17 +116,19 @@ void main() {
     expect(find.text('1 of 2 members have allowed it'), findsOneWidget);
   });
 
-  testWidgets('once everyone allowed it the admin can hand over the key; withdraw is one tap away', (t) async {
+  testWidgets('once everyone allowed it there is no key hand-over any more, only a pointer to the upgrade; withdraw is one tap away', (t) async {
     await setup(t);
     await t.runAsync(() => bob.consentToServer(cid));
     await t.tap(find.byKey(const Key('server-allow')));
     await settle(t);
     await t.tap(find.text('I understand: allow the server'));
     await settle(t);
-    expect(find.byKey(const Key('server-share')), findsOneWidget);
-    await t.tap(find.byKey(const Key('server-share')));
-    await settle(t);
-    expect(server.circles[cid]!.wraps.containsKey('1/${srv.deviceId}'), isTrue);
+    // PRIVACY_PROCESSING 5.4.1: the hand-over of the CIRCLE key is gone. The screen says so and
+    // points to the admin upgrade (ProcessingScreen); nothing reaches the server key.
+    expect(find.byKey(const Key('server-share')), findsNothing);
+    expect(find.byKey(const Key('server-use-upgrade')), findsOneWidget);
+    expect(find.textContaining('Upgrade this circle'), findsOneWidget);
+    expect(server.circles[cid]!.wraps.containsKey('1/${srv.deviceId}'), isFalse);
 
     await t.tap(find.byKey(const Key('server-withdraw')));
     await settle(t);

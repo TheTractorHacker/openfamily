@@ -230,7 +230,8 @@ BEGIN
           FROM (SELECT ST_Y(l.geom) AS lat, ST_X(l.geom) AS lon, l.ts, l.device_id, l.accuracy_meters AS acc,
                        l.speed_mps AS spd, l.battery_pct AS bat
                   FROM locations l JOIN devices d ON d.id = l.device_id
-                 WHERE d.user_id = usr ORDER BY l.ts DESC LIMIT 1) n
+                 WHERE d.user_id = usr AND (l.e2ee_circle_id IS NULL OR e2ee_member_server_ok(l.e2ee_circle_id, usr))
+                 ORDER BY l.ts DESC LIMIT 1) n
          WHERE mp.user_id = usr AND mp.ts = ANY (tss);
         -- no other location remains: a last position that was one of the purged points goes
         DELETE FROM member_positions WHERE user_id = usr AND ts = ANY (tss);

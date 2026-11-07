@@ -39,6 +39,7 @@ const (
 	exitLog      = 4
 	exitReauth   = 5
 	exitDawarich = 6
+	exitAlarm    = 7 // lanes: the server handed this key a phone key (CK) or an SK that reuses a CK
 )
 
 // logError means the key transparency log failed verification: stop loudly.
@@ -115,6 +116,7 @@ type wireItem struct {
 	Purpose    string `json:"purpose"`
 	Epoch      int    `json:"epoch"`
 	Ciphertext string `json:"ciphertext"`
+	KeyLine    string `json:"key_line,omitempty"`
 }
 
 type itemsPage struct {
@@ -148,6 +150,14 @@ type bridge struct {
 	resynced bool           // state already refreshed for this page
 	snap     *recvState     // receiver state before the current page
 	logIdx   *e2ee.LogIndex // fully verified log; nil until the first verification (everything is then refused)
+
+	// lanes (docs/design/PRIVACY_PROCESSING.md, section 19): per circle read through the server line only
+	laneOn      map[string]bool            // circle is read via key_line=server this cycle
+	lanes       map[string]map[string]bool // circle -> user -> VERIFIED lane server
+	srvDev      *srvKey                    // the server key members' prefs must name (nil: unknown)
+	active      int                        // circles read (either flow) in this cycle
+	offSeen     bool                       // a circle whose server key we held turned its policy off
+	lastMissing map[string]string          // circle -> last missing-wrap report (log only on change)
 }
 
 func newBridge(st *store, id *identity, api *apiClient, cfg *config, log *slog.Logger) (*bridge, error) {
@@ -164,7 +174,8 @@ func newBridge(st *store, id *identity, api *apiClient, cfg *config, log *slog.L
 		sink = newServerSink(cfg, id.f.DeviceID, log)
 	}
 	return &bridge{st: st, id: id, keys: keys, api: api, cfg: cfg, rs: rs, sink: sink, log: log,
-		now: time.Now, cur: map[string]*circleState{}, keyRetry: map[string]*keyRetry{}, consents: map[string]map[string]bool{}}, nil
+		now: time.Now, cur: map[string]*circleState{}, keyRetry: map[string]*keyRetry{}, consents: map[string]map[string]bool{},
+		laneOn: map[string]bool{}, lanes: map[string]map[string]bool{}, lastMissing: map[string]string{}}, nil
 }
 
 func (b *bridge) save() error { return b.st.saveRunState(b.rs) }
@@ -198,6 +209,7 @@ func (b *bridge) cycle(ctx context.Context) error {
 		return err
 	}
 	var first error
+	b.active, b.srvDev = 0, nil
 	for _, c := range circles {
 		if c.E2EEMode != "private" || !b.cfg.wantCircle(c.ID) {
 			continue
@@ -219,12 +231,15 @@ func (b *bridge) cycle(ctx context.Context) error {
 	if err := b.save(); err != nil {
 		return err
 	}
+	if b.offSeen && b.active == 0 && b.cfg.serverMode() {
+		return errPolicyOff
+	}
 	return first
 }
 
 func fatal(err error) bool {
 	var le *logError
-	return errors.Is(err, errNoApproved) || errors.Is(err, errReauth) || errors.Is(err, errDawarichAuth) || errors.Is(err, errIngestAuth) || errors.As(err, &le)
+	return errors.Is(err, errNoApproved) || errors.Is(err, errReauth) || errors.Is(err, errDawarichAuth) || errors.Is(err, errIngestAuth) || errors.Is(err, errPolicyOff) || errors.As(err, &le) || isAlarm(err)
 }
 
 // ---- transparency log
@@ -366,12 +381,30 @@ func (b *bridge) syncCircle(ctx context.Context, c circleOut) error {
 	if st.Mode != "private" {
 		return nil
 	}
+	delete(b.laneOn, c.ID)
+	mode, proc, vp, err := b.circleMode(ctx, c.ID, st)
+	if err != nil {
+		return err
+	}
+	switch mode {
+	case modeLanes:
+		return b.syncLanes(ctx, c.ID, st, proc, vp)
+	case modeSkip:
+		return nil
+	case modePolicyOff:
+		if b.cfg.serverMode() {
+			return b.policyOff(c.ID)
+		}
+		// The Dawarich bridge: assistance off means there is no server lane; the old
+		// flow (the keys its owner chose to give it) is unchanged.
+	}
 	if err := b.syncKeys(ctx, c.ID, st, false); err != nil {
 		return err
 	}
 	if b.cfg.serverMode() {
-		// The server device reads a circle only while EVERY member's phone has
-		// signed a consent for this key (verified here, not taken from the server).
+		// Legacy trusted-server circle: the server device reads it only while EVERY
+		// member's phone has signed a consent for this key (verified here, not taken
+		// from the server).
 		var resp struct {
 			Consents []consentWire `json:"consents"`
 		}
@@ -388,16 +421,21 @@ func (b *bridge) syncCircle(ctx context.Context, c circleOut) error {
 			return nil
 		}
 	}
+	b.active++
 	return b.pull(ctx, c.ID)
 }
 
 func (b *bridge) pull(ctx context.Context, circle string) error {
-	stored := b.rs.Recv.Cursor[circle]
+	curKey, lineQ := circle, ""
+	if b.laneOn[circle] {
+		curKey, lineQ = skID(circle), "&key_line=server"
+	}
+	stored := b.rs.Recv.Cursor[curKey]
 	after := stored
 	frozen := int64(-1) // once an item is deferred, the persisted cursor stays before it
 	for page := 0; page < 400 && ctx.Err() == nil; page++ {
 		var resp itemsPage
-		q := fmt.Sprintf("/circles/%s/e2ee/items?after=%d&as_device=%s&purpose=fix,history&limit=%d", circle, after, b.id.f.DeviceID, pageLimit)
+		q := fmt.Sprintf("/circles/%s/e2ee/items?after=%d&as_device=%s&purpose=fix,history&limit=%d%s", circle, after, b.id.f.DeviceID, pageLimit, lineQ)
 		if err := b.api.do(ctx, "GET", q, nil, &resp); err != nil {
 			return err
 		}
@@ -419,7 +457,7 @@ func (b *bridge) pull(ctx context.Context, circle string) error {
 			next = frozen
 		}
 		if next > stored {
-			b.rs.Recv.Cursor[circle], stored = next, next
+			b.rs.Recv.Cursor[curKey], stored = next, next
 		}
 		if err := b.save(); err != nil {
 			return err
@@ -450,9 +488,16 @@ const (
 	rClockSkew     reason = "clock_skew"
 	rRollback      reason = "epoch_rollback"
 	rBadBody       reason = "bad_body"
+	// lanes
+	rLineMismatch reason = "line_mismatch"          // not a server-line v2 item (cross-line confusion)
+	rNotServerLn  reason = "author_not_server_lane" // the author's verified lane is not server: never decrypted
 )
 
-func transient(r reason) bool { return r == rNoKey || r == rUnknownSender }
+// transient verdicts keep the cursor in front of the item and are retried until a TTL. An author
+// whose lane is not (yet) server is one of them: a member who signs the server lane right after
+// our last state refresh must not lose the first items to a race, and an honest phone never
+// puts a server-line item in the relay without a server-lane statement anyway.
+func transient(r reason) bool { return r == rNoKey || r == rUnknownSender || r == rNotServerLn }
 
 // handlePage verifies every item, collects points, delivers them and returns the
 // id of the first item that stays deferred (0 if none).
@@ -470,7 +515,7 @@ func (b *bridge) handlePage(ctx context.Context, circle string, items []wireItem
 				b.rs.Recv.Deferred[key], first = now, now
 			}
 			ttl := unknownSenderTTL
-			if r == rNoKey {
+			if r == rNoKey && !b.laneOn[circle] {
 				ttl = noKeyTTL
 			}
 			if time.Duration(now-first)*time.Millisecond > ttl {
@@ -531,6 +576,9 @@ func devKey(circle, dev string) string { return circle + "/" + dev }
 
 // process runs the phone's ChannelReceiver policy for one item.
 func (b *bridge) process(ctx context.Context, circle string, it wireItem) reason {
+	if b.laneOn[circle] {
+		return b.processLane(ctx, circle, it)
+	}
 	if (it.Purpose != "fix" && it.Purpose != "history") || it.Seq <= 0 || it.Epoch < 1 || e2ee.CheckID(it.DeviceID) != nil {
 		return rMalformed
 	}
