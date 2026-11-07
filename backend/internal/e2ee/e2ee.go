@@ -312,7 +312,12 @@ const (
 	ActDisable  byte = 7
 	ActReset    byte = 8 // new ROOT key replacing all of the user's keys (no cross-signature possible)
 	ActApprove  byte = 9 // circle admin approves a replacement device for that circle
-	zeroUUID         = "00000000-0000-0000-0000-000000000000"
+	// Processing lanes (docs/design/PRIVACY_PROCESSING.md section 5.3). The
+	// signed statement itself is ProcessingPrefMessage / ProcessingPolicyMessage;
+	// the log entry's ref is the SHA-256 of that statement.
+	ActProcessingPref   byte = 10 // a member's own lane choice (also the per-member server consent)
+	ActProcessingPolicy byte = 11 // circle admin: server assistance on/off, default, SK generation + commitment
+	zeroUUID                 = "00000000-0000-0000-0000-000000000000"
 )
 
 // LogActionMessage is signed by the ACTING device's Ed25519 key for every
@@ -340,7 +345,7 @@ func LogActionMessage(action byte, userID, actorDeviceID, circleID, subjectID st
 	if ref == nil {
 		ref = make([]byte, 32)
 	}
-	if len(ref) != 32 || action < ActRegister || action > ActApprove {
+	if len(ref) != 32 || action < ActRegister || action > ActProcessingPolicy {
 		return nil, ErrBadBlob
 	}
 	m := append([]byte(domLogAct), action)

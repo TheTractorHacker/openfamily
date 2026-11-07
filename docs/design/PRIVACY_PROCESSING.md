@@ -402,3 +402,50 @@ The circle admin's signed `processing_policy` carries `member_opt_out`: `allowed
 * In both modes only the member's own phone signature puts their data on the server. The admin cannot opt anyone in. Switching to `required_server` and every member decision are signed log entries, visible in the key log, so coercion is visible even if it cannot be prevented.
 * Children (Q3): the pairing-time choice stands; a circle in `required_server` mode applies the same rule to child members.
 * Opted-out members compute trips, driving reports and weekly figures on their own phone (section 9 option a). No load sharing between phones is built.
+
+## 17. Phase 1 API (implemented: crypto and wire formats only)
+
+Go: `backend/internal/e2ee/lanes.go`. Dart: `app/lib/services/e2ee/e2ee_crypto.dart` (`E2ee.*`, same names in lowerCamelCase). Shared vectors: `backend/internal/e2ee/testdata/lanes.json` (Go generates with `UPDATE_VECTORS=1 go test ./internal/e2ee -run Lanes`; Dart test `app/test/services/e2ee/e2ee_lanes_test.dart` reads the same file). Legacy `testdata/vectors.json` and `testdata/server_consent.json` are unchanged and still verified.
+
+Values: `Line` / lane = `0x00` phone, `0x01` server (`LinePhone`, `LineServer`; names `"phone"`, `"server"`; `ParseLine`). Unknown line, version, generation 0, or unknown `member_opt_out` is rejected everywhere (fail closed). New log action codes: `ActProcessingPref = 10`, `ActProcessingPolicy = 11` (`LogActionMessage`/`VerifyLogSlice` now accept them).
+
+Wire formats (frozen by the vectors):
+
+* v2 payload: `0x02 || line || gen(4 BE) || nonce(24) || ct || tag`. AEAD key = HKDF-SHA256(key, salt = circle||line||gen, info = `"OFE2EE3-MSG-KEY\0"||purpose`). AAD = `"OFE2EE3-ITEM-AAD\0"||circle||line||gen||device_id||purpose`. Inner envelope (padded as v1): `0x02 || seq(8) || ts_ms(8) || sig(64) || body`. Signature input: `"OFE2EE3-ITEM\0"||circle||line||gen||device_id||len(purpose)(1)||purpose||seq||ts_ms||body`.
+* v3 wrap: same sealed-box blob as v1. AAD = `"OFE2EE3-WRAP-AAD\0"||line||circle||gen(4)||recipient||wrapper`. Wrapper signs `"OFE2EE3-WRAP-SIG\0"||(AAD fields after the domain)||blob`. Server-line wraps MUST use v3; legacy phone-line wraps keep `WrapAAD` v1 and stay valid.
+* SK commitment: `KeyCommitmentLine` = HKDF(key, salt = circle||line||gen, info = `"OFE2EE3-KEY-COMMIT\0"`, 32).
+* `processing_pref` / consent: `"OFE2EE3-PROCESSING\0"||circle||user||lane(1)||sk_gen(4)||server_device_id||server_fingerprint(32)||nonce(16)`. Lane server needs `sk_gen >= 1`, a real server device and a non-zero fingerprint; lane phone needs the zero UUID and an all-zero fingerprint.
+* `processing_policy`: `"OFE2EE3-POLICY\0"||circle||admin_user||server_assist(1)||default_for_new(1: lane)||member_opt_out(1: 0 allowed, 1 required_server)||sk_gen(4)||commitment(32)||nonce(16)` (section 16.1). `required_server` requires `server_assist = on`; assist on requires `sk_gen >= 1` and a non-zero commitment.
+* Log entry for both statements: `LogActionMessage(action, user, actor_device, circle, subject, sk_gen as epoch, ProcessingRef(statement))`, where `ProcessingRef` = SHA-256 of the statement and `subject` = server device id for a lane-server pref, empty otherwise. A pref's `effective_seq` is the log entry's own seq (chain position), not a signed field.
+
+Exported Go functions (Dart equivalents are static methods on `E2ee`; value types `PayloadHeader`, `ItemV2`, `LineWrap`, `PrefEntry`, `LaneVerdict`, `RollbackGuard`):
+
+```go
+func ParseLine(s string) (Line, error)
+func ParseMemberOptOut(s string) (MemberOptOut, error)           // "allowed" | "required_server"
+func WrapAADLine(circleID string, line Line, gen uint32, recipientDeviceID, wrapperDeviceID string) ([]byte, error)
+func WrapSigMessageLine(circleID string, line Line, gen uint32, recipientDeviceID, wrapperDeviceID string, blob []byte) ([]byte, error)
+func VerifyWrapSignatureLine(wrapperEdPub []byte, circleID string, line Line, gen uint32, recipientDeviceID, wrapperDeviceID string, blob, sig []byte) error
+func KeyCommitmentLine(key []byte, circleID string, line Line, gen uint32) ([]byte, error)
+func OpenWrapLine(circleID, deviceID string, xSecret, xPub []byte, w LineWrap, wantLine Line, wantGen uint32, commitment []byte) ([]byte, error)
+func CheckWrapRecipient(line Line, recipientKind string, policyOn, hasServerLaneMember bool) error // CK never to kind "server"
+func ParsePayloadHeader(payload []byte) (PayloadHeader, error)  // v1 -> phone line, gen = epoch
+func SealWithNonceV2(key []byte, circleID string, line Line, gen uint32, deviceID, purpose string, plaintext []byte, nonce [24]byte) ([]byte, error)
+func OpenV2(key []byte, circleID string, expectLine Line, deviceID, purpose string, payload []byte) ([]byte, PayloadHeader, error)
+func ItemAADV2(...) []byte
+func ItemSignedMessageV2(circleID string, line Line, gen uint32, deviceID, purpose string, seq, tsMs uint64, body []byte) ([]byte, error)
+func SealItemV2(key []byte, circleID string, line Line, gen uint32, deviceID string, priv ed25519.PrivateKey, purpose string, seq, tsMs uint64, body []byte, nonce [24]byte) ([]byte, error)
+func OpenItemV2(key []byte, circleID string, expectLine Line, deviceID string, senderEdPub []byte, purpose string, serverSeq uint64, payload []byte) (ItemV2, error)
+func ProcessingPrefMessage(circleID, userID string, lane Line, skGen uint32, serverDeviceID string, serverFingerprint, nonce []byte) ([]byte, error)
+func VerifyProcessingPref(approverEdPub []byte, circleID, userID string, lane Line, skGen uint32, serverDeviceID string, serverFingerprint, nonce, sig []byte) error
+func ProcessingPolicyMessage(circleID, adminUserID string, serverAssist bool, defaultForNew Line, optOut MemberOptOut, skGen uint32, commitment, nonce []byte) ([]byte, error)
+func VerifyProcessingPolicy(adminEdPub []byte, circleID, adminUserID string, serverAssist bool, defaultForNew Line, optOut MemberOptOut, skGen uint32, commitment, nonce, sig []byte) error
+func ProcessingRef(statement []byte) []byte
+func NewRollbackGuard() *RollbackGuard   // Observe(line, gen, nowMs), Check(line, gen, deviceID, itemTsMs, nowMs): per-line rollback rule
+func ClassifyItemLane(prefs []PrefEntry, line Line, itemTsMs uint64) LaneVerdict // flags server-line items from authors without a server pref
+```
+
+Caller duties the library does not do: sender approval and registration chain (`Trust.AuthorizeSender`), signed-time window, replay window, verifying that the policy/epoch record is in the verified log (pass its commitment to `OpenWrapLine`), checking the policy signer is a circle admin, `RollbackGuard.Check` only after AEAD and signature succeeded, and the DB-side rules of section 5.4/6.
+
+Vector file format (`lanes.json`, hex strings, `line`/`lane` as 0/1): top-level `circle_id`, `ck_hex`, `sk_hex`, identities `sender`, `admin`, `recipient` (`user_id`, `device_id`, `ed_seed_hex`, `ed_pub_hex`, `x_secret_hex`, `x_pub_hex`), `server_device_id`, `server_fingerprint_hex`; positive arrays `items`, `wraps`, `prefs`, `policies` (inputs plus expected `payload_hex` / `blob_hex` / `message_hex` / `sig_hex` / `commitment_hex` / log ref and log action message); and `negative.{items,wraps,prefs,policies}`: each entry has the inputs of the verifying function and MUST be rejected. Negative coverage: line or gen tampered in header, CK payload or wrap replayed as SK (signature replay, re-signed with v3 AAD, re-signed legacy v1 AAD), identical key bytes relabelled across lines, signature made for the other line inside a server payload, unknown line/version, wrong sender/device/purpose/seq, wrong or short commitment, consent moved across circle/user/gen/lane/nonce/server device, wrong server fingerprint, legacy consent signature offered as new, policy field flips including `member_opt_out` and unknown `member_opt_out`.
+
