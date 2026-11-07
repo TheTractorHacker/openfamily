@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/TheTractorHacker/openfamily/backend/internal/sms"
 )
 
 // Needs TEST_DATABASE_URL (skipped otherwise).
@@ -163,4 +165,39 @@ func TestPrivateServerLaneAndMixedMembership(t *testing.T) {
 	if familyLatOf(t, raw, e.ids["C"]) == nil {
 		t.Fatalf("C is in a normal circle but D sees no position: %s", raw)
 	}
+}
+
+// A paused member shows only the reason, never when the phone was last active.
+func TestDeliveryPausedMemberRevealsNoTimes(t *testing.T) {
+	e := newChanEnv(t)
+	e.route("GET", "/circles/{id}/delivery", e.srv.E2EEDelivery)
+	e.post("B", e.b, e.circle, 201, e.seal(t, e.b, e.circle, "fix", 1, 1, []byte(`{"lat":1,"lon":2}`)))
+	if _, err := e.pool.Exec(context.Background(), `UPDATE circle_members SET sharing_enabled = FALSE WHERE circle_id = $1 AND user_id = $2`, e.circle, e.ids["B"]); err != nil {
+		t.Fatal(err)
+	}
+	rep := e.mustCode("A", "GET", "/circles/"+e.circle+"/delivery", nil, 200)
+	b := deliveryOf(t, rep, e.ids["B"])
+	if b["reason"] != "sharing_paused" || b["last_item_at"] != nil || b["last_fix_at"] != nil || b["last_contact_at"] != nil {
+		t.Fatalf("paused member leaks times to others: %v", b)
+	}
+	for _, d := range b["devices"].([]any) {
+		if d.(map[string]any)["last_item_at"] != nil || d.(map[string]any)["last_fix_at"] != nil {
+			t.Fatalf("paused device leaks times: %v", d)
+		}
+	}
+	// B sees their own report normally.
+	own := deliveryOf(t, e.mustCode("B", "GET", "/circles/"+e.circle+"/delivery", nil, 200), e.ids["B"])
+	if own["last_item_at"] == nil {
+		t.Fatalf("a member should see their own times: %v", own)
+	}
+}
+
+func TestDeliveryRateLimited(t *testing.T) {
+	e := newChanEnv(t)
+	e.srv.AuthLimit = sms.NewLimiter()
+	e.route("GET", "/circles/{id}/delivery", e.srv.E2EEDelivery)
+	for i := 0; i < e2eeReadPerUser; i++ {
+		e.mustCode("A", "GET", "/circles/"+e.circle+"/delivery", nil, 200)
+	}
+	e.mustCode("A", "GET", "/circles/"+e.circle+"/delivery", nil, 429)
 }

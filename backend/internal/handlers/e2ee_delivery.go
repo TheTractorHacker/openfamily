@@ -144,10 +144,9 @@ func (s *Server) loadDeliveryReport(ctx context.Context, circleID, viewer string
 		SELECT m.user_id::text, u.name, m.role, m.sharing_enabled,
 		       CASE WHEN e2ee_pref_lane_server(m.circle_id, m.user_id) THEN 'server' ELSE 'phone' END,
 		       COALESCE(av.app_version, ''), COALESCE(av.platform, ''),
-		       GREATEST(rs.last_report_at, (SELECT max(dv.last_seen) FROM devices dv WHERE dv.user_id = m.user_id))
+		       NULL::timestamptz
 		FROM live_circle_members m
 		JOIN users u ON u.id = m.user_id
-		LEFT JOIN member_report_state rs ON rs.user_id = m.user_id
 		LEFT JOIN LATERAL (SELECT app_version, platform FROM app_client_versions a WHERE a.user_id = m.user_id
 		                   ORDER BY a.last_seen DESC LIMIT 1) av ON TRUE
 		WHERE m.circle_id = $1
@@ -220,6 +219,20 @@ func (s *Server) loadDeliveryReport(ctx context.Context, circleID, viewer string
 	for i := range rep.Members {
 		m := &rep.Members[i]
 		m.Reason = deliveryReason(*m, rep.Now)
+		// Contact time is only what this circle itself received, rounded down to the hour.
+		if m.LastItemAt != nil {
+			t := m.LastItemAt.Truncate(time.Hour)
+			m.LastContactAt = &t
+		}
+		if !m.SharingEnabled && !m.You {
+			// A pause is private: others learn that sharing is paused, never when the phone was last active.
+			m.LastContactAt, m.LastItemAt, m.LastFixAt = nil, nil, nil
+			for j := range m.Devices {
+				m.Devices[j].LastItemAt, m.Devices[j].LastFixAt = nil, nil
+			}
+			problems++
+			continue
+		}
 		if m.Reason != DeliveryOK {
 			problems++
 		}
@@ -244,6 +257,9 @@ func (s *Server) loadDeliveryReport(ctx context.Context, circleID, viewer string
 func (s *Server) E2EEDelivery(w http.ResponseWriter, r *http.Request) {
 	uid, m, ok := s.requireCircleMember(w, r)
 	if !ok {
+		return
+	}
+	if !s.allowKey(w, "e2eeread:user:"+uid, e2eeReadPerUser, e2eeReadWindow) {
 		return
 	}
 	rep, err := s.loadDeliveryReport(r.Context(), m.CircleID, uid)
