@@ -27,9 +27,18 @@ import javax.crypto.spec.GCMParameterSpec
  * software as the last resort). `status` reports which one so the app can show
  * it. If the key is invalidated, `decrypt` fails with code "invalidated" and
  * the app fails closed (restore from the recovery phrase).
+ *
+ * Locked phone: the wrapping key is deliberately NOT bound to an unlocked device
+ * (no setUnlockedDeviceRequired), because the background location service must
+ * seal and upload positions while the phone sits locked in a pocket. It is still
+ * hardware-backed, non-exportable and device-bound. The key `alias` (v2) replaced
+ * `legacyAlias` (v1), which required an unlocked device; the legacy key is only
+ * used to decrypt old blobs while migrating (see E2eeVault.migrateLegacy) and is
+ * deleted only after Dart confirmed every blob was re-wrapped and read back.
  */
 class KeystoreChannel(private val activity: Activity) {
-    private val alias = "openfamily_e2ee_wrap_v1"
+    private val alias = "openfamily_e2ee_wrap_v2"
+    private val legacyAlias = "openfamily_e2ee_wrap_v1"
     private val provider = "AndroidKeyStore"
 
     fun handle(call: MethodCall, result: MethodChannel.Result) {
@@ -38,6 +47,14 @@ class KeystoreChannel(private val activity: Activity) {
                 "encrypt" -> result.success(encrypt(call.arguments as ByteArray))
                 "decrypt" -> result.success(decrypt(call.arguments as ByteArray))
                 "status" -> result.success(status())
+                // Migration from the v1 key (unlocked-device-only). Never creates a key.
+                "decryptLegacy" -> result.success(decryptLegacy(call.arguments as ByteArray))
+                "hasLegacy" -> result.success(store().containsAlias(legacyAlias))
+                "deleteLegacy" -> {
+                    val ks = store()
+                    if (ks.containsAlias(legacyAlias)) ks.deleteEntry(legacyAlias)
+                    result.success(null)
+                }
                 "recreateKey" -> {
                     val auth = (call.arguments as? Map<*, *>)?.get("requireUserAuth") == true
                     recreate(auth)
@@ -55,6 +72,9 @@ class KeystoreChannel(private val activity: Activity) {
             }
         } catch (e: KeyPermanentlyInvalidatedException) {
             result.error("invalidated", "key invalidated", null)
+        } catch (e: android.security.keystore.UserNotAuthenticatedException) {
+            // Locked phone / auth-bound key: the key is fine, just not usable right now.
+            result.error("locked", "key not usable now", null)
         } catch (e: java.security.UnrecoverableKeyException) {
             result.error("invalidated", "key unrecoverable", null)
         } catch (e: Throwable) {
@@ -82,7 +102,9 @@ class KeystoreChannel(private val activity: Activity) {
                 .setRandomizedEncryptionRequired(true)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 if (strongBox) b.setIsStrongBoxBacked(true)
-                b.setUnlockedDeviceRequired(true)
+                // Only the opt-in strict mode ties the key to an unlocked phone.
+                // The default must work with the screen locked (background sealing).
+                if (requireUserAuth) b.setUnlockedDeviceRequired(true)
             }
             if (requireUserAuth) {
                 b.setUserAuthenticationRequired(true)
@@ -125,14 +147,23 @@ class KeystoreChannel(private val activity: Activity) {
         return byteArrayOf(iv.size.toByte()) + iv + ct
     }
 
-    private fun decrypt(blob: ByteArray): ByteArray {
+    private fun decrypt(blob: ByteArray, which: String = alias): ByteArray {
         val ivLen = blob[0].toInt()
         val iv = blob.copyOfRange(1, 1 + ivLen)
         val ct = blob.copyOfRange(1 + ivLen, blob.size)
         val c = Cipher.getInstance("AES/GCM/NoPadding")
-        c.init(Cipher.DECRYPT_MODE, store().getKey(alias, null) ?: throw java.security.UnrecoverableKeyException(),
+        c.init(Cipher.DECRYPT_MODE, store().getKey(which, null) ?: throw java.security.UnrecoverableKeyException(),
             GCMParameterSpec(128, iv))
         return c.doFinal(ct)
+    }
+
+    /** A key that needs an unlocked phone refuses to init while locked: report that as "locked", not as lost. */
+    private fun decryptLegacy(blob: ByteArray): ByteArray = try {
+        decrypt(blob, legacyAlias)
+    } catch (e: KeyPermanentlyInvalidatedException) {
+        throw e
+    } catch (e: java.security.InvalidKeyException) {
+        throw android.security.keystore.UserNotAuthenticatedException()
     }
 
     private fun status(): Map<String, Any> {
@@ -153,11 +184,13 @@ class KeystoreChannel(private val activity: Activity) {
                 level = if (info.isInsideSecureHardware) "tee" else "software"
             }
             // KeyInfo cannot report this; it was requested when the key was created (API 28+).
-            unlocked = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
             auth = info.isUserAuthenticationRequired
+            // Reported truthfully from the key itself where the OS can say so (API 31+).
+            unlocked = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && info.isUnlockedDeviceRequired
         } catch (_: Throwable) {
             // keep "software": we could not prove hardware backing
         }
-        return mapOf("level" to level, "unlockedDeviceRequired" to unlocked, "userAuthRequired" to auth)
+        return mapOf("level" to level, "unlockedDeviceRequired" to unlocked, "userAuthRequired" to auth,
+            "legacyKey" to store().containsAlias(legacyAlias))
     }
 }

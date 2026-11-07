@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'screens/login_screen.dart';
+import 'services/e2ee/e2ee_vault.dart';
 import 'screens/app_shell.dart';
 import 'screens/join_circle_screen.dart';
 import 'screens/server_config_screen.dart';
@@ -269,6 +270,9 @@ class _SessionGateState extends State<_SessionGate> {
       // A secure-storage hiccup should not prevent the app from starting; a
       // later launch or logout will retry this idempotent cleanup.
     }
+
+    // Re-wrap keys stored by older versions so they work with the screen locked. Foreground only, never throws.
+    unawaited(SecureVault().migrateLegacy().catchError((Object _) => VaultMigration.failedKept));
 
     if (!ServerConfig.instance.isConfigured) return null;
 

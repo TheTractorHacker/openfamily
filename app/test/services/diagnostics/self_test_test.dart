@@ -25,6 +25,12 @@ class _FakeKeystore implements KeystoreChannel {
 
   @override
   Future<void> recreateKey({required bool requireUserAuth}) async {}
+
+  @override
+  Future<Uint8List> decryptLegacy(Uint8List blob) => decrypt(blob);
+
+  @override
+  Future<void> deleteLegacy() async {}
 }
 
 void main() {
