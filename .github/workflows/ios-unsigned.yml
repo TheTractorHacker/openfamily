@@ -9,7 +9,6 @@ name: iOS unsigned IPA (sideload)
 on:
   push:
     tags: ['v*']
-    branches: ['ci/ios-unsigned-test'] # build-only dry run, never uploads
   workflow_dispatch:
 
 permissions:
