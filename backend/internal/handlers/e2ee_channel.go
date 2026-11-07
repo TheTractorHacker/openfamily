@@ -499,7 +499,10 @@ func (s *Server) E2EEPostBatch(w http.ResponseWriter, r *http.Request) {
 
 	if len(stored) > 0 {
 		s.noteReport(ctx, uid, time.Now())
-		s.touchPrivateLiveness(r, uid)
+		if kind != "server" {
+			// Genuine accepted upload from a phone key only (never a poll).
+			s.touchPrivateLiveness(r, uid)
+		}
 		circleID, sender := m.CircleID, uid
 		postCommitRunner.Submit(func() { s.fanOutE2EEItems(circleID, sender, stored, wake) })
 	}
@@ -645,7 +648,6 @@ func (s *Server) E2EEListItems(w http.ResponseWriter, r *http.Request) {
 		writeE2EECode(w, http.StatusForbidden, "no_approved_device", "no approved device key for this circle")
 		return
 	}
-	s.touchPrivateLiveness(r, uid)
 	// A server-kind key reads the server line only (metadata minimisation; it can
 	// open nothing else), except in a legacy circle where it still holds CK.
 	if pullDev != "" && !legacy {
