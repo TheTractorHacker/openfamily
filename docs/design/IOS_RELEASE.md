@@ -256,6 +256,33 @@ The simulator job in `test.yml` (job `ios`) now also lints the plists and runs t
 tests, which cover the software-key path of `SecureKeyChannel` (the Simulator has no Secure
 Enclave) and the invite-link filter.
 
+## Unsigned IPA for sideloading
+
+`.github/workflows/ios-unsigned.yml` runs on every `v*` tag (and manually). On `macos-15` it runs
+`flutter build ios --release --no-codesign`, zips `Payload/Runner.app` into
+`openfamily-<version>-unsigned.ipa` and attaches it, plus a `.sha256` file and the SHA256 in the
+release notes, to **this repository's** GitHub release for the tag. It needs no secrets, uses only
+the workflow `GITHUB_TOKEN`, uploads only when the ref is a tag of `TheTractorHacker/openfamily`,
+and never runs the signed `ios-release.yml` path. It waits for `apk.yml` to create the release
+instead of creating one itself. Non-tag runs only keep a workflow artifact.
+
+The file is **not installable as is**. Re-sign it yourself with AltStore or Sideloadly using your
+own Apple ID, and verify the SHA256 first. Caveats of re-signing:
+
+* A free Apple ID signs for 7 days; the app stops launching until it is re-signed (AltStore
+  refreshes it while the AltServer computer is reachable). Free accounts allow 3 sideloaded apps
+  and 10 App IDs per week.
+* The tool replaces the bundle id and the entitlements. Capabilities that need a paid account
+  or an App ID registered for them will not work: **Associated Domains** (universal invite links;
+  the `openfamily://join` button still works), **Push Notifications** (`aps-environment`; the
+  APNs alert and location-refresh channel will not register), and the Keychain access group.
+* The Secure Enclave wrapping key may not be created, or may be lost on re-signing, because the
+  Keychain items are tied to the signing identity/team. `SecureKeyChannel` then falls back to the
+  software Keychain key and reports `keychain` instead of `secure_enclave`; after every re-sign
+  with another identity the old wrapped secrets can be unreadable and the app asks for the
+  restore phrase (fail closed).
+* Not notarised or reviewed by Apple; no automatic updates (use AltStore sources or repeat the install).
+
 ## Verification status
 
 Verified here (Linux): Dart analysis and unit tests (fake method channels, platform guards),

@@ -78,6 +78,11 @@ type Server struct {
 	TileURL          string
 	SatelliteTileURL string
 	MapStyleURL      string
+
+	// MinSupportedAppVersion is the env pin for the oldest supported app version
+	// (see compat.go); an admin override in app_compat_settings wins.
+	MinSupportedAppVersion string
+	compatCache            compatCache
 	// OnMapStyleChange, when set, is called with the effective style URL after
 	// an admin changes it, so the admin panel CSP can allow its origin.
 	OnMapStyleChange func(styleURL string)

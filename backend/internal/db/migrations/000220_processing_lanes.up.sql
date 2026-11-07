@@ -422,6 +422,57 @@ BEGIN
     RETURN NEW;
 END $$ LANGUAGE plpgsql;
 
+-- Old apps (no 'lanes2') cannot verify the key log once it holds processing_pref /
+-- processing_policy entries (action codes 10 and 11): they would go blind to
+-- key-change alarms. So (a) such an entry can only be appended while no live member
+-- has an active phone key without lanes2, (b) nobody with such a key joins a circle
+-- that already has such entries, and (c) such a key cannot be registered by a member
+-- of such a circle. The handlers answer 409 update_required_for_lanes first; these
+-- triggers are the backstop for every other path.
+CREATE INDEX IF NOT EXISTS idx_e2ee_log_circle_lanes ON e2ee_log (circle_id) WHERE action IN (10, 11);
+CREATE OR REPLACE FUNCTION e2ee_circle_has_lanes_log(circ UUID) RETURNS BOOLEAN AS $$
+    SELECT EXISTS (SELECT 1 FROM e2ee_log WHERE circle_id = circ AND action IN (10, 11))
+$$ LANGUAGE sql STABLE;
+
+CREATE OR REPLACE FUNCTION e2ee_log_lanes_guard() RETURNS trigger AS $$
+BEGIN
+    IF NEW.circle_id IS NOT NULL AND EXISTS (
+        SELECT 1 FROM live_circle_members m JOIN device_keys d ON d.user_id = m.user_id
+         WHERE m.circle_id = NEW.circle_id AND d.kind = 'device' AND d.revoked_at IS NULL AND NOT ('lanes2' = ANY (d.caps))) THEN
+        RAISE EXCEPTION 'e2ee_update_required_for_lanes: a member still runs an app that cannot read processing log entries'
+            USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NEW;
+END $$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS trg_e2ee_log_lanes_guard ON e2ee_log;
+CREATE TRIGGER trg_e2ee_log_lanes_guard BEFORE INSERT ON e2ee_log
+    FOR EACH ROW WHEN (NEW.action IN (10, 11)) EXECUTE FUNCTION e2ee_log_lanes_guard();
+
+CREATE OR REPLACE FUNCTION e2ee_member_lanes_guard() RETURNS trigger AS $$
+BEGIN
+    IF e2ee_circle_has_lanes_log(NEW.circle_id) AND EXISTS (
+        SELECT 1 FROM device_keys d WHERE d.user_id = NEW.user_id AND d.kind = 'device' AND d.revoked_at IS NULL
+           AND NOT ('lanes2' = ANY (d.caps))) THEN
+        RAISE EXCEPTION 'e2ee_update_required_for_lanes: update the app to join this circle' USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NEW;
+END $$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS trg_e2ee_member_lanes_guard ON circle_members;
+CREATE TRIGGER trg_e2ee_member_lanes_guard BEFORE INSERT ON circle_members
+    FOR EACH ROW EXECUTE FUNCTION e2ee_member_lanes_guard();
+
+CREATE OR REPLACE FUNCTION e2ee_device_lanes_guard() RETURNS trigger AS $$
+BEGIN
+    IF NEW.kind = 'device' AND NOT ('lanes2' = ANY (NEW.caps)) AND EXISTS (
+        SELECT 1 FROM circle_members m WHERE m.user_id = NEW.user_id AND e2ee_circle_has_lanes_log(m.circle_id)) THEN
+        RAISE EXCEPTION 'e2ee_update_required_for_lanes: update the app to register a key' USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NEW;
+END $$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS trg_e2ee_device_lanes_guard ON device_keys;
+CREATE TRIGGER trg_e2ee_device_lanes_guard BEFORE INSERT ON device_keys
+    FOR EACH ROW EXECUTE FUNCTION e2ee_device_lanes_guard();
+
 -- Circles that were ALREADY in trusted-server mode (any consent row or a wrap to
 -- a server key) stay legacy until their admin runs the upgrade action. New
 -- circles can never be legacy: no API sets the flag.

@@ -10,6 +10,7 @@ class ChatMessage {
     required this.body,
     required this.createdAt,
     this.hasImage = false,
+    this.editedAt,
   });
 
   final String id;
@@ -25,6 +26,9 @@ class ChatMessage {
   /// True for a photo message (fetch the bytes via the chat photo endpoint).
   final bool hasImage;
 
+  /// Set once the sender has edited the text.
+  final DateTime? editedAt;
+
   factory ChatMessage.fromJson(Map<String, dynamic> json) {
     return ChatMessage(
       id: json['id'] as String? ?? '',
@@ -34,6 +38,7 @@ class ChatMessage {
       senderName: json['sender_name'] as String? ?? '',
       body: json['body'] as String? ?? '',
       hasImage: json['has_image'] == true,
+      editedAt: DateTime.tryParse(json['edited_at'] as String? ?? '')?.toLocal(),
       createdAt:
           DateTime.tryParse(json['created_at'] as String? ?? '')?.toLocal() ??
               DateTime.fromMillisecondsSinceEpoch(0),

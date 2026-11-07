@@ -20,6 +20,10 @@ class ChatScreen extends StatefulWidget {
     this.incoming,
     this.reads,
     this.picker,
+    this.edits,
+    this.deletes,
+    this.reconnects,
+    this.isAdmin = false,
   });
 
   final String circleId;
@@ -37,6 +41,15 @@ class ChatScreen extends StatefulWidget {
   /// Overrides the photo picker (tests): returns JPEG/PNG bytes or null.
   final Future<Uint8List?> Function(ImageSource source)? picker;
 
+  /// Overrides [ChatEvents.edits] / [ChatEvents.deletes] /
+  /// [ChatEvents.reconnects] (tests).
+  final Stream<ChatMessage>? edits;
+  final Stream<(String, String)>? deletes;
+  final Stream<void>? reconnects;
+
+  /// Circle admins may delete anyone's message (moderation).
+  final bool isAdmin;
+
   @override
   State<ChatScreen> createState() => _ChatScreenState();
 }
@@ -50,6 +63,12 @@ class _ChatScreenState extends State<ChatScreen> {
   final Set<String> _ids = <String>{};
   StreamSubscription<ChatMessage>? _sub;
   StreamSubscription<(String, ChatReader)>? _readSub;
+  StreamSubscription<ChatMessage>? _editSub;
+  StreamSubscription<(String, String)>? _delSub;
+  StreamSubscription<void>? _reconnectSub;
+  String? _clientId;
+  String? _clientIdBody;
+  ChatMessage? _editing;
   final Map<String, ChatReader> _readers = <String, ChatReader>{};
   final Map<String, Future<Uint8List>> _photos = <String, Future<Uint8List>>{};
   String? _me;
@@ -73,6 +92,16 @@ class _ChatScreenState extends State<ChatScreen> {
       if (old != null && old.lastSeq >= e.$2.lastSeq) return;
       setState(() => _readers[e.$2.userId] = e.$2);
     });
+    _editSub = (widget.edits ?? ChatEvents.edits).listen((ChatMessage m) {
+      if (m.circleId != widget.circleId || !mounted) return;
+      _replace(m);
+    });
+    _delSub = (widget.deletes ?? ChatEvents.deletes).listen(((String, String) e) {
+      if (e.$1 != widget.circleId || !mounted) return;
+      _remove(e.$2);
+    });
+    _reconnectSub =
+        (widget.reconnects ?? ChatEvents.reconnects).listen((_) => _catchUp());
     _scroll.addListener(_onScroll);
     _text.addListener(() => setState(() {}));
     unawaited(_load());
@@ -85,6 +114,9 @@ class _ChatScreenState extends State<ChatScreen> {
     }
     _sub?.cancel();
     _readSub?.cancel();
+    _editSub?.cancel();
+    _delSub?.cancel();
+    _reconnectSub?.cancel();
     _scroll.dispose();
     _text.dispose();
     super.dispose();
@@ -138,6 +170,37 @@ class _ChatScreenState extends State<ChatScreen> {
     await ChatEvents.refreshUnread();
   }
 
+  void _replace(ChatMessage m) {
+    final int i = _messages.indexWhere((ChatMessage x) => x.id == m.id);
+    if (i < 0) return;
+    setState(() => _messages[i] = m);
+  }
+
+  void _remove(String id) {
+    if (!_ids.remove(id)) return;
+    setState(() => _messages.removeWhere((ChatMessage x) => x.id == id));
+  }
+
+  /// After the socket (re)connects, fetch whatever arrived while it was down.
+  Future<void> _catchUp() async {
+    if (_loading || _error != null || !mounted) return;
+    try {
+      final int newest = _messages.isEmpty ? 0 : _messages.first.seq;
+      final ChatPage page = await _svc.messages(widget.circleId, after: newest);
+      if (!mounted) return;
+      final bool fresh = page.messages.any((ChatMessage m) => !_ids.contains(m.id));
+      setState(() {
+        _addAll(page.messages);
+        for (final ChatReader r in page.readers) {
+          _readers[r.userId] = r;
+        }
+      });
+      if (fresh) unawaited(_markRead());
+    } catch (_) {
+      // The next reconnect or reopening the chat retries.
+    }
+  }
+
   void _onIncoming(ChatMessage m) {
     if (m.circleId != widget.circleId || !_ids.add(m.id)) return;
     setState(() {
@@ -181,15 +244,36 @@ class _ChatScreenState extends State<ChatScreen> {
   Future<void> _send() async {
     final String body = _text.text.trim();
     if (body.isEmpty || _sending) return;
+    final ChatMessage? editing = _editing;
+    // A retry of the same text reuses its client id so the server cannot
+    // store it twice if the first attempt got through.
+    if (_clientId == null || _clientIdBody != body) {
+      _clientId = '${DateTime.now().microsecondsSinceEpoch}-${body.hashCode}';
+      _clientIdBody = body;
+    }
     setState(() {
       _sending = true;
       _sendError = null;
     });
     try {
-      final ChatMessage sent = await _svc.send(widget.circleId, body);
+      if (editing != null) {
+        final ChatMessage upd =
+            await _svc.edit(widget.circleId, editing.id, body);
+        if (!mounted) return;
+        setState(() {
+          _sending = false;
+          _editing = null;
+          _text.clear();
+        });
+        _replace(upd);
+        return;
+      }
+      final ChatMessage sent =
+          await _svc.send(widget.circleId, body, clientId: _clientId);
       if (!mounted) return;
       setState(() {
         _sending = false;
+        _clientId = null;
         _text.clear();
         _addAll(<ChatMessage>[sent]);
       });
@@ -199,6 +283,72 @@ class _ChatScreenState extends State<ChatScreen> {
         _sending = false;
         _sendError = describeChatError(e).message; // draft is kept
       });
+    }
+  }
+
+  void _messageActions(ChatMessage m) {
+    final bool mine = m.senderId == _me;
+    if (!mine && !widget.isAdmin) return;
+    showModalBottomSheet<void>(
+      context: context,
+      builder: (BuildContext ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            if (mine)
+              ListTile(
+                key: const Key('chat-action-edit'),
+                leading: const Icon(Icons.edit_outlined),
+                title: const Text('Edit'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  setState(() {
+                    _editing = m;
+                    _sendError = null;
+                    _text.text = m.body;
+                    _text.selection =
+                        TextSelection.collapsed(offset: m.body.length);
+                  });
+                },
+              ),
+            ListTile(
+              key: const Key('chat-action-delete'),
+              leading: const Icon(Icons.delete_outline),
+              title: Text(mine ? 'Delete' : 'Delete (admin)'),
+              onTap: () {
+                Navigator.pop(ctx);
+                unawaited(_confirmDelete(m));
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _confirmDelete(ChatMessage m) async {
+    final bool? yes = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext ctx) => AlertDialog(
+        title: const Text('Delete message?'),
+        content: const Text('It is removed for everyone in this circle.'),
+        actions: <Widget>[
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          TextButton(
+              key: const Key('chat-delete-confirm'),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Delete')),
+        ],
+      ),
+    );
+    if (yes != true || !mounted) return;
+    try {
+      await _svc.delete(widget.circleId, m.id);
+      if (mounted) _remove(m.id);
+    } catch (e) {
+      if (mounted) setState(() => _sendError = describeChatError(e).message);
     }
   }
 
@@ -363,6 +513,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 message: m,
                 mine: mine,
                 showName: !sameAsOlder,
+                onLongPress: () => _messageActions(m),
                 photo: m.hasImage ? _photoBytes(m.id) : null,
               ),
             ),
@@ -394,6 +545,29 @@ class _ChatScreenState extends State<ChatScreen> {
     final ColorScheme cs = Theme.of(context).colorScheme;
     final int len = _text.text.characters.length;
     final bool tooLong = len > kMaxChatLength;
+    return Column(mainAxisSize: MainAxisSize.min, children: <Widget>[
+      if (_editing != null)
+        ListTile(
+          key: const Key('chat-editing'),
+          dense: true,
+          leading: const Icon(Icons.edit_outlined),
+          title: const Text('Editing message'),
+          trailing: IconButton(
+            key: const Key('chat-editing-cancel'),
+            tooltip: 'Cancel editing',
+            icon: const Icon(Icons.close),
+            onPressed: () => setState(() {
+              _editing = null;
+              _text.clear();
+            }),
+          ),
+        ),
+      _composerRow(context, cs, len, tooLong),
+    ]);
+  }
+
+  Widget _composerRow(
+      BuildContext context, ColorScheme cs, int len, bool tooLong) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(
           AppSpace.md, AppSpace.xs, AppSpace.xs, AppSpace.xs),
@@ -405,7 +579,7 @@ class _ChatScreenState extends State<ChatScreen> {
             tooltip: 'Send a photo',
             constraints: const BoxConstraints(
                 minWidth: kMinTarget, minHeight: kMinTarget),
-            onPressed: _sending ? null : _attachMenu,
+            onPressed: _sending || _editing != null ? null : _attachMenu,
             icon: const Icon(Icons.add_photo_alternate_outlined),
           ),
           Expanded(
@@ -430,7 +604,7 @@ class _ChatScreenState extends State<ChatScreen> {
           ),
           IconButton(
             key: const Key('chat-send'),
-            tooltip: 'Send',
+            tooltip: _editing != null ? 'Save edit' : 'Send',
             constraints: const BoxConstraints(
                 minWidth: kMinTarget, minHeight: kMinTarget),
             onPressed: _canSend ? _send : null,
@@ -466,8 +640,10 @@ class _Bubble extends StatelessWidget {
     required this.mine,
     required this.showName,
     this.photo,
+    this.onLongPress,
   });
 
+  final VoidCallback? onLongPress;
   final ChatMessage message;
   final bool mine;
   final bool showName;
@@ -484,9 +660,18 @@ class _Bubble extends StatelessWidget {
     final ColorScheme cs = Theme.of(context).colorScheme;
     final Color bg = mine ? cs.primaryContainer : cs.surfaceContainerHighest;
     final Color fg = mine ? cs.onPrimaryContainer : cs.onSurface;
+    final String who = mine ? 'You' : message.senderName;
     return Align(
       alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
+      child: Semantics(
+        container: true,
+        label: '$who, ${message.hasImage ? 'photo, ' : ''}${message.body}, '
+            '${_time(message.createdAt)}${message.editedAt != null ? ', edited' : ''}',
+        onLongPress: onLongPress,
+        excludeSemantics: true,
+        child: GestureDetector(
+        onLongPress: onLongPress,
+        child: Container(
         margin: const EdgeInsets.symmetric(vertical: 2),
         constraints:
             BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.78),
@@ -514,12 +699,16 @@ class _Bubble extends StatelessWidget {
             if (message.body.isNotEmpty)
               Text(message.body, style: AppType.body.copyWith(color: fg)),
             Text(
-              _time(message.createdAt),
+              message.editedAt != null
+                  ? '${_time(message.createdAt)} · edited'
+                  : _time(message.createdAt),
               style: AppType.secondary
                   .copyWith(color: fg.withValues(alpha: 0.7), fontSize: 11),
             ),
           ],
         ),
+      ),
+      ),
       ),
     );
   }

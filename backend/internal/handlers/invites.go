@@ -273,6 +273,10 @@ func (s *Server) JoinFamily(w http.ResponseWriter, r *http.Request) {
 	}
 
 	familyID, role, err := s.consumeInviteCode(r.Context(), tx, code)
+	if err == nil && oldAppBlocksJoin(r.Context(), tx, familyID, claims.UserID) {
+		writeUpdateRequired(w, nil)
+		return
+	}
 	if err != nil {
 		var ie *inviteError
 		if errors.As(err, &ie) {

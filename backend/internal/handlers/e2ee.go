@@ -316,6 +316,10 @@ func (s *Server) E2EERegisterDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.Kind == "device" && !hasLanes2(cleanCaps(req.Caps)) && oldKeyBlocksRegistration(ctx, s.Pool, uid) {
+		writeUpdateRequired(w, nil)
+		return
+	}
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to register key")
@@ -463,6 +467,10 @@ func (s *Server) E2EERotateDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	} else if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to rotate key")
+		return
+	}
+	if kind == "device" && !hasLanes2(rotatedCaps(req.Caps, oldCaps)) && oldKeyBlocksRegistration(ctx, tx, uid) {
+		writeUpdateRequired(w, nil)
 		return
 	}
 	if kind == "server" {

@@ -2,10 +2,12 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:flutter/foundation.dart' show compute;
+import 'package:flutter/foundation.dart'
+    show TargetPlatform, compute, defaultTargetPlatform, kIsWeb;
 import 'package:http/http.dart' as http;
 
 import '../models/user_profile.dart';
+import 'app_compat.dart';
 import 'perf/perf_monitor.dart';
 import 'server_config.dart';
 import 'session_diary.dart';
@@ -646,6 +648,12 @@ class ApiClient {
     } else if (body != null) {
       headers['Content-Type'] = 'application/json';
     }
+    // Announce the app version so the server can tell an old app apart and
+    // answer with X-OpenFamily-Compat (docs/api-compat.md).
+    if (AppCompat.version.isNotEmpty) {
+      headers['X-App-Version'] = AppCompat.version;
+      headers['X-App-Platform'] = _platformName();
+    }
     if (auth) {
       final String? token = await TokenStorage.readAccessToken();
       if (token != null) {
@@ -661,10 +669,21 @@ class ApiClient {
     try {
       final http.Response r = await _dispatch(method, uri, headers, encoded);
       status = r.statusCode;
+      AppCompat.observeHeaders(r.headers);
+      if (status == 426) AppCompat.observeUpgradeRequired();
       return r;
     } finally {
       PerfMonitor.instance.recordHttp(method, uri.path, sw.elapsedMilliseconds, status);
     }
+  }
+
+  static String _platformName() {
+    if (kIsWeb) return 'web';
+    return switch (defaultTargetPlatform) {
+      TargetPlatform.iOS => 'ios',
+      TargetPlatform.android => 'android',
+      _ => '',
+    };
   }
 
   static Future<http.Response> _dispatch(
@@ -941,6 +960,9 @@ class ApiClient {
     _throwForError(response);
   }
 
+  /// Test hook for the error mapping.
+  static Never debugThrowForError(http.Response r) => _throwForError(r);
+
   /// Throws an [ApiException] using the backend's error JSON when available.
   static Never _throwForError(http.Response response) {
     final String body = response.body;
@@ -949,6 +971,11 @@ class ApiClient {
       final dynamic decoded = jsonDecode(body);
       if (decoded is Map && decoded['error'] is String) {
         message = decoded['error'] as String;
+      }
+      // This app version cannot take part in a circle with processing lanes: show the same
+      // "update the app" state as a 426 does, instead of a plain error.
+      if (response.statusCode == 409 && decoded is Map && decoded['code'] == 'update_required_for_lanes') {
+        AppCompat.observeUpgradeRequired(message);
       }
     } catch (_) {
       // Non-JSON error body; keep the generic message.

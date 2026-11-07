@@ -51,7 +51,14 @@ final class SecureKeyChannel {
     let instance = SecureKeyChannel()
     let channel = FlutterMethodChannel(name: channelName, binaryMessenger: messenger)
     channel.setMethodCallHandler { call, result in instance.handle(call, result) }
+    // The private store directory: registered for every engine, including the headless background one.
+    let store = FlutterMethodChannel(name: storeChannelName, binaryMessenger: messenger)
+    store.setMethodCallHandler { call, result in
+      if call.method == "prepare" { result(PrivateStoreDirectory.prepare()) } else { result(FlutterMethodNotImplemented) }
+    }
   }
+
+  static let storeChannelName = "app.openfamily/store"
 
   // MARK: Channel
 
@@ -212,13 +219,17 @@ final class SecureKeyChannel {
     return (try createKey(requireUserAuth: false), true)
   }
 
-  private func createKey(requireUserAuth: Bool) throws -> SecKey {
+  /// The Simulator has no Secure Enclave: go straight to the software key there.
+  private static let hasSecureEnclave: Bool = {
     #if targetEnvironment(simulator)
-      let enclaveFirst = false  // the Simulator has no Secure Enclave
+      return false
     #else
-      let enclaveFirst = true
+      return true
     #endif
-    if enclaveFirst, let k = try? generate(requireUserAuth: requireUserAuth, enclave: true) {
+  }()
+
+  private func createKey(requireUserAuth: Bool) throws -> SecKey {
+    if Self.hasSecureEnclave, let k = try? generate(requireUserAuth: requireUserAuth, enclave: true) {
       return k
     }
     return try generate(requireUserAuth: requireUserAuth, enclave: false)
@@ -255,7 +266,9 @@ final class SecureKeyChannel {
     if enclave { attrs[kSecAttrTokenID as String] = kSecAttrTokenIDSecureEnclave }
     var genErr: Unmanaged<CFError>?
     guard let key = SecKeyCreateRandomKey(attrs as CFDictionary, &genErr) else {
-      throw KeyError(code: "keystore", detail: enclave ? "enclave keygen" : "keygen")
+      let status = genErr.map { CFErrorGetCode($0.takeRetainedValue()) } ?? 0
+      throw KeyError(
+        code: "keystore", detail: (enclave ? "enclave keygen " : "keygen ") + "\(status)")
     }
     return key
   }
@@ -286,5 +299,41 @@ final class SecureKeyChannel {
     }
     defaults.removeObject(forKey: authDefaultsKey)
     defaults.set(true, forKey: installedDefaultsKey)
+  }
+}
+
+/// The one directory that holds the sensitive stores of the app (location trails, the sealed upload queue, lane facts,
+/// shared results). It is created on every engine start, excluded from iCloud / computer backups AS A DIRECTORY (files
+/// created inside inherit it, and it survives atomic rewrites, unlike a flag on a single preferences file), and the flag
+/// is read back. The answer is returned to Dart, which shows it in Diagnostics; nothing is swallowed.
+enum PrivateStoreDirectory {
+  static func prepare() -> [String: Any] {
+    let fm = FileManager.default
+    guard let support = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+      return ["path": "", "excluded": false, "error": "no Application Support directory"]
+    }
+    var dir = support.appendingPathComponent("openfamily-private", isDirectory: true)
+    var error = ""
+    do {
+      try fm.createDirectory(at: dir, withIntermediateDirectories: true, attributes: nil)
+    } catch {
+      return ["path": "", "excluded": false, "error": "cannot create the store directory"]
+    }
+    do {
+      var values = URLResourceValues()
+      values.isExcludedFromBackup = true
+      try dir.setResourceValues(values)
+    } catch let e {
+      error = "setting the flag failed: \(e.localizedDescription)"
+    }
+    // Read it back; only a confirmed flag counts.
+    var excluded = false
+    do {
+      dir.removeAllCachedResourceValues()
+      excluded = try dir.resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup ?? false
+    } catch let e {
+      error = "reading the flag failed: \(e.localizedDescription)"
+    }
+    return ["path": dir.path, "excluded": excluded, "error": error]
   }
 }

@@ -373,7 +373,7 @@ func TestLanesServerModeIngestsOnlyServerLaneAuthors(t *testing.T) {
 		t.Fatal("an item of a phone-lane author was decrypted")
 	}
 	h := w.of.hits
-	if h["wraps-line-server"] == 0 || h["wraps-line-"] != 0 || h["wraps-line-phone"] != 0 || h["wraps-line-all"] != 0 {
+	if h["wraps-line-server"] == 0 || h["wraps-line-"] != 0 || h["wraps-line-phone"] != 0 {
 		t.Fatalf("wrap requests %v: the sidecar must ask for the server line only", h)
 	}
 	if h["items-line-server"] == 0 || h["items-line-phone"] != 0 || h["items-line-all"] != 0 {
@@ -736,5 +736,64 @@ func TestLegacyCircleDoesNotUseLanes(t *testing.T) {
 	w.cycleOK(b)
 	if len(ing.points()) != 1 || w.of.hits["GET /circles/"+w.of.circle+"/e2ee/processing"] != 0 {
 		t.Fatalf("legacy flow changed: %d points", len(ing.points()))
+	}
+}
+
+// A hostile server withholds the CK wrap from the filtered request but shows it unfiltered.
+func TestLanesAlarmsOnACKWrapHiddenFromTheFilteredRequest(t *testing.T) {
+	w := newLanesWorld(t, "server")
+	w.vectorItem()
+	b := w.newBridge()
+	w.cycleOK(b) // normal: SK held, points ingested
+	if len(w.pts()) != 1 {
+		t.Fatal("baseline")
+	}
+	w.of.hiddenWraps = []e2ee.SKWrap{w.vectorSKWrap("ck_v3_gen3", "phone")}
+	err := b.cycle(context.Background())
+	if err == nil || !isAlarm(err) || exitCodeFor(err) != exitAlarm {
+		t.Fatalf("hidden CK wrap: %v", err)
+	}
+	// ...also on a device that holds no SK yet, and nothing is read
+	w2 := newLanesWorld(t, "server")
+	w2.of.skWraps = nil
+	w2.of.hiddenWraps = []e2ee.SKWrap{w2.vectorSKWrap("ck_v3_gen3", "phone")}
+	if err := w2.newBridge().cycle(context.Background()); err == nil || !isAlarm(err) {
+		t.Fatalf("no-SK device: %v", err)
+	}
+	// The Dawarich bridge tolerates a CK wrap (its owner's old choice) and keeps working on the SK line only.
+	w3 := newLanesWorld(t, "service")
+	w3.vectorItem()
+	w3.of.hiddenWraps = []e2ee.SKWrap{w3.vectorSKWrap("ck_v3_gen3", "phone")}
+	b3 := w3.newBridge()
+	w3.cycleOK(b3)
+	if len(w3.dw.points()) != 1 || len(b3.keys.epochs(w3.v.CircleID)) != 0 {
+		t.Fatalf("bridge with an ignored CK wrap: %d points, CK epochs %v", len(w3.dw.points()), b3.keys.epochs(w3.v.CircleID))
+	}
+}
+
+// A CK epoch with the SK's bytes appears AFTER the SK was stored: the held SK is re-checked every cycle.
+func TestLanesRechecksAHeldSKAgainstLaterCKEpochs(t *testing.T) {
+	w := newLanesWorld(t, "server")
+	w.vectorItem()
+	b := w.newBridge()
+	w.cycleOK(b)
+	if len(b.keys.epochs(skID(w.v.CircleID))) != 1 {
+		t.Fatal("baseline: SK held")
+	}
+	w.of.publishEpoch(w.admin, 4, w.sk) // CK epoch 4 = the SK bytes
+	err := b.cycle(context.Background())
+	if err == nil || !isAlarm(err) || !strings.Contains(err.Error(), "reuses CK") || exitCodeFor(err) != exitAlarm {
+		t.Fatalf("later CK epoch with the SK's bytes: %v", err)
+	}
+}
+
+// Lanes circles need only SK: with no CK wrap at all (the normal case) the service key works.
+func TestLanesServiceKeyNeedsNoCKWrap(t *testing.T) {
+	w := newLanesWorld(t, "service")
+	w.vectorItem()
+	b := w.newBridge()
+	w.cycleOK(b)
+	if len(w.dw.points()) != 1 || len(b.keys.epochs(w.v.CircleID)) != 0 || len(w.of.wraps[w.v.Recipient.DeviceID]) != 0 {
+		t.Fatal("service key without a CK wrap")
 	}
 }

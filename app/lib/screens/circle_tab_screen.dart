@@ -54,7 +54,10 @@ class CircleTabScreen extends StatelessWidget {
       );
       await nav.push(MaterialPageRoute<void>(
         builder: (_) =>
-            ChatScreen(circleId: target.id, circleName: target.name),
+            ChatScreen(
+                circleId: target.id,
+                circleName: target.name,
+                isAdmin: target.isAdmin),
       ));
       await ChatEvents.refreshUnread();
     } catch (_) {

@@ -12,6 +12,8 @@ import '../services/server_config.dart';
 import '../theme/app_theme.dart';
 import '../widgets/ds/ds.dart';
 import '../widgets/circle_widgets.dart';
+import '../widgets/trusted_server_prompt.dart';
+import 'processing_screen.dart';
 
 /// Extension presets for an admin, label to hours.
 const Map<String, int> kTempCircleExtensions = <String, int>{
@@ -61,14 +63,8 @@ class _CircleDetailScreenState extends State<CircleDetailScreen> {
     }
   }
 
-  Future<void> _togglePrivate(bool on) async {
-    final E2eeService? svc = _e2ee;
-    if (svc == null || _e2eeBusy) return;
-    final bool ok = await showDsConfirm(
-      context,
-      title: on ? 'Make this a private circle?' : 'Turn off private mode?',
-      message: on
-          ? 'From now on, in this circle: live positions, location history, places, arrival and departure '
+  static const String _privateOnMessage =
+      'From now on, in this circle: live positions, location history, places, arrival and departure '
               'events and the position in check-ins and SOS are encrypted on each phone. The server '
               'stores and forwards ciphertext only and cannot read where anyone is.\n\n'
               'Still visible to the server: who is in the circle, when phones are online and how often '
@@ -84,7 +80,32 @@ class _CircleDetailScreenState extends State<CircleDetailScreen> {
               'Existing places are re-encrypted and the server copies deleted. Location history the server '
               'already holds stays until each person deletes it in their settings. Every member needs the '
               'latest app and an approved phone. If every phone and the recovery phrase are lost, encrypted '
-              'data cannot be recovered.'
+              'data cannot be recovered.';
+
+  Future<void> _togglePrivate(bool on) async {
+    final E2eeService? svc = _e2ee;
+    if (svc == null || _e2eeBusy) return;
+    // When the admin recommends trusting the server, offer the choice (trusted
+    // preselected, strict one tap away). It is only a recommendation: no consent
+    // is ever sent from here.
+    bool recommended = false;
+    if (on) {
+      try {
+        recommended = await svc.api.trustedServerDefault();
+      } catch (_) {}
+    }
+    if (!mounted) return;
+    PrivateModeChoice? choice;
+    final bool ok = recommended
+        ? ((choice = await showDialog<PrivateModeChoice>(
+                context: context,
+                builder: (BuildContext ctx) => PrivateModeChoiceDialog(message: _privateOnMessage))) !=
+            null)
+        : await showDsConfirm(
+      context,
+      title: on ? 'Make this a private circle?' : 'Turn off private mode?',
+      message: on
+          ? _privateOnMessage
           : 'The circle goes back to normal mode and its encrypted items and key copies are deleted from the '
               'server. Places and history that exist only on phones stay there; the server will not have them. '
               'Keys already on phones stay there.',
@@ -118,6 +139,11 @@ class _CircleDetailScreenState extends State<CircleDetailScreen> {
       try {
         await PrivateRuntime.instance.setCircles(await _service.listCircles());
       } catch (_) {}
+      if (on && choice == PrivateModeChoice.trusted && mounted) {
+        // Lead the person to the processing screen, where each choice needs an explicit confirmation. Nothing is signed here.
+        await Navigator.of(context).push<void>(MaterialPageRoute<void>(
+            builder: (_) => ProcessingScreen(circle: _circle, service: svc)));
+      }
     } on NeedsCrossSignatureException catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));

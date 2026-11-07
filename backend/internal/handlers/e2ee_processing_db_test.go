@@ -414,9 +414,12 @@ func TestPrefValidation(t *testing.T) {
 	wb := e.prefBody(web, "server", 1)
 	e.mustCode("B", "PUT", pref, wb, 400)
 	// An app that never declared lanes2 cannot choose the server lane.
+	// (A new phone key without lanes2 cannot even be registered by a member of this
+	// circle any more: see TestOldAppsAreKeptApartFromProcessingLogEntries.)
 	old := newTDev(t, e.ids["B"])
-	e.mustCode("B", "POST", "/e2ee/devices", regBody(t, old, "device", e.b, e2ee.ActRegister, false), 201)
-	e.mustCode("B", "PUT", pref, e.prefBody(old, "server", 1), 409)
+	if c, m, _ := e.do("B", "POST", "/e2ee/devices", regBody(t, old, "device", e.b, e2ee.ActRegister, false)); c != 409 || m["code"] != "update_required_for_lanes" {
+		t.Fatalf("old-app key registration: %d %v", c, m)
+	}
 	// The right one works and is logged.
 	r := e.mustCode("B", "PUT", pref, e.prefBody(e.b, "server", 1), 200)
 	if r["lane"] != "server" || r["effective_seq"].(float64) < 1 {
@@ -456,10 +459,6 @@ func TestCapsGateAndOldAppsStayPhoneOnly(t *testing.T) {
 	e.mustCode("A", "PUT", pol, policyBody(t, e.circle, true, "phone", "allowed", 1, e.a, wraps...), 409)
 	e.declareLanes2("C", e.c)
 	e.mustCode("A", "PUT", pol, policyBody(t, e.circle, true, "phone", "allowed", 1, e.a, wraps...), 200)
-	// A later joiner with an old app: cannot choose the server lane, cannot post server-line items.
-	d := newTDev(t, e.ids["B"])
-	e.mustCode("B", "POST", "/e2ee/devices", regBody(t, d, "device", e.b, e2ee.ActRegister, false), 201)
-	e.mustCode("B", "PUT", "/circles/"+e.circle+"/e2ee/processing-pref", e.prefBody(d, "server", 1), 409)
 	// Old-app view: wraps and items default to the phone line only; the circle list
 	// flag that old apps read as "server can read it" stays false.
 	e.setLane("A", e.a, "server", 1, 200)
@@ -483,12 +482,6 @@ func TestCapsGateAndOldAppsStayPhoneOnly(t *testing.T) {
 	r := results(e.post("B", e.b, e.circle, 201, e.seal(t, e.b, e.circle, "fix", 1, 1, []byte("x"))))
 	if r[0]["status"] != "stored" {
 		t.Fatalf("v1 item refused in a lanes circle: %v", r)
-	}
-	// An app without lanes2 posting a server-line item is refused.
-	it := e.sealV2(d, e2ee.LineServer, 1, 1, "fix")
-	rs := results(e.mustCode("B", "POST", "/circles/"+e.circle+"/e2ee/batch", map[string]any{"sender_device_id": d.id, "items": []any{it}}, 200))
-	if rs[0]["status"] != "rejected" {
-		t.Fatalf("server-line item from an old app: %v", rs)
 	}
 }
 
@@ -1458,7 +1451,7 @@ func TestInvitePreviewShowsOnlyThePrivacySetup(t *testing.T) {
 	}
 	var m map[string]any
 	_ = json.Unmarshal(rec.Body.Bytes(), &m)
-	if m["private"] != true || m["server_assist"] != true || m["member_opt_out"] != "allowed" || m["default_for_new"] != "server" || len(m) != 4 {
+	if m["private"] != true || m["server_assist"] != true || m["member_opt_out"] != "allowed" || m["default_for_new"] != "server" || m["legacy"] != false || len(m) != 5 {
 		t.Fatalf("preview: %v", m)
 	}
 	body := rec.Body.String()
@@ -1529,5 +1522,127 @@ func TestLegacyAccessOpenFlagAndPurgeResponse(t *testing.T) {
 	}
 	if _, ok := m["items_deleted"]; !ok {
 		t.Fatalf("%v", m)
+	}
+}
+
+
+// ====================================================== old apps and the key log
+
+func (e *srvEnv) registerOld(t *testing.T, user string, want int) *tdev {
+	t.Helper()
+	d := newTDev(t, e.ids[user])
+	c, m, raw := e.do(user, "POST", "/e2ee/devices", regBody(t, d, "device", nil2(e, user), e2ee.ActRegister, false))
+	if c != want {
+		t.Fatalf("register old-app key for %s: %d %s (want %d)", user, c, raw, want)
+	}
+	if want == 409 && m["code"] != "update_required_for_lanes" {
+		t.Fatalf("code: %v", m)
+	}
+	return d
+}
+
+// nil2 returns the user's existing phone key so a second key can be cross-signed.
+func nil2(e *srvEnv, user string) *tdev {
+	switch user {
+	case "A":
+		return e.a
+	case "B":
+		return e.b
+	case "C":
+		return e.c
+	}
+	return nil
+}
+
+// A processing log entry cannot land while a member still has an app that cannot read it.
+func TestProcessingEntriesRefusedWhileAMemberHasAnOldApp(t *testing.T) {
+	e := newLaneEnv(t)
+	old := e.registerOld(t, "B", 201) // allowed: no processing entries in the circle yet
+	pol := "/circles/" + e.circle + "/e2ee/processing-policy"
+	wraps := []map[string]any{mkSKWrap(t, e.circle, 1, e.a, e.a), mkSKWrap(t, e.circle, 1, e.a, e.b)}
+	c, m, raw := e.do("A", "PUT", pol, policyBody(t, e.circle, true, "phone", "allowed", 1, e.a, wraps...))
+	if c != 409 || m["code"] != "update_required_for_lanes" || len(m["not_ready"].([]any)) != 1 {
+		t.Fatalf("policy with an old-app member: %d %s", c, raw)
+	}
+	if e.count(`SELECT count(*) FROM e2ee_log WHERE circle_id = $1 AND action IN (10, 11)`, e.circle) != 0 {
+		t.Fatal("an entry landed")
+	}
+	// The DB backstop refuses a direct append as well.
+	if err := e.sqlErr(`INSERT INTO e2ee_log (seq, action, user_id, actor_device_id, actor_pub, circle_id, epoch, ref, signature, prev_hash, entry_hash)
+		VALUES (999999, 10, $1, $2, $3, $4, 0, $5, $6, $5, $5)`, e.ids["A"], e.a.id, e.a.ed, e.circle, make([]byte, 32), make([]byte, 64)); err == nil || !strings.Contains(err.Error(), "update_required_for_lanes") {
+		t.Fatalf("DB let a processing entry in beside an old app: %v", err)
+	}
+	// Once the old key is revoked the policy lands; a pref from an old-app member is the same story.
+	e.mustCode("B", "DELETE", "/e2ee/devices/"+old.id, simpleAction(t, e2ee.ActRevoke, e.b, "", 0, old.id, old.fp), 200)
+	e.mustCode("A", "PUT", pol, policyBody(t, e.circle, true, "phone", "allowed", 1, e.a, wraps...), 200)
+	e.sql(`UPDATE device_keys SET caps = '{}' WHERE device_id = $1`, e.b.id) // B's app regresses (simulated)
+	if c, m, _ := e.do("A", "PUT", "/circles/"+e.circle+"/e2ee/processing-pref", e.prefBody(e.a, "phone", 0)); c != 409 || m["code"] != "update_required_for_lanes" {
+		t.Fatalf("pref beside an old app: %d %v", c, m)
+	}
+}
+
+// After a circle has processing entries no old-app key can enter it, by any path.
+func TestOldAppsCannotEnterACircleWithProcessingEntries(t *testing.T) {
+	e := newLaneEnv(t)
+	// D has an old-app key (registered before: D is in no such circle); E has none yet.
+	d := newTDev(t, e.ids["D"])
+	e.mustCode("D", "POST", "/e2ee/devices", regBody(t, d, "device", nil, e2ee.ActRegister, false), 201)
+	e.enableAssist("allowed")
+	e.route("POST", "/family/join", e.srv.JoinFamily)
+	invite := func() string {
+		return e.mustCode("A", "POST", "/circles/"+e.circle+"/invites", map[string]any{}, 201)["code"].(string)
+	}
+	// Invite accept by a user whose key is old: 409 with the machine-readable code, code not consumed.
+	code := invite()
+	if c, m, raw := e.do("D", "POST", "/circles/join", map[string]string{"code": code}); c != 409 || m["code"] != "update_required_for_lanes" {
+		t.Fatalf("circle join: %d %s", c, raw)
+	}
+	if e.count(`SELECT uses FROM invite_codes WHERE code = $1`, code) != 0 {
+		t.Fatal("a refused join consumed the invite")
+	}
+	// Legacy family join path.
+	if c, m, raw := e.do("D", "POST", "/family/join", map[string]string{"code": invite()}); c != 409 || m["code"] != "update_required_for_lanes" {
+		t.Fatalf("family join: %d %s", c, raw)
+	}
+	// Admin/any other path: the trigger.
+	if err := e.sqlErr(`INSERT INTO circle_members (circle_id, user_id, role) VALUES ($1,$2,'member')`, e.circle, e.ids["D"]); err == nil || !strings.Contains(err.Error(), "update_required_for_lanes") {
+		t.Fatalf("direct membership insert of an old-app user: %v", err)
+	}
+	if err := e.sqlErr(`UPDATE users SET family_id = $1 WHERE id = $2`, e.circle, e.ids["D"]); err == nil {
+		t.Fatal("moving an old-app user into the circle was allowed")
+	}
+	// A member cannot add a NEW old device (registration), but can add one with lanes2.
+	e.registerOld(t, "B", 409)
+	nb := newTDev(t, e.ids["B"])
+	body := regBody(t, nb, "device", e.b, e2ee.ActRegister, false)
+	body["caps"] = []string{"lanes2"}
+	e.mustCode("B", "POST", "/e2ee/devices", body, 201)
+	// A joiner with no key yet can join, and is stopped when registering an old key.
+	ee := newTDev(t, e.ids["E"])
+	_ = ee
+	e.mustCode("E", "POST", "/circles/join", map[string]string{"code": invite()}, 200)
+	e.registerOld(t, "E", 409)
+	body = regBody(t, ee, "device", nil, e2ee.ActRegister, false)
+	body["caps"] = []string{"lanes2"}
+	e.mustCode("E", "POST", "/e2ee/devices", body, 201)
+	// Web/service/recovery keys are unaffected.
+	w := newTDev(t, e.ids["B"])
+	e.mustCode("B", "POST", "/e2ee/devices", regBody(t, w, "web", e.b, e2ee.ActRegister, false), 201)
+}
+
+func TestInvitePreviewAndStateCarryLegacy(t *testing.T) {
+	e := readyEnv(t) // a legacy trusted-server circle
+	e.declareLanes2("A", e.a)
+	code := e.invite(t, "")
+	rec := httptest.NewRecorder()
+	e.rt.ServeHTTP(rec, httptest.NewRequest("GET", "/invites/"+code+"/preview", nil))
+	var m map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &m)
+	if rec.Code != 200 || m["legacy"] != true || m["private"] != true || m["server_assist"] != false || len(m) != 5 {
+		t.Fatalf("legacy preview: %d %v", rec.Code, m)
+	}
+	st := e.mustCode("A", "GET", "/circles/"+e.circle+"/e2ee/processing", nil, 200)
+	if lg := st["legacy"].(map[string]any); lg["active"] != true {
+		t.Fatalf("state legacy: %v", st["legacy"])
 	}
 }

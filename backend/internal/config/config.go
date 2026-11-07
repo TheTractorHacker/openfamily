@@ -110,6 +110,11 @@ type Config struct {
 	// advertised on GET /config. Empty = the app uses its built-in OpenFreeMap.
 	MapStyleURL string
 
+	// MinSupportedAppVersion (MIN_SUPPORTED_APP_VERSION, e.g. "0.16.0") pins the
+	// oldest app version the server treats as supported. Empty = the rolling
+	// window of the last compat.WindowSize releases. An admin override wins.
+	MinSupportedAppVersion string
+
 	// RequireAdminMFA (REQUIRE_ADMIN_MFA) refuses admin panel/API access to
 	// platform admins who have not enabled TOTP.
 	RequireAdminMFA bool
@@ -263,6 +268,7 @@ func Load() Config {
 		TileURL:               getenv("TILE_URL", DefaultTileURL),
 		SatelliteTileURL:      getenv("SATELLITE_TILE_URL", DefaultSatelliteTileURL),
 		MapStyleURL:           getenv("MAP_STYLE_URL", ""),
+		MinSupportedAppVersion: getenv("MIN_SUPPORTED_APP_VERSION", ""),
 		RequireAdminMFA:       getenvBool("REQUIRE_ADMIN_MFA", false),
 		GeocoderURL:           strings.TrimSpace(getenvPresent("GEOCODER_URL", DefaultGeocoderURL)),
 		GeocoderType:          strings.ToLower(strings.TrimSpace(getenv("GEOCODER_TYPE", "photon"))),

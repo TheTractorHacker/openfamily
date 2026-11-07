@@ -709,6 +709,17 @@ func (s *Server) applyPolicy(w http.ResponseWriter, r *http.Request, tx pgx.Tx, 
 			return false
 		}
 	}
+	if req.ServerAssist { // no old-app key may sit beside the processing log entry this appends
+		old, err := devicesLackingLanes2(ctx, tx, circleID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to check members")
+			return false
+		}
+		if len(old) > 0 {
+			writeUpdateRequired(w, old)
+			return false
+		}
+	}
 	if needWraps && len(req.Wraps) == 0 {
 		writeError(w, http.StatusBadRequest, "the new server key generation must be wrapped to the caller's own device and the other members")
 		return false
@@ -859,6 +870,13 @@ func (s *Server) E2EEPutProcessingPref(w http.ResponseWriter, r *http.Request) {
 	var gen int
 	if err := tx.QueryRow(ctx, `SELECT server_assist, e2ee_server_gen FROM circles WHERE id = $1`, m.CircleID).Scan(&assist, &gen); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load circle")
+		return
+	}
+	if old, err := devicesLackingLanes2(ctx, tx, m.CircleID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to check members")
+		return
+	} else if len(old) > 0 {
+		writeUpdateRequired(w, old)
 		return
 	}
 	var pub []byte
@@ -1209,20 +1227,91 @@ func (s *Server) InvitePreview(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "invalid invite code")
 		return
 	}
-	var private, assist bool
+	var private, assist, legacy bool
 	var optOut, def string
 	err := s.Pool.QueryRow(r.Context(), `
 		SELECT c.e2ee_mode = 'private', c.e2ee_mode = 'private' AND c.server_assist,
 		       CASE WHEN c.e2ee_mode = 'private' AND c.server_assist THEN c.member_opt_out ELSE 'allowed' END,
-		       CASE WHEN c.e2ee_mode = 'private' AND c.server_assist THEN c.server_assist_default ELSE 'phone' END
+		       CASE WHEN c.e2ee_mode = 'private' AND c.server_assist THEN c.server_assist_default ELSE 'phone' END,
+		       c.e2ee_mode = 'private' AND c.server_legacy_ck
 		FROM invite_codes ic
 		JOIN circles c ON c.id = COALESCE(ic.circle_id, ic.family_id) AND `+circleLiveSQL+`
 		WHERE ic.code = $1 AND ic.uses < ic.max_uses AND (ic.expires_at IS NULL OR ic.expires_at > now())`, code).
-		Scan(&private, &assist, &optOut, &def)
+		Scan(&private, &assist, &optOut, &def, &legacy)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "invalid invite code")
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, http.StatusOK, map[string]any{"private": private, "server_assist": assist, "member_opt_out": optOut, "default_for_new": def})
+	writeJSON(w, http.StatusOK, map[string]any{"private": private, "server_assist": assist, "member_opt_out": optOut, "default_for_new": def, "legacy": legacy})
+}
+
+
+// ------------------------------------------------ old apps and the key log
+//
+// An app without 'lanes2' cannot verify a key log that holds processing_pref /
+// processing_policy entries (action codes 10 and 11); it would stop pinning the log
+// head and go blind to key-change alarms. So the server keeps old apps and such
+// entries apart (code update_required_for_lanes, HTTP 409):
+//   - an entry can only be appended while no live member has an active phone key
+//     without lanes2 (policy on/edit/rotate, pref, upgrade);
+//   - nobody with such a key can join a circle that has such entries (invite accept,
+//     family join; admin moves are caught by the database trigger);
+//   - a member of such a circle cannot register or rotate to a phone key without lanes2.
+// The migration's triggers enforce the same on every other path.
+
+const codeUpdateRequired = "update_required_for_lanes"
+
+func writeUpdateRequired(w http.ResponseWriter, notReady []string) {
+	writeJSON(w, http.StatusConflict, map[string]any{
+		"error":     "Update OpenFamily to continue: this circle uses privacy controls that your app version does not support.",
+		"code":      codeUpdateRequired,
+		"not_ready": nonNil(notReady),
+	})
+}
+
+// devicesLackingLanes2 lists live members of the circle who have an active phone
+// key without the lanes2 capability.
+func devicesLackingLanes2(ctx context.Context, q querier, circleID string) ([]string, error) {
+	rows, err := q.Query(ctx, `SELECT DISTINCT m.user_id::text FROM live_circle_members m
+		JOIN device_keys d ON d.user_id = m.user_id AND d.kind = 'device' AND d.revoked_at IS NULL AND NOT ('lanes2' = ANY (d.caps))
+		WHERE m.circle_id = $1 ORDER BY 1`, circleID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var u string
+		if err := rows.Scan(&u); err != nil {
+			return nil, err
+		}
+		out = append(out, u)
+	}
+	return out, rows.Err()
+}
+
+// oldAppBlocksJoin: the circle has processing log entries and the user already has
+// an active phone key without lanes2. A user with no key yet is stopped later, at registration.
+func oldAppBlocksJoin(ctx context.Context, q querier, circleID, userID string) bool {
+	var blocked bool
+	err := q.QueryRow(ctx, `SELECT e2ee_circle_has_lanes_log($1::uuid) AND EXISTS (SELECT 1 FROM device_keys d
+		WHERE d.user_id = $2 AND d.kind = 'device' AND d.revoked_at IS NULL AND NOT ('lanes2' = ANY (d.caps)))`, circleID, userID).Scan(&blocked)
+	return err != nil || blocked // fail closed
+}
+
+// oldKeyBlocksRegistration: the user belongs to a circle with processing log entries.
+func oldKeyBlocksRegistration(ctx context.Context, q querier, userID string) bool {
+	var blocked bool
+	err := q.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM circle_members m WHERE m.user_id = $1 AND e2ee_circle_has_lanes_log(m.circle_id))`, userID).Scan(&blocked)
+	return err != nil || blocked
+}
+
+func hasLanes2(caps []string) bool {
+	for _, c := range caps {
+		if c == capLanes2 {
+			return true
+		}
+	}
+	return false
 }

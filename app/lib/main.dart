@@ -15,6 +15,7 @@ import 'services/accent_preference.dart';
 import 'services/speed_units.dart';
 import 'services/units_sync.dart';
 import 'services/api_client.dart';
+import 'services/app_compat.dart';
 import 'services/auth_service.dart';
 import 'services/background_credential_store.dart';
 import 'services/background_location_service.dart';
@@ -62,6 +63,7 @@ Future<void> main() async {
       UnitPreferenceService.ensureLoaded(),
       MapStylePreferenceService.load(),
       ServerConfig.instance.load(),
+      AppCompat.init(),
     ]),
   );
   UnitsSync.install();

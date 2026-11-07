@@ -38,6 +38,7 @@ import type {
   AdminSession,
   AuditPage,
   FleetResponse,
+  AdminCompat,
 } from './types'
 
 const API_BASE = '/api'
@@ -874,4 +875,30 @@ export function testHaWebhook(id: string): Promise<{ ok: boolean; status_code: n
 
 export function getFleetHealth(): Promise<FleetResponse> {
   return request<FleetResponse>('/api/admin/fleet')
+}
+
+export type TrustedServerDefault = {
+  trusted_server_default: boolean
+  token_configured: boolean
+  server_device_pinned: boolean
+}
+
+export function getTrustedServerDefault(): Promise<TrustedServerDefault> {
+  return request<TrustedServerDefault>('/api/admin/settings/e2ee-trusted-default')
+}
+
+export function setTrustedServerDefault(on: boolean): Promise<TrustedServerDefault> {
+  return request<TrustedServerDefault>('/api/admin/settings/e2ee-trusted-default', {
+    method: 'PUT',
+    body: { trusted_server_default: on },
+  })
+}
+
+export function getAdminCompat(): Promise<AdminCompat> {
+  return request<AdminCompat>('/api/admin/compat')
+}
+
+/** Sets the minimum-version override ("" clears it) and/or write enforcement. */
+export function saveAdminCompat(body: { min_supported_override?: string; enforce_writes?: boolean }): Promise<AdminCompat> {
+  return request<AdminCompat>('/api/admin/compat', { method: 'PUT', body })
 }

@@ -167,6 +167,7 @@ func parseMainRoutes(t *testing.T) []parsedRoute {
 var publicRoutes = map[string]string{
 	"GET /healthz":                     "liveness",
 	"GET /config":                      "public server config",
+	"GET /compat":                      "app/server compatibility probe: static policy, no user data",
 	"GET /alerts/share/{token}":        "unguessable SOS share token",
 	"GET /integrations/ha/v1/ping":     "scoped integration token (ofha_...), checked in the handler; see TestAuthzMatrixHAAPI",
 	"GET /integrations/ha/v1/members":  "scoped integration token (ofha_...); see TestAuthzMatrixHAAPI and handlers/ha_integrations_db_test.go",
@@ -395,6 +396,8 @@ func (f *authzFixture) buildRouter(t *testing.T, routes []parsedRoute) http.Hand
 				mws = append(mws, mid.NoStore)
 			case "RequireAuth":
 				mws = append(mws, mid.RequireAuth(f.tm))
+			case "RecordAppVersion":
+				mws = append(mws, mid.RecordAppVersion(f.pool))
 			case "RequireTokenVersion":
 				mws = append(mws, mid.RequireTokenVersion(f.pool))
 			case "RequirePlatformAdmin":
