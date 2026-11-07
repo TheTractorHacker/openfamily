@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write # only used to attach the .ipa to this repo's release
+  contents: read # the build job never writes; only the attach job below can
 
 concurrency:
   group: ios-unsigned-${{ github.ref }}
@@ -27,7 +27,7 @@ jobs:
         working-directory: app
     steps:
       - uses: actions/checkout@v4
-      - uses: subosito/flutter-action@v2
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
           channel: stable
           flutter-version: '3.47.0'
@@ -82,16 +82,33 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
-      # Only a tag build of THIS repository uploads, only with the workflow's own
-      # GITHUB_TOKEN, only to this repository's release for that tag.
+  # Separate job so the write token is never present while third-party actions run.
+  # Only first-party actions and the gh CLI are used here, and only on a tag build
+  # of THIS repository, only with the workflow's own GITHUB_TOKEN, only to this
+  # repository's release for that tag.
+  attach:
+    needs: ipa
+    if: github.ref_type == 'tag' && github.repository == 'TheTractorHacker/openfamily'
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    permissions:
+      contents: write
+    steps:
+      - name: Version
+        id: ver
+        run: |
+          set -euo pipefail
+          echo "name=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@v4
+        with:
+          name: openfamily-${{ steps.ver.outputs.name }}-unsigned-ipa
+          path: dist
       - name: Attach to the GitHub release
-        if: github.ref_type == 'tag' && github.repository == 'TheTractorHacker/openfamily'
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
           V: ${{ steps.ver.outputs.name }}
-        working-directory: ${{ github.workspace }}
         run: |
           set -euo pipefail
           # apk.yml creates the release for the tag; wait for it (up to 60 min)
