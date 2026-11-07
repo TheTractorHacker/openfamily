@@ -281,6 +281,26 @@ class E2eeService {
     return base64Url.encode(utf8.encode(jsonEncode(<String, String>{'a': me.deviceId, 's': E2ee.b64(sig)})));
   }
 
+  /// Admin phone: approves the SERVER's own key after the person compared the code
+  /// (the same signature as for a viewer or bridge; the server registers itself).
+  Future<void> approveServerJoin() async {
+    final ServerJoinInfo j = await api.serverJoin();
+    if (!j.waiting || !j.canApprove || j.requestCode.isEmpty) {
+      throw StateError('The server is not asking to join right now.');
+    }
+    if (await identity() == null) await registerThisDevice(label: 'This phone');
+    final LinkRequestInfo info = await inspectLinkRequest(j.requestCode);
+    if (info.kind != 'server') throw const E2eeFormatException('this is not the request of a server');
+    final LocalIdentity me = (await identity())!;
+    final Uint8List sig = await E2ee.sign(me.edSeed,
+        E2ee.logActionMessage(E2ee.actRegister, me.userId, me.deviceId, subjectId: info.deviceId, ref: info.fingerprint));
+    await api.approveServerJoin(<String, dynamic>{
+      'device_id': info.deviceId,
+      'actor_device_id': me.deviceId,
+      'log_signature': E2ee.b64(sig),
+    });
+  }
+
   LinkApproval parseApproval(String code) {
     final Map<String, dynamic> m = jsonDecode(utf8.decode(base64Url.decode(code.trim()))) as Map<String, dynamic>;
     return LinkApproval(m['a'] as String, E2ee.unb64(m['s'] as String));

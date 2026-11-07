@@ -205,6 +205,10 @@ func (s *Server) E2EEServerDevice(w http.ResponseWriter, r *http.Request) {
 	out["profile_effective"] = effective
 	out["data_at_rest_key"] = atrest.Enabled()
 	out["recommended_lane"] = "phone"
+	out["builtin"] = s.ServerDevice != nil
+	if s.ServerDevice != nil {
+		out["builtin_state"] = s.ServerDevice.Info().State
+	}
 	if serverMemberEnabled() {
 		dev, err := s.pinnedServerDevice(r.Context())
 		if err != nil {
@@ -215,7 +219,7 @@ func (s *Server) E2EEServerDevice(w http.ResponseWriter, r *http.Request) {
 			out["device"] = dev
 			// Only a recommendation: true only while the mode is usable at all.
 			out["trusted_server_default"] = s.trustedServerDefaultSetting(r.Context())
-			out["recommended_lane"] = recommendedLane(effective, true)
+			out["recommended_lane"] = recommendedLane(effective, true, out["trusted_server_default"] == true)
 		}
 	}
 	writeJSON(w, http.StatusOK, out)

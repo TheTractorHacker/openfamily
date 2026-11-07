@@ -18,3 +18,4 @@
 .wb-ss-qr { width: 176px; height: 176px; margin: 8px 0; background: #fff; padding: 4px; border-radius: 6px; }
 .wb-ss-qr svg { width: 100%; height: 100%; }
 .wb-ss-adv { margin-top: 12px; }
+.wb-ss-ok { color: var(--wb-success, #1a7f4b); margin: 0 0 8px; }

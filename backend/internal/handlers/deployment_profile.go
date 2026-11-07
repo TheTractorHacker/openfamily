@@ -71,10 +71,12 @@ func (s *Server) DeploymentProfile(ctx context.Context) (configured, source, eff
 	return configured, source, ProfileCloud
 }
 
-// recommendedLane is what the app preselects: the server lane only on a home
-// server with an enrolled server key. A phone never gets it by default on cloud.
-func recommendedLane(effective string, pinned bool) string {
-	if effective == ProfileHome && pinned {
+// recommendedLane is what the app preselects: the server lane when a server key
+// is enrolled AND the server runs at home or the admin chose it as the default
+// (adminDefault, the "trusted server default" switch). A rented server stays on
+// phone-only until the admin deliberately says otherwise. It is advice, never consent.
+func recommendedLane(effective string, pinned, adminDefault bool) string {
+	if pinned && (effective == ProfileHome || adminDefault) {
 		return "server"
 	}
 	return "phone"
@@ -108,18 +110,29 @@ func (s *Server) deploymentJSON(ctx context.Context) map[string]any {
 	_, setAt, dismissed := s.storedProfile(ctx)
 
 	out := map[string]any{
+		"server_device_builtin": s.ServerDevice != nil,
 		"profile":          configured,
 		"effective":        effective,
 		"source":           source,
 		"env_value":        envDeploymentProfile(),
 		"profile_set_at":   setAt,
-		"recommended_lane": recommendedLane(effective, pinned),
+		"recommended_lane": recommendedLane(effective, pinned, s.trustedServerDefaultSetting(ctx)),
 		"token_configured": enabled,
 		"server_pinned":    pinned,
 		"setup_dismissed":  dismissed,
 		"at_rest":          atRestStatus(),
 		"server_device":    nil,
 		"docs_path":        "/docs/server-setup",
+	}
+	if s.ServerDevice != nil {
+		in := s.ServerDevice.Info()
+		out["builtin"] = map[string]any{"state": in.State, "state_detail": in.StateDetail, "registered": in.Registered,
+			"short": in.Short, "digits": in.Digits, "fingerprint": in.Fingerprint, "sealed": in.Sealed, "last_sync": in.LastSync}
+	}
+	if s.Pool != nil {
+		var n int
+		_ = s.Pool.QueryRow(ctx, `SELECT count(*) FROM circles WHERE e2ee_mode = 'private' AND NOT server_assist`).Scan(&n)
+		out["private_circles_without_server"] = n
 	}
 	if pinned {
 		out["server_device"] = map[string]any{

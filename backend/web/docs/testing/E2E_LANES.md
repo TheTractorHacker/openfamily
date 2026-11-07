@@ -12,6 +12,7 @@ and are removed at the end. Extra arguments are passed to `flutter test`.
 
     scripts/e2e-lanes.sh
     E2E_REQUIRE_SIDECAR=1 scripts/e2e-lanes.sh     # also fail while the sidecar predates lanes
+    E2E_BUILTIN=1 scripts/e2e-lanes.sh test/e2e_real_server/builtin_e2e_test.dart   # no sidecar: the API is its own server device
     E2E_RUN=dev E2E_KEEP=1 scripts/e2e-lanes.sh    # keep the stack between runs (development)
 
 Without `E2E_BASE_URL` (the normal `flutter test`) the suite is skipped.

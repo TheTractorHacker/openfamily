@@ -93,6 +93,9 @@ services:
       # disk or database dump is useless without it. >= 32 chars, openssl rand -base64 32.
       # KEEP A COPY OUTSIDE THE SERVER; once used, the server will not start without it.
       OPENFAMILY_DATA_KEY: ${OPENFAMILY_DATA_KEY:-}
+      # auto (default): the API is its own server device unless E2EE_SERVER_INGEST_TOKEN is set for the
+      # optional sidecar. builtin | sidecar | off to force.
+      OPENFAMILY_SERVER_DEVICE: ${OPENFAMILY_SERVER_DEVICE:-auto}
       VERBOSE_PUSH: ${VERBOSE_PUSH:-false}
       DIRECT_PUSH: ${DIRECT_PUSH:-true}
       PLATFORM_ADMIN_EMAIL: ${PLATFORM_ADMIN_EMAIL:-}
@@ -150,6 +153,9 @@ services:
       APK_GITHUB_TOKEN: ${APK_GITHUB_TOKEN:-}
     volumes:
       - apk_data:/data/apk
+      # The server's own device key (built-in server participant, docs/design/PRIVACY_PROCESSING.md
+      # section 22). Created on first start, files 0600. Back this volume up with the database.
+      - server_device:/data/server-device
     depends_on:
       postgres:
         condition: service_healthy
@@ -350,6 +356,7 @@ services:
           memory: 512M
 
 volumes:
+  server_device:
   e2ee_server_state:
   caddy_data:
   caddy_config:

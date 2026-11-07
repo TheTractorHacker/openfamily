@@ -129,6 +129,12 @@ abstract class ProcessingController {
 
   /// The server's deployment profile and pinned key; never throws for an older server ([ServerProfile.unknown]).
   Future<ServerProfile> serverProfile();
+
+  /// "Your server wants to join" (the built-in server device). Never throws; older servers answer none.
+  Future<ServerJoinInfo> serverJoin();
+
+  /// Server administrator's phone: approves the server's key after the code was compared.
+  Future<void> approveServerJoin();
 }
 
 class LanesProcessingController implements ProcessingController {
@@ -225,4 +231,16 @@ class LanesProcessingController implements ProcessingController {
       return ServerProfile.unknown;
     }
   }
+
+  @override
+  Future<ServerJoinInfo> serverJoin() async {
+    try {
+      return await lanes.api.serverJoin();
+    } catch (_) {
+      return ServerJoinInfo.none;
+    }
+  }
+
+  @override
+  Future<void> approveServerJoin() => lanes.service.approveServerJoin();
 }

@@ -77,3 +77,14 @@ see [Safety](safety-and-check-ins.md).
   privacy: **Private** circle, accept the battery cost.
 - Technical background: [Privacy processing design](../design/PRIVACY_PROCESSING.md)
   and [Operator privacy controls](../privacy-controls.md).
+
+
+## Which should I pick?
+
+* **Normal (recommended).** Your server keeps locations so maps, history and driving reports just work.
+* **Private.** Only phones can read locations; the server keeps nothing readable. Inside a Private circle
+  each person then chooses **Use the server (recommended)** (reports, history and maps work for you) or
+  **Keep on my phone** (shared privately, encrypted from phone to phone; no reports unless you turn on phone
+  reports, which uses more battery). Nobody can choose for you, and you can change your mind any time.
+* If a Private circle shows people missing because their app is old, a circle admin can **switch the circle
+  to normal mode** so everyone shows up again. The server then keeps readable locations for that circle.

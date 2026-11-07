@@ -233,6 +233,12 @@ class FakeE2eeClient implements E2eeApi {
   Future<ServerProfile> serverProfile() async => s.serverProfileValue;
 
   @override
+  Future<ServerJoinInfo> serverJoin() async => ServerJoinInfo.none;
+
+  @override
+  Future<void> approveServerJoin(Map<String, dynamic> body) async {}
+
+  @override
   Future<ServerMemberState> serverMemberState(String circleId) async {
     final FakeCircle c = s.circles[circleId]!;
     if (!s.serverModeEnabled) return ServerMemberState.off;

@@ -673,3 +673,57 @@ A "Server setup" card at the top of Settings (platform admin only, dismissible, 
 * No server-side consent, no server-side signing, no new key line. The server-lane pref, the policy and the purge rules are as in sections 5 to 20.
 * Old apps keep working: they ignore the new fields; the lanes 409 rules still apply.
 * `trusted_server_default` (v0.21 recommendation flag) stays as an advanced switch for the legacy trusted-server mode; the profile card links to it and does not replace its API.
+
+## 22. Server by default and the built-in server participant
+
+Status: implemented on branch `feat/srvdefault`. Owner request: the server does the processing by default and the
+phone only when a person opts out; the server must join a circle without a copy-paste sidecar. This section changes
+defaults and adds one component; it changes **no** wire format, signature, key line or purge rule of sections 5 to 21.
+
+### 22.1 Defaults (rules)
+
+* A new circle is **Normal**. Private is an explicit choice ("only phones can read locations; the server keeps
+  nothing readable"). The server-side processing in Normal mode needs no key, no consent protocol.
+* Inside a Private circle the **suggested** lane is `server` when a server key is enrolled AND (the deployment profile
+  is home OR the admin chose the server as default, the existing `trusted_server_default`). Cloud and unset stay on
+  `phone` until the admin decides. `recommended_lane` (GET /e2ee/server-device) carries this; the sheet publishes
+  `default_for_new` from it.
+* **Never auto-consent.** A lane is the member's own signed pref. The app asks once per circle: "Use the server
+  (recommended) / Keep on my phone". "Use" runs the existing three-step sheet (compare the code, one OK). "Keep"
+  signs nothing; the member stays phone-lane. The column default `circles.server_assist_default = 'phone'` is
+  inert (guarded by `server_assist`); the effective default is the signed `default_for_new`, so no migration.
+* Wording for the phone lane: "locations shared privately, encrypted phone to phone; no reports unless you turn on
+  phone reports (uses battery)". The phone-reports switch belongs to the performance work, not to this section.
+
+### 22.2 The built-in server device
+
+* `internal/e2eebridge` holds the sidecar's logic (moved from `cmd/e2ee-bridge`, which is now a thin wrapper).
+  `Embedded` (embedded.go) is the API's own device: key created once in `/data/server-device` (volume
+  `server_device`, 0600; sealed with `OPENFAMILY_DATA_KEY` through the store's passphrase seal when set), an ingest
+  secret generated and persisted there (no `E2EE_SERVER_INGEST_TOKEN` to type), and the same bridge loop run
+  in-process against the API's own loopback address with a short-lived access token for the approving admin.
+* `OPENFAMILY_SERVER_DEVICE`: `auto` (default; built in unless `E2EE_SERVER_INGEST_TOKEN(_FILE)` is set, i.e. the
+  operator runs the sidecar), `builtin`, `sidecar`, `off`.
+* Enrollment: `GET /e2ee/server-join` (any user sees "waiting"; a platform admin also gets the request with the
+  server's binding signature for THAT account), `POST /e2ee/server-join/approve` (platform admin; the phone signs the
+  usual register action after comparing the 4 groups). The API validates through the unchanged `POST /e2ee/devices`.
+  A push "Your server wants to join" goes to platform admins a few minutes after start and daily until approved;
+  the app also shows a card when opened.
+* Security properties kept: the server device receives SK only, never CK; it reads only members whose own signed
+  lane is `server` (verified against the key log); DB triggers unchanged; a CK handed to it is a security alarm and
+  stops the loop. **Accepted trade-off:** its private key now lives on the server's own disk next to the database, so
+  whoever owns the machine owns the server device (they could already read everything the server reads). Cloud
+  profile: set `OPENFAMILY_DATA_KEY` so a copied volume alone is not enough; or run the sidecar off-host.
+
+### 22.3 Existing setups and stalled circles
+
+* A Private circle with assistance off gets an admin card "Let the server do the processing (recommended)": the
+  same sheet approves the server (if it is waiting), publishes the policy and signs the admin's own lane. Other
+  members are asked on their own phones. Members on old apps cannot sign lanes: `LanesNotReady`, the "needs
+  update" delivery state and a "Message to send" text.
+* **Switch to normal mode** uses the existing `POST /circles/{id}/e2ee/disable` (signed by a circle admin
+  phone). It deletes `circle_key_wraps` and `e2ee_items` of the circle (encrypted history is gone), sets
+  `e2ee_mode='off'`, audits `e2ee.disabled`, and (new) sends every other member a push saying the circle is
+  normal again and the server keeps readable locations. Plaintext rows the server already holds for server-lane
+  members stay; phone-only places and history stay on phones.
+

@@ -1,8 +1,9 @@
 # Server setup: adding your own server to a circle
 
-This page is for the person who runs the OpenFamily server for their family. It takes about ten minutes.
-Phones keep working without the server. Adding the server is what lets it keep **history, driving reports,
-trips and the map** for the people who say yes.
+This page is for the person who runs the OpenFamily server for their family. It takes about five minutes
+and has three steps: **pick where the server runs, approve on your phone, install the apps and invite family**.
+The server keeps **history, driving reports, trips and the map** for everyone by default; privacy-conscious
+members choose "Keep on my phone".
 
 ## 1. Tell the server where it runs
 
@@ -35,41 +36,43 @@ reports, history, place names. The server must read them to draw the map and not
 image of a running or unencrypted machine therefore shows them. Disk encryption and a trusted host are the
 protection for that part, not the data key.
 
-## 2. Give the server its key (once)
+## 2. Approve on your phone
 
-The server keeps its own key in a separate container (`e2ee-server-device`), never next to the database
-password. In the admin panel the Server setup card shows the exact lines to copy. In short, in the folder with
-`docker-compose.yml`:
+You do not run any command. The server creates its own key the first time it starts and keeps it in the
+`server_device` Docker volume (`/data/server-device`, files readable only by the server). The admin panel
+(Settings > Server setup) shows a short code of four groups. Your phone gets a message **"Your server wants
+to join"**; if you do not get it, the same prompt shows at the top of the app when you open it. Check that the
+code is **the same**, then tap **Yes, it matches - approve**. If it differs, stop and check that you are on your
+own server's address.
 
-```bash
-echo "E2EE_SERVER_INGEST_TOKEN=$(openssl rand -hex 32)" >> .env
-echo "COMPOSE_PROFILES=${COMPOSE_PROFILES:+$COMPOSE_PROFILES,}e2ee-server" >> .env   # edit if you already use profiles
-docker compose up -d
-read -rsp 'Your OpenFamily password: ' P; echo
-printf '%s\n' "$P" | docker compose --profile e2ee-server run --rm -T e2ee-server-device \
-    enroll --kind server --server http://api:8080 --email you@example.org
-```
+* Only a server administrator can approve. Approving does not switch anyone on: the circle admin taps
+  **Let the server do the processing (recommended)** and every member then taps **Use the server** (or
+  **Keep on my phone**) on their own phone.
+* The card finishes by itself and turns into a green **Server is processing**.
+* **Where the key lives (accepted trade-off):** the server's private key is now on the server's own disk
+  volume, next to the database. Someone who can read the whole machine can read what the server can read
+  anyway. On a rented server set `OPENFAMILY_DATA_KEY`: it then also encrypts the key file at rest, so a copied
+  volume alone is not enough. The server key only ever receives the server key line, never a circle key.
+* Back up the `server_device` volume together with the database. Losing it only means the server must be
+  approved again.
 
-It prints a **request code**. On your phone open **Settings > Encryption keys > Approve a viewer or bridge**,
-paste it and copy the **approval code** the phone shows, then:
+### Details: the separate container (advanced)
 
-```bash
-docker compose --profile e2ee-server run --rm e2ee-server-device enroll --approval PASTE_THE_CODE
-docker compose --profile e2ee-server up -d e2ee-server-device
-```
+Cloud and security-minded operators can keep the key in a separate container, away from the database. Set
+`E2EE_SERVER_INGEST_TOKEN` (or `OPENFAMILY_SERVER_DEVICE=sidecar`) and follow the commands under
+**Details** on the Server setup card, or [the sidecar README](https://github.com/TheTractorHacker/openfamily/blob/main/backend/cmd/e2ee-bridge/README.md). The
+built-in device is then switched off (`OPENFAMILY_SERVER_DEVICE=auto` decides; `builtin`, `sidecar` and `off`
+force it).
 
-Use the login of the person who is circle admin. The key is stored in the `e2ee_server_state` volume.
+## 3. Use the server (what each person does)
 
-## 3. Compare the key, then tap OK
+In the app, **Use the server (recommended)** shows four groups of characters. The admin panel shows the same
+four groups and a QR code. If they are **the same**, tap OK. Each person decides for themselves and can switch
+back at any time ("Keep on my phone"; their copies on the server are then deleted if they ask).
 
-In the app open the circle and tap **Add server to this circle**. It shows four groups of characters. The admin
-panel (Settings > Server setup, step 4) shows the same four groups and a QR code. If they are **the same**, tap
-OK. If they differ, stop: do not continue and check that you are on your own server's address.
-
-* The circle admin's OK turns server help on for the circle. Each other member still has to say yes on their
-  own phone, and can say no, or remove the server later (their copies on the server are then deleted).
-* "Remove server" in the same sheet takes the server away again.
-* If the app says the server is not set up yet, step 2 is not finished.
+* **Use the server**: the server keeps your locations so maps, history and driving reports just work.
+* **Keep on my phone**: your location is shared privately, encrypted from phone to phone. You get no reports
+  unless you turn on phone reports (uses more battery).
 
 ## 4. Install the apps and invite family
 

@@ -30,8 +30,26 @@ the phones afterwards.
 
 ## Unreleased
 
-Nothing yet. The owner moves these notes under a version heading when a
-release is tagged.
+- **The server does the processing by default.** New circles are Normal (the
+  server keeps locations so maps, history and driving reports just work). Private
+  is a clear choice: "only phones can read locations".
+- **The server joins by itself.** No extra container, no commands, no passwords:
+  the server creates its own key on first start and your phone asks "Your server
+  wants to join - does the code match?". One tap approves it. The setup card is
+  three steps and ends in a green "Server is processing". The old separate
+  container stays available under Details.
+- **Use the server (recommended) / Keep on my phone.** A one-time question on
+  each member's phone in circles where the admin turned the server on. Nobody is
+  ever switched on for someone else. "Keep on my phone" means locations are shared
+  privately, encrypted from phone to phone, with no reports unless phone reports
+  are turned on.
+- **Existing Private circles** get a card for the admin: "Let the server do the
+  processing (recommended)". Members on an old app get a "needs update" state and
+  a message to send, and an "Update available" card in Settings.
+- **Switch a Private circle back to normal mode in one tap** (admin), with a plain
+  explanation of what is deleted and who is told.
+- New Docker volume `server_device` for the server's key (back it up with the
+  database). `OPENFAMILY_SERVER_DEVICE` chooses built-in, sidecar or off.
 
 ## v0.22.1 (2026-11-07)
 

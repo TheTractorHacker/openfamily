@@ -1147,6 +1147,7 @@ func (s *Server) E2EEDisable(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.auditCircle(r.Context(), uid, m.CircleID, "e2ee.disabled", "private circle disabled", clientIP(r))
+	s.notifyCircleNormalMode(r.Context(), uid, m.CircleID)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "mode": "off"})
 }
 
@@ -1466,3 +1467,30 @@ func (s *Server) auditRekeyIfNeeded(ctx context.Context, actorID, circleID, ip s
 }
 
 func itoa(n int) string { return strconv.Itoa(n) }
+
+// notifyCircleNormalMode tells the other members that the circle left Private
+// mode, in plain words: from now on the server keeps readable locations. Best effort.
+func (s *Server) notifyCircleNormalMode(ctx context.Context, actor, circleID string) {
+	if s.Pool == nil {
+		return
+	}
+	var name string
+	_ = s.Pool.QueryRow(ctx, `SELECT name FROM circles WHERE id = $1`, circleID).Scan(&name)
+	rows, err := s.Pool.Query(ctx, `SELECT user_id::text FROM live_circle_members WHERE circle_id = $1 AND user_id <> $2`, circleID, actor)
+	if err != nil {
+		return
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if rows.Scan(&id) == nil {
+			ids = append(ids, id)
+		}
+	}
+	rows.Close()
+	if len(ids) == 0 {
+		return
+	}
+	go s.pushUsers(context.WithoutCancel(ctx), ids, "A circle is back in normal mode",
+		"An admin switched "+name+" to normal mode. The server now keeps its locations so maps, history and driving reports work.")
+}

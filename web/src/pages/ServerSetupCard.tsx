@@ -10,6 +10,8 @@ import {
   enrollCommands,
   profileSummary,
   qrText,
+  serverProcessing,
+  setupComplete,
   setupSteps,
   showSetupCard,
   type DeploymentState,
@@ -171,17 +173,79 @@ export function DeploymentProfileCard() {
   )
 }
 
-/** First-run checklist (platform admin). Hidden once finished or dismissed. */
+/** Details: the older manual route (separate sidecar container) for advanced and cloud operators. */
+function ManualRoute({ state }: { state: DeploymentState }) {
+  const [email, setEmail] = React.useState('')
+  const cmds = enrollCommands(email)
+  return (
+    <details className="wb-ss-adv">
+      <summary>Details: run the server key in a separate container (advanced)</summary>
+      <p className="wb-help">
+        Not needed for a normal install: the server creates its own key. Use this only if you want the key in a
+        separate container, away from the database (see {state.docs_path}). Run these on the machine that runs the
+        server.
+      </p>
+      <label className="wb-ss-field">
+        Your OpenFamily login email (the server admin)
+        <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.org" />
+      </label>
+      <Cmd label="1. Switch on the key container" text={cmds.token} />
+      <Cmd label="2. Ask for a key (it prints a request code)" text={cmds.request} />
+      <p className="wb-help">
+        3. On your phone: Settings &gt; Encryption keys &gt; Approve a viewer or bridge. Paste the request code, then
+        copy the approval code the phone shows.
+      </p>
+      <Cmd label="4. Give the approval code to the server" text={cmds.approve} />
+      <Cmd label="5. Start it" text={cmds.start} />
+    </details>
+  )
+}
+
+/** First-run setup (platform admin): three steps, then a green "Server is processing" line. */
 export function ServerSetupCard() {
   const { state, setState, error } = useDeployment()
-  const [email, setEmail] = React.useState('')
   const [busy, setBusy] = React.useState(false)
-  if (error) return null
-  if (!state) return null
+  // While the server waits for approval, look again every few seconds so the card completes by itself.
+  React.useEffect(() => {
+    if (!state || setupComplete(state)) return
+    const t = setInterval(() => getDeploymentProfile().then(setState).catch(() => {}), 5000)
+    return () => clearInterval(t)
+  }, [state, setState])
+  if (error || !state) return null
+  const origin = typeof window !== 'undefined' ? window.location.origin : ''
+
+  if (serverProcessing(state)) {
+    return (
+      <Card>
+        <p className="wb-ss-ok" role="status" data-testid="server-processing">
+          <span aria-hidden="true">✓ </span>
+          <strong>Server is processing</strong> &ndash; maps, history and driving reports work for everyone who chose
+          the server.
+        </p>
+        {(state.private_circles_without_server ?? 0) > 0 && (
+          <p className="wb-help" data-testid="private-circles-hint">
+            {state.private_circles_without_server} private circle(s) are not using the server yet. A circle admin opens
+            the app and taps &ldquo;Let the server do the processing (recommended)&rdquo;; then each member taps
+            &ldquo;Use the server&rdquo;. The admin web cannot do this for them: it needs their phone&rsquo;s keys.
+          </p>
+        )}
+        <details className="wb-ss-adv">
+          <summary>Details</summary>
+          {state.builtin && (
+            <p className="wb-help">
+              The server uses its own built-in key (state: {state.builtin.state}
+              {state.builtin.sealed ? ', sealed with your data key' : ''}). Its private key lives on this
+              machine&rsquo;s data volume.
+            </p>
+          )}
+          {state.server_device && <ServerKeyWords device={state.server_device} />}
+          <ManualRoute state={state} />
+        </details>
+      </Card>
+    )
+  }
   if (!showSetupCard(state)) return null
   const steps = setupSteps(state)
-  const cmds = enrollCommands(email)
-  const origin = typeof window !== 'undefined' ? window.location.origin : ''
   const nextIdx = steps.findIndex((s) => !s.done)
 
   async function dismiss() {
@@ -193,14 +257,16 @@ export function ServerSetupCard() {
     }
   }
 
+  const waiting = state.builtin && !state.builtin.registered
+
   return (
     <Card>
       <div className="wb-settings-title-row">
         <h3 className="wb-settings-title">Server setup</h3>
       </div>
       <p className="wb-settings-section-help">
-        Five short steps so your family can let this server see their location (for driving reports, history and the
-        map). You can skip this and add the server later from the app.
+        Three short steps so this server can keep maps, history and driving reports for your family. Everyone still
+        chooses for themselves in the app whether the server may use their location.
       </p>
       <ol className="wb-ss-steps">
         {steps.map((s, i) => (
@@ -210,37 +276,22 @@ export function ServerSetupCard() {
               <strong>{s.title}</strong>
               <span className="wb-help">{s.detail}</span>
               {s.key === 'profile' && !s.done && <ProfileChooser state={state} onChange={setState} />}
-              {s.key === 'enroll' && !s.done && (
-                <div>
+              {s.key === 'approve' && !s.done && waiting && state.builtin && (
+                <div data-testid="server-join-code">
                   <p className="wb-help">
-                    Run these on the machine that runs the server, in the folder with docker-compose.yml. The server
-                    key is created in a separate container so it is never next to the database password.
+                    Open OpenFamily on your phone (you get a message &ldquo;Your server wants to join&rdquo;; if not,
+                    the same prompt shows at the top of the app). It must show this code:
                   </p>
-                  <label className="wb-ss-field">
-                    Your OpenFamily login email (the circle admin)
-                    <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.org" />
-                  </label>
-                  <Cmd label="1. Switch on the server key service" text={cmds.token} />
-                  <Cmd label="2. Ask for a key (it prints a request code)" text={cmds.request} />
-                  <p className="wb-help">
-                    3. On your phone: Settings &gt; Encryption keys &gt; Approve a viewer or bridge. Paste the request
-                    code, then copy the approval code the phone shows.
-                  </p>
-                  <Cmd label="4. Give the approval code to the server" text={cmds.approve} />
-                  <Cmd label="5. Start it" text={cmds.start} />
-                  <p className="wb-help">Reload this page afterwards. Full guide: {state.docs_path}</p>
+                  <ServerKeyWords
+                    device={{ device_id: '', label: 'OpenFamily server', fingerprint: state.builtin.fingerprint, short: state.builtin.short, digits: state.builtin.digits }}
+                  />
                 </div>
               )}
-              {s.key === 'verify' && state.server_device && (
-                <div>
-                  <p className="wb-help">
-                    In the app, open your circle and tap &ldquo;Add server&rdquo;. It shows four groups. They must be
-                    exactly these:
-                  </p>
-                  <ServerKeyWords device={state.server_device} />
-                </div>
+              {s.key === 'approve' && !s.done && !waiting && (
+                <span className="wb-help">
+                  This server uses a separate key container. Open &ldquo;Details&rdquo; below to finish it.
+                </span>
               )}
-              {s.key === 'verify' && !state.server_device && <span className="wb-help">Waiting for step 3.</span>}
               {s.key === 'apps' && (
                 <ul className="wb-ss-list">
                   <li>
@@ -255,6 +306,7 @@ export function ServerSetupCard() {
           </li>
         ))}
       </ol>
+      <ManualRoute state={state} />
       <Button variant="ghost" size="sm" onClick={dismiss} loading={busy}>Hide this checklist</Button>
     </Card>
   )

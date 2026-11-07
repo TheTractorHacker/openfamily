@@ -35,13 +35,23 @@ enum AddServerState {
   /// An admin cannot switch it on yet: some member's app is too old.
   membersNeedUpdate,
 
+  /// The built-in server device asked to join and this phone's owner is a server administrator:
+  /// the same three steps approve the server's key first, then add it (one OK).
+  approveServer,
+
+  /// The server asked to join but only a server administrator can approve it.
+  serverWaiting,
+
   /// Everything is in place.
   ready,
 }
 
 class AddServerPlan {
-  const AddServerPlan(this.state, this.snapshot, this.profile, {this.names = const <String>[]});
+  const AddServerPlan(this.state, this.snapshot, this.profile, {this.names = const <String>[], this.join = ServerJoinInfo.none});
   final AddServerState state;
+
+  /// The pending join request of the built-in server device (waiting only).
+  final ServerJoinInfo join;
   final ProcessingSnapshot snapshot;
   final ServerProfile profile;
 
@@ -49,33 +59,43 @@ class AddServerPlan {
   final List<String> names;
 
   /// The four short groups the person compares ("AB12 CD34 EF56 7890"), from the verified key.
-  String get words => snapshot.serverKeyShort ?? '';
+  String get words => state == AddServerState.approveServer ? join.short : (snapshot.serverKeyShort ?? '');
 
   /// The 12 groups of digits (the full code).
-  String get digits => snapshot.serverKeyDigits ?? '';
+  String get digits => state == AddServerState.approveServer ? join.digits : (snapshot.serverKeyDigits ?? '');
 
   /// Whether OK also has to publish the circle policy first (circle admin, server not on yet).
   bool get adminTurnsOn => snapshot.iAmAdmin && !snapshot.assistOn;
 }
 
 class AddServerFlow {
-  AddServerFlow(this.controller);
+  AddServerFlow(this.controller, {Duration? waitStep}) {
+    if (waitStep != null) this.waitStep = waitStep;
+  }
   final ProcessingController controller;
+
+  /// Pause between checks while the server pins its key after being approved (tests use zero).
+  Duration waitStep = const Duration(seconds: 1);
 
   /// Reads the verified situation. Throws what the controller throws (an older
   /// server without lanes, offline): the sheet turns that into plain text.
   Future<AddServerPlan> plan(String circleId) async {
     final ProcessingSnapshot s = await controller.load(circleId, force: true);
     final ServerProfile p = await controller.serverProfile();
-    return AddServerPlan(_stateOf(s, p), s, p, names: s.notReady);
+    final ServerJoinInfo j = (!s.hasServerKey && s.isPrivate) ? await controller.serverJoin() : ServerJoinInfo.none;
+    return AddServerPlan(_stateOf(s, p, j), s, p, names: s.notReady, join: j);
   }
 
-  static AddServerState _stateOf(ProcessingSnapshot s, ServerProfile p) {
+  static AddServerState _stateOf(ProcessingSnapshot s, ServerProfile p, ServerJoinInfo j) {
     if (!s.isPrivate) return AddServerState.notPrivate;
     if (s.legacy) return AddServerState.legacy;
     final ProcessingMember? me = s.me;
     if (me != null && me.serverAssisted && s.assistOn) return AddServerState.alreadyAdded;
-    if (!s.hasServerKey) return AddServerState.serverMissing;
+    if (!s.hasServerKey) {
+      if (j.waiting && j.canApprove) return AddServerState.approveServer;
+      if (j.waiting) return AddServerState.serverWaiting;
+      return AddServerState.serverMissing;
+    }
     // Two independent answers (the key log and the profile endpoint) must name the same key.
     final String? other = p.device?.fingerprint;
     if (other != null && other.toLowerCase() != s.serverKeyFingerprint!.toLowerCase()) return AddServerState.keyConflict;
@@ -86,10 +106,25 @@ class AddServerFlow {
 
   /// Step 3. Returns the fresh snapshot. [LanesNotReady] and StateError carry plain messages for the sheet.
   Future<ProcessingSnapshot> confirm(String circleId, AddServerPlan plan) async {
+    if (plan.state == AddServerState.approveServer) {
+      // The person compared the code: sign the server's key, wait until the server has pinned it, then continue as usual.
+      await controller.approveServerJoin();
+      AddServerPlan next = plan;
+      for (int i = 0; i < 30; i++) {
+        next = await this.plan(circleId);
+        if (next.state != AddServerState.approveServer && next.state != AddServerState.serverWaiting && next.state != AddServerState.serverMissing) break;
+        await Future<void>.delayed(waitStep);
+      }
+      if (next.state != AddServerState.ready) {
+        throw StateError('The server is joining, but is not ready yet. Wait a moment and tap OK again.');
+      }
+      return confirm(circleId, next);
+    }
     if (plan.state != AddServerState.ready) throw StateError('The server cannot be added yet.');
     ProcessingSnapshot s = plan.snapshot;
     if (plan.adminTurnsOn) {
       // The default shown to NEW members follows the profile: server only on a home server that has its key.
+      // Server by default when the server recommends it (home profile or admin choice); never consent.
       await controller.setPolicy(circleId,
           assist: true,
           defaultForNew: plan.profile.serverRecommended ? E2ee.lineServer : E2ee.linePhone,

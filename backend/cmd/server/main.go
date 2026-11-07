@@ -105,6 +105,30 @@ func main() {
 		dispatcher.SetDirect(srv.Direct)
 		go srv.RunPushJanitor(ctx)
 	}
+	if dev := startServerDevice(ctx, cfg, pool, tm); dev != nil {
+		srv.ServerDevice = dev
+		go func() {
+			// Ask a server administrator's phone to approve the key: a few minutes after start
+			// (push needs the API up), then once a day until somebody does.
+			for _, d := range []time.Duration{2 * time.Minute, 24 * time.Hour} {
+				for ctx.Err() == nil {
+					select {
+					case <-ctx.Done():
+						return
+					case <-time.After(d):
+					}
+					srv.NotifyServerJoinWaiting(ctx)
+					if dev.Info().Registered {
+						return
+					}
+					if d == 24*time.Hour {
+						continue
+					}
+					break
+				}
+			}
+		}()
+	}
 	srv.VerbosePush = cfg.VerbosePush
 	srv.AdminLocationAccess = cfg.AdminLocationAccess
 	if wa, err := handlers.WebAuthnFromPublicURL(cfg.PublicBaseURL, os.Getenv("WEBAUTHN_RP_ID"), os.Getenv("WEBAUTHN_ORIGINS")); err != nil {
@@ -405,6 +429,8 @@ func main() {
 		r.Post("/circles/{id}/e2ee/purge-plaintext", srv.E2EEPurgePlaintext)
 		// Trusted-server mode: the OpenFamily server as an approved, consented member.
 		r.Get("/e2ee/server-device", srv.E2EEServerDevice)
+		r.Get("/e2ee/server-join", srv.E2EEServerJoin)
+		r.Post("/e2ee/server-join/approve", srv.E2EEServerJoinApprove)
 		r.Get("/circles/{id}/e2ee/server-member", srv.E2EEServerMemberState)
 		r.Put("/circles/{id}/e2ee/server-consent", srv.E2EEPutServerConsent)
 		r.Delete("/circles/{id}/e2ee/server-consent", srv.E2EEDeleteServerConsent)

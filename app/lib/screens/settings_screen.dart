@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import '../widgets/server_prompts.dart';
 import 'package:local_auth/local_auth.dart' show BiometricType;
 import 'package:package_info_plus/package_info_plus.dart';
 
@@ -453,6 +454,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             constraints: const BoxConstraints(maxWidth: 640),
             child: ListView(
               children: [
+            UpdateCard(serverHost: ServerConfig.instance.apiBaseUrl),
             const DsSectionHeader('Account'),
             DsListRow(
               leading: DsListRow.iconTile(context, Icons.person_outline),
