@@ -428,6 +428,10 @@ type LogIndex struct {
 	// A log entry only proves "some key signed this"; binding it to the device id is
 	// what stops a forged voucher.
 	actorKey map[string]string
+	// proc indexes the processing_pref / processing_policy entries (lanes): by seq,
+	// and the newest entry per (action, circle, user) (policy: user "").
+	proc       map[int64]LogEntry
+	procLatest map[string]LogEntry
 	// conflict is set when one device id appears with two different keys (the log
 	// is then not trusted at all).
 	conflict string
@@ -437,7 +441,7 @@ type LogIndex struct {
 var ErrNotInLog = errors.New("e2ee: not in the verified log")
 
 func newLogIndex() *LogIndex {
-	return &LogIndex{hashes: map[int64][]byte{}, regs: map[string]LogEntry{}, epochs: map[string]LogEntry{}, revoked: map[string]int64{}, resets: map[string][]int64{}, actorKey: map[string]string{}}
+	return &LogIndex{hashes: map[int64][]byte{}, regs: map[string]LogEntry{}, epochs: map[string]LogEntry{}, revoked: map[string]int64{}, resets: map[string][]int64{}, actorKey: map[string]string{}, proc: map[int64]LogEntry{}, procLatest: map[string]LogEntry{}}
 }
 
 func (x *LogIndex) add(e LogEntry) {
@@ -476,6 +480,18 @@ func (x *LogIndex) add(e LogEntry) {
 				x.conflict = fmt.Sprintf("entry %d: device %s is registered twice", e.Seq, *e.SubjectID)
 			} else if !dup {
 				x.regs[*e.SubjectID] = e
+			}
+		}
+	case ActProcessingPref, ActProcessingPolicy:
+		if e.CircleID != nil && e.UserID != nil {
+			x.proc[e.Seq] = e
+			user := *e.UserID
+			if byte(*e.Action) == ActProcessingPolicy {
+				user = ""
+			}
+			k := procKey(byte(*e.Action), *e.CircleID, user)
+			if old, ok := x.procLatest[k]; !ok || e.Seq > old.Seq {
+				x.procLatest[k] = e
 			}
 		}
 	case ActRevoke:

@@ -90,6 +90,7 @@ type fakeItem struct {
 	Purpose string
 	Epoch   int
 	CT      []byte
+	Line    string // "" = phone
 }
 
 type tmember struct {
@@ -124,13 +125,19 @@ type fakeOF struct {
 	expire   bool // next authenticated request answers 401 once
 
 	// injected behaviour
-	itemsStatus  int
-	itemsCode    string
-	hits         map[string]int
-	registered   []map[string]any
-	revoked      []map[string]any
-	rawLogHook   func(entries []e2ee.LogEntry) []e2ee.LogEntry
-	consents     []consentWire // server mode: what GET .../e2ee/server-member lists
+	itemsStatus int
+	itemsCode   string
+	hits        map[string]int
+	registered  []map[string]any
+	revoked     []map[string]any
+	rawLogHook  func(entries []e2ee.LogEntry) []e2ee.LogEntry
+	consents    []consentWire // server mode: what GET .../e2ee/server-member lists
+	// lanes
+	proc      func() any       // GET .../e2ee/processing (nil: 404, an older server)
+	skWraps   []e2ee.SKWrap    // GET .../e2ee/wraps?key_line=server
+	pending   []map[string]any // GET .../e2ee/pending?key_line=server
+	serverDev any              // GET /e2ee/server-device
+
 	swapApprover *tdev // when set, the registration response names this key as the approver's
 }
 
@@ -227,7 +234,28 @@ func (f *fakeOF) serve(w http.ResponseWriter, r *http.Request) {
 		jw(w, 200, out)
 	case path == "/circles/"+f.circle+"/e2ee/server-member":
 		jw(w, 200, map[string]any{"enabled": true, "consents": f.consents})
+	case path == "/circles/"+f.circle+"/e2ee/processing":
+		if f.proc == nil {
+			jw(w, 404, map[string]string{"error": "not found"})
+			return
+		}
+		jw(w, 200, f.proc())
+	case path == "/circles/"+f.circle+"/e2ee/pending":
+		f.hits["pending-line-"+r.URL.Query().Get("key_line")]++
+		jw(w, 200, map[string]any{"circle_id": f.circle, "pending": append([]map[string]any{}, f.pending...)})
+	case path == "/e2ee/server-device":
+		jw(w, 200, f.serverDev)
+	case path == "/circles/"+f.circle+"/e2ee/wraps" && r.URL.Query().Get("key_line") == "server":
+		f.hits["wraps-line-server"]++
+		out := []e2ee.SKWrap{}
+		for _, sw := range f.skWraps {
+			if sw.RecipientDeviceID == r.URL.Query().Get("device_id") {
+				out = append(out, sw)
+			}
+		}
+		jw(w, 200, map[string]any{"circle_id": f.circle, "wraps": out})
 	case path == "/circles/"+f.circle+"/e2ee/wraps":
+		f.hits["wraps-line-"+r.URL.Query().Get("key_line")]++
 		jw(w, 200, map[string]any{"circle_id": f.circle, "wraps": append([]e2ee.WrapRecord{}, f.wraps[r.URL.Query().Get("device_id")]...)})
 	case path == "/circles/"+f.circle+"/e2ee/items":
 		if f.itemsStatus != 0 {
@@ -324,18 +352,28 @@ func (f *fakeOF) serveItems(w http.ResponseWriter, r *http.Request) {
 		Purpose    string `json:"purpose"`
 		Epoch      int    `json:"epoch"`
 		Ciphertext string `json:"ciphertext"`
+		KeyLine    string `json:"key_line"`
 	}
+	line := q.Get("key_line")
+	if line == "" {
+		line = "phone"
+	}
+	f.hits["items-line-"+line]++
 	out := []outItem{}
 	more := false
 	for _, it := range f.items {
-		if it.ID <= after || (len(purposes) > 0 && !purposes[it.Purpose]) {
+		il := it.Line
+		if il == "" {
+			il = "phone"
+		}
+		if it.ID <= after || (len(purposes) > 0 && !purposes[it.Purpose]) || (line != "all" && il != line) {
 			continue
 		}
 		if len(out) == limit {
 			more = true
 			break
 		}
-		out = append(out, outItem{it.ID, it.Dev, it.Seq, it.Purpose, it.Epoch, std(it.CT)})
+		out = append(out, outItem{it.ID, it.Dev, it.Seq, it.Purpose, it.Epoch, std(it.CT), il})
 	}
 	next := after
 	if len(out) > 0 {
@@ -434,10 +472,14 @@ func (f *fakeOF) sealItem(key []byte, epoch int, by *tdev, purpose string, seq, 
 }
 
 func (f *fakeOF) addItem(dev string, seq int64, purpose string, epoch int, ct []byte) fakeItem {
+	return f.addLineItem(dev, seq, purpose, epoch, ct, "")
+}
+
+func (f *fakeOF) addLineItem(dev string, seq int64, purpose string, epoch int, ct []byte, line string) fakeItem {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.nextID++
-	it := fakeItem{ID: f.nextID, Dev: dev, Seq: seq, Purpose: purpose, Epoch: epoch, CT: ct}
+	it := fakeItem{ID: f.nextID, Dev: dev, Seq: seq, Purpose: purpose, Epoch: epoch, CT: ct, Line: line}
 	f.items = append(f.items, it)
 	return it
 }

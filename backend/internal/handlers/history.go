@@ -318,6 +318,7 @@ func (s *Server) loadHistoryPoints(ctx context.Context, userID string, from, to 
 		FROM locations l
 		JOIN devices d ON d.id = l.device_id
 		WHERE d.user_id = $1 AND l.ts >= $2 AND l.ts < $3
+		  AND (l.e2ee_circle_id IS NULL OR e2ee_member_server_ok(l.e2ee_circle_id, d.user_id))
 		ORDER BY l.ts`, userID, from, to)
 	if err != nil {
 		return nil, err

@@ -83,7 +83,7 @@ to Dawarich. SIGINT/SIGTERM finish the page in progress, persist the state and e
 
 Exit codes: `0` ok / clean shutdown, `1` error, `2` usage or config, `3` the server answered
 `403 no_approved_device` (bridge revoked, or its key is no longer approved: it stops, it never loops),
-`4` key log verification failed, `5` OpenFamily login expired (re-run `enroll --email ...`), `6` Dawarich refused the API key.
+`4` key log verification failed, `5` OpenFamily login expired (re-run `enroll --email ...`), `6` Dawarich refused the API key (server mode: the ingest token), `7` security alarm in a lanes circle (see "Lanes circles").
 
 `status` prints the device, fingerprint, registration, pinned log entry, cursors and counters (no secrets, works without the passphrase).
 `revoke` revokes the bridge key on the server (`DELETE /e2ee/devices/{id}` signed by the bridge itself); the server drops its
@@ -179,3 +179,55 @@ docker compose --profile e2ee-server up -d e2ee-server-device
 Then in each circle every member opens *Encryption keys > circle > Trusted server* and allows it, and a circle admin
 taps *Give the server the circle key*. Revoke with `e2ee-bridge revoke` (or from a phone); delete the server's plaintext copies
 from the same app screen. Exit code 6 in this mode also covers a refused ingest token.
+
+## Lanes circles (per-member processing lanes)
+
+Circles with per-member lanes (`docs/design/PRIVACY_PROCESSING.md`) change what both modes read. Detection is
+cryptographic, not a server flag: once the verified key log contains a `processing_policy` for a circle, the
+sidecar fetches `GET /circles/{id}/e2ee/processing` and the policy statement it serves must be the NEWEST policy
+entry of that log, signed by a device of a current circle admin; otherwise the circle is **not read** (a warning
+is logged). A circle whose log has no policy keeps the old flow described above (legacy trusted-server circle, or
+the Dawarich bridge's CK flow), unchanged.
+
+When the verified policy has server assistance **on**:
+
+* The device holds **only the server key SK**. It asks `GET .../wraps?key_line=server` and never asks for, stores or
+  opens a circle key (CK). Each SK wrap must come from a device of the admin who signed that generation's policy,
+  and the unwrapped key must match the policy's signed commitment. **If the server answers that request with a
+  phone-line (CK) wrap, or an SK that is byte-identical to a CK or has the commitment of a CK epoch, the device
+  logs `SECURITY ALARM`, stores nothing and exits with code 7.**
+* It pulls only `key_line=server`, purposes `fix,history`, with its own cursor (`status` shows "server line").
+  Result items (`trip`, `drive`, `week`) are never requested: the server computes its own from the ingested fixes
+  (ADR 8.4), and results of phone-lane members are not readable by the server by design.
+* **Per author lane check, before any decryption:** an item is opened only if its author's lane is VERIFIED
+  `server`: the member's signed `processing_pref` must be their newest one in the verified key log, signed by a
+  usable phone key of that member, naming exactly this server key (the sidecar's own key; for the Dawarich bridge
+  the pinned key from `GET /e2ee/server-device`), with `sk_gen` within the policy's generations. Phone-lane members,
+  members without a statement, replayed old statements and unlogged statements are counted as
+  `deferred_author_not_server_lane` (retried for 15 minutes in case the member's statement is just about to arrive, then
+  dropped as `author_not_server_lane_expired`); their ciphertext is never decrypted (the sidecar could not read it anyway).
+  With nobody in the server lane the circle is not pulled at all.
+* Per item, additionally: v2 header (line = server, generation = declared epoch), AEAD under SK of that generation,
+  the author device authorization chain, signature, seq, signed-time window, the replay window, and the **per-line
+  rollback rule** (`RollbackGuard`, persisted in `state.json`; a newer SK generation never outdates CK). A phone-line
+  or v1 payload relayed as server line is rejected as `line_mismatch`.
+* **Missing wraps** are reported in the log, once per change: "this device holds no server key for the current
+  generation yet; waiting for an admin's phone" (open the circle's encryption screen on an admin phone) and
+  "member devices that lack the current server key" with a count (from `.../pending?key_line=server`).
+* **Policy off** (verified): the device drops its SK (also from disk) and stops reading that circle; when it held a
+  server key and no circle remains readable it exits with code 3. A revoked key stops with code 3 as before
+  (`403 no_approved_device`).
+* The server still re-verifies every ingested point (policy, member lane, newest log entry) in Go; the sidecar's check
+  is an independent second one.
+* **Dawarich bridge** (`service` key): in a lanes circle with assistance on it forwards only server-lane members'
+  points, using the same engine (`key_line=server`, SK). It does not read the phone line even if its owner gave it a
+  CK (ADR 8.9: that is the "includes phone-only data" decision and is not exercised here). A circle without a policy,
+  or whose policy is off, keeps the old CK flow. The built-in server-side Dawarich sync reads only the plaintext
+  `locations` table, which never holds a phone-lane member's points (test:
+  `handlers/e2ee_dawarich_lanes_db_test.go`).
+
+Upgraded legacy circles: the old phone-key epochs stay with the server until the admin calls
+`DELETE /circles/{id}/e2ee/legacy-server-access`; this sidecar never uses them (it only asks for the server line),
+and a converted legacy consent is honoured only while the member has signed no newer statement.
+
+Exit code 7 is new: a CK wrap offered for the server line, or an SK reusing a CK.

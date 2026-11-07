@@ -157,6 +157,7 @@ func (s *Server) dawarichPending(ctx context.Context, row dawarichRow) int64 {
 		LEFT JOIN dawarich_user_map m ON m.user_id = d.user_id
 		LEFT JOIN dawarich_cursor c ON c.device_id = l.device_id
 		WHERE l.ts > COALESCE(c.last_ts, COALESCE(m.since, $1))
+		  AND (l.e2ee_circle_id IS NULL OR e2ee_member_server_ok(l.e2ee_circle_id, d.user_id))
 		  AND ((m.user_id IS NOT NULL AND m.enabled) OR (m.user_id IS NULL AND $2))`,
 		row.Since, row.SendUnmapped && row.APIKey != "").Scan(&n)
 	return n
@@ -462,6 +463,7 @@ func (s *Server) nextDawarichBatch(ctx context.Context, t dawarichTarget) ([]daw
 		JOIN users u ON u.id = d.user_id
 		LEFT JOIN dawarich_cursor c ON c.device_id = l.device_id
 		WHERE l.ts > COALESCE(c.last_ts, $1)
+		  AND (l.e2ee_circle_id IS NULL OR e2ee_member_server_ok(l.e2ee_circle_id, u.id))
 		  AND CASE WHEN $2::text = '' THEN NOT EXISTS (SELECT 1 FROM dawarich_user_map m WHERE m.user_id = u.id)
 		           ELSE u.id::text = $2::text END
 		ORDER BY l.ts ASC

@@ -242,7 +242,7 @@ func (s *Server) lookupShareView(ctx context.Context, token string) (shareViewRo
 		       mp.lat, mp.lon, mp.accuracy_meters, mp.heading_deg, mp.speed_mps, mp.battery_pct, mp.ts
 		FROM share_links sl
 		JOIN users u ON u.id = sl.user_id
-		LEFT JOIN member_positions mp ON mp.user_id = sl.user_id
+		LEFT JOIN member_positions mp ON mp.user_id = sl.user_id AND NOT e2ee_keeps_data_on_phone(sl.user_id)
 		WHERE sl.token_hash = $1 AND sl.revoked_at IS NULL AND sl.expires_at > now()`, want,
 	).Scan(&stored, &out.data.ExpiresAt, &out.data.Name, &out.hasAvatar, &paused,
 		&lat, &lon, &acc, &head, &speed, &batt, &ts)

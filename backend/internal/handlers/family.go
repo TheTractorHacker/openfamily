@@ -344,7 +344,7 @@ func (s *Server) ListMembers(w http.ResponseWriter, r *http.Request) {
 		       mp.lat, mp.lon, mp.ts, mp.battery_pct, mp.speed_mps, mp.motion_state, mp.accuracy_meters, mp.heading_deg,
 		       d.last_seen, u.phone, u.platform_admin
 		FROM users u
-		LEFT JOIN member_positions mp ON mp.user_id = u.id
+		LEFT JOIN member_positions mp ON mp.user_id = u.id AND NOT e2ee_keeps_data_on_phone(u.id)
 		LEFT JOIN (
 			SELECT user_id, MAX(last_seen) AS last_seen
 			FROM devices GROUP BY user_id

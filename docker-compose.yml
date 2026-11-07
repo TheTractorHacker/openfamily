@@ -242,6 +242,12 @@ services:
   #   docker compose --profile e2ee-server run --rm e2ee-server-device enroll --approval <APPROVAL CODE>
   # Then every member opens the circle > Encryption > Trusted server and allows it.
   # The private key lives in the e2ee_server_state volume (0600), never in Postgres.
+  # LANES circles (per-member processing lanes, docs/design/PRIVACY_PROCESSING.md): this container
+  # then holds ONLY the server key SK, never a circle key CK, and ingests only members who signed
+  # the server lane. An admin's phone wraps SK to it; it reports missing wraps in its log. Exit 3
+  # (key revoked / admin switched server assistance off) and exit 7 (the server handed it a CK wrap)
+  # are deliberate stops: with the hardening anchor's "restart: unless-stopped" docker restarts it
+  # anyway and it stops again at once; set `restart: "no"` here if that noise bothers you.
   e2ee-server-device:
     <<: *hardening
     profiles: ["e2ee-server"]

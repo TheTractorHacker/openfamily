@@ -509,7 +509,8 @@ func (s *Server) E2EEPurgeServerCopies(w http.ResponseWriter, r *http.Request) {
 			FROM (SELECT ST_Y(l.geom) AS lat, ST_X(l.geom) AS lon, l.ts, l.device_id, l.accuracy_meters AS acc,
 			             l.speed_mps AS spd, l.battery_pct AS bat
 			      FROM locations l JOIN devices d ON d.id = l.device_id
-			      WHERE d.user_id = $1 ORDER BY l.ts DESC LIMIT 1) n
+			      WHERE d.user_id = $1 AND (l.e2ee_circle_id IS NULL OR e2ee_member_server_ok(l.e2ee_circle_id, d.user_id))
+			      ORDER BY l.ts DESC LIMIT 1) n
 			WHERE mp.user_id = $1`, u)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to purge")

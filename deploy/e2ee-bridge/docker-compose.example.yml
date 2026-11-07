@@ -6,6 +6,8 @@
 #   (paste the REQUEST CODE into the phone: Encryption keys > Approve a viewer or bridge)
 #   docker compose run --rm bridge enroll --approval <APPROVAL CODE>
 # Then open the circle's encryption screen on the phone once, so it wraps the keys.
+# In a LANES circle (per-member processing lanes) with server assistance on, this bridge gets the
+# server key SK (not CK) and forwards only members who chose the server lane; see README, "Lanes circles".
 #   docker compose up -d
 #
 # Build context is the repository root:

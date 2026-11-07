@@ -58,7 +58,14 @@ E2EE_BRIDGE_DAWARICH_KEY (main Dawarich API key).
 
 Exit codes: 0 ok / clean shutdown, 1 error, 2 usage or config, 3 bridge revoked or
 not approved (server says no_approved_device), 4 key log verification failed,
-5 login expired (re-run enroll), 6 Dawarich refused the API key.
+5 login expired (re-run enroll), 6 Dawarich refused the API key (server mode: the ingest token),
+7 SECURITY ALARM: the server handed this key a circle-key (CK) wrap, or an SK that reuses a CK.
+Exit 3 also covers: server assistance switched off in every circle this server device was reading.
+
+LANES CIRCLES (per-member processing lanes, docs/design/PRIVACY_PROCESSING.md): the server device holds ONLY
+the server key SK, never a circle key. It reads items of members whose own signed lane is "server" (checked
+against the key log) and nothing else; phone-lane members' items are never decrypted. The Dawarich bridge
+does the same in a circle whose server assistance is on.
 `
 
 type app struct {
@@ -168,8 +175,10 @@ func realMain(ctx context.Context, args []string, env func(string) string, stdin
 func exitCodeFor(err error) int {
 	var le *logError
 	switch {
-	case errors.Is(err, errNoApproved):
+	case errors.Is(err, errNoApproved), errors.Is(err, errPolicyOff):
 		return exitRevoked
+	case isAlarm(err):
+		return exitAlarm
 	case errors.As(err, &le):
 		return exitLog
 	case errors.Is(err, errReauth):
@@ -219,7 +228,11 @@ func (a *app) cmdStatus() error {
 	fmt.Fprintf(w, "Last sync:    %s\n", or(rs.Stats.LastSync, "never"))
 	fmt.Fprintf(w, "Points sent:  %d   items accepted: %d\n", rs.Stats.Sent, rs.Stats.Accepted)
 	for circle, cur := range rs.Recv.Cursor {
-		fmt.Fprintf(w, "Circle %s: cursor %d\n", circle[:min(8, len(circle))], cur)
+		lbl := ""
+		if strings.HasSuffix(circle, "#sk") {
+			lbl, circle = " (server line)", strings.TrimSuffix(circle, "#sk")
+		}
+		fmt.Fprintf(w, "Circle %s%s: cursor %d\n", circle[:min(8, len(circle))], lbl, cur)
 	}
 	fmt.Fprintf(w, "Deferred items: %d\n", len(rs.Recv.Deferred))
 	for k, v := range rs.Stats.Rejected {
@@ -300,6 +313,12 @@ func (b *bridge) loop(ctx context.Context, poll time.Duration, once bool) int {
 		case errors.Is(err, errNoApproved):
 			b.log.Error("STOPPING: the server no longer lets this bridge read the circle. It was revoked or its key is not approved any more. Re-enroll if that is unexpected.", "err", err)
 			return exitRevoked
+		case errors.Is(err, errPolicyOff):
+			b.log.Error("STOPPING: " + err.Error())
+			return exitRevoked
+		case isAlarm(err):
+			b.log.Error("STOPPING: " + err.Error())
+			return exitAlarm
 		case errors.Is(err, errReauth):
 			b.log.Error("STOPPING: login expired, re-run `e2ee-bridge enroll --email ...`")
 			return exitReauth
