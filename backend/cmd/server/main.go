@@ -349,6 +349,7 @@ func main() {
 		r.Get("/auth/passkeys", srv.ListPasskeys)
 		r.Delete("/auth/passkeys/{id}", srv.DeletePasskey)
 		r.Get("/auth/sessions", srv.ListSessions)
+		r.Post("/auth/sessions/current", srv.CurrentSession)
 		r.Delete("/auth/sessions/{id}", srv.RevokeSession)
 		r.Get("/me/export", srv.ExportMe)
 		r.Get("/me/location-retention", srv.GetLocationRetention)

@@ -128,7 +128,7 @@ class _JoinCircleScreenState extends State<JoinCircleScreen> {
   Widget build(BuildContext context) {
     if (_joined) {
       return DsPage(
-        title: 'Join a family',
+        title: 'Join a circle',
         showBack: false,
         step: widget.step,
         totalSteps: widget.step == null ? null : widget.totalSteps,
@@ -159,7 +159,7 @@ class _JoinCircleScreenState extends State<JoinCircleScreen> {
       );
     }
     return DsPage(
-      title: 'Join a family',
+      title: 'Join a circle',
       step: widget.step,
       totalSteps: widget.step == null ? null : widget.totalSteps,
       actions: <Widget>[

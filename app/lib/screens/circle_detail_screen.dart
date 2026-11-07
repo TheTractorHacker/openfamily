@@ -173,7 +173,7 @@ class _CircleDetailScreenState extends State<CircleDetailScreen> {
             key: const Key('circle-why-cant-i-see'),
             leading: DsListRow.iconTile(context, Icons.help_outline),
             title: "Why can't I see everyone?",
-            subtitle: 'Check who is sending updates, and fix this circle in one tap.',
+            subtitle: 'See who is sending updates',
             chevron: true,
             onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => DeliveryScreen(circle: _circle))),
           ),
@@ -200,12 +200,17 @@ class _CircleDetailScreenState extends State<CircleDetailScreen> {
         children: <Widget>[
           DsToggleRow(
             icon: st.isPrivate ? Icons.lock : Icons.lock_open,
-            title: 'Private circle (end-to-end encrypted)',
+            title: 'Private circle',
             subtitle: st.isPrivate
+                ? (_circle.e2eeServerMember ? 'Old mode: the server can read it' : 'On: only members can read locations')
+                : 'Off: locations are not encrypted for the server',
+            info: st.isPrivate
                 ? (_circle.e2eeServerMember
-                    ? 'On (key epoch ${st.epoch}), OLD TRUSTED-SERVER MODE: the Orbitly server can read this circle (every member allowed it). An admin can upgrade it under Encryption keys > Server processing.'
-                    : 'On (key epoch ${st.epoch}). Positions, history, places and events are end-to-end encrypted. Server processing is optional and each member decides for their own data (Encryption keys > Server processing).')
-                : 'Off. Turning it on encrypts locations so the server cannot read them. Some server features are not available in private circles.',
+                    ? 'OLD TRUSTED-SERVER MODE: the Orbitly server can read this circle (every member allowed it). An admin can upgrade it under Encryption keys > Server processing.'
+                    : 'Positions, history, places and events are end-to-end encrypted: only the members can read them. '
+                        'Server processing is optional and each member decides for their own data (Encryption keys > Server processing).')
+                : 'Turning it on encrypts locations so the server cannot read them. Some server features are not available in private circles.',
+            infoTitle: 'Private circle',
             value: st.isPrivate,
             onChanged: _e2eeBusy ? null : _togglePrivate,
           ),
@@ -214,7 +219,8 @@ class _CircleDetailScreenState extends State<CircleDetailScreen> {
               key: const Key('circle-add-server'),
               leading: DsListRow.iconTile(context, Icons.dns_outlined),
               title: 'Add server to this circle',
-              subtitle: 'Lets your own server keep history, trips and driving reports. Takes three taps.',
+              subtitle: 'Keep history, trips and driving reports',
+              info: 'Lets your own server keep history, trips and driving reports for this circle. Takes three taps.',
               chevron: true,
               onTap: _addServer,
             ),

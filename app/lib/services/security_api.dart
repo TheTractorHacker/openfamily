@@ -13,6 +13,9 @@ abstract class SecurityApi {
   Future<void> totpDisable({required String password, required String code});
   Future<List<SessionInfo>> listSessions();
   Future<void> revokeSession(String id);
+
+  /// The id of the session this device uses, or null when unknown (older server).
+  Future<String?> currentSessionId();
   Future<void> logoutAll();
   Future<void> changePassword({
     required String currentPassword,
@@ -64,6 +67,9 @@ class ApiSecurityApi implements SecurityApi {
 
   @override
   Future<void> revokeSession(String id) => ApiClient.revokeSession(id);
+
+  @override
+  Future<String?> currentSessionId() => ApiClient.currentSessionId();
 
   @override
   Future<void> logoutAll() => ApiClient.logoutAll();

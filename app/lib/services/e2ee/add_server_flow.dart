@@ -154,7 +154,7 @@ class AddServerFlow {
 String addServerExplanation(ServerProfile p) {
   if (p.isHome) {
     return 'The server in your home will be able to see where this circle\'s members are, so it can keep their history, trips and driving reports. '
-        'It runs on a computer your family owns, and each person still decides for themselves and can take it away at any time.';
+        'It runs on a computer your circle owns, and each person still decides for themselves and can take it away at any time.';
   }
   if (p.known && p.profile == 'cloud') {
     return 'The server is rented from a company, and it will be able to see where this circle\'s members are, so it can keep their history, trips and driving reports. '

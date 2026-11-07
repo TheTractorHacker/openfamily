@@ -268,6 +268,24 @@ func TestAccountFlowsPG(t *testing.T) {
 		if !sawPhone {
 			t.Fatalf("user agent lost across rotation: %+v", out)
 		}
+		// Which session am I? The refresh token (any rotation of the family) answers; a stranger's token does not.
+		current := func(user, jti string) (int, string) {
+			tok, _ := s.TM.IssueRefreshWithID(user, "", 0, jti)
+			req := httptest.NewRequest("POST", "/", strings.NewReader(`{"refresh_token":"`+tok+`"}`))
+			req = req.WithContext(middleware.ContextWithClaims(req.Context(), &auth.Claims{UserID: uid}))
+			rec := httptest.NewRecorder()
+			s.CurrentSession(rec, req)
+			return rec.Code, rec.Body.String()
+		}
+		if code, body := current(uid, "s1"); code != 200 || !strings.Contains(body, `"id":"s1"`) {
+			t.Fatalf("current session: %d %s", code, body)
+		}
+		if code, _ := current("someone-else", "s1"); code != 404 {
+			t.Fatalf("foreign refresh token must not resolve, got %d", code)
+		}
+		if code, _ := current(uid, "nope"); code != 404 {
+			t.Fatalf("unknown jti must be 404, got %d", code)
+		}
 		router := chi.NewRouter()
 		router.Delete("/auth/sessions/{id}", func(w http.ResponseWriter, r *http.Request) {
 			s.RevokeSession(w, r.WithContext(middleware.ContextWithClaims(r.Context(), &auth.Claims{UserID: uid})))

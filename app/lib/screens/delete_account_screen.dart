@@ -128,10 +128,10 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
         const _Bullet('Your profile, photo and sign-in details'),
         const _Bullet('Your devices and every stored location point'),
         const _Bullet('Your emergency contacts and active sessions'),
-        const _Bullet('Your family too, if you are its only member'),
+        const _Bullet('Your circle too, if you are its only member'),
         const SizedBox(height: AppSpace.md),
         Text(
-          'If you are the last admin of a family that still has other '
+          'If you are the last admin of a circle that still has other '
           'people, promote someone else first. Want a copy of your data? '
           'Download it from Security before deleting.',
           style: AppType.secondary.copyWith(
