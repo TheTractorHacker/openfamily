@@ -1,5 +1,7 @@
 package app.openfamily
 
+import android.app.ActivityManager
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import androidx.core.view.WindowCompat
@@ -10,6 +12,7 @@ import io.flutter.plugin.common.MethodChannel
 class MainActivity : FlutterFragmentActivity() {
     private var linkChannel: MethodChannel? = null
     private var initialLink: String? = null
+    private var deviceChannel: MethodChannel? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         // Deliberately opt in to edge-to-edge (Android 15+ enforces it for
@@ -36,6 +39,33 @@ class MainActivity : FlutterFragmentActivity() {
             }
         }
         linkChannel = channel
+
+        // Memory facts for the device tier (see perf/device_tier.dart) and the
+        // channel that carries onTrimMemory levels back to Dart.
+        val device = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "app.openfamily/device")
+        device.setMethodCallHandler { call, result ->
+            if (call.method == "memoryInfo") {
+                try {
+                    val am = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+                    val mi = ActivityManager.MemoryInfo()
+                    am.getMemoryInfo(mi)
+                    result.success(
+                        mapOf(
+                            "totalBytes" to mi.totalMem,
+                            "availableBytes" to mi.availMem,
+                            "isLowRamDevice" to am.isLowRamDevice,
+                            "memoryClassMb" to am.memoryClass,
+                            "largeMemoryClassMb" to am.largeMemoryClass,
+                        )
+                    )
+                } catch (_: Throwable) {
+                    result.success(null)
+                }
+            } else {
+                result.notImplemented()
+            }
+        }
+        deviceChannel = device
 
         // Keystore-backed wrapping key + FLAG_SECURE for the end-to-end encryption
         // secrets (see KeystoreChannel.kt).
@@ -68,6 +98,16 @@ class MainActivity : FlutterFragmentActivity() {
                     result.success(false)
                 }
             }
+    }
+
+    // The system asks apps to give memory back (ComponentCallbacks2). Dart
+    // decides what to free; see perf/memory_pressure.dart.
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        try {
+            deviceChannel?.invokeMethod("trim", level)
+        } catch (_: Throwable) {
+        }
     }
 
     // singleTop: a link opened while the app is running arrives here.

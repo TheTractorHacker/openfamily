@@ -7,6 +7,7 @@ import 'package:vector_map_tiles/vector_map_tiles.dart';
 import '../services/map_style_preference.dart';
 import '../services/map_style_service.dart';
 import '../services/tile_config.dart';
+import '../services/perf/perf_profile.dart';
 
 /// Shared base-map layer for every FlutterMap in the app: crisp vector tiles
 /// (OpenFreeMap by default, light/dark following the app theme), with
@@ -86,6 +87,7 @@ class _OpenFamilyTileLayerState extends State<OpenFamilyTileLayer> {
         final Style? style = snap.data;
         if (style == null) return const SizedBox.shrink();
         final bool low = widget.reducedData;
+        final PerfProfile profile = PerfProfile.current;
         return VectorTileLayer(
           key: ValueKey<String>(url),
           tileProviders: style.providers,
@@ -93,10 +95,14 @@ class _OpenFamilyTileLayerState extends State<OpenFamilyTileLayer> {
           sprites: style.sprites,
           layerMode: VectorTileLayerMode.vector,
           // Bounded disk cache (default 50 MB, 25 MB in reduced-data mode).
-          fileCacheMaximumSizeInBytes: low ? 25 * 1024 * 1024 : 50 * 1024 * 1024,
+          fileCacheMaximumSizeInBytes:
+              low ? profile.tileDiskCacheBytes ~/ 2 : profile.tileDiskCacheBytes,
           fileCacheTtl: const Duration(days: 14),
-          memoryTileCacheMaxSize: low ? 4 * 1024 * 1024 : 10 * 1024 * 1024,
-          concurrency: Platform.isAndroid || Platform.isIOS ? 2 : 1,
+          memoryTileCacheMaxSize:
+              low ? profile.tileMemoryCacheBytes ~/ 2 : profile.tileMemoryCacheBytes,
+          concurrency: Platform.isAndroid || Platform.isIOS
+              ? profile.tileConcurrency
+              : 1,
         );
       },
     );

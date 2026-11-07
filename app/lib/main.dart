@@ -24,7 +24,11 @@ import 'services/deep_link_service.dart';
 import 'services/direct_push_service.dart' show onOpenRoute;
 import 'services/invite_link.dart';
 import 'services/pending_invite.dart';
+import 'services/perf/memory_pressure.dart';
 import 'services/perf/perf_monitor.dart';
+import 'services/perf/perf_profile.dart';
+import 'services/member_avatar_cache.dart';
+import 'services/e2ee/private_runtime.dart';
 import 'services/push_service.dart';
 import 'services/server_config.dart';
 import 'services/session_gate.dart';
@@ -65,10 +69,24 @@ Future<void> main() async {
       MapStylePreferenceService.load(),
       ServerConfig.instance.load(),
       AppCompat.init(),
+      // Reads the phone's RAM (one small platform call, in parallel with the
+      // stored settings) so caches are sized before the first screen builds.
+      PerfProfile.init(),
     ]),
   );
   UnitsSync.install();
+  MemoryPressureGuard.instance
+    ..install()
+    ..addTrimmer(trimReloadableMemory);
   runApp(const OpenFamilyApp());
+}
+
+/// What to free when the system is short of memory. Everything here reloads
+/// lazily; unsaved points are written out first, never dropped.
+void trimReloadableMemory(bool severe) {
+  final PrivateRuntime? rt = PrivateRuntime.existing;
+  if (rt != null) unawaited(rt.flushStores().catchError((Object _) {}));
+  if (severe) MemberAvatarCache.instance.trimBytes();
 }
 
 /// Root widget for the Orbitly app.
