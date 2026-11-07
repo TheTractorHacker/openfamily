@@ -1,8 +1,12 @@
 import React from 'react'
-import { ApiError, getAdminCompat, saveAdminCompat } from '../lib/api'
-import { COMPAT_LABEL, COMPAT_TONE, describePolicy, isVersionInput, usersByStatus } from '../lib/compat'
+import { ApiError, getAdminCompat, getDocText, saveAdminCompat } from '../lib/api'
+import { changelogSection, latestChangelogSection } from '../lib/docs'
+import { Markdown } from './DocsPage'
+import './DocsPage.css'
+import { COMPAT_LABEL, COMPAT_TONE, describePolicy, isVersionInput, peopleNeedingUpdate, policyInWords, usersByStatus } from '../lib/compat'
 import { formatRelativeTime } from '../lib/format'
-import { Badge, Button, Card } from '../components/primitives'
+import { KeyValueList } from '../components/patterns'
+import { Badge, Button, Card, CopyButton } from '../components/primitives'
 import type { AdminCompat } from '../lib/types'
 
 const errText = (e: unknown) => (e instanceof ApiError || e instanceof Error ? e.message : 'Request failed')
@@ -18,6 +22,11 @@ export function AppVersionsCard() {
   const [enforce, setEnforce] = React.useState(false)
   const [busy, setBusy] = React.useState(false)
   const [msg, setMsg] = React.useState<{ tone: 'success' | 'error'; text: string } | null>(null)
+
+  const [changelog, setChangelog] = React.useState<string | null>(null)
+  React.useEffect(() => {
+    getDocText('CHANGELOG.md').then(setChangelog).catch(() => {})
+  }, [])
 
   const apply = (r: AdminCompat) => {
     setData(r)
@@ -54,6 +63,11 @@ export function AppVersionsCard() {
   }
 
   const counts = data ? usersByStatus(data.versions) : null
+  const notes = React.useMemo(() => {
+    if (!changelog || !data?.server) return null
+    return changelogSection(changelog, data.server.version) || latestChangelogSection(changelog)
+  }, [changelog, data])
+  const nudge = data ? peopleNeedingUpdate(data.people) : []
 
   return (
     <Card>
@@ -67,6 +81,23 @@ export function AppVersionsCard() {
             {data.users_with_version} of {data.users_total} users have reported an app version in the last 90 days.
             {counts && counts.required > 0 && ` ${counts.required} are outside the window.`}
           </p>
+          {data.server && (
+            <KeyValueList
+              label="Server and supported versions"
+              items={[
+                { label: 'Server version', value: data.server.version || 'unknown', mono: true },
+                { label: 'Newest app release it knows', value: data.server.release, mono: true },
+                { label: 'Supported app window', value: `${data.policy.window.join(', ')} (minimum ${data.policy.min_supported_version})` },
+              ]}
+            />
+          )}
+          <p className="wb-help">{policyInWords(data.policy)}</p>
+          {notes && (
+            <details open>
+              <summary>What is new in this server version</summary>
+              <Markdown from="CHANGELOG.md" text={notes.replace(/^## /, '### ')} />
+            </details>
+          )}
           {data.versions.length === 0 ? (
             <p className="wb-help">No app has reported a version yet. Apps from this release on do.</p>
           ) : (
@@ -97,7 +128,41 @@ export function AppVersionsCard() {
             </table>
             </div>
           )}
-          {data.outside_window.length > 0 && (
+          {nudge.length > 0 && (
+            <>
+              <h4 className="wb-settings-title">People to nudge</h4>
+              <ul className="wb-nudge-list" aria-label="People on an old app version">
+                {nudge.map((u) => (
+                  <li key={`${u.user_id}|${u.platform}`} className="wb-nudge">
+                    <div className="wb-nudge-head">
+                      <strong>{u.name || u.email}</strong>
+                      <small>{u.email}</small>
+                      <span>
+                        {u.app_version}
+                        {u.platform ? ` on ${u.platform}` : ''}
+                      </span>
+                      {u.status && <Badge tone={COMPAT_TONE[u.status]}>{COMPAT_LABEL[u.status]}</Badge>}
+                    </div>
+                    <p className="wb-help">
+                      <strong>What they will see: </strong>
+                      {u.experience}
+                      {u.missing_features && u.missing_features.length > 0 && (
+                        <> Cannot use yet: {u.missing_features.join('; ')}.</>
+                      )}
+                    </p>
+                    {u.update_message && (
+                      <p className="wb-help wb-nudge-copy">
+                        <span>Message to send: </span>
+                        <CopyButton value={u.update_message} label={`Copy update message for ${u.name || u.email}`} />
+                        <span> Copy</span>
+                      </p>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+          {data.outside_window.length > 0 && nudge.length === 0 && (
             <>
               <h4 className="wb-settings-title">Outside the window</h4>
               <ul className="wb-help" aria-label="Users outside the support window">

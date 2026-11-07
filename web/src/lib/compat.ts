@@ -1,7 +1,7 @@
 // Pure helpers for the Settings "App versions" card (kept free of React so
 // they can be unit tested with node --test).
 
-import type { AdminCompat, AdminCompatVersion, AppCompatStatus } from './types'
+import type { AdminCompat, AdminCompatUser, AdminCompatVersion, AppCompatStatus } from './types'
 
 export const COMPAT_TONE = { ok: 'green', recommended: 'orange', required: 'red', unknown: 'grey' } as const
 
@@ -35,4 +35,21 @@ export function describePolicy(p: AdminCompat['policy']): string {
     default:
       return `Rolling window of the last ${p.window_size} releases: ${window}.`
   }
+}
+
+
+/** Plain-words explanation of the support rule, shown on the App versions card. */
+export function policyInWords(p: AdminCompat['policy']): string {
+  const first = p.window[0] ?? p.min_supported_version
+  const last = p.window[p.window.length - 1] ?? p.latest_version
+  return (
+    `The server works with the last ${p.window_size} app versions (${first} to ${last}), so nobody has to update on the same day as the server. ` +
+    `Apps 2 or more versions behind the newest still work and get a small note. Apps older than ${p.min_supported_version} get an "Update required" banner` +
+    (p.enforce_writes ? ' and their location uploads are refused until they update.' : ', but their uploads are still accepted (enforcement is off).')
+  )
+}
+
+/** Splits people into those who need a nudge (outside the window or behind) and the rest. */
+export function peopleNeedingUpdate(people: AdminCompatUser[] = []): AdminCompatUser[] {
+  return people.filter((u) => u.status === 'required' || u.status === 'recommended')
 }

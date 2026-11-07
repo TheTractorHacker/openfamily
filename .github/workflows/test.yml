@@ -45,6 +45,25 @@ jobs:
       - name: Test
         run: go test -p 1 -count=1 ./...
 
+  # Documentation gate: every relative link, image and anchor in docs/ and
+  # README.md resolves, images have alt text, and the copy of the docs embedded
+  # in the server (backend/web/docs) is up to date. Also runs the admin web
+  # unit tests (Markdown renderer, docs search, app-versions helpers).
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Docs links, images and embedded copy
+        run: scripts/docs-check.sh
+      - name: Admin web tests
+        working-directory: web
+        run: |
+          npm ci
+          npm test
+
   flutter:
     runs-on: ubuntu-latest
     defaults:

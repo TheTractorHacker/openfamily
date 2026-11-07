@@ -289,6 +289,8 @@ func main() {
 		r.Get("/me", srv.GetMe)
 		// Release the server runs, for signed-in users only (not on /healthz).
 		r.Get("/version", srv.AdminVersion)
+		// Documentation embedded in the server (admin web "Documents" page).
+		r.Get("/api/docs/*", srv.DocsContent)
 		r.Patch("/me", srv.UpdateMe)
 		r.Patch("/me/password", srv.ChangeMyPassword)
 		r.Delete("/me", srv.DeleteMe)

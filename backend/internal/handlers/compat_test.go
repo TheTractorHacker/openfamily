@@ -267,6 +267,11 @@ func TestCompatRecordAndAdmin(t *testing.T) {
 		} `json:"policy"`
 		Versions []adminCompatVersion `json:"versions"`
 		Outside  []adminCompatUser    `json:"outside_window"`
+		People   []adminCompatUser    `json:"people"`
+		Server   struct {
+			Release string `json:"release"`
+		} `json:"server"`
+		Experience map[string]string `json:"experience"`
 	}
 	get := func() adminOut {
 		w := httptest.NewRecorder()
@@ -293,6 +298,21 @@ func TestCompatRecordAndAdmin(t *testing.T) {
 	}
 	if !outside {
 		t.Fatalf("user not listed outside the window: %+v", o.Outside)
+	}
+
+	// The per-person list says what this person experiences and offers a message.
+	var me *adminCompatUser
+	for i := range o.People {
+		if o.People[i].UserID == uid {
+			me = &o.People[i]
+		}
+	}
+	if me == nil || me.Status != "required" || !strings.Contains(me.Experience, "Update required") ||
+		!strings.HasPrefix(me.UpdateMessage, "Hi") || len(me.MissingFeatures) == 0 {
+		t.Fatalf("person entry: %+v", me)
+	}
+	if o.Server.Release == "" || o.Experience["ok"] == "" || o.Experience["required"] == "" {
+		t.Fatalf("server/experience missing: %+v %+v", o.Server, o.Experience)
 	}
 
 	put := func(body string) int {

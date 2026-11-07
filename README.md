@@ -48,8 +48,19 @@ chores) that currently ranks first in GitHub search for the same name.
               └───────────┘
 ```
 
+## Documentation
+
+The full manual lives in [docs/](docs/README.md): guides for
+[families](docs/user/getting-started.md), for
+[people who run the server](docs/admin/install.md) and for
+[developers](docs/developers/architecture.md). It also ships **inside every
+server**: sign in to the admin web and open **Documents** (works offline, shows
+what is new in your server version). Screenshots are generated, see
+[how](docs/developers/screenshots.md).
+
 ## Table of contents
 
+- [Documentation](#documentation)
 - [Why self-host this](#why-self-host-this)
 - [Features](#features)
 - [Compared to](#compared-to)

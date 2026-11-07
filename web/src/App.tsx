@@ -23,6 +23,7 @@ import { FleetPage } from './pages/FleetPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { CirclesPage } from './pages/CirclesPage'
 import { ShareLinksPage } from './pages/ShareLinksPage'
+import { DocsPage } from './pages/DocsPage'
 import { EncryptionKeysPage } from './pages/EncryptionKeysPage'
 import { ROUTES, DEFAULT_ROUTE, routeFromHash, type RouteKey } from './lib/routes'
 import { clearTokens, getEmail, isAuthenticated, subscribeAuth } from './lib/auth'
@@ -173,6 +174,8 @@ function renderPage(
       return <SystemPage />
     case 'builds':
       return <BuildsPage />
+    case 'documents':
+      return <DocsPage />
     case 'settings':
       return <SettingsPage email={email} onLogout={logout} />
     default:
