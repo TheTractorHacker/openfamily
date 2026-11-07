@@ -51,3 +51,11 @@
   .wb-fleet-summary { grid-template-columns: 1fr auto; row-gap: var(--space-1); }
   .wb-fleet-cell.is-secondary { display: none; }
 }
+
+.wb-fleet-hint { font-size: var(--font-xs); color: var(--text-muted); overflow-wrap: anywhere; }
+.wb-fleet-findings li { max-width: 100%; }
+.wb-fleet-private-note { margin: var(--space-3) 0 0; font-size: var(--font-xs); color: var(--text-muted); overflow-wrap: anywhere; }
+.wb-fleet-stale { margin-bottom: var(--space-4); display: flex; flex-direction: column; gap: var(--space-2); }
+.wb-fleet-stale-days .wb-input { width: 72px; height: 32px; }
+.wb-fleet-stale-list { margin: 0 0 var(--space-3); padding-left: var(--space-5); font-size: var(--font-sm); overflow-wrap: anywhere; }
+.wb-fleet-sub { white-space: normal; }

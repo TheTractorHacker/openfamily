@@ -1,6 +1,6 @@
 # Safety: SOS, check-ins and pausing
 
-Orbitly tells **your family**. It never calls emergency services. If someone
+Orbitly tells **your people**. It never calls emergency services. If someone
 is in danger, call your local emergency number first.
 
 ![The SOS screen](../images/app/sos.png)

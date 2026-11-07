@@ -6,6 +6,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -220,5 +224,82 @@ func TestLoginReplacesSameInstallAndSweepsIdle(t *testing.T) {
 	login("hy-5", "")
 	if !revoked("hy-2") || revoked("hy-5") || revoked("hy-4") {
 		t.Fatalf("cap: 2=%v 4=%v 5=%v", revoked("hy-2"), revoked("hy-4"), revoked("hy-5"))
+	}
+}
+
+func TestPublicDownloadIPAWithoutConfigIs404AndServesCache(t *testing.T) {
+	rec := httptest.NewRecorder()
+	(&Server{}).PublicDownloadIPA(rec, httptest.NewRequest(http.MethodGet, "/app.ipa", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status %d", rec.Code)
+	}
+	// GitHub unreachable but an IPA is cached: serve it.
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "openfamily-release.ipa"), []byte("IPA"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{APKDir: dir, APKGitHubRepo: "bad repo"}
+	rec = httptest.NewRecorder()
+	s.PublicDownloadIPA(rec, httptest.NewRequest(http.MethodGet, "/app.ipa", nil))
+	if rec.Code != 200 || rec.Body.String() != "IPA" || !strings.Contains(rec.Header().Get("Content-Disposition"), ".ipa") {
+		t.Fatalf("cached ipa: %d %q", rec.Code, rec.Body.String())
+	}
+}
+
+func TestRevocationCoversRotatedFamilies(t *testing.T) {
+	fx := newAlertFixture(t)
+	ctx := context.Background()
+	t.Cleanup(func() { _, _ = fx.pool.Exec(ctx, `DELETE FROM refresh_sessions WHERE family_id LIKE 'rf-%'`) })
+	store := pgRefreshStore{pool: fx.pool}
+	exp := time.Now().Add(24 * time.Hour)
+	activeRows := func(fam string) (n int) {
+		_ = fx.pool.QueryRow(ctx, `SELECT count(*) FROM refresh_sessions WHERE family_id = $1 AND revoked_at IS NULL AND used_at IS NULL`, fam).Scan(&n)
+		return
+	}
+	// Family A: signed in on install "rotated-install", then rotated twice.
+	if err := store.Create(ctx, fx.c, "rf-A", exp); err != nil {
+		t.Fatal(err)
+	}
+	_, _ = fx.pool.Exec(ctx, `UPDATE refresh_sessions SET client_key = 'rotated-install' WHERE jti = 'rf-A'`)
+	for _, pair := range [][2]string{{"rf-A", "rf-A2"}, {"rf-A2", "rf-A3"}} {
+		if out, err := store.Rotate(ctx, fx.c, pair[0], pair[1], exp); err != nil || out != rotateOK {
+			t.Fatalf("rotate: %v %v", out, err)
+		}
+	}
+	// Another family (B) for the same user, and the caller's own (C).
+	_ = store.Create(ctx, fx.c, "rf-B", exp)
+	_ = store.Create(ctx, fx.c, "rf-C", exp)
+	if activeRows("rf-A") != 1 {
+		t.Fatalf("expected one live token in family A")
+	}
+	// Same install signs in again: ALL live rows of family A must be revoked,
+	// including the rotated one that carries no explicit login tag.
+	_ = store.Create(ctx, fx.c, "rf-D", exp)
+	req := httptest.NewRequest("POST", "/auth/login", nil)
+	req.Header.Set("X-Install-Id", "rotated-install")
+	fx.srv.tagSessionClient(req, fx.c, "rf-D")
+	if n := activeRows("rf-A"); n != 0 {
+		t.Fatalf("family A still has %d live rows after replacement", n)
+	}
+	if activeRows("rf-D") != 1 || activeRows("rf-B") != 1 {
+		t.Fatal("unrelated families must stay active")
+	}
+	// Bulk revoke from C's point of view: rotate B twice, then revoke all but C.
+	for _, pair := range [][2]string{{"rf-B", "rf-B2"}, {"rf-B2", "rf-B3"}} {
+		if out, err := store.Rotate(ctx, fx.c, pair[0], pair[1], exp); err != nil || out != rotateOK {
+			t.Fatalf("rotate: %v %v", out, err)
+		}
+	}
+	r := chi.NewRouter()
+	r.Post("/sessions/bulk-revoke", fx.srv.AdminBulkRevokeSessions)
+	code, out := callAs(t, r, "POST", "/sessions/bulk-revoke", fx.a, "rf-C", map[string]any{"mode": "all_except_current", "user_id": fx.c})
+	if code != 200 || out["revoked"].(float64) < 2 {
+		t.Fatalf("bulk: %d %v", code, out)
+	}
+	if activeRows("rf-B") != 0 || activeRows("rf-D") != 0 {
+		t.Fatalf("rotated family left live rows: B=%d D=%d", activeRows("rf-B"), activeRows("rf-D"))
+	}
+	if activeRows("rf-C") != 1 {
+		t.Fatal("current family was revoked")
 	}
 }

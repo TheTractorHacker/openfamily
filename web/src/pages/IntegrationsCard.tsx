@@ -148,7 +148,7 @@ export function IntegrationsCard() {
       {tokens !== null && tokens.length === 0 && !creating && !fresh && (
         <EmptyState
           title="No Home Assistant connection yet"
-          description="Create a token, paste it into the Orbitly integration in Home Assistant, and your family shows up as device trackers."
+          description="Create a token, paste it into the Orbitly integration in Home Assistant, and your people show up as device trackers."
           action={<Button onClick={() => setCreating(true)}>Create a token</Button>}
         />
       )}

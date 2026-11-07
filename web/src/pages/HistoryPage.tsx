@@ -293,7 +293,7 @@ export function HistoryPage() {
       <div className="wb-history-toolbar">
         {isPlatformAdmin ? (
           <label className="wb-field" htmlFor="history-family">
-            <span className="wb-label">Family</span>
+            <span className="wb-label">Group</span>
             <select
               id="history-family"
               className="wb-select"
@@ -303,7 +303,7 @@ export function HistoryPage() {
                 setMemberId('')
               }}
             >
-              <option value="">All families</option>
+              <option value="">All groups</option>
               {familyList.map((f: Family) => (
                 <option key={f.id} value={f.id}>
                   {f.name}
@@ -314,9 +314,9 @@ export function HistoryPage() {
         ) : (
           // App parity: a regular user only ever sees their own circle.
           <div className="wb-field">
-            <span className="wb-label">Family</span>
+            <span className="wb-label">Group</span>
             <p className="wb-history-family-name">
-              <Badge tone="purple">{familyList[0]?.name ?? 'Your family'}</Badge>
+              <Badge tone="purple">{familyList[0]?.name ?? 'Your group'}</Badge>
             </p>
           </div>
         )}
@@ -401,7 +401,7 @@ export function HistoryPage() {
           {!memberId ? (
             <EmptyState
               title="Pick a member"
-              description="Choose a family member to see where they went and the path they took."
+              description="Choose a person to see where they went and the path they took."
             />
           ) : loading ? (
             <div className="wb-history-loading">

@@ -301,6 +301,7 @@ func main() {
 	r.Get("/.well-known/apple-app-site-association", srv.AppleAppSiteAssociation)
 	// Public signed-APK download for invited family members (rate limited).
 	r.Get("/app.apk", srv.PublicDownloadAPK)
+	r.Get("/app.ipa", srv.PublicDownloadIPA)
 	// Public share-link viewer (docs/share-links.md): hash lookup, generic 404,
 	// per-IP rate limit.
 	r.Get("/s/{token}", srv.ShareViewPage)
@@ -627,6 +628,8 @@ func main() {
 		r.Post("/api/admin/settings/map-style/test", srv.AdminTestMapStyle)
 
 		r.Get("/api/admin/apk", srv.AdminDownloadAPK)
+		r.Get("/api/admin/ipa", srv.AdminDownloadIPA)
+		r.Get("/api/admin/builds", srv.AdminBuildsOverview)
 		r.Post("/api/admin/apk/build", srv.AdminBuildAPK)
 		r.Get("/api/admin/apk/status", srv.AdminAPKStatus)
 

@@ -146,6 +146,17 @@ export function BackupsCard({ onChanged }: { onChanged?: () => void }) {
               unavailable until it is started again.
             </Alert>
           )}
+          <Alert tone="info" title="Where backups are stored">
+            Local copies go to the <code>backups</code> folder next to <code>docker-compose.yml</code> on the server
+            (<code>BACKUP_LOCAL_PATH</code> in <code>.env</code> moves it; inside the container it is <code>/backups</code>).
+            Files are named by date and end in <code>.age</code> when encrypted. Without the backup service,{' '}
+            <code>./scripts/backup.sh</code> writes to the same folder. S3 copies go to the bucket you configure under Settings.
+          </Alert>
+          {!agent && (
+            <p className="wb-help" role="note">
+              “Back up now” needs the backup service. Turn it on with the command above; scheduled backups stay off until you do.
+            </p>
+          )}
           {actionError && (
             <Alert tone="danger" title="Couldn’t queue the request">
               {actionError}

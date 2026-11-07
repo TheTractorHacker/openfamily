@@ -140,8 +140,8 @@ export function CommandMenu({ onNavigate }: CommandMenuProps) {
           }}
           onFocus={() => setOpen(true)}
           onKeyDown={onInputKeyDown}
-          placeholder="Search families and members…"
-          aria-label="Search families and members"
+          placeholder="Search groups and people…"
+          aria-label="Search groups and people"
           role="combobox"
           aria-expanded={open}
           aria-controls="wb-cmd-list"
@@ -160,7 +160,7 @@ export function CommandMenu({ onNavigate }: CommandMenuProps) {
             <div className="wb-cmd-empty">No results for “{query}”</div>
           ) : (
             <>
-              {hasFamilies && <div className="wb-cmd-group">Families</div>}
+              {hasFamilies && <div className="wb-cmd-group">Groups</div>}
               {filteredFamilies.map((f, i) => {
                 const idx = i
                 return (

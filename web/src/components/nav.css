@@ -7,9 +7,12 @@
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  padding: var(--space-4) var(--space-3);
+  padding: var(--space-4) var(--space-3) var(--space-2);
+  min-height: 0;
+  overflow: hidden;
 }
 .wb-brand {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -51,7 +54,12 @@
   flex-direction: column;
   gap: 2px;
   margin-top: var(--space-2);
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
+.wb-nav-item { flex: 0 0 auto; }
 .wb-nav-item {
   position: relative;
   display: flex;
@@ -98,8 +106,12 @@
 }
 
 .wb-sidebar-footer {
-  margin-top: auto;
-  padding: var(--space-3) var(--space-2);
+  flex: 0 0 auto;
+  margin-top: var(--space-2);
+  padding: var(--space-2) var(--space-2) 0;
+  border-top: 1px solid var(--border);
+  max-height: 60%;
+  overflow-y: auto;
   color: var(--text-faint);
   font-size: var(--font-xs);
 }
@@ -219,6 +231,21 @@
   }
   .wb-nav-item { justify-content: center; padding: var(--space-2); }
   .wb-nav-active-bar { left: -8px; }
+  .wb-sidebar { padding-left: var(--space-2); padding-right: var(--space-2); }
+  .wb-sidebar-footer { padding: var(--space-2) 0 0; max-height: none; overflow: visible; }
+  .wb-about-title { display: none; }
+  .wb-about-short {
+    display: flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; margin: 0 auto; border-radius: 999px;
+    border: 1px solid var(--border); font-style: italic; font-weight: 700;
+  }
+  /* Opened credits float over the narrow rail only while open. */
+  .wb-about-footer[open] .wb-about-body {
+    position: fixed; left: 8px; bottom: 8px; z-index: 40; width: min(280px, calc(100vw - 16px));
+    padding: var(--space-3); background: var(--surface); color: var(--text);
+    border: 1px solid var(--border); border-radius: var(--radius-sm, 8px);
+    box-shadow: 0 8px 24px rgba(0,0,0,.25);
+  }
 }
 
 /* Phones: the page already shows its own title, so the top bar gives its
@@ -231,11 +258,20 @@
   .wb-topbar-right { gap: var(--space-2); flex: 0 0 auto; }
 }
 
-.wb-about-footer {
-  display: grid;
-  gap: 2px;
-  line-height: 1.35;
+.wb-about-footer { line-height: 1.35; overflow-wrap: anywhere; }
+.wb-about-footer summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 2px 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
+.wb-about-footer summary::-webkit-details-marker { display: none; }
+.wb-about-footer summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.wb-about-short { display: none; }
+.wb-about-body { display: grid; gap: 2px; padding: var(--space-1, 4px) 0 var(--space-2); }
+/* Short windows: always the one-line form until opened. */
 .wb-about-footer a {
   color: inherit;
   text-decoration: underline;

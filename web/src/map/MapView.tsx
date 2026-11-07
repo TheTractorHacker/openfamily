@@ -545,7 +545,7 @@ export function MapView(props: MapViewProps): JSX.Element {
         }
       } catch (e) {
         if (cancelled) return;
-        setError(e instanceof Error ? e.message : "Could not load families. Check your connection and try again.");
+        setError(e instanceof Error ? e.message : "Could not load groups. Check your connection and try again.");
         setLoading(false);
       }
     }
@@ -852,7 +852,7 @@ export function MapView(props: MapViewProps): JSX.Element {
               </span>
               <span className="wb-state-text">
                 {visibleMembers.length === 0
-                  ? "When families have members reporting their location, they’ll appear here live."
+                  ? "When groups have members reporting their location, they’ll appear here live."
                   : "Members are here, but none have reported a location yet."}
               </span>
             </div>

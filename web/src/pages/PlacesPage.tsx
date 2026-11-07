@@ -35,7 +35,7 @@ interface Draft {
   lon: number
   radius: number
   address: string
-  circleId: string // '' = whole family
+  circleId: string // '' = whole group
 }
 
 const pinIcon = L.divIcon({
@@ -179,7 +179,7 @@ export function PlacesPage() {
       return
     }
     if (!draft.familyId) {
-      setMessage({ tone: 'error', text: 'Pick a family for this place.' })
+      setMessage({ tone: 'error', text: 'Pick a group for this place.' })
       return
     }
     setBusy('save')
@@ -230,18 +230,18 @@ export function PlacesPage() {
     <div className="wb-places">
       <PageHeader
         title="Places"
-        subtitle="Add, move, resize and remove places for any family."
+        subtitle="Add, move, resize and remove places for any group."
         actions={
           <>
         <label className="wb-field" htmlFor="places-family">
-          <span className="wb-label">Family</span>
+          <span className="wb-label">Group</span>
           <select
             id="places-family"
             className="wb-select"
             value={filterFamily}
             onChange={(e) => setFilterFamily(e.target.value)}
           >
-            <option value="">All families</option>
+            <option value="">All groups</option>
             {families.map((f) => (
               <option key={f.id} value={f.id}>
                 {f.name}
@@ -326,12 +326,12 @@ export function PlacesPage() {
               </label>
               {draft.id ? (
                 <div className="wb-field">
-                  <span className="wb-label">Family</span>
+                  <span className="wb-label">Group</span>
                   <Badge tone="purple">{familyName(draft.familyId) || 'Family'}</Badge>
                 </div>
               ) : (
                 <label className="wb-field" htmlFor="place-family">
-                  <span className="wb-label">Family</span>
+                  <span className="wb-label">Group</span>
                   <select
                     id="place-family"
                     className="wb-select"
@@ -354,7 +354,7 @@ export function PlacesPage() {
                   value={draft.circleId}
                   onChange={(e) => patch({ circleId: e.target.value })}
                 >
-                  <option value="">Whole family</option>
+                  <option value="">Whole group</option>
                   {circleOptions.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.name}

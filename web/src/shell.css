@@ -3,14 +3,15 @@
 .wb-shell {
   display: grid;
   grid-template-columns: 232px 1fr;
-  grid-template-rows: 56px 1fr;
+  grid-template-rows: 56px minmax(0, 1fr);
   grid-template-areas:
     "sidebar topbar"
     "sidebar content";
-  height: 100%;
-  min-height: 100vh;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
 }
-.wb-shell-sidebar { grid-area: sidebar; min-width: 0; }
+.wb-shell-sidebar { grid-area: sidebar; min-width: 0; min-height: 0; overflow: hidden; }
 .wb-shell-topbar {
   grid-area: topbar;
   min-width: 0;

@@ -58,8 +58,8 @@ export function DashboardPage() {
       <div className="wb-page">
         <Card>
           <EmptyState
-            title="You’re not in a family circle yet"
-            description="Create a new circle or join one with an invite code — then your family shows up here live."
+            title="You’re not in a circle yet"
+            description="Create a new circle or join one with an invite code — then your people show up here live."
             action={
               <Button size="sm" onClick={() => navigateToFamilies()}>
                 Set up your circle
@@ -79,7 +79,7 @@ export function DashboardPage() {
       <div className="wb-dashboard-strip">
         <div className="wb-dashboard-stats">
           {isPlatformAdmin ? (
-            <StatCard label="Families" value={loading ? null : totalFamilies} />
+            <StatCard label="Groups" value={loading ? null : totalFamilies} />
           ) : (
             <StatCard label="Your circle" value={loading ? null : familyName ?? '—'} />
           )}
@@ -113,7 +113,7 @@ export function DashboardPage() {
           {empty ? (
             <EmptyState
               title="No groups yet"
-              description="Create a family circle in the app and its members will appear here on the live map."
+              description="Create a circle in the app and its members will appear here on the live map."
             />
           ) : (
             <MapArea />

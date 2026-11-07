@@ -7,7 +7,15 @@ import { BRAND_NAME, REPO_URL, UPSTREAM_NAME, UPSTREAM_URL } from '../lib/brand'
  */
 export function AboutFooter({ version }: { version?: string | null }) {
   return (
-    <div className="wb-about-footer">
+    <details className="wb-about-footer">
+      <summary>
+        <span className="wb-about-short" aria-hidden="true">i</span>
+        <span className="wb-about-title">
+          {BRAND_NAME}
+          {version ? ` ${version}` : ''} · About
+        </span>
+      </summary>
+      <div className="wb-about-body">
       <div>
         {BRAND_NAME}
         {version ? ` ${version}` : ''}
@@ -22,6 +30,7 @@ export function AboutFooter({ version }: { version?: string | null }) {
       <div>
         <a href={REPO_URL} target="_blank" rel="noopener noreferrer">Source code</a>
       </div>
-    </div>
+      </div>
+    </details>
   )
 }

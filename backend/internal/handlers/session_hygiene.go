@@ -55,9 +55,13 @@ func (s *Server) tagSessionClient(r *http.Request, userID, jti string) {
 	ctx := r.Context()
 	if key := installIDHeader(r); key != "" {
 		_, _ = s.Pool.Exec(ctx, `UPDATE refresh_sessions SET client_key = $2 WHERE jti = $1`, jti, key)
+		// By FAMILY: refresh tokens rotate (new jti, same family), so every
+		// row of every older family from this install is revoked, not only
+		// the row that happens to carry the key.
 		_, _ = s.Pool.Exec(ctx, `
 			UPDATE refresh_sessions SET revoked_at = now()
-			WHERE user_id = $1 AND client_key = $2 AND revoked_at IS NULL
+			WHERE user_id = $1 AND revoked_at IS NULL
+			  AND family_id IN (SELECT family_id FROM refresh_sessions WHERE user_id = $1 AND client_key = $2)
 			  AND family_id <> (SELECT family_id FROM refresh_sessions WHERE jti = $3)`, userID, key, jti)
 	}
 	max := s.loadSecuritySettings(ctx).MaxSessionsPerUser

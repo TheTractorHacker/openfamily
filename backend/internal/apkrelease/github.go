@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -139,6 +140,19 @@ func LatestInfo(ctx context.Context, opts Options) (ReleaseInfo, error) {
 // semver GitHub Release. If the cached file already matches that asset, it is
 // reused. The returned path is the local APK. CI apk-* tags are ignored.
 func Sync(ctx context.Context, opts Options) (string, error) {
+	return SyncKind(ctx, opts, ".apk")
+}
+
+// SyncIPA is Sync for the unsigned iOS .ipa attached to the same release
+// (orbitly-<version>-unsigned.ipa; older openfamily-* names work too).
+func SyncIPA(ctx context.Context, opts Options) (string, error) {
+	return SyncKind(ctx, opts, ".ipa")
+}
+
+// SyncKind caches the asset with file extension ext (".apk" or ".ipa") from
+// the latest published v* release into DestDir and returns its path.
+func SyncKind(ctx context.Context, opts Options, ext string) (string, error) {
+	cachedName, metaName := cacheNames(ext)
 	if opts.DestDir == "" {
 		return "", errors.New("APK_DIR is not configured")
 	}
@@ -161,7 +175,7 @@ func Sync(ctx context.Context, opts Options) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	asset, err := pickAPKAsset(rel.Assets)
+	asset, err := pickAsset(rel.Assets, ext)
 	if err != nil {
 		return "", err
 	}
@@ -170,7 +184,7 @@ func Sync(ctx context.Context, opts Options) (string, error) {
 		return "", fmt.Errorf("create APK_DIR: %w", err)
 	}
 	dest := filepath.Join(opts.DestDir, cachedName)
-	if cacheFresh(opts.DestDir, dest, asset.ID) {
+	if cacheFresh(opts.DestDir, metaName, dest, asset.ID) {
 		return dest, nil
 	}
 
@@ -180,7 +194,7 @@ func Sync(ctx context.Context, opts Options) (string, error) {
 		return "", err
 	}
 	meta := cacheMeta{AssetID: asset.ID, TagName: rel.TagName, Name: asset.Name}
-	if metaErr := writeMeta(opts.DestDir, meta); metaErr != nil {
+	if metaErr := writeMeta(opts.DestDir, metaName, meta); metaErr != nil {
 		// The APK is usable even if the sidecar fails; the next sync will
 		// re-download.
 		return dest, nil
@@ -197,20 +211,32 @@ func parseRepo(repo string) (owner, name string, err error) {
 	return parts[0], parts[1], nil
 }
 
-func pickAPKAsset(assets []asset) (asset, error) {
+func pickAPKAsset(assets []asset) (asset, error) { return pickAsset(assets, ".apk") }
+
+func pickAsset(assets []asset, ext string) (asset, error) {
 	for _, a := range assets {
-		if strings.EqualFold(filepath.Ext(a.Name), ".apk") {
+		if strings.EqualFold(filepath.Ext(a.Name), ext) {
 			return a, nil
 		}
 	}
 	return asset{}, ErrNotFound
 }
 
-func cacheFresh(dir, dest string, assetID int64) bool {
+// cacheNames returns the cached file name and sidecar name for an extension.
+// The APK keeps its historical names so existing caches stay valid.
+func cacheNames(ext string) (cached, meta string) {
+	if ext == ".apk" {
+		return cachedName, metaName
+	}
+	e := strings.TrimPrefix(ext, ".")
+	return "openfamily-release." + e, "." + e + "-release.json"
+}
+
+func cacheFresh(dir, metaFile, dest string, assetID int64) bool {
 	if _, err := os.Stat(dest); err != nil {
 		return false
 	}
-	meta, err := readMeta(dir)
+	meta, err := readMeta(dir, metaFile)
 	if err != nil {
 		return false
 	}
@@ -405,13 +431,13 @@ func defaultClient() *http.Client {
 	}
 }
 
-func metaPath(dir string) string {
-	return filepath.Join(dir, metaName)
+func metaPath(dir, file string) string {
+	return filepath.Join(dir, file)
 }
 
-func readMeta(dir string) (cacheMeta, error) {
+func readMeta(dir, file string) (cacheMeta, error) {
 	var meta cacheMeta
-	data, err := os.ReadFile(metaPath(dir))
+	data, err := os.ReadFile(metaPath(dir, file))
 	if err != nil {
 		return meta, err
 	}
@@ -421,16 +447,16 @@ func readMeta(dir string) (cacheMeta, error) {
 	return meta, nil
 }
 
-func writeMeta(dir string, meta cacheMeta) error {
+func writeMeta(dir, file string, meta cacheMeta) error {
 	data, err := json.Marshal(meta)
 	if err != nil {
 		return err
 	}
-	tmp := metaPath(dir) + ".tmp"
+	tmp := metaPath(dir, file) + ".tmp"
 	if err := os.WriteFile(tmp, data, 0o644); err != nil {
 		return err
 	}
-	return os.Rename(tmp, metaPath(dir))
+	return os.Rename(tmp, metaPath(dir, file))
 }
 
 func writeAtomic(dest string, r io.Reader) error {
@@ -453,4 +479,154 @@ func writeAtomic(dest string, r io.Reader) error {
 		return err
 	}
 	return os.Rename(tmpName, dest)
+}
+
+// AssetInfo describes one downloadable file of a release.
+type AssetInfo struct {
+	Kind   string `json:"kind"` // apk, aab, ipa
+	Name   string `json:"name"`
+	Size   int64  `json:"size"`
+	SHA256 string `json:"sha256,omitempty"`
+}
+
+// ReleaseSummary is one release in the "older versions" list.
+type ReleaseSummary struct {
+	TagName     string      `json:"tag_name"`
+	HTMLURL     string      `json:"html_url,omitempty"`
+	PublishedAt time.Time   `json:"published_at,omitempty"`
+	Assets      []AssetInfo `json:"assets"`
+}
+
+// Overview is what the admin Builds page shows: the latest published v*
+// release (with every installable file and its checksum) and older ones.
+type Overview struct {
+	Latest ReleaseInfo      `json:"latest"`
+	Assets []AssetInfo      `json:"assets"`
+	Older  []ReleaseSummary `json:"older"`
+}
+
+func assetKind(name string) string {
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".apk":
+		return "apk"
+	case ".aab":
+		return "aab"
+	case ".ipa":
+		return "ipa"
+	}
+	return ""
+}
+
+// parseChecksums reads "<hex>  <file>" lines (sha256sum / shasum output) and
+// bare "<hex>" files named after the asset.
+func parseChecksums(text, onlyFile string) map[string]string {
+	out := map[string]string{}
+	for _, line := range strings.Split(text, "\n") {
+		f := strings.Fields(line)
+		if len(f) == 0 || len(f[0]) != 64 {
+			continue
+		}
+		if len(f) >= 2 {
+			out[strings.TrimPrefix(f[1], "*")] = strings.ToLower(f[0])
+		} else if onlyFile != "" {
+			out[onlyFile] = strings.ToLower(f[0])
+		}
+	}
+	return out
+}
+
+func assetInfos(ctx context.Context, client *http.Client, token string, rel *release) []AssetInfo {
+	sums := map[string]string{}
+	for _, a := range rel.Assets {
+		n := strings.ToLower(a.Name)
+		if a.Size > 1<<16 || !(strings.HasSuffix(n, ".sha256") || strings.HasSuffix(n, "sums.txt")) {
+			continue
+		}
+		only := ""
+		if strings.HasSuffix(n, ".sha256") {
+			only = strings.TrimSuffix(a.Name, filepath.Ext(a.Name))
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.URL, nil)
+		if err != nil {
+			continue
+		}
+		setGitHubHeaders(req, token, "application/octet-stream")
+		res, err := client.Do(req)
+		if err != nil {
+			continue
+		}
+		body, _ := io.ReadAll(io.LimitReader(res.Body, 1<<16))
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			continue
+		}
+		for k, v := range parseChecksums(string(body), only) {
+			sums[k] = v
+		}
+	}
+	var out []AssetInfo
+	for _, a := range rel.Assets {
+		if k := assetKind(a.Name); k != "" {
+			out = append(out, AssetInfo{Kind: k, Name: a.Name, Size: a.Size, SHA256: sums[a.Name]})
+		}
+	}
+	return out
+}
+
+// ListOverview returns the latest v* release with all installable assets and
+// up to maxOlder older v* releases (newest first).
+func ListOverview(ctx context.Context, opts Options, maxOlder int) (Overview, error) {
+	owner, name, err := parseRepo(opts.Repo)
+	if err != nil {
+		return Overview{}, err
+	}
+	client := opts.Client
+	if client == nil {
+		client = defaultClient()
+	}
+	api := strings.TrimRight(opts.API, "/")
+	if api == "" {
+		api = defaultAPI
+	}
+	ctx, cancel := context.WithTimeout(ctx, metaTimeout)
+	defer cancel()
+	rels, err := listReleases(ctx, client, api, owner, name, opts.Token)
+	if err != nil {
+		return Overview{}, err
+	}
+	latest, err := pickLatestSemverRelease(rels)
+	if err != nil {
+		return Overview{}, err
+	}
+	ov := Overview{Latest: ReleaseInfo{TagName: latest.TagName, Name: latest.Name, Body: latest.Body,
+		HTMLURL: latest.HTMLURL, PublishedAt: latest.PublishedAt}}
+	ov.Assets = assetInfos(ctx, client, opts.Token, latest)
+	for _, a := range ov.Assets {
+		if a.Kind == "apk" {
+			ov.Latest.AssetName, ov.Latest.AssetSize = a.Name, a.Size
+			break
+		}
+	}
+	older := []release{}
+	for _, r := range rels {
+		sv, ok := parseSemverTag(r.TagName)
+		if !ok || r.Draft || r.TagName == latest.TagName || sv.prerelease() {
+			continue
+		}
+		older = append(older, r)
+	}
+	sort.SliceStable(older, func(i, j int) bool { return older[i].PublishedAt.After(older[j].PublishedAt) })
+	for _, r := range older {
+		if len(ov.Older) >= maxOlder {
+			break
+		}
+		sum := ReleaseSummary{TagName: r.TagName, HTMLURL: r.HTMLURL, PublishedAt: r.PublishedAt, Assets: []AssetInfo{}}
+		for _, a := range r.Assets {
+			if k := assetKind(a.Name); k != "" {
+				sum.Assets = append(sum.Assets, AssetInfo{Kind: k, Name: a.Name, Size: a.Size})
+			}
+		}
+		ov.Older = append(ov.Older, sum)
+	}
+	return ov, nil
 }

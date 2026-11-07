@@ -5,11 +5,9 @@ import React from 'react'
 import {
   ApiError,
   exportAuditCsv,
-  listAdminSessions,
   listAudit,
   listAuditActions,
   listUsers,
-  revokeAdminSession,
 } from '../lib/api'
 import { isAccessDenied, useAsync } from '../lib/useAsync'
 import {
@@ -22,7 +20,7 @@ import {
   Mono,
   Spinner,
 } from '../components/primitives'
-import { formatRelativeTime } from '../lib/format'
+import { SessionsSection } from './SessionsSection'
 import type { AuditEntry } from '../lib/types'
 import './pages.css'
 import './AuditPage.css'
@@ -32,35 +30,6 @@ function whenText(iso: string): string {
   return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString()
 }
 
-/** A short device label from a raw User-Agent string. */
-function deviceLabel(ua: string): string {
-  if (!ua) return 'Unknown device'
-  if (/(Orbitly|Orbitly)/i.test(ua)) return ua.length > 60 ? `${ua.slice(0, 57)}…` : ua
-  const browser = /Edg\//.test(ua)
-    ? 'Edge'
-    : /Chrome\//.test(ua)
-      ? 'Chrome'
-      : /Firefox\//.test(ua)
-        ? 'Firefox'
-        : /Safari\//.test(ua)
-          ? 'Safari'
-          : /okhttp|Dart/i.test(ua)
-            ? 'Mobile app'
-            : 'Browser'
-  const os = /Android/.test(ua)
-    ? 'Android'
-    : /iPhone|iPad|iOS/.test(ua)
-      ? 'iOS'
-      : /Windows/.test(ua)
-        ? 'Windows'
-        : /Mac OS X/.test(ua)
-          ? 'macOS'
-          : /Linux/.test(ua)
-            ? 'Linux'
-            : ''
-  return os ? `${browser} on ${os}` : browser
-}
-
 function actionTone(action: string): 'green' | 'orange' | 'pink' | 'neutral' {
   if (/fail|reuse|revoked|delete|locked/.test(action)) return 'orange'
   if (/login|create|register/.test(action)) return 'green'
@@ -68,12 +37,7 @@ function actionTone(action: string): 'green' | 'orange' | 'pink' | 'neutral' {
 }
 
 export function AuditPage() {
-  // ---- sessions ----
-  const [sessionUser, setSessionUser] = React.useState('')
   const usersQ = useAsync(listUsers, [])
-  const sessionsQ = useAsync(() => listAdminSessions(sessionUser || undefined), [sessionUser])
-  const [revoking, setRevoking] = React.useState<string | null>(null)
-  const [sessionMsg, setSessionMsg] = React.useState<string | null>(null)
 
   // ---- audit ----
   const actionsQ = useAsync(listAuditActions, [])
@@ -111,7 +75,7 @@ export function AuditPage() {
     void load()
   }, [load])
 
-  if (isAccessDenied(error) || isAccessDenied(sessionsQ.error)) {
+  if (isAccessDenied(error)) {
     return (
       <div className="wb-page">
         <AccessDenied />
@@ -139,24 +103,7 @@ export function AuditPage() {
     }
   }
 
-  const revoke = async (id: string, who: string) => {
-    if (!window.confirm(`Sign ${who} out of this device? Their refresh token stops working now.`)) return
-    setRevoking(id)
-    setSessionMsg(null)
-    try {
-      await revokeAdminSession(id)
-      setSessionMsg('Session revoked.')
-      sessionsQ.refetch()
-      void load()
-    } catch (e) {
-      setSessionMsg(e instanceof Error ? e.message : 'Could not revoke the session.')
-    } finally {
-      setRevoking(null)
-    }
-  }
-
   const users = usersQ.data ?? []
-  const sessions = sessionsQ.data ?? []
 
   return (
     <div className="wb-page">
@@ -169,92 +116,7 @@ export function AuditPage() {
         </div>
       </div>
 
-      <section className="wb-audit-section" aria-labelledby="sessions-h">
-        <div className="wb-audit-sectionhead">
-          <h2 id="sessions-h" className="wb-audit-h2">
-            Active sessions
-          </h2>
-          <label className="wb-field" htmlFor="sessions-user">
-            <span className="wb-label">User</span>
-            <select
-              id="sessions-user"
-              className="wb-select"
-              value={sessionUser}
-              onChange={(e) => setSessionUser(e.target.value)}
-            >
-              <option value="">Everyone</option>
-              {users.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.name} ({u.email})
-                </option>
-              ))}
-            </select>
-          </label>
-          <Button variant="secondary" size="sm" onClick={() => sessionsQ.refetch()}>
-            Refresh
-          </Button>
-        </div>
-        {sessionMsg && (
-          <p className="wb-help" role="status">
-            {sessionMsg}
-          </p>
-        )}
-        {sessionsQ.loading && !sessionsQ.data ? (
-          <div className="wb-page-loading">
-            <Spinner /> Loading sessions…
-          </div>
-        ) : sessionsQ.error ? (
-          <ErrorState
-            title="Couldn’t load sessions"
-            description={sessionsQ.error.message}
-            onRetry={sessionsQ.refetch}
-          />
-        ) : sessions.length === 0 ? (
-          <EmptyState title="No active sessions" description="Nobody is signed in right now." />
-        ) : (
-          <Card padded={false}>
-            <div className="wb-audit-tablewrap">
-              <table className="wb-table">
-                <thead>
-                  <tr>
-                    <th>User</th>
-                    <th>Device</th>
-                    <th>Signed in</th>
-                    <th>Last active</th>
-                    <th>Expires</th>
-                    <th aria-label="Actions" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {sessions.map((s) => (
-                    <tr key={s.id}>
-                      <td>
-                        <div className="wb-audit-user">{s.user_name}</div>
-                        <div className="wb-audit-sub">{s.user_email}</div>
-                      </td>
-                      <td title={s.user_agent}>{deviceLabel(s.user_agent)}</td>
-                      <td>{whenText(s.created_at)}</td>
-                      <td>{formatRelativeTime(s.last_used_at)}</td>
-                      <td>{whenText(s.expires_at)}</td>
-                      <td>
-                        <Button
-                          variant="danger"
-                          size="sm"
-                          loading={revoking === s.id}
-                          disabled={revoking !== null}
-                          onClick={() => void revoke(s.id, s.user_name)}
-                        >
-                          Revoke
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </Card>
-        )}
-      </section>
+      <SessionsSection onChanged={() => void load()} />
 
       <section className="wb-audit-section" aria-labelledby="audit-h">
         <div className="wb-audit-sectionhead">

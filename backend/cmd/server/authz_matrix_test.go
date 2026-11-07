@@ -177,6 +177,7 @@ var publicRoutes = map[string]string{
 	"GET /invites/{code}/preview":      "public: privacy setup of the invited circle only; per-IP rate limit, generic 404",
 	"GET /.well-known/apple-app-site-association": "iOS Universal Links association file (static)",
 	"GET /app.apk":                     "signed APK for invitees",
+	"GET /app.ipa":                     "unsigned iOS build for sideloading",
 	"GET /s/{token}":                   "share-link viewer (hash lookup)",
 	"GET /s/{token}/data":              "share-link viewer",
 	"GET /s/{token}/photo":             "share-link viewer",

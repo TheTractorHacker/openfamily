@@ -281,7 +281,7 @@ export function BackupSettings({ onChanged }: { onChanged?: () => void }) {
                 <input {...inp('bk-region', 'region', { type: 'text', autoComplete: 'off' })} value={form.region} onChange={(e) => set('region', e.target.value)} />
               </Field>
               <Field id="bk-bucket" label="Bucket" field="bucket" src={src('bucket')} pinned={pin('bucket')} error={errors.bucket}>
-                <input {...inp('bk-bucket', 'bucket', { type: 'text', autoComplete: 'off', placeholder: 'my-family-backups' })} value={form.bucket} onChange={(e) => set('bucket', e.target.value)} />
+                <input {...inp('bk-bucket', 'bucket', { type: 'text', autoComplete: 'off', placeholder: 'my-backups' })} value={form.bucket} onChange={(e) => set('bucket', e.target.value)} />
               </Field>
               <Field id="bk-prefix" label="Folder (prefix)" field="prefix" src={src('prefix')} pinned={pin('prefix')} error={errors.prefix} hint="Backups are stored under this folder.">
                 <input {...inp('bk-prefix', 'prefix', { type: 'text', autoComplete: 'off' })} value={form.prefix} onChange={(e) => set('prefix', e.target.value)} />
