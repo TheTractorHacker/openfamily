@@ -392,3 +392,13 @@ Phases 1 and 0 can run in parallel; 2 and 4 in parallel after 1 (agreeing on the
 ## 16. Owner decisions (2026-11-07)
 
 Open questions Q1 to Q7 are resolved with the recommendations above: Q1 places follow the creator's lane; Q2 the admin map shows phone-only members as "keeps data on phone"; Q3 pairing-time choice only, no remote override; Q4 phone-only results stay in the member's lane; Q5 home hub is documented only; Q6 no backfill of past history in v1; Q7 stale members may be removed so server assistance can be enabled.
+
+### 16.1 Member opt-out policy (owner decision, 2026-11-07)
+
+The circle admin's signed `processing_policy` carries `member_opt_out`: `allowed` (DEFAULT for every circle) or `required_server`.
+
+* `allowed`: any member may keep their own data phone-only (their own signed `processing_pref`). This is the default because keeping your location on your own phone is the member's choice, not an admin's.
+* `required_server`: for circles that need full server processing (for example a parent managing a child's phone). Joining means accepting server processing; this is shown on the join screen and in the circle. Existing members are notified, and each must sign their own consent or leave. The server refuses to relay phone-lane items from members of such a circle, so the rule is enforced rather than advisory.
+* In both modes only the member's own phone signature puts their data on the server. The admin cannot opt anyone in. Switching to `required_server` and every member decision are signed log entries, visible in the key log, so coercion is visible even if it cannot be prevented.
+* Children (Q3): the pairing-time choice stands; a circle in `required_server` mode applies the same rule to child members.
+* Opted-out members compute trips, driving reports and weekly figures on their own phone (section 9 option a). No load sharing between phones is built.
