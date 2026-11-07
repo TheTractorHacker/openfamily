@@ -320,6 +320,19 @@ abstract class LaneSource {
   Future<bool> serverAssistOn(String circleId);
 }
 
+/// Optional extra of a [ChannelKv]: a lock shared by every isolate (and process) that uses the store, so a
+/// read-modify-write cannot interleave with another one. Stores without it rely on the version check alone.
+abstract class LockableKv {
+  Future<T> withLock<T>(String name, Future<T> Function() body);
+}
+
+/// Optional extra of a [LaneSource]: a counter that changes whenever the stored
+/// lane facts of a circle change. The upload queue reads it again immediately
+/// before each request and starts over when it moved.
+abstract class VersionedLaneSource {
+  Future<int> laneVersion(String circleId);
+}
+
 /// Who may send in a circle. Backed by the circle's E2EE state (the verified key
 /// log): a sender must be an active (or, for older items, once active) APPROVED
 /// device of a current member.
@@ -330,6 +343,11 @@ abstract class SenderDirectory {
 /// Small persistent key/value store (SharedPreferences in the app).
 abstract class ChannelKv {
   Future<String?> get(String key);
+
+  /// Like [get] but never from a cache: another isolate (the background
+  /// location service) may have written the value since. Lane facts and the
+  /// queue are read this way.
+  Future<String?> getFresh(String key);
   Future<void> set(String key, String value);
   Future<void> remove(String key);
 }
@@ -338,6 +356,8 @@ class MemoryKv implements ChannelKv {
   final Map<String, String> data = <String, String>{};
   @override
   Future<String?> get(String key) async => data[key];
+  @override
+  Future<String?> getFresh(String key) async => data[key];
   @override
   Future<void> set(String key, String value) async => data[key] = value;
   @override
@@ -505,6 +525,7 @@ class SealedQueue {
   final Duration maxAge;
 
   static const String _key = 'queue/v1';
+  static final Random _rng = Random.secure();
   Future<void> _lock = Future<void>.value();
 
   Future<T> _locked<T>(Future<T> Function() f) {
@@ -519,23 +540,52 @@ class SealedQueue {
     return c.future;
   }
 
-  Future<List<Map<String, dynamic>>> _load() async {
-    final String? raw = await kv.get(_key);
-    if (raw == null || raw.isEmpty) return <Map<String, dynamic>>[];
+  /// The stored queue: a versioned envelope `{v, w, i}` (older builds stored a bare list).
+  Future<({int ver, String w, List<Map<String, dynamic>> items})> _read() async {
+    final String? raw = await kv.getFresh(_key);
+    if (raw == null || raw.isEmpty) return (ver: 0, w: '', items: <Map<String, dynamic>>[]);
     try {
-      return (jsonDecode(raw) as List<dynamic>).cast<Map<String, dynamic>>();
-    } catch (_) {
-      return <Map<String, dynamic>>[];
-    }
+      final Object? d = jsonDecode(raw);
+      if (d is List<dynamic>) return (ver: 0, w: '', items: d.cast<Map<String, dynamic>>());
+      if (d is Map<String, dynamic>) {
+        return (ver: (d['v'] as num).toInt(), w: (d['w'] as String?) ?? '', items: (d['i'] as List<dynamic>).cast<Map<String, dynamic>>());
+      }
+    } catch (_) {}
+    return (ver: 0, w: '', items: <Map<String, dynamic>>[]);
   }
 
-  Future<void> _save(List<Map<String, dynamic>> l) => l.isEmpty ? kv.remove(_key) : kv.set(_key, jsonEncode(l));
+  /// Read-modify-write that survives a second writer (the background location
+  /// isolate shares this store). SharedPreferences has no atomic compare-and-swap, so:
+  /// read fresh, apply [op], look at the version again right before the write
+  /// (start over if it moved), write `{v+1, writer-id}`, read back and start over
+  /// if another writer's record is there instead. [op] must be idempotent.
+  Future<T> _mutate<T>(Future<T> Function(List<Map<String, dynamic>> l) op) => _locked(() {
+        final ChannelKv store = kv;
+        return store is LockableKv ? (store as LockableKv).withLock('queue', () => _mutateOnce(op)) : _mutateOnce(op);
+      });
 
-  Future<void> enqueue(WireItem item) => _locked(() async {
-        final List<Map<String, dynamic>> l = await _load();
+  Future<T> _mutateOnce<T>(Future<T> Function(List<Map<String, dynamic>> l) op) async {
+        T? result;
+        for (int attempt = 0; attempt < 8; attempt++) {
+          final snap = await _read();
+          result = await op(snap.items);
+          final int cur = (await _read()).ver;
+          if (cur != snap.ver && attempt < 7) continue;
+          final String w = '${_rng.nextInt(1 << 30)}-${clock.now().microsecondsSinceEpoch}';
+          await kv.set(_key, jsonEncode(<String, dynamic>{'v': snap.ver + 1, 'w': w, 'i': snap.items}));
+          final back = await _read();
+          if (back.ver == snap.ver + 1 && back.w == w) return result as T;
+        }
+        return result as T;
+      }
+
+  Future<List<Map<String, dynamic>>> _load() async => (await _read()).items;
+
+  Future<void> enqueue(WireItem item) => _mutate((List<Map<String, dynamic>> l) async {
+        final String k = '${item.circleId}/${item.deviceId}/${item.seq}';
+        if (l.any((Map<String, dynamic> m) => '${m['c']}/${m['d']}/${m['s']}' == k)) return;
         l.add(<String, dynamic>{...item.toStore(), 'q': clock.now().millisecondsSinceEpoch, 'n': 0});
         _prune(l);
-        await _save(l);
       });
 
   void _prune(List<Map<String, dynamic>> l) {
@@ -564,7 +614,8 @@ class SealedQueue {
   /// the policy is still on). Otherwise the item is replaced by its phone-line
   /// twin or dropped (see [reconcileLanes]). Without a [lanes] source no
   /// server-line item is ever sent.
-  Future<int> flush(ChannelApi api, {required String Function(String circleId) deviceFor, int batchSize = 50, LaneSource? lanes}) async {
+  Future<int> flush(ChannelApi api,
+      {required String Function(String circleId) deviceFor, int batchSize = 50, LaneSource? lanes, void Function(String circleId)? onNeedKeySync}) async {
     int delivered = 0;
     while (true) {
       await reconcileLanes(lanes);
@@ -579,10 +630,14 @@ class SealedQueue {
           .take(batchSize)
           .toList();
       final List<WireItem> items = batch.map(WireItem.fromStore).toList();
-      // Last look at the pref before the bytes leave the phone.
+      // Last look at the pref before the bytes leave the phone. The lane record is
+      // read fresh (not from a cache) and its version must not move between the check
+      // and the request; if it did, start over (the loop reconciles first).
+      final int ver0 = await _laneVersion(lanes, circle);
       if (items.any((WireItem i) => i.line == E2ee.lineServer) && !(lanes != null && await _allowsServer(lanes, circle))) {
         continue; // the next loop turn reconciles (twin or drop) before anything is sent
       }
+      if (ver0 != await _laneVersion(lanes, circle)) continue;
       List<BatchResult> results;
       try {
         results = await api.postBatch(circle, device, items);
@@ -595,11 +650,25 @@ class SealedQueue {
         return delivered; // offline or server trouble: keep everything, try later
       }
       final Set<int> done = <int>{};
+      bool needSync = false;
       for (final BatchResult r in results) {
-        // stored/duplicate: server has it. rejected: permanent (bad epoch etc.), drop.
+        if (r.status != 'rejected') {
+          // stored/duplicate: the server has it.
+          done.add(r.seq);
+          delivered++;
+          continue;
+        }
+        final String code = r.error ?? '';
+        if (transientRejections.contains(code)) {
+          // An epoch problem a key sync may fix: keep the item, sync keys, retry later (bounded by the retry counter).
+          needSync = true;
+          continue;
+        }
+        // Permanent. A required_server refusal is NOT silent: the user is told the data was not delivered.
+        if (code == 'required_server') await noteUndelivered(circle, code);
         done.add(r.seq);
-        if (r.status != 'rejected') delivered++;
       }
+      if (needSync) onNeedKeySync?.call(circle);
       // Items the server did not mention stay queued.
       await _remove(batch, done);
       if (done.isEmpty) {
@@ -608,6 +677,41 @@ class SealedQueue {
       }
     }
   }
+
+  /// Rejection codes of the relay that a key sync can cure; the item stays queued.
+  static const Set<String> transientRejections = <String>{'legacy_epoch_closed', 'bad_epoch'};
+
+  static Future<int> _laneVersion(LaneSource? lanes, String circle) async {
+    try {
+      return lanes is VersionedLaneSource ? await (lanes as VersionedLaneSource).laneVersion(circle) : 0;
+    } catch (_) {
+      return -1;
+    }
+  }
+
+  String _undeliveredKey(String circle) => 'queue/undelivered/$circle';
+
+  /// Remembers that the relay refused an item for good ([code]); shown to the user.
+  Future<void> noteUndelivered(String circle, String code) async {
+    int n = 0;
+    try {
+      n = ((jsonDecode(await kv.getFresh(_undeliveredKey(circle)) ?? '{}') as Map<String, dynamic>)['n'] as num?)?.toInt() ?? 0;
+    } catch (_) {}
+    await kv.set(_undeliveredKey(circle), jsonEncode(<String, dynamic>{'n': n + 1, 'code': code, 'at': clock.now().millisecondsSinceEpoch}));
+  }
+
+  /// How many items of [circle] were refused for good, and why; null when none.
+  Future<({int count, String code})?> undelivered(String circle) async {
+    try {
+      final Map<String, dynamic> m = jsonDecode(await kv.getFresh(_undeliveredKey(circle)) ?? '') as Map<String, dynamic>;
+      final int n = (m['n'] as num).toInt();
+      return n > 0 ? (count: n, code: (m['code'] as String?) ?? '') : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> clearUndelivered(String circle) => kv.remove(_undeliveredKey(circle));
 
   static Future<bool> _allowsServer(LaneSource lanes, String circle) async {
     try {
@@ -624,8 +728,7 @@ class SealedQueue {
   /// Nothing is ever re-sealed from plaintext: none is stored. Returns how many
   /// items were changed. Call it whenever a pref changes (and flush calls it
   /// before every request).
-  Future<int> reconcileLanes(LaneSource? lanes) => _locked(() async {
-        final List<Map<String, dynamic>> l = await _load();
+  Future<int> reconcileLanes(LaneSource? lanes) => _mutate((List<Map<String, dynamic>> l) async {
         final Map<String, bool> allowed = <String, bool>{};
         int changed = 0;
         for (int i = l.length - 1; i >= 0; i--) {
@@ -642,32 +745,27 @@ class SealedQueue {
             l.removeAt(i);
           }
         }
-        if (changed > 0) await _save(l);
         return changed;
       });
 
-  Future<void> _remove(List<Map<String, dynamic>> batch, Set<int> seqs) => _locked(() async {
-        final List<Map<String, dynamic>> l = await _load();
+  Future<void> _remove(List<Map<String, dynamic>> batch, Set<int> seqs) => _mutate((List<Map<String, dynamic>> l) async {
         final Set<String> keys = <String>{
           for (final Map<String, dynamic> m in batch)
             if (seqs.contains(m['s'])) '${m['c']}/${m['d']}/${m['s']}',
         };
         l.removeWhere((Map<String, dynamic> m) => keys.contains('${m['c']}/${m['d']}/${m['s']}'));
-        await _save(l);
       });
 
-  Future<void> _bump(List<Map<String, dynamic>> batch) => _locked(() async {
-        final List<Map<String, dynamic>> l = await _load();
+  Future<void> _bump(List<Map<String, dynamic>> batch) => _mutate((List<Map<String, dynamic>> l) async {
         final Set<String> keys = <String>{for (final Map<String, dynamic> m in batch) '${m['c']}/${m['d']}/${m['s']}'};
         for (final Map<String, dynamic> m in l) {
           if (keys.contains('${m['c']}/${m['d']}/${m['s']}')) m['n'] = ((m['n'] as int?) ?? 0) + 1;
         }
         // A batch that failed this many times is poison: drop it so it cannot pin the queue.
         l.removeWhere((Map<String, dynamic> m) => ((m['n'] as int?) ?? 0) >= 20);
-        await _save(l);
       });
 
-  Future<void> clear() => kv.remove(_key);
+  Future<void> clear() => _mutate((List<Map<String, dynamic>> l) async => l.clear());
 }
 
 /// A failure that retrying cannot fix (4xx other than rate limiting).

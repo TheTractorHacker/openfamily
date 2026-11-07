@@ -31,6 +31,10 @@ class FakeProcessingController implements ProcessingController {
     bool serverKey = true,
     List<String> notReady = const <String>[],
     LaneStatus? status,
+    Set<String> children = const <String>{},
+    List<ProcessingViewer> viewers = const <ProcessingViewer>[],
+    int undeliveredCount = 0,
+    DateTime? optOutPendingSince,
   }) {
     final Map<String, String> names = <String, String>{pA: 'Alice', pB: 'Bob', pC: 'Carol'};
     final StoredPolicy pol = StoredPolicy(assist: assist, skGen: assist ? 1 : 0, defaultForNew: defaultForNew, memberOptOut: optOut);
@@ -46,6 +50,10 @@ class FakeProcessingController implements ProcessingController {
       iAmAdmin: admin,
       legacy: legacy,
       legacyAccessOpen: legacyAccessOpen,
+      viewers: viewers,
+      undeliveredCount: undeliveredCount,
+      undeliveredCode: undeliveredCount > 0 ? 'required_server' : '',
+      optOutPendingSince: optOutPendingSince,
       notReady: notReady,
       serverKeyShort: serverKey ? 'ab12 cd34' : null,
       serverKeyDigits: serverKey ? '11111 22222 33333' : null,
@@ -58,7 +66,8 @@ class FakeProcessingController implements ProcessingController {
               lane: e.value,
               verified: !unverified.contains(e.key),
               isMe: e.key == me,
-              isAdmin: e.key == pA),
+              isAdmin: e.key == pA,
+              isChild: children.contains(e.key)),
       ],
     );
   }

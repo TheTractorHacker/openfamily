@@ -90,6 +90,8 @@ class DiagFacts {
     this.backgroundServiceRunning,
     this.sharingEnabled = true,
     this.hasPrivateCircle = false,
+    this.storeBackupExcluded,
+    this.storeBackupError = '',
     this.vaultReadable,
     this.vaultDetail = '',
     this.vaultNeedsUnlock = false,
@@ -134,6 +136,10 @@ class DiagFacts {
   final bool? backgroundServiceRunning;
   final bool sharingEnabled;
   final bool hasPrivateCircle;
+
+  /// iOS: whether the private store directory is confirmed excluded from backups (read back). Null: not applicable.
+  final bool? storeBackupExcluded;
+  final String storeBackupError;
 
   /// Whether the E2EE secrets could be decrypted just now with the Keystore.
   final bool? vaultReadable;
@@ -564,6 +570,23 @@ List<DiagCheck> evaluateDiagnostics(DiagFacts f) {
                   'unlock it. Your circle may see updates late; this is by design.'
               : 'The encryption keys on this phone opened just now, so background reporting can encrypt positions.'));
     }
+  }
+
+  // 14. iOS: is the store of the private circles kept out of backups?
+  if (f.storeBackupExcluded != null) {
+    out.add(f.storeBackupExcluded == true
+        ? const DiagCheck(
+            id: 'backup-exclusion',
+            title: 'Private data and backups',
+            status: DiagStatus.pass,
+            detail: 'The folder that holds your Private circle trail, queue and settings on this phone is excluded from backups.')
+        : DiagCheck(
+            id: 'backup-exclusion',
+            title: 'Private data and backups',
+            status: DiagStatus.warn,
+            detail: 'Backup exclusion NOT confirmed${f.storeBackupError.isEmpty ? '' : ' (${f.storeBackupError})'}. '
+                'Private circle data still works, but this phone could not verify that its trail, queue and settings stay out of '
+                'iCloud and computer backups. Turn off backups for this app in the phone settings to be safe.'));
   }
 
   return out;

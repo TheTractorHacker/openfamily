@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:openfamily/models/circle.dart';
 import 'package:openfamily/screens/encryption_circle_screen.dart';
-import 'package:openfamily/screens/trusted_server_screen.dart';
+import 'package:openfamily/screens/processing_screen.dart';
+import 'package:openfamily/screens/trusted_server_screen.dart' show kTrustedServerWarning;
 import 'package:openfamily/services/e2ee/e2ee_service.dart';
 import 'package:openfamily/services/e2ee/e2ee_trust.dart';
 import 'package:openfamily/services/e2ee/e2ee_vault.dart';
@@ -118,8 +119,11 @@ void main() {
       expect(server.circles[cid]!.serverConsents, isEmpty);
       await t.tap(find.byKey(const Key('trusted-server-prompt-open')));
       await settle(t);
-      expect(find.byType(TrustedServerScreen), findsOneWidget);
+      // The prompt only leads to the Server processing screen; nothing is signed or consented on the way.
+      expect(find.byType(ProcessingScreen), findsOneWidget);
       expect(server.circles[cid]!.serverConsents, isEmpty);
+      expect(server.circles[cid]!.prefs, isEmpty);
+      expect(server.circles[cid]!.assist, isFalse);
     });
 
     testWidgets('dismissing is remembered for the circle', (t) async {

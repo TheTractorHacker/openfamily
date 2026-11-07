@@ -17,8 +17,8 @@ class TrustedServerPromptStore {
 }
 
 /// A dismissible notice on a Private circle: the admin recommends trusting the
-/// server and this person has not allowed it yet. It only LEADS to the Trusted
-/// server screen; nothing is ever consented from here.
+/// server and this person has not allowed it yet. It only LEADS to the Server
+/// processing screen; nothing is ever signed or consented from here.
 class TrustedServerPrompt extends StatelessWidget {
   const TrustedServerPrompt({super.key, required this.onOpen, required this.onDismiss});
   final VoidCallback onOpen;
@@ -48,8 +48,9 @@ class TrustedServerPrompt extends StatelessWidget {
                 Text('Your server admin suggests trusting the server', style: AppType.body.copyWith(fontWeight: FontWeight.w800)),
                 const SizedBox(height: AppSpace.xs),
                 const Text(
-                  'Nothing has changed: the server still cannot read this circle. If you want it to, you can allow it '
-                  'yourself on the Trusted server screen. Everyone in the circle has to allow it, and you can say no.',
+                  'Nothing has changed and nothing is shared: the server cannot read your data unless you allow it. If you want '
+                  'it to, you decide for your own data on the Server processing screen and confirm it there. You can say no and '
+                  'keep your data on your phone.',
                   style: AppType.secondary,
                 ),
               ]),
@@ -117,8 +118,8 @@ class _PrivateModeChoiceDialogState extends State<PrivateModeChoiceDialog> {
               const Text(kTrustedServerWarning, key: Key('choice-warning'), style: AppType.secondary),
               const SizedBox(height: AppSpace.sm),
               const Text(
-                'Choosing this does not allow anything yet. Next you review it on the Trusted server screen, and every member '
-                'must allow it on their own phone.',
+                'Choosing this does not allow anything yet. Next you review it on the Server processing screen, and every member '
+                'decides for their own data there, on their own phone.',
                 style: AppType.secondary,
               ),
             ],

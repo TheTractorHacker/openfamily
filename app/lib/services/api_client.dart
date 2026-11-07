@@ -960,6 +960,9 @@ class ApiClient {
     _throwForError(response);
   }
 
+  /// Test hook for the error mapping.
+  static Never debugThrowForError(http.Response r) => _throwForError(r);
+
   /// Throws an [ApiException] using the backend's error JSON when available.
   static Never _throwForError(http.Response response) {
     final String body = response.body;
@@ -968,6 +971,11 @@ class ApiClient {
       final dynamic decoded = jsonDecode(body);
       if (decoded is Map && decoded['error'] is String) {
         message = decoded['error'] as String;
+      }
+      // This app version cannot take part in a circle with processing lanes: show the same
+      // "update the app" state as a 426 does, instead of a plain error.
+      if (response.statusCode == 409 && decoded is Map && decoded['code'] == 'update_required_for_lanes') {
+        AppCompat.observeUpgradeRequired(message);
       }
     } catch (_) {
       // Non-JSON error body; keep the generic message.

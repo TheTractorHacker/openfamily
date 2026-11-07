@@ -93,7 +93,7 @@ class _MyProcessingScreenState extends State<MyProcessingScreen> {
                         leading: DsListRow.iconTile(context, Icons.lock_outline),
                         title: r.circle.name,
                         subtitle: _subtitle(r.snap),
-                        trailing: r.snap?.me == null ? null : LaneChip(server: r.snap!.me!.serverAssisted),
+                        trailing: r.snap?.me == null || r.snap!.legacy ? null : LaneChip(server: r.snap!.me!.serverAssisted),
                         chevron: true,
                         onTap: () async {
                           await Navigator.of(context).push<void>(MaterialPageRoute<void>(
@@ -110,6 +110,7 @@ class _MyProcessingScreenState extends State<MyProcessingScreen> {
 
   String _subtitle(ProcessingSnapshot? s) {
     if (s == null) return 'Could not check this circle';
+    if (s.legacy) return 'Old trusted-server mode: the server can read this circle while every member allowed it';
     if (!s.assistOn) return 'Server processing is off. Your phone does the work.';
     final ProcessingMember? me = s.me;
     if (me?.serverAssisted ?? false) return 'The server processes your data';

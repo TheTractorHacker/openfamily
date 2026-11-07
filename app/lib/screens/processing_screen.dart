@@ -189,6 +189,36 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
           else ...<Widget>[
             _statusCard(s),
             if (s.legacy) ...<Widget>[const SizedBox(height: AppSpace.lg), _legacyCard(s)],
+            if (s.optOutPendingSince != null)
+              const Padding(
+                padding: EdgeInsets.only(top: AppSpace.lg),
+                child: ProcessingNote(
+                    noteKey: Key('proc-optout-pending'),
+                    icon: Icons.sync_problem,
+                    color: AppColors.statusOrange,
+                    text: 'Not yet confirmed: the server still has your previous choice. Your phone already seals for phones only and keeps '
+                        'trying to tell the server. Until it is confirmed, the server may still treat you as allowing it.'),
+              ),
+            if (s.undeliveredCount > 0)
+              Padding(
+                padding: const EdgeInsets.only(top: AppSpace.lg),
+                child: ProcessingNote(
+                    noteKey: const Key('proc-undelivered'),
+                    icon: Icons.report_problem_outlined,
+                    color: AppColors.statusRed,
+                    text: '${s.undeliveredCount} ${s.undeliveredCount == 1 ? 'item was' : 'items were'} not delivered to this circle'
+                        '${s.undeliveredCode == 'required_server' ? ' because it requires server processing and you have not consented yet' : ''}. '
+                        'They are not kept.'),
+              ),
+            if (s.required && s.members.any((ProcessingMember m) => m.isChild))
+              const Padding(
+                padding: EdgeInsets.only(top: AppSpace.lg),
+                child: ProcessingNote(
+                    noteKey: Key('proc-child-note'),
+                    icon: Icons.child_care,
+                    text: 'This circle requires server processing and the rule applies to child accounts too. A child\'s phone sends nothing '
+                        'to this circle (except help requests) until it has consented; the choice is made when the child\'s phone is paired.'),
+              ),
             if (s.status == LaneStatus.verificationFailed)
               const Padding(
                 padding: EdgeInsets.only(top: AppSpace.lg),
@@ -227,12 +257,28 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
                   key: Key('member-${m.userId}'),
                   leading: DsListRow.iconTile(context, Icons.person_outline),
                   title: m.isMe ? '${m.name} (you)' : m.name,
-                  subtitle: m.serverAssisted
-                      ? 'Allowed server processing'
-                      : (s.assistOn && !m.verified ? 'No choice made yet, phone only' : 'Keeps data on their phone'),
-                  trailing: LaneChip(server: m.serverAssisted),
+                  subtitle: s.legacy
+                      ? (m.isChild ? 'Child account. Old mode: the server may read it if everyone allowed it' : 'Old mode: the server may read this circle if everyone allowed it')
+                      : m.serverAssisted
+                          ? 'Allowed server processing'
+                          : (s.assistOn && !m.verified ? 'No choice made yet, phone only' : 'Keeps data on their phone'),
+                  trailing: s.legacy ? null : LaneChip(server: m.serverAssisted),
                 ),
             ]),
+            if (s.viewers.isNotEmpty && !s.legacy) ...<Widget>[
+              const DsSectionHeader('Viewers and bridges', padding: EdgeInsets.fromLTRB(0, AppSpace.xl, 0, AppSpace.xs)),
+              DsRowGroup(children: <Widget>[
+                for (final ProcessingViewer v in s.viewers)
+                  DsListRow(
+                    key: Key('viewer-${v.ownerName}-${v.kind}'),
+                    leading: DsListRow.iconTile(context, v.kind == 'web' ? Icons.web : Icons.hub_outlined),
+                    title: v.kind == 'web' ? '${v.ownerName} has a web viewer' : '${v.ownerName} has a bridge (for example Dawarich)',
+                    subtitle: v.kind == 'web'
+                        ? 'If ${v.ownerName} gave it this circle\'s key, it can read everyone ${v.ownerName} can read, including members who keep data on their phone.'
+                        : 'A bridge gets only the server key here: it reads members who allowed server processing, not phone-only members.',
+                  ),
+              ]),
+            ],
             if (s.assistOn || s.serverCount > 0) ...<Widget>[
               const DsSectionHeader('Delete server copies', padding: EdgeInsets.fromLTRB(0, AppSpace.xl, 0, AppSpace.xs)),
               Text(
@@ -270,6 +316,7 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
   }
 
   String _policyLine(ProcessingSnapshot s) {
+    if (s.legacy) return 'Old trusted-server mode. An admin can upgrade it.';
     if (!s.assistOn) return 'Off. Everyone\'s phone does the processing.';
     return s.required
         ? 'On, and required: members must allow it or leave.'
@@ -277,7 +324,9 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
   }
 
   Widget _statusCard(ProcessingSnapshot s) {
-    final (IconData icon, Color color, String title, String sub) = !s.assistOn
+    final (IconData icon, Color color, String title, String sub) = s.legacy
+        ? (Icons.dns_outlined, AppColors.sosRed, ProcessingCopy.legacyStatusTitle, ProcessingCopy.legacyStatusBody)
+        : !s.assistOn
         ? (Icons.smartphone, AppColors.statusGreen, 'Phones only', 'The server cannot read this circle. Phones do the processing.')
         : (
             Icons.dns_outlined,
@@ -419,13 +468,13 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
               DsPillButton(
                 key: const Key('choose-server'),
                 label: 'Server processing',
-                style: s.policy.defaultForNew == E2ee.lineServer ? DsPillStyle.filled : DsPillStyle.outlined,
+                style: DsPillStyle.outlined,
                 onPressed: _busy || !s.hasServerKey ? null : () => _chooseUndecided(E2ee.lineServer),
               ),
               DsPillButton(
                 key: const Key('choose-phone'),
                 label: 'Phone only',
-                style: s.policy.defaultForNew == E2ee.linePhone ? DsPillStyle.filled : DsPillStyle.outlined,
+                style: DsPillStyle.outlined,
                 onPressed: _busy ? null : () => _chooseUndecided(E2ee.linePhone),
               ),
             ]),

@@ -26,6 +26,7 @@ class _KeyLogScreenState extends State<KeyLogScreen> {
   LogHead? _head;
   String _digits = '';
   LogSync? _result;
+  List<E2eeAlarm> _laneAlarms = <E2eeAlarm>[];
   bool _busy = false;
   String? _compareResult;
   final TextEditingController _peer = TextEditingController();
@@ -34,6 +35,7 @@ class _KeyLogScreenState extends State<KeyLogScreen> {
   void initState() {
     super.initState();
     _refreshHead();
+    _loadLaneAlarms();
   }
 
   @override
@@ -53,12 +55,20 @@ class _KeyLogScreenState extends State<KeyLogScreen> {
     }
   }
 
+  Future<void> _loadLaneAlarms() async {
+    try {
+      final List<E2eeAlarm> a = await _svc.laneAlarmList();
+      if (mounted) setState(() => _laneAlarms = a);
+    } catch (_) {}
+  }
+
   Future<void> _verify() async {
     setState(() => _busy = true);
     try {
       final LogSync r = await _svc.syncLog();
       if (mounted) setState(() => _result = r);
       await _refreshHead();
+      await _loadLaneAlarms();
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(errorText(e))));
     } finally {
@@ -103,6 +113,8 @@ class _KeyLogScreenState extends State<KeyLogScreen> {
             style: AppType.secondary,
           ),
           const SizedBox(height: AppSpace.lg),
+          for (final E2eeAlarm a in _laneAlarms)
+            Padding(padding: const EdgeInsets.only(bottom: AppSpace.md), child: AlarmBanner(key: Key('lane-alarm-${a.circleId}'), alarm: a)),
           if (h == null)
             const Text('No log head pinned yet. Verify once to pin it.')
           else ...<Widget>[

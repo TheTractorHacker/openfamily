@@ -11,6 +11,7 @@ import '../background_location_service.dart';
 import '../e2ee/e2ee_app.dart';
 import '../e2ee/e2ee_vault.dart';
 import '../e2ee/private_runtime.dart';
+import '../e2ee/private_store.dart';
 import '../location_outbox.dart';
 import '../location_sharing_service.dart';
 import '../server_config.dart';
@@ -185,6 +186,13 @@ class DiagnosticsProbe {
     final bool? bg = _android ? await _try(() => BackgroundLocationService.isRunning()) : null;
     final String? deviceId = await _try(() => TokenStorage.readDeviceId());
 
+    bool? storeExcluded;
+    String storeError = '';
+    try {
+      await PrivateStore.files();
+      storeExcluded = PrivateStore.status.backupExcluded;
+      storeError = PrivateStore.status.error;
+    } catch (_) {}
     final bool hasPrivate = sv.privateCircles > 0 || ((await _try(() => PrivateRuntime.instance.privateCircles()))?.isNotEmpty ?? false);
     bool? vaultOk;
     String vaultDetail = '';
@@ -237,6 +245,8 @@ class DiagnosticsProbe {
       backgroundServiceRunning: bg,
       sharingEnabled: LocationSharingService.enabled.value,
       hasPrivateCircle: hasPrivate,
+      storeBackupExcluded: storeExcluded,
+      storeBackupError: storeError,
       vaultReadable: vaultOk,
       vaultDetail: vaultDetail,
       vaultNeedsUnlock: needsUnlock,

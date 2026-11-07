@@ -103,7 +103,8 @@ void main() {
     for (final String g in digits.split(' ').take(3)) {
       expect(find.textContaining(g), findsWidgets);
     }
-    expect(find.textContaining('can READ the location of every member'), findsOneWidget);
+    expect(find.byKey(const Key('viewer-bridge-warning')), findsOneWidget);
+    expect(find.textContaining('receives only the server'), findsOneWidget);
     expect(find.textContaining('Compare these digits'), findsOneWidget);
     expect(find.text('It matches: approve'), findsOneWidget);
   });

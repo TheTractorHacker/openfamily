@@ -33,6 +33,7 @@ class _EncryptionCircleScreenState extends State<EncryptionCircleScreen> {
   PendingReport _pending = const PendingReport();
   Map<String, TrustAssessment> _trust = <String, TrustAssessment>{};
   String _me = '';
+  List<E2eeAlarm> _laneAlarms = <E2eeAlarm>[];
   bool _loading = true;
   bool _busy = false;
   String? _error;
@@ -61,6 +62,10 @@ class _EncryptionCircleScreenState extends State<EncryptionCircleScreen> {
       for (final CircleE2eeMember m in st.members) {
         t[m.userId] = await _svc.trust.assess(m.userId, m.devices.map((DeviceKey d) => d.fingerprint));
       }
+      List<E2eeAlarm> la = <E2eeAlarm>[];
+      try {
+        la = (await _svc.laneAlarmList()).where((E2eeAlarm a) => a.circleId == widget.circle.id).toList();
+      } catch (_) {}
       // Admin recommends trusting the server, its key is pinned, and this person
       // has not allowed it (and has not dismissed the notice). Never nags again.
       bool prompt = false;
@@ -74,6 +79,7 @@ class _EncryptionCircleScreenState extends State<EncryptionCircleScreen> {
       }
       if (!mounted) return;
       setState(() {
+        _laneAlarms = la;
         _showTrustPrompt = prompt;
         _state = st;
         _pending = p;
@@ -162,6 +168,8 @@ class _EncryptionCircleScreenState extends State<EncryptionCircleScreen> {
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.all(AppSpace.xl),
         children: <Widget>[
+          for (final E2eeAlarm a in _laneAlarms)
+            Padding(padding: const EdgeInsets.only(bottom: AppSpace.md), child: AlarmBanner(key: Key('lane-alarm-${a.circleId}'), alarm: a)),
           Text(st.isPrivate ? 'Private circle, key epoch ${st.epoch}' : 'Normal circle (not end-to-end encrypted)', style: AppType.headline),
           const SizedBox(height: AppSpace.sm),
           Text(
@@ -177,7 +185,7 @@ class _EncryptionCircleScreenState extends State<EncryptionCircleScreen> {
             TrustedServerPrompt(
               onOpen: () async {
                 await Navigator.of(context).push<void>(MaterialPageRoute<void>(
-                    builder: (_) => TrustedServerScreen(circle: widget.circle, service: _svc)));
+                    builder: (_) => ProcessingScreen(circle: widget.circle, service: _svc)));
                 if (mounted) _load();
               },
               onDismiss: () async {

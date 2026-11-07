@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import '../api_client.dart' show ApiException;
 import 'e2ee_api.dart';
 import 'e2ee_crypto.dart';
 import 'e2ee_models.dart';
@@ -157,22 +158,26 @@ class LanesService {
     ];
     final Map<int, Uint8List> commitments = <int, Uint8List>{};
     final Map<int, bool> entryVerifiedOn = <int, bool>{}; // entry seq -> verified statement says assistance ON
-    // The server serves only the newest statement: commitments of OLDER generations are not
-    // available, so an SK wrap of an older generation is not opened (documented limit).
-    final List<PolicyStatement> stmts = <PolicyStatement>[if (proc.policy != null) proc.policy!];
+    // The newest statement plus the older ones the server serves (`policy.history`, up to 30). Each is
+    // verified on its own against the admin's signature and the log; a statement that does not verify
+    // counts as "failed" below. Entries older than the served history are unknown, so they fail too:
+    // that is fail-closed and only voids prefs signed before them.
+    final List<PolicyStatement> stmts = <PolicyStatement>[
+      if (proc.policy != null) proc.policy!,
+      ...proc.policyHistory,
+    ];
+    final Set<int> seenStmt = <int>{};
     for (final PolicyStatement s in stmts) {
       final LogEntry? e = await _policyEntryFor(circleId, s, policyEntries, admins, deviceById);
-      if (e == null) continue;
+      if (e == null || !seenStmt.add(e.seq)) continue;
       entryVerifiedOn[e.seq] = s.serverAssist && s.skGen >= 1;
-      if (s.skGen >= 1) commitments[s.skGen] = s.commitment;
+      if (s.serverAssist && s.skGen >= 1) commitments[s.skGen] = s.commitment;
     }
     StoredPolicy policy = StoredPolicy.off;
     if (policyEntries.isNotEmpty) {
       final LogEntry newest = policyEntries.reduce((LogEntry a, LogEntry b) => a.seq >= b.seq ? a : b);
       PolicyStatement? ns;
-      for (final PolicyStatement s in stmts) {
-        if (entryVerifiedOn.containsKey(newest.seq) && await _statementMatches(circleId, s, newest)) ns = s;
-      }
+      if (proc.policy != null && entryVerifiedOn.containsKey(newest.seq) && await _statementMatches(circleId, proc.policy!, newest)) ns = proc.policy;
       if (ns != null) {
         policy = StoredPolicy(assist: ns.serverAssist && ns.skGen >= 1, skGen: ns.skGen, defaultForNew: ns.defaultForNew, memberOptOut: ns.memberOptOut);
       }
@@ -352,12 +357,16 @@ class LanesService {
       if (onLaneChanged != null) await onLaneChanged!(circleId);
       final Uint8List sig = await E2ee.sign(me.edSeed, msg);
       final Uint8List logMsg = E2ee.logActionMessage(E2ee.actProcessingPref, me.userId, me.deviceId, circleId: circleId, epoch: 0, ref: ref);
-      await api.putProcessingPref(circleId, <String, dynamic>{
+      final Map<String, dynamic> body = <String, dynamic>{
         ...PrefStatement(
                 userId: me.userId, lane: E2ee.linePhone, skGen: 0, serverDeviceId: E2ee.zeroUuid, nonce: nonce, approverDeviceId: me.deviceId, signature: sig)
             .toRequest(Uint8List(32)),
         'log_signature': E2ee.b64(await E2ee.sign(me.edSeed, logMsg)),
-      });
+      };
+      // Kept until the server has it: if this call fails the opt-out stays in force on this phone and is sent again later.
+      await store.setPendingBody(circleId, body);
+      await api.putProcessingPref(circleId, body);
+      await store.clearPendingBody(circleId);
       invalidateLog();
       try {
         await refresh(circleId, force: true);
@@ -390,6 +399,27 @@ class LanesService {
     invalidateLog();
     final CircleLanes after = await refresh(circleId, force: true);
     if (after.status == LaneStatus.serverAssisted) await _wrapForServerIfDue(circleId, after);
+  }
+
+  /// Sends an opt-out again that the server has not accepted yet. True when there is nothing left to confirm or the
+  /// server took it now (a 409 means it already did). Until then the phone lane stays in force and the screens say
+  /// "not yet confirmed". Safe to call often.
+  Future<bool> retryPendingOptOut(String circleId) async {
+    final Map<String, dynamic>? body = await store.pendingBody(circleId);
+    if (body == null) return (await store.pendingPhoneRef(circleId)) == null;
+    try {
+      await api.putProcessingPref(circleId, body);
+    } on ApiException catch (e) {
+      if (e.status != 409) return false;
+    } catch (_) {
+      return false;
+    }
+    await store.clearPendingBody(circleId);
+    invalidateLog();
+    try {
+      await refresh(circleId, force: true);
+    } catch (_) {}
+    return true;
   }
 
   // ---------------------------------------------------------- admin policy
@@ -551,6 +581,9 @@ class LanesService {
   /// my own other devices) and, only when a verified member is in lane server,
   /// to the pinned server key (admin).
   Future<CircleLanes> maintain(String circleId) async {
+    try {
+      await retryPendingOptOut(circleId);
+    } catch (_) {}
     CircleLanes cl = await refresh(circleId);
     if (!cl.policy.assist) return cl;
     final LocalIdentity me = (await service.identity())!;

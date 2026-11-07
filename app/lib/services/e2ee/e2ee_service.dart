@@ -398,15 +398,60 @@ class E2eeService {
     return false;
   }
 
-  Future<void> _raiseSkEqualsCk(String circleId) async {
-    final E2eeAlarm a = E2eeAlarm(AlarmKind.serverKeyIsCircleKey, 'Server key refused',
-        'A server key for this circle was identical to the circle key and was NOT used. Someone may be trying to give the server your private data.',
-        circleId: circleId);
+  static const String _skckIndex = 'alarm:skck:index';
+
+  Future<void> _raiseSkEqualsCk(String circleId, {bool ckSide = false}) async {
+    final E2eeAlarm a = _skckAlarm(circleId, ckSide);
     laneAlarms.add(a);
-    // Recorded on this phone so the alert survives a restart.
+    // Recorded on this phone so the alert survives a restart, and listed in [laneAlarmList].
     try {
-      await trust.kv.set('alarm:skck:$circleId', DateTime.now().toUtc().toIso8601String());
+      await trust.kv.set('alarm:skck:$circleId', '${DateTime.now().toUtc().toIso8601String()}|${ckSide ? 'ck' : 'sk'}');
+      final Set<String> idx = <String>{...(await trust.kv.get(_skckIndex) ?? '').split(',').where((String x) => x.isNotEmpty), circleId};
+      await trust.kv.set(_skckIndex, idx.join(','));
     } catch (_) {}
+  }
+
+  static E2eeAlarm _skckAlarm(String circleId, bool ckSide) => ckSide
+      ? E2eeAlarm(AlarmKind.serverKeyIsCircleKey, 'Circle key refused',
+          'A circle key sent to this phone was identical to the server key of this circle, so it was NOT used. Someone may be trying to hand '
+          'the server your phone-only data. Do not share anything new in this circle until a circle admin checked it.',
+          circleId: circleId)
+      : E2eeAlarm(AlarmKind.serverKeyIsCircleKey, 'Server key refused',
+          'A server key for this circle was identical to the circle key and was NOT used. Someone may be trying to give the server your private data.',
+          circleId: circleId);
+
+  /// Severe alarms the lane checks raised on this phone (this run and earlier ones), for the key log and the circle screens.
+  Future<List<E2eeAlarm>> laneAlarmList() async {
+    final Map<String, E2eeAlarm> out = <String, E2eeAlarm>{for (final E2eeAlarm a in laneAlarms) '${a.circleId}/${a.title}': a};
+    try {
+      for (final String c in (await trust.kv.get(_skckIndex) ?? '').split(',')) {
+        if (c.isEmpty) continue;
+        final String v = await trust.kv.get('alarm:skck:$c') ?? '';
+        if (v.isEmpty) continue;
+        final E2eeAlarm a = _skckAlarm(c, v.endsWith('|ck'));
+        out.putIfAbsent('$c/${a.title}', () => a);
+      }
+    } catch (_) {}
+    return out.values.toList();
+  }
+
+  /// True when [ck] (a circle key just opened) is, or commits like, a server line key of [circleId]: a held SK
+  /// byte for byte, or the commitment of any signed policy statement the server serves.
+  Future<bool> circleKeyIsServerKey(String circleId, Uint8List ck) async {
+    for (final int gen in await heldServerGens(circleId)) {
+      final Uint8List? sk = await serverKey(circleId, gen);
+      if (sk != null && E2ee.constEq(sk, ck)) return true;
+    }
+    try {
+      final ProcessingServerState ps = await api.processingState(circleId);
+      for (final PolicyStatement p in <PolicyStatement>[if (ps.policy != null) ps.policy!, ...ps.policyHistory]) {
+        if (p.skGen >= 1 && p.commitment.any((int b) => b != 0) &&
+            E2ee.constEq(await E2ee.keyCommitmentLine(ck, circleId, E2ee.lineServer, p.skGen), p.commitment)) {
+          return true;
+        }
+      }
+    } catch (_) {}
+    return false;
   }
 
   /// One v3 wrap of the server line key.
@@ -528,7 +573,7 @@ class E2eeService {
   /// admin policy is on, the key is the pinned one and at least one member is
   /// in lane server.
   Future<List<DeviceKey>> _recipients(CircleE2eeState st, LocalIdentity me,
-      {int line = E2ee.linePhone, DeviceKey? serverKey}) async {
+      {int line = E2ee.linePhone, DeviceKey? serverKey, bool lanesOn = false}) async {
     final Set<String> own = st.allDevices.where((DeviceKey k) => k.userId == me.userId).map((DeviceKey k) => k.deviceId).toSet();
     final List<DeviceKey> out = <DeviceKey>[];
     for (final DeviceKey k in st.allDevices) {
@@ -544,6 +589,10 @@ class E2eeService {
         out.add(k);
         continue;
       }
+      // In a circle with server processing (ADR 8.9) a bridge or a web viewer must NOT receive the phone key by default: it
+      // would read phone-only members too. A bridge only ever gets the server key; a web viewer needs [confirmWrap]
+      // with explicit informed approval.
+      if (line == E2ee.linePhone && lanesOn && (k.kind == 'service' || k.kind == 'web')) continue;
       final WrapDecisionResult d = await decideWrap(key: k, selfUserId: me.userId, trust: trust, ownKnownDeviceIds: own);
       if (d.decision == WrapDecision.auto) out.add(k);
     }
@@ -551,6 +600,17 @@ class E2eeService {
       throw StateError('internal error: the phone key line must never be wrapped to a server key');
     }
     return out;
+  }
+
+  /// Whether server processing is on for [circleId] as far as the server says. Used only to WITHHOLD phone keys from
+  /// bridges and web viewers (a wrong answer can only make the phone give less).
+  Future<bool> lanesOn(String circleId) async {
+    try {
+      final ProcessingServerState ps = await api.processingState(circleId);
+      return ps.serverAssist && !ps.legacy;
+    } catch (_) {
+      return false;
+    }
   }
 
   /// Admin: switches a circle to Private mode. Generates the epoch-1 key on this
@@ -574,8 +634,9 @@ class E2eeService {
     final CircleE2eeState st = await api.circleState(circleId);
     final int epoch = st.epoch + 1;
     final Uint8List key = E2ee.randomBytes(32);
+    final bool lanes = await lanesOn(circleId);
     final List<Map<String, dynamic>> wraps = <Map<String, dynamic>>[
-      for (final DeviceKey k in await _recipients(st, me)) await _wrapTo(me, circleId, epoch, key, k)
+      for (final DeviceKey k in await _recipients(st, me, lanesOn: lanes)) await _wrapTo(me, circleId, epoch, key, k)
     ];
     await api.bumpEpoch(circleId, await _epochBody(me, E2ee.actEpoch, circleId, epoch, key, wraps));
     await vault.write(_ckName(circleId, epoch), key);
@@ -591,8 +652,9 @@ class E2eeService {
     final CircleE2eeState st = await api.circleState(circleId);
     final int epoch = st.epoch + 1;
     final Uint8List key = E2ee.randomBytes(32);
+    // The upgrade turns server processing on in the same request: viewers and bridges get no phone key.
     final List<Map<String, dynamic>> wraps = <Map<String, dynamic>>[
-      for (final DeviceKey k in await _recipients(st, me)) await _wrapTo(me, circleId, epoch, key, k)
+      for (final DeviceKey k in await _recipients(st, me, lanesOn: true)) await _wrapTo(me, circleId, epoch, key, k)
     ];
     final Map<String, dynamic> b = await _epochBody(me, E2ee.actEpoch, circleId, epoch, key, wraps);
     b['epoch_wraps'] = b.remove('wraps');
@@ -647,6 +709,13 @@ class E2eeService {
           rejectedWraps++;
           continue;
         }
+        // The reverse of the SK check: a circle key that is (or commits like) a server line key
+        // would hand the server every phone-line item. Refuse it and raise the severe alarm.
+        if (await circleKeyIsServerKey(circleId, key)) {
+          rejectedWraps++;
+          await _raiseSkEqualsCk(circleId, ckSide: true);
+          continue;
+        }
         await vault.write(_ckName(circleId, w.epoch), key);
         n++;
       } on E2eeAuthException {
@@ -681,8 +750,14 @@ class E2eeService {
     final Set<String> own = st.allDevices.where((DeviceKey k) => k.userId == me.userId).map((DeviceKey k) => k.deviceId).toSet();
     final List<Map<String, dynamic>> wraps = <Map<String, dynamic>>[];
     final List<PendingItem> confirm = <PendingItem>[], waiting = <PendingItem>[], refused = <PendingItem>[];
+    final bool lanes = await lanesOn(circleId);
     for (final DeviceKey k in pending) {
-      if (k.kind == 'server') continue; // only through shareKeyWithServer, after every consent
+      if (k.kind == 'server') continue; // the server key never gets the phone key line
+      if (lanes && k.kind == 'service') continue; // a bridge reads through the server line only
+      if (lanes && k.kind == 'web') {
+        confirm.add(PendingItem(k, const WrapDecisionResult(WrapDecision.confirm, 'a web viewer in a circle with server processing: needs your explicit approval')));
+        continue;
+      }
       final WrapDecisionResult d = await decideWrap(key: k, selfUserId: me.userId, trust: trust, ownKnownDeviceIds: own);
       switch (d.decision) {
         case WrapDecision.auto:
@@ -702,7 +777,7 @@ class E2eeService {
 
   /// After the user compared the safety number: wrap for [key] and (optionally)
   /// pin its owner as verified.
-  Future<void> confirmWrap(String circleId, DeviceKey key, {bool markVerified = false}) async {
+  Future<void> confirmWrap(String circleId, DeviceKey key, {bool markVerified = false, bool viewerInformed = false}) async {
     final LocalIdentity me = (await identity())!;
     final CircleE2eeState st = await api.circleState(circleId);
     final Uint8List? k = await circleKey(circleId, st.epoch);
@@ -712,6 +787,12 @@ class E2eeService {
       // is wrapped by LanesService once the admin policy and a member's own
       // pref allow it.
       throw StateError('The server key never receives the phone circle key. Use the processing settings (server key line).');
+    }
+    if (key.kind == 'service' && await lanesOn(circleId)) {
+      throw StateError('A bridge only gets the server key in a circle with server processing. It never receives the phone key.');
+    }
+    if (key.kind == 'web' && !viewerInformed && await lanesOn(circleId)) {
+      throw StateError('Approving a web viewer for a circle with server processing needs the extra warning. Open Approve a viewer or bridge.');
     }
     if (st.epochRecord(st.epoch)?.publisherUserId != me.userId && key.userId != me.userId) {
       throw StateError('Only the admin who published this key epoch can share it with other members.');
@@ -939,7 +1020,10 @@ class E2eeService {
     for (final String name in await vault.names()) {
       if (name.startsWith('ck/')) circles.add(name.split('/')[1]);
     }
-    for (final String c in circles) {
+    // Only a phone or the recovery identity receives every phone key this way. A bridge, a web viewer or the server key
+    // would read phone-only members too; they get phone keys only through [confirmWrap] (web, informed) and never as a bulk copy.
+    final bool phoneKeys = target.kind == 'device' || target.kind == 'recovery';
+    for (final String c in phoneKeys ? circles : <String>{}) {
       for (final int epoch in await heldEpochs(c)) {
         final Uint8List? key = await circleKey(c, epoch);
         if (key == null) continue;
@@ -1028,9 +1112,10 @@ class E2eeService {
     if (!check.ok) {
       return LogSync(check, <E2eeAlarm>[E2eeAlarm(AlarmKind.logProblem, 'Key log verification FAILED', check.detail)], r.head);
     }
-    final List<E2eeAlarm> alarms = me == null
-        ? <E2eeAlarm>[]
-        : await alarmsFromLog(events: check.events, selfUserId: me.userId, trust: trust, userNames: userNames, circleNames: circleNames);
+    final List<E2eeAlarm> alarms = <E2eeAlarm>[
+      if (me != null) ...await alarmsFromLog(events: check.events, selfUserId: me.userId, trust: trust, userNames: userNames, circleNames: circleNames),
+      ...await laneAlarmList(),
+    ];
     if (check.newHead != null && check.newHead!.seq > 0) await trust.pinHead(check.newHead!);
     return LogSync(check, alarms, check.newHead);
   }

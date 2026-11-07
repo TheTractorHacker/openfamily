@@ -72,8 +72,19 @@ class StoredMember {
 }
 
 class LaneStore {
-  LaneStore(this.kv);
+  /// [fresh]: read every fact straight from the store (never a cache). The sealer and the
+  /// upload queue use it, because the background isolate and the app both write.
+  LaneStore(this.kv, {this.fresh = false});
   final ChannelKv kv;
+  final bool fresh;
+
+  Future<String?> _get(String key) => fresh ? kv.getFresh(key) : kv.get(key);
+  String _ver(String c) => 'lanes/ver/$c';
+  String _histUsers(String c) => 'lanes/histusers/$c';
+
+  /// A counter that changes whenever a lane fact of [circleId] is written.
+  Future<int> version(String circleId) async => int.tryParse(await kv.getFresh(_ver(circleId)) ?? '') ?? 0;
+  Future<void> _bumpVer(String circleId) async => kv.set(_ver(circleId), '${await version(circleId) + 1}');
 
   String _own(String c) => 'lanes/own/$c';
   String _policy(String c) => 'lanes/policy/$c';
@@ -83,7 +94,7 @@ class LaneStore {
   String _hist(String c, String u) => 'lanes/hist/$c/$u';
 
   Future<Map<String, dynamic>?> _json(String key) async {
-    final String? raw = await kv.get(key);
+    final String? raw = await _get(key);
     if (raw == null || raw.isEmpty) return null;
     try {
       final Object? d = jsonDecode(raw);
@@ -102,16 +113,21 @@ class LaneStore {
     return LaneChoice.phone;
   }
 
-  Future<void> setOwnLane(String circleId, LaneChoice c) =>
-      kv.set(_own(circleId), jsonEncode(<String, dynamic>{'l': c.line, 'g': c.skGen}));
+  Future<void> setOwnLane(String circleId, LaneChoice c) async {
+    await kv.set(_own(circleId), jsonEncode(<String, dynamic>{'l': c.line, 'g': c.skGen}));
+    await _bumpVer(circleId);
+  }
 
   // ---- policy
   Future<StoredPolicy> policy(String circleId) async => StoredPolicy.fromJson(await _json(_policy(circleId)));
-  Future<void> setPolicy(String circleId, StoredPolicy p) => kv.set(_policy(circleId), jsonEncode(p.toJson()));
+  Future<void> setPolicy(String circleId, StoredPolicy p) async {
+    await kv.set(_policy(circleId), jsonEncode(p.toJson()));
+    await _bumpVer(circleId);
+  }
 
   // ---- status
   Future<LaneStatus> status(String circleId) async {
-    final String? raw = await kv.get(_status(circleId));
+    final String? raw = await _get(_status(circleId));
     for (final LaneStatus s in LaneStatus.values) {
       if (s.name == raw) return s;
     }
@@ -122,12 +138,33 @@ class LaneStore {
 
   // ---- pending local opt-out (effective at once, before the server confirms)
   Future<String?> pendingPhoneRef(String circleId) async => (await _json(_pending(circleId)))?['ref'] as String?;
-  Future<void> setPendingPhone(String circleId, String refHex) => kv.set(_pending(circleId), jsonEncode(<String, dynamic>{'ref': refHex}));
-  Future<void> clearPending(String circleId) => kv.remove(_pending(circleId));
+  Future<void> setPendingPhone(String circleId, String refHex) async {
+    await kv.set(_pending(circleId), jsonEncode(<String, dynamic>{'ref': refHex, 'at': DateTime.now().millisecondsSinceEpoch}));
+    await _bumpVer(circleId);
+  }
+
+  String _pendingBody(String c) => 'lanes/pendingbody/$c';
+
+  /// The signed request of an opt-out that the server has not accepted yet (kept so it can be sent again).
+  Future<Map<String, dynamic>?> pendingBody(String circleId) => _json(_pendingBody(circleId));
+  Future<void> setPendingBody(String circleId, Map<String, dynamic> body) => kv.set(_pendingBody(circleId), jsonEncode(body));
+  Future<void> clearPendingBody(String circleId) => kv.remove(_pendingBody(circleId));
+
+  Future<void> clearPending(String circleId) async {
+    await kv.remove(_pendingBody(circleId));
+    await kv.remove(_pending(circleId));
+    await _bumpVer(circleId);
+  }
+
+  /// When the local opt-out was made while the server has not confirmed it yet, else null.
+  Future<DateTime?> pendingSince(String circleId) async {
+    final int? at = ((await _json(_pending(circleId)))?['at'] as num?)?.toInt();
+    return at == null ? null : DateTime.fromMillisecondsSinceEpoch(at);
+  }
 
   // ---- members
   Future<List<StoredMember>> members(String circleId) async {
-    final String? raw = await kv.get(_members(circleId));
+    final String? raw = await _get(_members(circleId));
     if (raw == null || raw.isEmpty) return <StoredMember>[];
     try {
       return <StoredMember>[
@@ -146,7 +183,7 @@ class LaneStore {
 
   // ---- per-author pref history (for badges of received items)
   Future<List<({int seq, int lane, int sinceMs})>> history(String circleId, String userId) async {
-    final String? raw = await kv.get(_hist(circleId, userId));
+    final String? raw = await _get(_hist(circleId, userId));
     if (raw == null || raw.isEmpty) return <({int seq, int lane, int sinceMs})>[];
     try {
       return <({int seq, int lane, int sinceMs})>[
@@ -166,20 +203,41 @@ class LaneStore {
     h.add((seq: seq, lane: lane, sinceMs: sinceMs));
     final List<({int seq, int lane, int sinceMs})> kept = h.length > 50 ? h.sublist(h.length - 50) : h;
     await kv.set(_hist(circleId, userId), jsonEncode(<List<int>>[for (final e in kept) <int>[e.seq, e.lane, e.sinceMs]]));
+    final Set<String> users = await _histUserSet(circleId)
+      ..add(userId);
+    await kv.set(_histUsers(circleId), jsonEncode(users.toList()));
+  }
+
+  Future<Set<String>> _histUserSet(String circleId) async {
+    try {
+      return <String>{for (final dynamic u in jsonDecode(await _get(_histUsers(circleId)) ?? '[]') as List<dynamic>) '$u'};
+    } catch (_) {
+      return <String>{};
+    }
   }
 
   /// Forgets every stored lane fact of a circle (no longer private / left).
   Future<void> clearCircle(String circleId) async {
-    for (final String k in <String>[_own(circleId), _policy(circleId), _status(circleId), _pending(circleId), _members(circleId)]) {
+    // The pref history of every member we know of goes too (it names who chose what).
+    final Set<String> users = <String>{for (final StoredMember m in await members(circleId)) m.userId, ...await _histUserSet(circleId)};
+    await kv.remove(_histUsers(circleId));
+    for (final String u in users) {
+      await kv.remove(_hist(circleId, u));
+    }
+    for (final String k in <String>[_own(circleId), _policy(circleId), _status(circleId), _pending(circleId), _pendingBody(circleId), _members(circleId)]) {
       await kv.remove(k);
     }
+    await _bumpVer(circleId);
   }
 }
 
 /// [LaneSource] over the persisted, verified facts.
-class KvLaneSource implements LaneSource {
-  KvLaneSource(ChannelKv kv) : store = LaneStore(kv);
+class KvLaneSource implements LaneSource, VersionedLaneSource {
+  KvLaneSource(ChannelKv kv) : store = LaneStore(kv, fresh: true);
   final LaneStore store;
+
+  @override
+  Future<int> laneVersion(String circleId) => store.version(circleId);
 
   @override
   Future<LaneChoice> ownLane(String circleId) async {

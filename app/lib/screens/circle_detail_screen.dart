@@ -13,7 +13,7 @@ import '../theme/app_theme.dart';
 import '../widgets/ds/ds.dart';
 import '../widgets/circle_widgets.dart';
 import '../widgets/trusted_server_prompt.dart';
-import 'trusted_server_screen.dart';
+import 'processing_screen.dart';
 
 /// Extension presets for an admin, label to hours.
 const Map<String, int> kTempCircleExtensions = <String, int>{
@@ -140,9 +140,9 @@ class _CircleDetailScreenState extends State<CircleDetailScreen> {
         await PrivateRuntime.instance.setCircles(await _service.listCircles());
       } catch (_) {}
       if (on && choice == PrivateModeChoice.trusted && mounted) {
-        // Lead the person to the explicit consent screen. Nothing is sent here.
+        // Lead the person to the processing screen, where each choice needs an explicit confirmation. Nothing is signed here.
         await Navigator.of(context).push<void>(MaterialPageRoute<void>(
-            builder: (_) => TrustedServerScreen(circle: _circle, service: svc)));
+            builder: (_) => ProcessingScreen(circle: _circle, service: svc)));
       }
     } on NeedsCrossSignatureException catch (e) {
       if (mounted) {

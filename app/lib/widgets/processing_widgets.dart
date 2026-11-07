@@ -79,10 +79,16 @@ class ProcessingCopy {
   static const String upgradeBody =
       'This circle uses the old trusted-server mode: the server holds the circle key and can read everything up to now.\n\n'
       '- Everything up to now stays readable by the server.\n'
-      '- From now on only data that members choose to share with the server is readable by it. Members who consented before '
-      'are carried over for 30 days and then must confirm again on their phone; everyone else starts on their phone only.\n'
       '- A new circle key is made that the server does not get.\n'
+      '- Nobody is carried over. After the upgrade EVERY member must open the app and sign their own choice again '
+      '(server processing or phone only). A member\'s data reaches the server only after they have done that.\n'
+      '- Until each member has signed, the server-side features for that member pause: admin map, history, trips, driving '
+      'reports, weekly summary and Dawarich export. Their phone keeps everything working in the app meanwhile.\n'
       '- Every member needs the latest app. The upgrade cannot be undone.\n\n$operatorCanRead';
+  static const String legacyStatusTitle = 'Old trusted-server mode';
+  static const String legacyStatusBody =
+      'The server holds the circle key of this circle and can read it, and it keeps readable copies, while every member has '
+      'allowed it. This is NOT end-to-end encryption against the server. An admin can upgrade the circle so each member decides for themselves.';
   static const String endLegacyTitle = 'End the server\'s access to old data?';
   static const String endLegacyBody =
       'After this the server can no longer open any data of the old circle key. Do this only when the server has already '

@@ -177,7 +177,7 @@ class _ProcessingPolicyScreenState extends State<ProcessingPolicyScreen> {
                 canEdit ? () => _setOptOut(E2ee.optOutAllowed) : null),
             _option(const Key('opt-required'), 'No, server processing is required',
                 'For circles that need it, for example a parent managing a child\'s phone. New members see this before they join. '
-                    'Existing members must consent on their own phone or leave.',
+                    'Existing members must consent on their own phone or leave. This applies to child accounts too.',
                 s.policy.memberOptOut == E2ee.optOutRequiredServer, canEdit ? () => _setOptOut(E2ee.optOutRequiredServer) : null),
           ]),
           const DsSectionHeader('Default shown to new members', padding: EdgeInsets.fromLTRB(0, AppSpace.xl, 0, AppSpace.xs)),
