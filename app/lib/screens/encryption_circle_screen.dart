@@ -8,6 +8,7 @@ import '../services/e2ee/e2ee_service.dart';
 import '../services/e2ee/e2ee_trust.dart';
 import '../theme/app_theme.dart';
 import '../widgets/ds/ds.dart';
+import '../widgets/trusted_server_prompt.dart';
 import 'encryption_widgets.dart';
 import 'member_safety_screen.dart';
 import 'security_widgets.dart';
@@ -17,9 +18,10 @@ import 'viewer_approval_screen.dart';
 /// One circle's encryption: status, new-key duty, requests from new/replacement
 /// keys ("Waiting for approval"), and every member's verification state.
 class EncryptionCircleScreen extends StatefulWidget {
-  const EncryptionCircleScreen({super.key, required this.circle, this.service});
+  const EncryptionCircleScreen({super.key, required this.circle, this.service, this.promptStore = const TrustedServerPromptStore()});
   final Circle circle;
   final E2eeService? service;
+  final TrustedServerPromptStore promptStore;
 
   @override
   State<EncryptionCircleScreen> createState() => _EncryptionCircleScreenState();
@@ -34,6 +36,7 @@ class _EncryptionCircleScreenState extends State<EncryptionCircleScreen> {
   bool _loading = true;
   bool _busy = false;
   String? _error;
+  bool _showTrustPrompt = false;
 
   @override
   void initState() {
@@ -58,8 +61,20 @@ class _EncryptionCircleScreenState extends State<EncryptionCircleScreen> {
       for (final CircleE2eeMember m in st.members) {
         t[m.userId] = await _svc.trust.assess(m.userId, m.devices.map((DeviceKey d) => d.fingerprint));
       }
+      // Admin recommends trusting the server, its key is pinned, and this person
+      // has not allowed it (and has not dismissed the notice). Never nags again.
+      bool prompt = false;
+      if (st.isPrivate && !widget.circle.e2eeServerMember) {
+        try {
+          if (await _svc.api.trustedServerDefault()) {
+            final ServerMemberState ss = await _svc.api.serverMemberState(widget.circle.id);
+            prompt = ss.enabled && ss.device != null && !ss.myConsent && !await widget.promptStore.dismissed(widget.circle.id);
+          }
+        } catch (_) {}
+      }
       if (!mounted) return;
       setState(() {
+        _showTrustPrompt = prompt;
         _state = st;
         _pending = p;
         _trust = t;
@@ -157,6 +172,20 @@ class _EncryptionCircleScreenState extends State<EncryptionCircleScreen> {
                 : 'Turn on "Private circle" in the circle\'s settings (admins only) to set up end-to-end keys.',
             style: AppType.secondary,
           ),
+          if (_showTrustPrompt) ...<Widget>[
+            const SizedBox(height: AppSpace.lg),
+            TrustedServerPrompt(
+              onOpen: () async {
+                await Navigator.of(context).push<void>(MaterialPageRoute<void>(
+                    builder: (_) => TrustedServerScreen(circle: widget.circle, service: _svc)));
+                if (mounted) _load();
+              },
+              onDismiss: () async {
+                await widget.promptStore.dismiss(widget.circle.id);
+                if (mounted) setState(() => _showTrustPrompt = false);
+              },
+            ),
+          ],
           if (st.isPrivate && st.rekeyRequired) ...<Widget>[
             const SizedBox(height: AppSpace.lg),
             AlarmBanner(

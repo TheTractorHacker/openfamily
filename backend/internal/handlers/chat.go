@@ -3,12 +3,12 @@ package handlers
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"image"
 	"image/jpeg"
 	"image/png"
 	"io"
-	"encoding/json"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -38,14 +38,30 @@ const (
 )
 
 type chatMessageOut struct {
-	ID         string    `json:"id"`
-	Seq        int64     `json:"seq"`
-	CircleID   string    `json:"circle_id"`
-	SenderID   string    `json:"sender_id"`
-	SenderName string    `json:"sender_name"`
-	Body       string    `json:"body"`
-	HasImage   bool      `json:"has_image"`
-	CreatedAt  time.Time `json:"created_at"`
+	ID         string     `json:"id"`
+	Seq        int64      `json:"seq"`
+	CircleID   string     `json:"circle_id"`
+	SenderID   string     `json:"sender_id"`
+	SenderName string     `json:"sender_name"`
+	Body       string     `json:"body"`
+	HasImage   bool       `json:"has_image"`
+	CreatedAt  time.Time  `json:"created_at"`
+	EditedAt   *time.Time `json:"edited_at,omitempty"`
+}
+
+// wsChatDelete / the "chat_edit" frame (a wsChat) keep open screens in step
+// with deletions and edits.
+type wsChatDelete struct {
+	Type     string `json:"type"`
+	CircleID string `json:"circle_id"`
+	ID       string `json:"id"`
+	Seq      int64  `json:"seq"`
+}
+
+const chatCols = `cm.id, cm.seq, cm.circle_id, cm.sender_id, COALESCE(u.name, ''), cm.body, cm.image_data IS NOT NULL, cm.created_at, cm.edited_at`
+
+func scanChat(row pgx.Row, c *chatMessageOut) error {
+	return row.Scan(&c.ID, &c.Seq, &c.CircleID, &c.SenderID, &c.SenderName, &c.Body, &c.HasImage, &c.CreatedAt, &c.EditedAt)
 }
 
 // wsChatRead tells the circle that a member has read up to Seq (drives the
@@ -89,6 +105,16 @@ func (s *Server) ListChatMessages(w http.ResponseWriter, r *http.Request) {
 		}
 		limit = min(n, chatPageMax)
 	}
+	// after: catch-up after a reconnect (only messages newer than this seq).
+	after := int64(0)
+	if v := r.URL.Query().Get("after"); v != "" {
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || n < 0 {
+			writeError(w, http.StatusBadRequest, "invalid after")
+			return
+		}
+		after = n
+	}
 	before := int64(0)
 	if v := r.URL.Query().Get("before"); v != "" {
 		n, err := strconv.ParseInt(v, 10, 64)
@@ -99,11 +125,11 @@ func (s *Server) ListChatMessages(w http.ResponseWriter, r *http.Request) {
 		before = n
 	}
 	rows, err := s.Pool.Query(r.Context(), `
-		SELECT cm.id, cm.seq, cm.circle_id, cm.sender_id, COALESCE(u.name, ''), cm.body, cm.image_data IS NOT NULL, cm.created_at
+		SELECT `+chatCols+`
 		FROM chat_messages cm JOIN users u ON u.id = cm.sender_id
-		WHERE cm.circle_id = $1 AND ($2::bigint = 0 OR cm.seq < $2)
+		WHERE cm.circle_id = $1 AND ($2::bigint = 0 OR cm.seq < $2) AND cm.seq > $4
 		ORDER BY cm.seq DESC
-		LIMIT $3`, m.CircleID, before, limit+1)
+		LIMIT $3`, m.CircleID, before, limit+1, after)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load messages")
 		return
@@ -112,7 +138,7 @@ func (s *Server) ListChatMessages(w http.ResponseWriter, r *http.Request) {
 	out := []chatMessageOut{}
 	for rows.Next() {
 		var c chatMessageOut
-		if err := rows.Scan(&c.ID, &c.Seq, &c.CircleID, &c.SenderID, &c.SenderName, &c.Body, &c.HasImage, &c.CreatedAt); err != nil {
+		if err := scanChat(rows, &c); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to load messages")
 			return
 		}
@@ -140,6 +166,75 @@ func (s *Server) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
+		Body     string `json:"body"`
+		ClientID string `json:"client_id"`
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	body, ok := validChatBody(w, req.Body)
+	if !ok {
+		return
+	}
+	if !validClientID(req.ClientID) {
+		writeError(w, http.StatusBadRequest, "invalid client_id")
+		return
+	}
+	// A retry of a send that already succeeded returns the stored message
+	// (no duplicate, no second push, not counted against the rate limit).
+	if req.ClientID != "" {
+		var prior chatMessageOut
+		if err := scanChat(s.Pool.QueryRow(r.Context(), `SELECT `+chatCols+`
+			FROM chat_messages cm JOIN users u ON u.id = cm.sender_id
+			WHERE cm.circle_id = $1 AND cm.sender_id = $2 AND cm.client_id = $3`,
+			m.CircleID, uid, req.ClientID), &prior); err == nil {
+			writeJSON(w, http.StatusOK, prior)
+			return
+		}
+	}
+	if !s.allowKey(w, "chat:send:"+uid, chatSendPerMinute, chatSendWindow) {
+		return
+	}
+	s.storeAndFanOutChat(w, r, m.CircleID, uid, body, nil, "", req.ClientID)
+}
+
+func validClientID(id string) bool {
+	return utf8.RuneCountInString(id) <= 64 && utf8.ValidString(id) && !strings.ContainsRune(id, 0)
+}
+
+// validChatBody trims and validates text; it writes the error response itself.
+func validChatBody(w http.ResponseWriter, raw string) (string, bool) {
+	body := strings.TrimSpace(raw)
+	if body == "" {
+		writeError(w, http.StatusBadRequest, "message is empty")
+		return "", false
+	}
+	if !utf8.ValidString(body) || strings.ContainsRune(body, 0) {
+		writeError(w, http.StatusBadRequest, "invalid message")
+		return "", false
+	}
+	if utf8.RuneCountInString(body) > maxChatBodyLen {
+		writeError(w, http.StatusRequestEntityTooLarge, "message is too long (max 2000 characters)")
+		return "", false
+	}
+	return body, true
+}
+
+// EditChatMessage lets the sender change the text (or photo caption) of their
+// own message. Members only; everyone live gets a chat_edit frame.
+func (s *Server) EditChatMessage(w http.ResponseWriter, r *http.Request) {
+	uid, m, ok := s.requireCircleMember(w, r)
+	if !ok {
+		return
+	}
+	id := chi.URLParam(r, "msgId")
+	if !circles.ValidID(id) {
+		writeError(w, http.StatusNotFound, "message not found")
+		return
+	}
+	var req struct {
 		Body string `json:"body"`
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
@@ -148,42 +243,98 @@ func (s *Server) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	body := strings.TrimSpace(req.Body)
-	if body == "" {
-		writeError(w, http.StatusBadRequest, "message is empty")
+	var hasImage bool
+	if err := s.Pool.QueryRow(r.Context(), `SELECT image_data IS NOT NULL FROM chat_messages
+		WHERE id = $1 AND circle_id = $2 AND sender_id = $3`, id, m.CircleID, uid).Scan(&hasImage); err != nil {
+		writeError(w, http.StatusNotFound, "message not found")
 		return
 	}
-	if !utf8.ValidString(body) || strings.ContainsRune(body, 0) {
-		writeError(w, http.StatusBadRequest, "invalid message")
+	if body == "" && hasImage {
+		// A photo may lose its caption.
+		if !s.allowKey(w, "chat:send:"+uid, chatSendPerMinute, chatSendWindow) {
+			return
+		}
+	} else {
+		var ok bool
+		if body, ok = validChatBody(w, body); !ok {
+			return
+		}
+		if !s.allowKey(w, "chat:send:"+uid, chatSendPerMinute, chatSendWindow) {
+			return
+		}
+	}
+	var msg chatMessageOut
+	err := scanChat(s.Pool.QueryRow(r.Context(), `
+		WITH up AS (
+			UPDATE chat_messages SET body = $4, edited_at = now()
+			WHERE id = $1 AND circle_id = $2 AND sender_id = $3
+			RETURNING *
+		)
+		SELECT cm.id, cm.seq, cm.circle_id, cm.sender_id, COALESCE(u.name, ''), cm.body, cm.image_data IS NOT NULL, cm.created_at, cm.edited_at
+		FROM up cm JOIN users u ON u.id = cm.sender_id`, id, m.CircleID, uid, body), &msg)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to edit message")
 		return
 	}
-	if utf8.RuneCountInString(body) > maxChatBodyLen {
-		writeError(w, http.StatusRequestEntityTooLarge, "message is too long (max 2000 characters)")
+	if frame, err := json.Marshal(wsChat{Type: "chat_edit", CircleID: msg.CircleID, Message: msg}); err == nil {
+		s.hub.broadcastCircles([]string{msg.CircleID}, "", frame)
+	}
+	writeJSON(w, http.StatusOK, msg)
+}
+
+// DeleteChatMessage removes a message for good (the row, text and photo).
+// The sender can delete their own; a circle admin can delete anyone's
+// (moderation). Anyone else gets 404.
+func (s *Server) DeleteChatMessage(w http.ResponseWriter, r *http.Request) {
+	uid, m, ok := s.requireCircleMember(w, r)
+	if !ok {
 		return
 	}
-	if !s.allowKey(w, "chat:send:"+uid, chatSendPerMinute, chatSendWindow) {
+	id := chi.URLParam(r, "msgId")
+	if !circles.ValidID(id) {
+		writeError(w, http.StatusNotFound, "message not found")
 		return
 	}
-	s.storeAndFanOutChat(w, r, m.CircleID, uid, body, nil, "")
+	var seq int64
+	err := s.Pool.QueryRow(r.Context(), `
+		DELETE FROM chat_messages
+		WHERE id = $1 AND circle_id = $2 AND (sender_id = $3 OR $4)
+		RETURNING seq`, id, m.CircleID, uid, m.Role == circles.RoleAdmin).Scan(&seq)
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "message not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete message")
+		return
+	}
+	if m.Role == circles.RoleAdmin {
+		s.auditCircle(r.Context(), uid, m.CircleID, "chat.delete", "message "+id, clientIP(r))
+	}
+	if frame, err := json.Marshal(wsChatDelete{Type: "chat_delete", CircleID: m.CircleID, ID: id, Seq: seq}); err == nil {
+		s.hub.broadcastCircles([]string{m.CircleID}, "", frame)
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // storeAndFanOutChat inserts a message (text and/or photo), marks it read for
 // the sender, broadcasts the live frame and pushes to the other members.
-func (s *Server) storeAndFanOutChat(w http.ResponseWriter, r *http.Request, circleID, uid, body string, img []byte, imgType string) {
+func (s *Server) storeAndFanOutChat(w http.ResponseWriter, r *http.Request, circleID, uid, body string, img []byte, imgType, clientID string) {
 	var msg chatMessageOut
 	var imgArg, typeArg any
 	if img != nil {
 		imgArg, typeArg = img, imgType
 	}
-	err := s.Pool.QueryRow(r.Context(), `
+	err := scanChat(s.Pool.QueryRow(r.Context(), `
 		WITH ins AS (
-			INSERT INTO chat_messages (circle_id, sender_id, body, image_data, image_content_type)
-			VALUES ($1, $2, $3, $4, $5)
-			RETURNING id, seq, circle_id, sender_id, body, image_data IS NOT NULL AS has_image, created_at
+			INSERT INTO chat_messages (circle_id, sender_id, body, image_data, image_content_type, client_id)
+			VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''))
+			RETURNING *
 		)
-		SELECT ins.id, ins.seq, ins.circle_id, ins.sender_id, COALESCE(u.name, ''), ins.body, ins.has_image, ins.created_at
-		FROM ins JOIN users u ON u.id = ins.sender_id`,
-		circleID, uid, body, imgArg, typeArg,
-	).Scan(&msg.ID, &msg.Seq, &msg.CircleID, &msg.SenderID, &msg.SenderName, &msg.Body, &msg.HasImage, &msg.CreatedAt)
+		SELECT cm.id, cm.seq, cm.circle_id, cm.sender_id, COALESCE(u.name, ''), cm.body, cm.image_data IS NOT NULL, cm.created_at, cm.edited_at
+		FROM ins cm JOIN users u ON u.id = cm.sender_id`,
+		circleID, uid, body, imgArg, typeArg, clientID,
+	), &msg)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to send message")
 		return
@@ -467,7 +618,7 @@ func (s *Server) SendChatPhoto(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid caption")
 		return
 	}
-	s.storeAndFanOutChat(w, r, m.CircleID, uid, caption, buf.Bytes(), ct)
+	s.storeAndFanOutChat(w, r, m.CircleID, uid, caption, buf.Bytes(), ct, "")
 }
 
 // GetChatPhoto serves a photo message to members of its circle only. A

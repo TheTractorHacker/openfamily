@@ -274,7 +274,8 @@ class _LocationTabViewState extends State<LocationTabView> {
                 orElse: () => widget.circles.first));
     if (c == null) return null;
     return () => Navigator.of(context).push(MaterialPageRoute<void>(
-          builder: (_) => ChatScreen(circleId: c.id, circleName: c.name),
+          builder: (_) => ChatScreen(
+              circleId: c.id, circleName: c.name, isAdmin: c.isAdmin),
         ));
   }
 

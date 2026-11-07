@@ -25,6 +25,10 @@ abstract class E2eeApi {
   // Trusted-server mode. Defaults keep older fakes (and servers without the
   // mode) working: the mode simply reports as off.
   Future<ServerMemberState> serverMemberState(String circleId) async => ServerMemberState.off;
+
+  /// The admin's "trust this server by default" recommendation. Only a hint for
+  /// the UI: it never grants or sends anything. False on older servers.
+  Future<bool> trustedServerDefault() async => false;
   Future<void> putServerConsent(String circleId, Map<String, dynamic> body) async =>
       throw UnsupportedError('server mode is not available');
   Future<void> deleteServerConsent(String circleId) async {}
@@ -130,6 +134,12 @@ class ApiE2eeApi implements E2eeApi {
   @override
   Future<ServerMemberState> serverMemberState(String circleId) async => ServerMemberState.fromJson(
       (await ApiClient.get('/circles/$circleId/e2ee/server-member')) as Map<String, dynamic>);
+
+  @override
+  Future<bool> trustedServerDefault() async {
+    final dynamic r = await ApiClient.get('/e2ee/server-device');
+    return r is Map<String, dynamic> && r['trusted_server_default'] == true;
+  }
 
   @override
   Future<void> putServerConsent(String circleId, Map<String, dynamic> body) =>

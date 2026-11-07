@@ -771,3 +771,62 @@ func TestServerPurgeKeepsPositionsFromOtherSources(t *testing.T) {
 		t.Fatalf("plaintext position was removed: %v", lat)
 	}
 }
+
+// ------------------------------------------------ admin "trusted by default"
+
+func TestTrustedServerDefaultIsOnlyARecommendation(t *testing.T) {
+	e := newSrvEnv(t)
+	ctx := context.Background()
+	if err := e.srv.EnsureThemeSchema(ctx); err != nil {
+		t.Fatal(err)
+	}
+	e.route("GET", "/api/admin/settings/e2ee-trusted-default", e.srv.AdminGetTrustedServerDefault)
+	e.route("PUT", "/api/admin/settings/e2ee-trusted-default", e.srv.AdminPutTrustedServerDefault)
+	reset := func() { _, _ = e.pool.Exec(ctx, `UPDATE app_theme_settings SET e2ee_trusted_server_default = FALSE WHERE id = 1`) }
+	reset()
+	t.Cleanup(reset)
+
+	dflt := func() bool {
+		_, m, raw := e.do("B", "GET", "/e2ee/server-device", nil)
+		v, ok := m["trusted_server_default"].(bool)
+		if !ok {
+			t.Fatalf("missing trusted_server_default: %s", raw)
+		}
+		return v
+	}
+	if dflt() {
+		t.Fatal("default must be false")
+	}
+	m := e.mustCode("A", "PUT", "/api/admin/settings/e2ee-trusted-default", map[string]any{"trusted_server_default": true}, 200)
+	if m["trusted_server_default"] != true || m["server_device_pinned"] != false || m["token_configured"] != true {
+		t.Fatalf("put: %v", m)
+	}
+	e.mustCode("A", "PUT", "/api/admin/settings/e2ee-trusted-default", map[string]any{}, 400)
+	// Set but no pinned server device: not exposed as true.
+	if dflt() {
+		t.Fatal("exposed true without a pinned server device")
+	}
+	e.pin()
+	if !dflt() {
+		t.Fatal("not exposed with token and pinned device")
+	}
+	// It grants nothing: no consent, circle is not a server member.
+	if e.serverMember() {
+		t.Fatal("the default made a circle a server member")
+	}
+	var n int
+	_ = e.pool.QueryRow(ctx, `SELECT count(*) FROM e2ee_server_consents`).Scan(&n)
+	if n != 0 {
+		t.Fatalf("default created %d consents", n)
+	}
+	var audits int
+	_ = e.pool.QueryRow(ctx, `SELECT count(*) FROM audit_log WHERE action = 'admin.e2ee_trusted_default_changed'`).Scan(&audits)
+	if audits < 1 {
+		t.Fatal("change was not audit-logged")
+	}
+	// Without the ingest token the value is never exposed.
+	t.Setenv("E2EE_SERVER_INGEST_TOKEN", "")
+	if dflt() {
+		t.Fatal("exposed true without the ingest token")
+	}
+}

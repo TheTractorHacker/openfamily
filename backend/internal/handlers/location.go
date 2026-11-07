@@ -52,6 +52,10 @@ func (s *Server) IngestLocation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "unauthenticated")
 		return
 	}
+	// 426 for apps below the supported minimum (only when enforcement is on).
+	if s.refuseUnsupportedApp(w, r) {
+		return
+	}
 	if s.LocationLimit != nil && !s.LocationLimit.Allow("loc:"+claims.UserID, ingestPerWindow, ingestWindow) {
 		writeError(w, http.StatusTooManyRequests, "too many location reports")
 		return

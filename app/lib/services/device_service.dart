@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 import 'api_client.dart';
+import 'app_compat.dart';
 import 'background_credential_store.dart';
 import 'token_storage.dart';
 
@@ -45,7 +46,7 @@ class DeviceService {
     final Map<String, dynamic> device = await ApiClient.registerDevice(
       platform: _platform(),
       name: _deviceName(),
-      appVersion: _appVersion,
+      appVersion: AppCompat.version.isNotEmpty ? AppCompat.version : _appVersion,
     );
     final String id = device['id'] as String;
     await TokenStorage.saveDeviceId(id);

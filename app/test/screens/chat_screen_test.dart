@@ -33,14 +33,38 @@ class _FakeChat implements ChatService {
   Future<String> myUserId() async => 'me';
 
   @override
-  Future<ChatPage> messages(String circleId, {int? before, int limit = 50}) async {
-    return ChatPage(history, null, readers);
+  Future<ChatPage> messages(String circleId,
+      {int? before, int? after, int limit = 50}) async {
+    final List<ChatMessage> out = after == null
+        ? history
+        : history.where((ChatMessage m) => m.seq > after).toList();
+    return ChatPage(out, null, readers);
+  }
+
+  final List<String?> clientIds = <String?>[];
+  final List<String> edited = <String>[];
+  final List<String> deleted = <String>[];
+
+  @override
+  Future<ChatMessage> edit(String circleId, String messageId, String body) async {
+    edited.add('$messageId=$body');
+    return ChatMessage(
+      id: messageId, seq: 1, circleId: circleId, senderId: 'me',
+      senderName: 'Me', body: body, createdAt: DateTime(2026, 1, 1, 9, 1),
+      editedAt: DateTime(2026, 1, 1, 9, 5),
+    );
   }
 
   @override
-  Future<ChatMessage> send(String circleId, String body) async {
+  Future<void> delete(String circleId, String messageId) async =>
+      deleted.add(messageId);
+
+  @override
+  Future<ChatMessage> send(String circleId, String body,
+      {String? clientId}) async {
     if (sendError != null) throw sendError!;
     sent.add(body);
+    clientIds.add(clientId);
     return _msg(100 + sent.length, 'me', body);
   }
 
@@ -65,7 +89,11 @@ class _FakeChat implements ChatService {
 }
 
 Widget _app(ChatService svc, Stream<ChatMessage> live,
-        {Stream<(String, ChatReader)>? reads,
+        {Stream<ChatMessage>? edits,
+        Stream<(String, String)>? deletes,
+        Stream<void>? reconnects,
+        bool isAdmin = false,
+        Stream<(String, ChatReader)>? reads,
         Future<Uint8List?> Function(ImageSource)? picker}) => MaterialApp(
       theme: buildLightTheme(),
       home: ChatScreen(
@@ -75,6 +103,10 @@ Widget _app(ChatService svc, Stream<ChatMessage> live,
         incoming: live,
         reads: reads,
         picker: picker,
+        edits: edits ?? const Stream<ChatMessage>.empty(),
+        deletes: deletes ?? const Stream<(String, String)>.empty(),
+        reconnects: reconnects ?? const Stream<void>.empty(),
+        isAdmin: isAdmin,
       ),
     );
 
@@ -272,16 +304,126 @@ void main() {
     await t.pumpAndSettle();
     expect(svc.photosSent, 1);
   });
+
+  testWidgets('long-press edits my own message', (WidgetTester t) async {
+    final _FakeChat svc = _FakeChat(<ChatMessage>[_msg(1, 'me', 'Helo')]);
+    final StreamController<ChatMessage> live = StreamController.broadcast();
+    addTearDown(live.close);
+    await t.pumpWidget(_app(svc, live.stream));
+    await t.pumpAndSettle();
+    await t.longPress(find.text('Helo'));
+    await t.pumpAndSettle();
+    await t.tap(find.byKey(const Key('chat-action-edit')));
+    await t.pumpAndSettle();
+    expect(find.byKey(const Key('chat-editing')), findsOneWidget);
+    await t.enterText(find.byKey(const Key('chat-input')), 'Hello');
+    await t.pump();
+    await t.tap(find.byKey(const Key('chat-send')));
+    await t.pumpAndSettle();
+    expect(svc.edited, <String>['id1=Hello']);
+    expect(svc.sent, isEmpty);
+    expect(find.text('Hello'), findsOneWidget);
+    expect(find.textContaining('edited'), findsOneWidget);
+    expect(find.byKey(const Key('chat-editing')), findsNothing);
+  });
+
+  testWidgets('delete asks first; others cannot be deleted unless admin',
+      (WidgetTester t) async {
+    final _FakeChat svc =
+        _FakeChat(<ChatMessage>[_msg(2, 'mom', 'Hers'), _msg(1, 'me', 'Mine')]);
+    final StreamController<ChatMessage> live = StreamController.broadcast();
+    addTearDown(live.close);
+    await t.pumpWidget(_app(svc, live.stream));
+    await t.pumpAndSettle();
+    await t.longPress(find.text('Hers'));
+    await t.pumpAndSettle();
+    expect(find.byKey(const Key('chat-action-delete')), findsNothing);
+
+    await t.longPress(find.text('Mine'));
+    await t.pumpAndSettle();
+    await t.tap(find.byKey(const Key('chat-action-delete')));
+    await t.pumpAndSettle();
+    await t.tap(find.byKey(const Key('chat-delete-confirm')));
+    await t.pumpAndSettle();
+    expect(svc.deleted, <String>['id1']);
+    expect(find.text('Mine'), findsNothing);
+  });
+
+  testWidgets('admin can delete someone else\'s message', (WidgetTester t) async {
+    final _FakeChat svc = _FakeChat(<ChatMessage>[_msg(1, 'mom', 'Rude')]);
+    final StreamController<ChatMessage> live = StreamController.broadcast();
+    addTearDown(live.close);
+    await t.pumpWidget(_app(svc, live.stream, isAdmin: true));
+    await t.pumpAndSettle();
+    await t.longPress(find.text('Rude'));
+    await t.pumpAndSettle();
+    expect(find.byKey(const Key('chat-action-edit')), findsNothing);
+    await t.tap(find.byKey(const Key('chat-action-delete')));
+    await t.pumpAndSettle();
+    await t.tap(find.byKey(const Key('chat-delete-confirm')));
+    await t.pumpAndSettle();
+    expect(svc.deleted, <String>['id1']);
+  });
+
+  testWidgets('live delete and edit frames update the list; reconnect catches up',
+      (WidgetTester t) async {
+    final _FakeChat svc = _FakeChat(<ChatMessage>[_msg(2, 'mom', 'Old'), _msg(1, 'mom', 'Gone')]);
+    final StreamController<ChatMessage> live = StreamController.broadcast();
+    final StreamController<ChatMessage> edits = StreamController.broadcast();
+    final StreamController<(String, String)> dels = StreamController.broadcast();
+    final StreamController<void> recon = StreamController.broadcast();
+    addTearDown(live.close);
+    addTearDown(edits.close);
+    addTearDown(dels.close);
+    addTearDown(recon.close);
+    await t.pumpWidget(_app(svc, live.stream,
+        edits: edits.stream, deletes: dels.stream, reconnects: recon.stream));
+    await t.pumpAndSettle();
+    dels.add(('c1', 'id1'));
+    dels.add(('other', 'id2'));
+    edits.add(_msg(2, 'mom', 'New'));
+    await t.pumpAndSettle();
+    expect(find.text('Gone'), findsNothing);
+    expect(find.text('Old'), findsNothing);
+    expect(find.text('New'), findsOneWidget);
+
+    svc.history.insert(0, _msg(3, 'mom', 'Missed while offline'));
+    recon.add(null);
+    await t.pumpAndSettle();
+    expect(find.text('Missed while offline'), findsOneWidget);
+  });
+
+  testWidgets('a retry after a failed send reuses the client id',
+      (WidgetTester t) async {
+    final _FakeChat svc = _FakeChat(<ChatMessage>[]);
+    final StreamController<ChatMessage> live = StreamController.broadcast();
+    addTearDown(live.close);
+    await t.pumpWidget(_app(svc, live.stream));
+    await t.pumpAndSettle();
+    await t.enterText(find.byKey(const Key('chat-input')), 'Ping');
+    await t.pump();
+    svc.sendError = const ChatException('offline');
+    await t.tap(find.byKey(const Key('chat-send')));
+    await t.pumpAndSettle();
+    expect(find.byKey(const Key('chat-send-error')), findsOneWidget);
+    expect(find.text('Ping'), findsOneWidget); // draft kept
+    svc.sendError = null;
+    await t.tap(find.byKey(const Key('chat-send')));
+    await t.pumpAndSettle();
+    expect(svc.clientIds.length, 1);
+    expect(svc.clientIds.first, isNotNull);
+  });
 }
+
 
 class _ThrowingChat extends _FakeChat {
   _ThrowingChat() : super(<ChatMessage>[]);
   bool fail = true;
 
   @override
-  Future<ChatPage> messages(String circleId, {int? before, int limit = 50}) async {
+  Future<ChatPage> messages(String circleId,
+      {int? before, int? after, int limit = 50}) async {
     if (fail) throw const ChatException('Can\'t reach the server.');
     return ChatPage(<ChatMessage>[_msg(1, 'mom', 'Hello')], null);
   }
-
 }

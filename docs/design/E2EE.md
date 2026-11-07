@@ -492,6 +492,14 @@ A consent is `PUT /circles/{id}/e2ee/server-consent` carrying an **Ed25519 signa
 
 Defence in depth, so a stored row is not enough: the ingest endpoint re-derives the state and **re-verifies every consent signature in Go** against the member's phone key before writing; the sidecar independently verifies the consents it is shown against the key log (a consent only counts if its approver is a phone key that `AuthorizeSender` accepts) and does not even pull a circle until every member's consent verifies; the phones verify the same thing themselves before wrapping.
 
+### "Trust this server by default" (admin recommendation)
+
+An admin can switch on **Settings > Trust this server by default** (`PUT /api/admin/settings/e2ee-trusted-default`, audit-logged as `admin.e2ee_trusted_default_changed`; stored as `app_theme_settings.e2ee_trusted_server_default`, default off, no migration needed). It is **a recommendation only**:
+
+* signed-in clients read it as `trusted_server_default` in `GET /e2ee/server-device`, and it is `true` only while the ingest token is set AND a server key is pinned;
+* the app then preselects "Server can read (trusted)" when a circle is made Private (the honest warning stays visible, strict end-to-end is one tap away) and shows a dismissible, remembered-per-circle notice to members who have not consented, leading to the Trusted server screen;
+* it **never** consents for anyone, never changes `e2ee_server_member()`, never touches the wrap rules: every member must still sign on their own phone and can decline or withdraw. Choosing "trusted" at turn-on only opens the Trusted server screen afterwards.
+
 ### Phone behaviour (Flutter)
 
 * **Approve a viewer or bridge** shows a `server` request distinctly ("OpenFamily server (can read the circle)") with its own warning. Approving only registers the key; it grants nothing.
