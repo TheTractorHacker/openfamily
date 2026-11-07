@@ -79,6 +79,10 @@ class WatchBridgeIos {
   final Duration extrasTtl;
 
   bool _started = false;
+  // Set by clear() (sign-out, switch off). While set nothing is pushed; an
+  // in-flight push notices through the generation counter and drops itself.
+  bool _clearRequested = false;
+  int _generation = 0;
   bool _enabled = true;
   WatchStatus _status = const WatchStatus();
   List<Member> _members = const <Member>[];
@@ -133,12 +137,15 @@ class WatchBridgeIos {
     if (!value) {
       await clear();
     } else {
+      await signedIn();
       _schedule(force: true);
     }
   }
 
   /// Sign-out: the watch must not keep any family data.
   Future<void> clear() async {
+    _clearRequested = true;
+    _generation++;
     _timer?.cancel();
     _timer = null;
     _members = const <Member>[];
@@ -147,13 +154,23 @@ class WatchBridgeIos {
     _lastPush = null;
     if (!_supported || !_started) return;
     try {
+      // The native side remembers the wipe until the watch has it.
       await _channel.invokeMethod<void>('clear');
+    } catch (_) {}
+  }
+
+  /// A user signed in (or switched the watch back on): pushes are allowed again.
+  Future<void> signedIn() async {
+    _clearRequested = false;
+    if (!_supported || !_started) return;
+    try {
+      await _channel.invokeMethod<void>('signedIn');
     } catch (_) {}
   }
 
   /// Called by the family service whenever the roster changes.
   void onRoster(List<Member> members, {String? userId, String? circleId}) {
-    if (!_supported || !_started || !_enabled) return;
+    if (!_supported || !_started || !_enabled || _clearRequested) return;
     _members = members;
     _myId = userId ?? _myId;
     _circleId = circleId ?? _circleId;
@@ -162,7 +179,7 @@ class WatchBridgeIos {
   }
 
   void _schedule({bool force = false}) {
-    if (!_supported || !_started || !_enabled || _timer != null) return;
+    if (!_supported || !_started || !_enabled || _clearRequested || _timer != null) return;
     final DateTime now = _clock();
     Duration wait = Duration.zero;
     if (!force && _lastPush != null) {
@@ -177,7 +194,8 @@ class WatchBridgeIos {
 
   /// Builds and sends one snapshot. Never throws.
   Future<void> pushNow() async {
-    if (!_supported || !_started || !_enabled) return;
+    if (!_supported || !_started || !_enabled || _clearRequested) return;
+    final int gen = _generation;
     try {
       final DateTime now = _clock();
       if (_extras == null || _extrasAt == null || now.difference(_extrasAt!) > extrasTtl) {
@@ -202,6 +220,8 @@ class WatchBridgeIos {
         units: UnitPreferenceService.units.value,
         now: now,
       );
+      // A sign-out or switch-off may have happened while the extras loaded.
+      if (gen != _generation || _clearRequested || !_enabled) return;
       _lastPush = now;
       await _channel.invokeMethod<void>('snapshot', jsonEncode(snap));
     } catch (_) {}
@@ -280,6 +300,10 @@ class WatchBridgeIos {
       <String, dynamic>{'ok': true, 'message': message};
   static Map<String, dynamic> _fail(String message) =>
       <String, dynamic>{'ok': false, 'message': message};
+
+  @visibleForTesting
+  Future<void> debugStatusChanged(Object? status) =>
+      _onCall(MethodCall('statusChanged', status));
 
   @visibleForTesting
   void debugMark({bool started = true}) => _started = started;

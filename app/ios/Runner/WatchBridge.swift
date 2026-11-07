@@ -18,6 +18,24 @@ final class WatchBridge: NSObject, WCSessionDelegate {
   private var channel: FlutterMethodChannel?
   private var session: WCSession?
 
+  // Sign-out must reach the watch even when it is out of reach at that moment.
+  // The flag survives app restarts; while set, snapshots are refused until
+  // Dart says `signedIn` again (login or switching the setting back on).
+  private let clearPendingKey = "orbitly.watch.clearPending"
+  private var clearPending: Bool {
+    get { UserDefaults.standard.bool(forKey: clearPendingKey) }
+    set { UserDefaults.standard.set(newValue, forKey: clearPendingKey) }
+  }
+
+  /// Sends the wipe to the watch when a usable session exists. Safe to repeat.
+  private func deliverClearIfPending() {
+    guard clearPending, let s = session, s.activationState == .activated,
+      s.isPaired, s.isWatchAppInstalled
+    else { return }
+    for t in s.outstandingUserInfoTransfers { t.cancel() }
+    try? s.updateApplicationContext(["cleared": true, "sentAt": Date().timeIntervalSince1970])
+  }
+
   func attach(messenger: FlutterBinaryMessenger) {
     let ch = FlutterMethodChannel(name: "app.openfamily/watch", binaryMessenger: messenger)
     channel = ch
@@ -61,21 +79,25 @@ final class WatchBridge: NSObject, WCSessionDelegate {
     case "status":
       result(statusMap())
     case "snapshot":
-      if let s = usable(), let json = call.arguments as? String {
+      if clearPending {
+        // Signed out: never send family data again until `signedIn`.
+        deliverClearIfPending()
+      } else if let s = usable(), let json = call.arguments as? String {
         // Latest value wins; delivered when the watch next wakes. No polling.
         try? s.updateApplicationContext(["snapshot": json, "sentAt": Date().timeIntervalSince1970])
       }
       result(nil)
     case "alert":
-      if let s = usable(), let json = call.arguments as? String {
+      if !clearPending, let s = usable(), let json = call.arguments as? String {
         s.transferUserInfo(["alert": json])
       }
       result(nil)
     case "clear":
-      if let s = session, s.activationState == .activated, s.isPaired, s.isWatchAppInstalled {
-        for t in s.outstandingUserInfoTransfers { t.cancel() }
-        try? s.updateApplicationContext(["cleared": true, "sentAt": Date().timeIntervalSince1970])
-      }
+      clearPending = true
+      deliverClearIfPending()
+      result(nil)
+    case "signedIn":
+      clearPending = false
       result(nil)
     default:
       result(FlutterMethodNotImplemented)
@@ -96,6 +118,7 @@ final class WatchBridge: NSObject, WCSessionDelegate {
     activationDidCompleteWith activationState: WCSessionActivationState,
     error: Error?
   ) {
+    deliverClearIfPending()
     notifyStatusChanged()
   }
 
@@ -107,10 +130,12 @@ final class WatchBridge: NSObject, WCSessionDelegate {
   }
 
   func sessionWatchStateDidChange(_ session: WCSession) {
+    deliverClearIfPending()
     notifyStatusChanged()
   }
 
   func sessionReachabilityDidChange(_ session: WCSession) {
+    deliverClearIfPending()
     notifyStatusChanged()
   }
 

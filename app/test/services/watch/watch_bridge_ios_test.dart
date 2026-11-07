@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -39,6 +40,16 @@ class _Actions implements WatchPhoneActions {
   Future<void> reply(String c, String t) async => _go('reply:$c:$t');
   @override
   Future<void> markRead(String c) async => _go('read:$c');
+}
+
+class _GatedActions extends _Actions {
+  _GatedActions(this.gate);
+  final Completer<void> gate;
+  @override
+  Future<WatchExtras> extras() async {
+    await gate.future;
+    return const WatchExtras();
+  }
 }
 
 Member _m(String id, String name, LatLng? pos,
@@ -194,6 +205,50 @@ void main() {
     await b.setEnabled(false);
     expect((await b.handleCommand(<String, Object?>{'cmd': 'sos'}))['ok'], false);
     expect(a.calls, isEmpty);
+  });
+
+  test('after clear no snapshot is sent until signedIn', () async {
+    final _Actions a = _Actions();
+    final WatchBridgeIos b = make(a);
+    await b.start();
+    final List<Member> roster = <Member>[_m('me', 'Me', const LatLng(1, 1))];
+    await b.clear();
+    expect(sent.last.method, 'clear');
+    b.onRoster(roster, userId: 'me', circleId: 'c1');
+    await b.pushNow();
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect(sent.where((MethodCall c) => c.method == 'snapshot'), isEmpty);
+    await b.signedIn();
+    expect(sent.last.method, 'signedIn');
+    b.onRoster(roster, userId: 'me', circleId: 'c1');
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect(sent.where((MethodCall c) => c.method == 'snapshot'), isNotEmpty);
+  });
+
+  test('clear while disconnected is still sent to the native side (which keeps it pending)', () async {
+    statusReply = <String, dynamic>{'supported': true, 'paired': false, 'installed': false, 'reachable': false};
+    final WatchBridgeIos b = make(_Actions());
+    await b.start();
+    await b.clear();
+    expect(sent.map((MethodCall c) => c.method), contains('clear'));
+    // The watch comes back: a status change must not trigger a push either.
+    statusReply = <String, dynamic>{'supported': true, 'paired': true, 'installed': true, 'reachable': true};
+    await b.debugStatusChanged(statusReply);
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect(sent.where((MethodCall c) => c.method == 'snapshot'), isEmpty);
+  });
+
+  test('an in-flight push is dropped when clear happens meanwhile', () async {
+    final Completer<void> gate = Completer<void>();
+    final _GatedActions a = _GatedActions(gate);
+    final WatchBridgeIos b = make(a);
+    await b.start();
+    b.onRoster(<Member>[_m('me', 'Me', const LatLng(1, 1))], userId: 'me', circleId: 'c1');
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    await b.clear();
+    gate.complete();
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect(sent.where((MethodCall c) => c.method == 'snapshot'), isEmpty);
   });
 
   test('status parsing is tolerant', () {
