@@ -320,6 +320,12 @@ abstract class LaneSource {
   Future<bool> serverAssistOn(String circleId);
 }
 
+/// Optional extra of a [ChannelKv]: a lock shared by every isolate (and process) that uses the store, so a
+/// read-modify-write cannot interleave with another one. Stores without it rely on the version check alone.
+abstract class LockableKv {
+  Future<T> withLock<T>(String name, Future<T> Function() body);
+}
+
 /// Optional extra of a [LaneSource]: a counter that changes whenever the stored
 /// lane facts of a circle change. The upload queue reads it again immediately
 /// before each request and starts over when it moved.
@@ -553,7 +559,12 @@ class SealedQueue {
   /// read fresh, apply [op], look at the version again right before the write
   /// (start over if it moved), write `{v+1, writer-id}`, read back and start over
   /// if another writer's record is there instead. [op] must be idempotent.
-  Future<T> _mutate<T>(Future<T> Function(List<Map<String, dynamic>> l) op) => _locked(() async {
+  Future<T> _mutate<T>(Future<T> Function(List<Map<String, dynamic>> l) op) => _locked(() {
+        final ChannelKv store = kv;
+        return store is LockableKv ? (store as LockableKv).withLock('queue', () => _mutateOnce(op)) : _mutateOnce(op);
+      });
+
+  Future<T> _mutateOnce<T>(Future<T> Function(List<Map<String, dynamic>> l) op) async {
         T? result;
         for (int attempt = 0; attempt < 8; attempt++) {
           final snap = await _read();
@@ -566,7 +577,7 @@ class SealedQueue {
           if (back.ver == snap.ver + 1 && back.w == w) return result as T;
         }
         return result as T;
-      });
+      }
 
   Future<List<Map<String, dynamic>>> _load() async => (await _read()).items;
 

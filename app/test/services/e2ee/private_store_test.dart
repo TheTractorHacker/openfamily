@@ -9,6 +9,7 @@ import 'package:openfamily/services/e2ee/private_store.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
   late Directory dir;
   setUp(() {
     dir = Directory.systemTemp.createTempSync('ofstore');

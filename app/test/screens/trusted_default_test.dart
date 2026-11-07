@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:openfamily/models/circle.dart';
 import 'package:openfamily/screens/encryption_circle_screen.dart';
 import 'package:openfamily/screens/processing_screen.dart';
+import 'package:openfamily/screens/trusted_server_screen.dart' show kTrustedServerWarning;
 import 'package:openfamily/services/e2ee/e2ee_service.dart';
 import 'package:openfamily/services/e2ee/e2ee_trust.dart';
 import 'package:openfamily/services/e2ee/e2ee_vault.dart';

@@ -36,7 +36,7 @@ class PrivateStoreStatus {
 
 /// File-backed [ChannelKv]: one file per key inside [dir]. Writes go to a temp file in the SAME directory and are
 /// renamed over the target, so a reader (the other isolate) sees the old or the new content, never half of it.
-class FileKv implements ChannelKv {
+class FileKv implements ChannelKv, LockableKv {
   FileKv(this.dir);
   final Directory dir;
   static final Random _rng = Random.secure();
@@ -82,6 +82,37 @@ class FileKv implements ChannelKv {
       final File f = _file(key);
       if (await f.exists()) await f.delete();
     } catch (_) {}
+  }
+
+  /// A cross-isolate lock: a lock file created with O_EXCL (atomic), removed afterwards. A lock older than [staleAfter]
+  /// (a crashed or killed writer) is broken. Waiting is bounded; if the lock cannot be taken in time the body runs
+  /// anyway, because the versioned queue record still catches most races (no data is lost to a blocked app).
+  @override
+  Future<T> withLock<T>(String name, Future<T> Function() body, {Duration staleAfter = const Duration(seconds: 10), Duration wait = const Duration(seconds: 5)}) async {
+    final File lock = File('${dir.path}${Platform.pathSeparator}.$name.lock');
+    final Stopwatch sw = Stopwatch()..start();
+    bool held = false;
+    while (sw.elapsed < wait) {
+      try {
+        await lock.create(exclusive: true);
+        held = true;
+        break;
+      } on FileSystemException {
+        try {
+          if (DateTime.now().difference(lock.lastModifiedSync()) > staleAfter) lock.deleteSync();
+        } catch (_) {}
+        await Future<void>.delayed(Duration(milliseconds: 5 + _rng.nextInt(15)));
+      }
+    }
+    try {
+      return await body();
+    } finally {
+      if (held) {
+        try {
+          await lock.delete();
+        } catch (_) {}
+      }
+    }
   }
 
   /// Every key in the store (for tests and the migration check).

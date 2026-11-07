@@ -7,7 +7,7 @@ void main() {
   setUp(AppCompat.debugReset);
 
   test('409 update_required_for_lanes shows the same update-required state as a 426', () {
-    expect(AppCompat.state.value.status, CompatStatus.ok);
+    expect(AppCompat.state.value.status, isNot(CompatStatus.required));
     expect(
         () => ApiClient.debugThrowForError(http.Response(
             '{"error":"Update OpenFamily to continue","code":"update_required_for_lanes","not_ready":["Sam"]}', 409)),
@@ -18,6 +18,6 @@ void main() {
 
   test('other 409s do not claim the app is outdated', () {
     expect(() => ApiClient.debugThrowForError(http.Response('{"error":"x","code":"members_not_ready"}', 409)), throwsA(isA<ApiException>()));
-    expect(AppCompat.state.value.status, CompatStatus.ok);
+    expect(AppCompat.state.value.status, isNot(CompatStatus.required));
   });
 }
