@@ -554,6 +554,8 @@ func main() {
 		r.Delete("/api/admin/settings/sms", srv.AdminDeleteSMSSettings)
 		r.Get("/api/admin/settings/theme", srv.AdminGetTheme)
 		r.Put("/api/admin/settings/theme", srv.AdminPutTheme)
+		r.Get("/api/admin/settings/e2ee-trusted-default", srv.AdminGetTrustedServerDefault)
+		r.Put("/api/admin/settings/e2ee-trusted-default", srv.AdminPutTrustedServerDefault)
 		r.Get("/api/admin/settings/dawarich", srv.AdminGetDawarich)
 		r.Put("/api/admin/settings/dawarich", srv.AdminPutDawarich)
 		r.Delete("/api/admin/settings/dawarich", srv.AdminDeleteDawarich)

@@ -191,7 +191,7 @@ func (s *Server) E2EEServerDevice(w http.ResponseWriter, r *http.Request) {
 	if _, ok := circleCaller(w, r); !ok {
 		return
 	}
-	out := map[string]any{"enabled": serverMemberEnabled(), "device": nil}
+	out := map[string]any{"enabled": serverMemberEnabled(), "device": nil, "trusted_server_default": false}
 	if serverMemberEnabled() {
 		dev, err := s.pinnedServerDevice(r.Context())
 		if err != nil {
@@ -200,6 +200,8 @@ func (s *Server) E2EEServerDevice(w http.ResponseWriter, r *http.Request) {
 		}
 		if dev != nil {
 			out["device"] = dev
+			// Only a recommendation: true only while the mode is usable at all.
+			out["trusted_server_default"] = s.trustedServerDefaultSetting(r.Context())
 		}
 	}
 	writeJSON(w, http.StatusOK, out)
