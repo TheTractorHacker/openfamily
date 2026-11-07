@@ -38,7 +38,7 @@ test('warnings expose the command to run', () => {
   assert.equal(splitWarning('The last successful backup is more than 36 hours old.').command, undefined)
 })
 
-import { cronToDaily, dailyToCron, validateForm, parseRecipients } from '../src/lib/backups.ts'
+import { credsBindingChanged, cronToDaily, dailyToCron, validateForm, parseRecipients } from '../src/lib/backups.ts'
 
 test('daily time <-> cron', () => {
   assert.equal(cronToDaily('15 3 * * *'), '03:15')
@@ -67,4 +67,13 @@ test('client validation mirrors the server rules', () => {
   // Pinned fields are not validated client-side (they cannot be edited).
   assert.deepEqual(validateForm({ ...base, bucket: 'X' }, new Set(['bucket'])), {})
   assert.deepEqual(parseRecipients('a, b\nc'), ['a', 'b', 'c'])
+})
+
+test('changing the destination requires re-entering credentials', () => {
+  const a = { endpoint: 'https://s3.example.com/', insecure: false, allow_private: false, region: 'eu' }
+  assert.equal(credsBindingChanged(a, { ...a, endpoint: 'HTTPS://s3.example.com' }), false)
+  assert.equal(credsBindingChanged(a, { ...a, endpoint: 'https://evil.example' }), true)
+  assert.equal(credsBindingChanged(a, { ...a, insecure: true }), true)
+  assert.equal(credsBindingChanged(a, { ...a, allow_private: true }), true)
+  assert.equal(credsBindingChanged(a, { ...a, region: 'us' }), true)
 })

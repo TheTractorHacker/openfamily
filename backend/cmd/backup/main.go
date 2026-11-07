@@ -176,7 +176,7 @@ func main() {
 				fatal(fmt.Errorf("invalid credentials: %v", errs))
 			}
 		}
-		if err := backupsettings.Save(ctx, pool, key, st, cr, false, ""); err != nil {
+		if err := backupsettings.Save(ctx, pool, key, st, cr, false, "", st.Binding()); err != nil {
 			fatal(err)
 		}
 		fmt.Println("settings saved")

@@ -7,6 +7,8 @@
 package backupsettings
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net"
@@ -46,7 +48,29 @@ type Settings struct {
 type Credentials struct {
 	AccessKeyID string `json:"access_key_id"`
 	SecretKey   string `json:"secret_access_key"`
+	// Binding fingerprints the destination (endpoint, TLS/private flags,
+	// region) the credentials were entered for. It lives inside the sealed
+	// blob, so it cannot be altered without the server key. Credentials are
+	// never used for a destination with a different binding.
+	Binding string `json:"binding,omitempty"`
 }
+
+// BindingOf fingerprints a destination. Changing any part requires the
+// credentials to be entered again, so a saved key can never be sent to an
+// endpoint it was not saved for.
+func BindingOf(endpoint string, insecure, allowPrivate bool, region string) string {
+	ep := strings.TrimRight(strings.ToLower(strings.TrimSpace(endpoint)), "/")
+	sum := sha256.Sum256([]byte(fmt.Sprintf("v1|%s|%t|%t|%s", ep, insecure, allowPrivate, strings.TrimSpace(region))))
+	return hex.EncodeToString(sum[:])
+}
+
+// Binding is the destination fingerprint of these settings.
+func (s Settings) Binding() string {
+	return BindingOf(s.Endpoint, s.Insecure, s.AllowPrivate, s.Region)
+}
+
+// ErrBinding is returned when saved credentials do not belong to the destination.
+var ErrBinding = errors.New("re-enter the access key and secret because the endpoint changed")
 
 // Defaults are used for every field neither the environment nor the UI set.
 func Defaults() Settings {

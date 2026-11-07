@@ -185,7 +185,8 @@ func (a *Agent) testS3(ctx context.Context, payload []byte) (string, error) {
 		}
 		st.Exists, st.Settings = true, p.Settings
 		if p.Credentials != nil {
-			st.Creds = p.Credentials
+			// Typed for exactly this test: never mixed with stored credentials.
+			st.Creds, st.CredsFresh = p.Credentials, true
 		}
 		cfg, err := ResolveConfig(a.getenv(), st)
 		if err != nil {

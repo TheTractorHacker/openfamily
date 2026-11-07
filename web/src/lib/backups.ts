@@ -103,3 +103,14 @@ export function validateForm(v: BackupSettingsValues, pinned: Set<string>): Reco
 export function parseRecipients(text: string): string[] {
   return text.split(/[\s,]+/).map((s) => s.trim()).filter(Boolean)
 }
+
+/** Saved credentials only work for the destination they were saved for. */
+export function credsBindingChanged(
+  saved: Pick<BackupSettingsValues, 'endpoint' | 'insecure' | 'allow_private' | 'region'>,
+  cur: Pick<BackupSettingsValues, 'endpoint' | 'insecure' | 'allow_private' | 'region'>,
+): boolean {
+  const ep = (e: string) => e.trim().toLowerCase().replace(/\/+$/, '')
+  return ep(saved.endpoint) !== ep(cur.endpoint) || saved.insecure !== cur.insecure || saved.allow_private !== cur.allow_private || saved.region.trim() !== cur.region.trim()
+}
+
+export const REENTER_CREDENTIALS = 'Re-enter the access key and secret because the endpoint changed.'

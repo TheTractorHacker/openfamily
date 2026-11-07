@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -76,7 +77,7 @@ func envBoolStr(v string) bool {
 
 // applyEnv overwrites the pinned fields of st with what the service's
 // environment says.
-func applyEnv(st *backupsettings.Settings, env map[string]string) {
+func applyEnv(st *backupsettings.Settings, env map[string]string, credsPinned bool) {
 	if v := env["BACKUP_S3_BUCKET"]; v != "" {
 		st.S3Enabled, st.Bucket = true, v
 	}
@@ -112,6 +113,19 @@ func applyEnv(st *backupsettings.Settings, env map[string]string) {
 	set("BACKUP_KEEP_WEEKLY", atoi(&st.KeepWeekly))
 	set("BACKUP_KEEP_MONTHLY", atoi(&st.KeepMonthly))
 	set("BACKUP_STALE_HOURS", atoi(&st.StaleHours))
+	if credsPinned {
+		// Environment credentials are bound to the environment's destination:
+		// what the env does not set is fixed to the service defaults, not the UI's.
+		if env["BACKUP_S3_ENDPOINT"] == "" {
+			st.Endpoint = ""
+		}
+		if env["BACKUP_S3_INSECURE"] == "" {
+			st.Insecure = false
+		}
+		if env["BACKUP_S3_ALLOW_PRIVATE"] == "" {
+			st.AllowPrivate = true
+		}
+	}
 }
 
 // pinnedFields maps field name -> true when the environment sets it.
@@ -133,6 +147,9 @@ func (s *Server) pinnedFields(info backupAgentInfo) map[string]bool {
 				pins[f.Name] = true
 			}
 		}
+	}
+	if pins["credentials"] {
+		pins["endpoint"], pins["insecure"], pins["allow_private"] = true, true, true
 	}
 	return pins
 }
@@ -172,7 +189,7 @@ func (s *Server) AdminGetBackupSettings(w http.ResponseWriter, r *http.Request) 
 		t := st.UpdatedAt
 		out.UpdatedAt = &t
 	}
-	applyEnv(&out.Values, env)
+	applyEnv(&out.Values, env, pins["credentials"])
 	for _, f := range backupsettings.Fields {
 		src := "default"
 		if st.Exists {
@@ -238,7 +255,7 @@ func (s *Server) prepareBackupSettings(r *http.Request, in *backupSettingsIn, pr
 
 	// A pinned field cannot be changed from the UI.
 	envView := backupsettings.Defaults()
-	applyEnv(&envView, env)
+	applyEnv(&envView, env, pins["credentials"])
 	cur := prev.Settings
 	cur.AccessKeyHint = ""
 	effective = in.Settings
@@ -299,6 +316,13 @@ func (s *Server) prepareBackupSettings(r *http.Request, in *backupSettingsIn, pr
 		hasCreds := pins["credentials"] || (prev.HasCreds && !in.ClearCredentials) || creds != nil
 		if !hasCreds {
 			errs["access_key_id"] = "S3 needs an access key; enter the key id and secret"
+		}
+		// Stored credentials belong to the destination they were saved for;
+		// never reuse them for a different endpoint, TLS or private-network setting.
+		if creds == nil && !pins["credentials"] && prev.HasCreds && !in.ClearCredentials {
+			if full, err := backupsettings.Load(r.Context(), s.Pool, s.BackupSettingsKey); err != nil || full.Creds == nil || full.Creds.Binding != effective.Binding() {
+				errs["access_key_id"] = "Re-enter the access key and secret because the endpoint changed"
+			}
 		}
 		hasEnc := len(effective.AgeRecipients) > 0
 		for _, k := range info.EnvSecrets {
@@ -379,12 +403,16 @@ func (s *Server) AdminPutBackupSettings(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, "failed to read backup settings")
 		return
 	}
-	store, _, creds, prob := s.prepareBackupSettings(r, in, prev)
+	store, effective, creds, prob := s.prepareBackupSettings(r, in, prev)
 	if prob != nil {
 		writeSettingsProblem(w, prob)
 		return
 	}
-	if err := backupsettings.Save(r.Context(), s.Pool, s.BackupSettingsKey, store, creds, in.ClearCredentials, claims.UserID); err != nil {
+	if err := backupsettings.Save(r.Context(), s.Pool, s.BackupSettingsKey, store, creds, in.ClearCredentials, claims.UserID, effective.Binding()); err != nil {
+		if errors.Is(err, backupsettings.ErrBinding) {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid settings", "fields": map[string]string{"access_key_id": "Re-enter the access key and secret because the endpoint changed"}})
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "failed to save backup settings")
 		return
 	}

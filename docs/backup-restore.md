@@ -139,6 +139,19 @@ always refused, checked again on every connection after DNS resolution.
 Loopback and private (LAN) addresses are refused unless *Allow private network
 address* is on, because a MinIO on your LAN is a legitimate target.
 
+**Credentials are bound to their destination.** A saved key is stored together
+with a fingerprint of the endpoint, plain-HTTP flag, private-network flag and
+region it was entered for (inside the encrypted blob). If you change any of
+those, in Save or in *Test connection*, you must type the access key and secret
+again; the saved key is never sent to a different address, so a hijacked admin
+session cannot point the test at a host it controls to collect it. Credentials
+from `.env` likewise pin the endpoint, plain-HTTP and private-network settings
+to `.env` (read-only in the panel). Keys saved by earlier builds have no
+fingerprint and must be entered once more. IPv6 transition addresses (NAT64,
+6to4, Teredo, IPv4-compatible) are refused unless *Allow private network
+address* is on, and the IPv4 address they embed is checked with the same rules,
+so metadata or LAN targets cannot be disguised that way.
+
 ### Quick start 2: with environment variables
 
 1. **Create the key pair on your own computer** (not on the server):

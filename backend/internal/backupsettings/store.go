@@ -12,12 +12,15 @@ import (
 
 // Stored is the saved UI configuration.
 type Stored struct {
-	Exists    bool
-	Settings  Settings
-	Creds     *Credentials // nil when none stored or unreadable
-	HasCreds  bool         // a credentials blob exists (even if unreadable)
-	CredsErr  error
-	UpdatedAt time.Time
+	Exists   bool
+	Settings Settings
+	Creds    *Credentials // nil when none stored or unreadable
+	HasCreds bool         // a credentials blob exists (even if unreadable)
+	// CredsFresh marks credentials typed in the current request (not loaded
+	// from the database); they are bound to the destination they are used for.
+	CredsFresh bool
+	CredsErr   error
+	UpdatedAt  time.Time
 }
 
 // Load reads the saved settings. key may be nil (credentials are then not
@@ -48,18 +51,31 @@ func Load(ctx context.Context, pool *pgxpool.Pool, key []byte) (*Stored, error) 
 }
 
 // Save stores settings. creds == nil keeps the stored credentials unless clear.
-func Save(ctx context.Context, pool *pgxpool.Pool, key []byte, s Settings, creds *Credentials, clear bool, userID string) error {
+// binding is the fingerprint of the EFFECTIVE destination (after environment
+// pins); use s.Binding() when nothing is pinned.
+func Save(ctx context.Context, pool *pgxpool.Pool, key []byte, s Settings, creds *Credentials, clear bool, userID, binding string) error {
 	var blob []byte
 	switch {
 	case clear:
 		s.AccessKeyHint = ""
 	case creds != nil:
-		b, err := Seal(key, *creds)
+		c := *creds
+		c.Binding = binding
+		b, err := Seal(key, c)
 		if err != nil {
 			return err
 		}
 		blob = b
 		s.AccessKeyHint = Hint(creds.AccessKeyID)
+	}
+	if blob == nil && !clear && s.S3Enabled {
+		// Keeping the stored credentials: they must belong to this destination.
+		var old []byte
+		if err := pool.QueryRow(ctx, `SELECT credentials_enc FROM backup_settings WHERE id = 1`).Scan(&old); err == nil && len(old) > 0 {
+			if c, err := Open(key, old); err != nil || c.Binding != binding {
+				return ErrBinding
+			}
+		}
 	}
 	raw, _ := json.Marshal(s)
 	var uid any

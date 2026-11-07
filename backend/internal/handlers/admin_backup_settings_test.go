@@ -95,7 +95,7 @@ func TestBackupSettingsSaveEncryptsAndNeverLeaks(t *testing.T) {
 	}
 	// Update without credentials keeps them.
 	s2 := goodSettings(pub)
-	s2["region"] = "eu-central-004"
+	s2["prefix"] = "other-folder"
 	if code, raw = put(e, "A", s2, nil); code != 200 {
 		t.Fatalf("update: %d %s", code, raw)
 	}
@@ -205,6 +205,8 @@ func TestBackupSettingsEnvPinnedFieldsAreReadOnly(t *testing.T) {
 	if code != 400 || !strings.Contains(string(raw), `"credentials"`) {
 		t.Fatalf("pinned credentials overridden: %d %s", code, raw)
 	}
+	// Environment credentials also pin the destination: endpoint "" (AWS), TLS on, private allowed.
+	m["endpoint"], m["allow_private"] = "", true
 	// Re-submitting the pinned value (as the UI does) is fine; the env value is not frozen into the UI layer.
 	if code, raw = put(e, "A", m, nil); code != 200 {
 		t.Fatalf("unchanged pinned values: %d %s", code, raw)
@@ -289,4 +291,105 @@ func generateAge() ([2]string, error) {
 		return [2]string{}, err
 	}
 	return [2]string{id.String(), id.Recipient().String()}, nil
+}
+
+func TestSavedCredentialsAreBoundToTheirDestination(t *testing.T) {
+	e := backupsEnv(t)
+	ctx := context.Background()
+	_, pub, _ := genAgePub(t)
+	creds := map[string]any{"access_key_id": tKeyID, "secret_access_key": tSecret}
+	if code, raw := put(e, "A", goodSettings(pub), creds); code != 200 {
+		t.Fatalf("%d %s", code, raw)
+	}
+	e.agent(true, false)
+	const msg = "Re-enter the access key and secret because the endpoint changed"
+	for name, mut := range map[string]func(m map[string]any){
+		"endpoint":      func(m map[string]any) { m["endpoint"] = "https://attacker.example.net" },
+		"region":        func(m map[string]any) { m["region"] = "us-east-1" },
+		"allow_private": func(m map[string]any) { m["allow_private"] = true },
+		"insecure": func(m map[string]any) {
+			m["insecure"] = true
+			m["endpoint"] = "http://s3.eu-central-003.backblazeb2.com"
+		},
+		"empty endpoint (AWS)": func(m map[string]any) { m["endpoint"] = "" },
+	} {
+		m := goodSettings(pub)
+		mut(m)
+		// Save without credentials: refused.
+		code, raw := put(e, "A", m, nil)
+		if code != 400 || !strings.Contains(string(raw), msg) {
+			t.Errorf("%s: save without re-entering credentials: %d %s", name, code, raw)
+		}
+		// Test of the unsaved values without credentials: refused, nothing queued.
+		e.srv.backupLimiter().Reset("backup:test_s3:" + e.ids["A"])
+		code, _, raw = e.do("A", "POST", "/api/admin/backups/test-s3", map[string]any{"settings": m})
+		if code != 400 || !strings.Contains(string(raw), msg) {
+			t.Errorf("%s: test without credentials: %d %s", name, code, raw)
+		}
+	}
+	var n int
+	_ = e.pool.QueryRow(ctx, `SELECT count(*) FROM backup_requests WHERE payload_enc IS NOT NULL`).Scan(&n)
+	if n != 0 {
+		t.Fatalf("%d test request(s) queued without credentials", n)
+	}
+	// With new credentials the same change is accepted and the binding follows.
+	m := goodSettings(pub)
+	m["endpoint"] = "https://s3.example.org"
+	if code, raw := put(e, "A", m, creds); code != 200 {
+		t.Fatalf("re-entered credentials refused: %d %s", code, raw)
+	}
+	// Unrelated changes (bucket, retention) keep working without re-entry.
+	m["bucket"], m["keep_daily"] = "another-bucket", 9
+	if code, raw := put(e, "A", m, nil); code != 200 {
+		t.Fatalf("unrelated change refused: %d %s", code, raw)
+	}
+	// The shared layer refuses too (defence in depth), even if the API check were bypassed.
+	st, _ := backupsettings.Load(ctx, e.pool, nil)
+	st.Settings.Endpoint = "https://evil.example.net"
+	if err := backupsettings.Save(ctx, e.pool, e.srv.BackupSettingsKey, st.Settings, nil, false, "", st.Settings.Binding()); err == nil {
+		t.Fatal("Save accepted stored credentials for a different destination")
+	}
+	// A legacy blob without a binding is never trusted.
+	blob, _ := backupsettings.Seal(e.srv.BackupSettingsKey, backupsettings.Credentials{AccessKeyID: tKeyID, SecretKey: tSecret})
+	_, _ = e.pool.Exec(ctx, `UPDATE backup_settings SET credentials_enc = $1`, blob)
+	e.srv.backupLimiter().Reset("backup:settings:" + e.ids["A"])
+	if code, raw := put(e, "A", m, nil); code != 400 || !strings.Contains(string(raw), msg) {
+		t.Fatalf("unbound legacy credentials accepted: %d %s", code, raw)
+	}
+}
+
+func TestEnvCredentialsPinTheDestination(t *testing.T) {
+	e := backupsEnv(t)
+	ctx := context.Background()
+	_, pub, _ := genAgePub(t)
+	cfg := `{"destinations":[],"encryption":"age-x25519","env":{"BACKUP_S3_BUCKET":"env-bucket","BACKUP_AGE_RECIPIENT":"` + pub + `"},"env_secrets":["BACKUP_S3_SECRET_ACCESS_KEY","BACKUP_S3_ACCESS_KEY_ID"]}`
+	if _, err := e.pool.Exec(ctx, `INSERT INTO backup_agent (id, version, config) VALUES (1,'x',$1) ON CONFLICT (id) DO UPDATE SET heartbeat_at = now(), config = $1`, cfg); err != nil {
+		t.Fatal(err)
+	}
+	_, _, raw := e.do("A", "GET", "/api/admin/backups/settings", nil)
+	var out backupSettingsOut
+	_ = json.Unmarshal(raw, &out)
+	pinned := strings.Join(out.Pinned, ",")
+	for _, f := range []string{"endpoint", "insecure", "allow_private", "credentials"} {
+		if !strings.Contains(pinned, f) || out.Sources[f] != "env" && f != "credentials" {
+			t.Fatalf("%s not pinned by environment credentials: %v %v", f, out.Pinned, out.Sources)
+		}
+	}
+	for name, mut := range map[string]func(m map[string]any){
+		"endpoint":      func(m map[string]any) { m["endpoint"] = "https://attacker.example.net" },
+		"insecure":      func(m map[string]any) { m["insecure"] = true },
+		"allow_private": func(m map[string]any) { m["allow_private"] = false },
+	} {
+		m := goodSettings(pub)
+		m["bucket"], m["endpoint"], m["insecure"], m["allow_private"] = "env-bucket", out.Values.Endpoint, out.Values.Insecure, out.Values.AllowPrivate
+		mut(m)
+		code, raw := put(e, "A", m, nil)
+		if code != 400 || !strings.Contains(string(raw), "environment") {
+			t.Errorf("%s change with env credentials accepted: %d %s", name, code, raw)
+		}
+		e.srv.backupLimiter().Reset("backup:test_s3:" + e.ids["A"])
+		if code, _, raw = e.do("A", "POST", "/api/admin/backups/test-s3", map[string]any{"settings": m}); code != 400 {
+			t.Errorf("%s: test against another endpoint with env credentials accepted: %d %s", name, code, raw)
+		}
+	}
 }

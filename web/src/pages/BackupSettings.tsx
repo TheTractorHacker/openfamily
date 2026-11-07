@@ -7,7 +7,7 @@
 import React from 'react'
 import { ApiError, getBackupSettings, putBackupSettings, testBackupS3 } from '../lib/api'
 import { generateAgeKeyPair, type AgeKeyPair } from '../lib/age'
-import { cronToDaily, dailyToCron, parseRecipients, validateForm } from '../lib/backups'
+import { credsBindingChanged, cronToDaily, dailyToCron, parseRecipients, REENTER_CREDENTIALS, validateForm } from '../lib/backups'
 import type { BackupSettingsResponse, BackupSettingsSubmit, BackupSettingsValues } from '../lib/types'
 import { Badge, Button, Card, Spinner } from '../components/primitives'
 import { Alert } from '../components/patterns'
@@ -146,6 +146,8 @@ export function BackupSettings({ onChanged }: { onChanged?: () => void }) {
   const src = (f: string) => resp.sources[f]
   const pin = (f: string) => pinned.has(f)
   const daily = cronToDaily(form.schedule)
+  const rebind = form.s3_enabled && !credPinned && resp.credentials.access_key_set && credsBindingChanged(resp.values, form)
+  const needNewCreds = rebind && credMode !== 'replace'
 
   const submit = (): BackupSettingsSubmit => {
     const body: BackupSettingsSubmit = { settings: { ...form, age_recipients: parseRecipients(recText) } }
@@ -163,6 +165,8 @@ export function BackupSettings({ onChanged }: { onChanged?: () => void }) {
     const e = validateForm(v, pinned)
     if (form.s3_enabled && !credPinned && credMode === 'replace' && (!keyId.trim() || !secret)) e.access_key_id = 'Enter both the access key id and the secret'
     if (form.s3_enabled && !credPinned && credMode !== 'replace' && !resp.credentials.access_key_set) e.access_key_id = 'S3 needs an access key'
+    if (rebind && credMode !== 'replace') e.access_key_id = REENTER_CREDENTIALS
+    if (rebind && credMode === 'replace' && (!keyId.trim() || !secret)) e.access_key_id = REENTER_CREDENTIALS
     if (form.s3_enabled && !credPinned && credMode === 'clear') e.access_key_id = 'S3 needs an access key; disable S3 to clear it'
     if (form.s3_enabled && v.age_recipients.length === 0 && !pin('age_recipients') && !e.age_recipients) e.age_recipients = 'S3 backups must be encrypted: add your age public key (Generate key pair does it for you)'
     setErrors(e)
@@ -298,7 +302,7 @@ export function BackupSettings({ onChanged }: { onChanged?: () => void }) {
                 </span>
                 {credPinned ? (
                   <p className="wb-bkf-hint">The access key and secret are provided by the server environment.</p>
-                ) : credMode === 'replace' || !resp.credentials.access_key_set ? (
+                ) : credMode === 'replace' || needNewCreds || !resp.credentials.access_key_set ? (
                   <div className="wb-bkf-credrow">
                     <input id="bk-keyid" className={`wb-input${errors.access_key_id ? ' is-invalid' : ''}`} type="text" autoComplete="off" spellCheck={false}
                       placeholder="Access key id" aria-label="Access key id" value={keyId}
@@ -306,7 +310,7 @@ export function BackupSettings({ onChanged }: { onChanged?: () => void }) {
                     <input id="bk-secret" className={`wb-input${errors.secret_access_key ? ' is-invalid' : ''}`} type="password" autoComplete="new-password" spellCheck={false}
                       placeholder="Secret access key" aria-label="Secret access key" value={secret}
                       onChange={(e) => { setSecret(e.target.value); setCredMode('replace') }} />
-                    {resp.credentials.access_key_set && (
+                    {resp.credentials.access_key_set && !rebind && (
                       <Button variant="ghost" size="sm" type="button" onClick={() => { setCredMode('keep'); setKeyId(''); setSecret('') }}>Keep current</Button>
                     )}
                   </div>
@@ -318,6 +322,7 @@ export function BackupSettings({ onChanged }: { onChanged?: () => void }) {
                     <Button variant="ghost" size="sm" type="button" onClick={() => setCredMode('clear')}>Clear</Button>
                   </div>
                 )}
+                {rebind && <p className="wb-bkf-err" role="alert">{REENTER_CREDENTIALS} The saved key is never sent to a different address.</p>}
                 {credMode === 'clear' && !credPinned && <p className="wb-bkf-hint">The stored key will be removed when you save.</p>}
                 {resp.credentials.unreadable && <p className="wb-bkf-err">The stored key can no longer be decrypted (the server key changed). Replace it.</p>}
                 {(errors.access_key_id || errors.secret_access_key) && <p className="wb-bkf-err" role="alert">{errors.access_key_id ?? errors.secret_access_key}</p>}
