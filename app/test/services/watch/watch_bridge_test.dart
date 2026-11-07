@@ -5,13 +5,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:openfamily/models/member.dart';
 import 'package:openfamily/services/watch/watch_bridge.dart';
-import 'package:openfamily/services/watch/watch_snapshot.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class FakeTransport implements WatchTransport {
   WatchLinkStatus st = const WatchLinkStatus(available: true, nodes: 1, names: <String>['Pixel Watch']);
   final List<String> published = <String>[];
   int cleared = 0;
+  bool clearDelivers = true;
+  int allowed = 0;
   bool failNext = false;
   Future<void> Function(String)? onCommand;
   void Function()? onPeer;
@@ -27,7 +28,13 @@ class FakeTransport implements WatchTransport {
   }
 
   @override
-  Future<void> clear() async => cleared++;
+  Future<bool> clear() async {
+    cleared++;
+    return clearDelivers;
+  }
+
+  @override
+  Future<void> allowPublish() async => allowed++;
 
   @override
   Future<WatchLinkStatus> status() async => st;
@@ -72,8 +79,12 @@ class FakeSource implements WatchContextSource {
   WatchContext ctx = const WatchContext(chatCircleId: 'c1', unread: 1);
 
   @override
+  Future<void> Function()? onRead;
+
+  @override
   Future<WatchContext> read() async {
     reads++;
+    await onRead?.call();
     return ctx;
   }
 
@@ -231,6 +242,74 @@ void main() {
     await b.setEnabled(true);
     await settle();
     expect(t.published.length, n + 1);
+  });
+
+  group('sign-out clear', () {
+    test('an undeliverable clear stays pending, blocks publishing and survives a restart', () async {
+      await make();
+      t.clearDelivers = false;
+      await b.signedOut();
+      final int n = t.published.length;
+      b.onMembers(<Member>[_m('u1')]);
+      await b.publish(force: true);
+      await settle();
+      expect(t.published.length, n);
+      expect((await SharedPreferences.getInstance()).getBool(WatchBridge.clearPendingKey), true);
+
+      // New bridge instance on the same prefs (app restart): still refuses until a new sign-in.
+      final FakeTransport t2 = FakeTransport();
+      final WatchBridge b2 = WatchBridge(transport: t2, actions: FakeActions(), source: FakeSource(), supported: true, minInterval: Duration.zero);
+      await b2.start();
+      await settle();
+      expect(t2.cleared, greaterThan(0)); // retried at start (a watch is connected now)
+      expect((await SharedPreferences.getInstance()).getBool(WatchBridge.clearPendingKey), false);
+      b2.disposeForTest();
+    });
+
+    test('retried when a watch connects; refuses until the user signs in again', () async {
+      await make();
+      t.clearDelivers = false;
+      await b.signedOut();
+      expect(t.cleared, 1);
+      t.st = const WatchLinkStatus(available: true, nodes: 0);
+      t.onPeer!();
+      await settle();
+      // Still not delivered: still pending.
+      t.clearDelivers = true;
+      t.st = const WatchLinkStatus(available: true, nodes: 1);
+      t.onPeer!();
+      await settle();
+      expect(t.cleared, 3);
+      // Delivered, but publishing stays refused (roster events after sign-out are stale).
+      final int n = t.published.length;
+      b.onMembers(<Member>[_m('u1')]);
+      await settle();
+      expect(t.published.length, n);
+      // A new login re-enables it.
+      await b.signedIn();
+      await settle();
+      expect(t.allowed, 1);
+      expect(t.published.length, n + 1);
+      expect(lastPublished()['signedIn'], true);
+    });
+
+    test('an in-flight snapshot cannot override a clear', () async {
+      await make();
+      src.onRead = () async => b.signedOut();
+      t.published.clear();
+      await b.publish(force: true);
+      await settle();
+      expect(t.published, isEmpty);
+    });
+
+    test('turning the bridge off is a pending clear until delivered', () async {
+      await make();
+      t.clearDelivers = false;
+      await b.setEnabled(false);
+      expect((await SharedPreferences.getInstance()).getBool(WatchBridge.clearPendingKey), true);
+      await b.setEnabled(true);
+      expect(t.allowed, 1);
+    });
   });
 
   group('commands', () {

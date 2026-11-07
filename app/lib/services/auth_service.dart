@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'api_client.dart';
 import 'background_location_service.dart';
 import 'biometric_service.dart';
@@ -145,6 +146,8 @@ class AuthService {
       access: tokens['access_token'] as String,
       refresh: tokens['refresh_token'] as String,
     );
+    // A new session may feed a paired watch again (a sign-out clear is final until now).
+    unawaited(WatchBridge.instance.signedIn());
     // "Keep me signed in on this device": remember the password in the
     // Keystore for the silent re-login fallback. Never with a TOTP code (the
     // saved login could not complete it) and never at the cost of the login.

@@ -66,9 +66,19 @@ cannot work alone (see "Standalone LTE mode" below).
   watch can turn the watch bridge off in Settings, Watch (Private circles can
   also be excluded: "Show Private circles on the watch", default on, off removes
   them from the snapshot).
-- Sign-out on the phone, or turning the bridge off, publishes an **empty
-  snapshot** (`signedIn: false`) and deletes the Data Layer item, so the watch
-  forgets everything.
+- Sign-out on the phone, or turning the bridge off, **deletes the Data Layer
+  item** and is a *debt, not a best effort*: a persistent clear-pending flag (in
+  Dart preferences and in native preferences) is set first. The clear counts as
+  paid only when the delete succeeded and a watch was connected to receive it.
+  Otherwise the flag stays, no snapshot is published (Dart refuses, and the
+  native `publish` refuses) until the user signs in again, and the debt is paid
+  the next time a watch connects (`WatchListenerService.onPeerConnected` /
+  `onCapabilityChanged`, which also works with the app closed) or at the next app
+  start. Just before sending, the bridge re-checks enabled, signed in and
+  not-pending, so a snapshot being built during a sign-out cannot override the
+  clear. On the watch, a deleted item, an empty (`signedIn: false`) snapshot, or
+  a connected phone with no snapshot item at all wipes the stored snapshot and
+  redraws the tile and complication empty.
 - Dim/ambient: the watch app shows names and places in ambient mode, same as the
   Wear OS system does for other apps; no extra privacy layer is added.
 

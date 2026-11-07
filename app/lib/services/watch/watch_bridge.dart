@@ -3,7 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
-import 'package:latlong2/latlong.dart';
+import 'package:latlong2/latlong.dart' show LatLng;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../models/alert.dart';
@@ -59,7 +59,13 @@ abstract class WatchTransport {
   Future<bool> publish(String json);
 
   /// Removes the snapshot from the Data Layer (sign-out, bridge turned off).
-  Future<void> clear();
+  /// True only when the removal reached a connected watch; false means it is
+  /// still owed (no watch connected, no Play Services) and the bridge keeps a
+  /// persistent clear-pending flag and retries when a watch connects.
+  Future<bool> clear();
+
+  /// The user signed in again: native publishing may resume.
+  Future<void> allowPublish();
   Future<WatchLinkStatus> status();
 
   /// Registers handlers for commands from the watch and for connection changes.
@@ -80,9 +86,18 @@ class MethodChannelWatchTransport implements WatchTransport {
   }
 
   @override
-  Future<void> clear() async {
+  Future<bool> clear() async {
     try {
-      await _channel.invokeMethod<void>('clear');
+      return await _channel.invokeMethod<bool>('clear') ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  @override
+  Future<void> allowPublish() async {
+    try {
+      await _channel.invokeMethod<void>('allowPublish');
     } catch (_) {}
   }
 
@@ -282,7 +297,7 @@ class ServiceWatchContextSource implements WatchContextSource {
       circles: <WatchCircle>[for (final Circle c in circles) WatchCircle(id: c.id, name: c.name, isPrivate: c.isPrivate)],
       sharingPaused: !LocationSharingService.enabled.value || pauseActive,
       pausedUntil: pauseActive ? p.until : null,
-      unread: ChatService.unreadTotal.value,
+      unread: ChatEvents.unreadTotal.value,
       alerts: _alerts ?? const <WatchAlert>[],
       privateMemberIds: priv,
       chatCircleId: scope?.id ?? primary?.id,
@@ -314,6 +329,7 @@ class WatchBridge {
 
   static const String enabledKey = 'watch_bridge_enabled';
   static const String showPrivateKey = 'watch_show_private';
+  static const String clearPendingKey = 'watch_clear_pending';
 
   final WatchTransport _transport;
   final WatchActions _actions;
@@ -336,6 +352,10 @@ class WatchBridge {
   bool _showPrivate = true;
   bool _started = false;
   bool _signedIn = true;
+
+  /// A clear (sign-out, bridge off) the watch has not confirmed yet. Persisted;
+  /// while set nothing is published.
+  bool _clearPending = false;
   WatchCommandResult? _lastCommand;
 
   String? _lastHash;
@@ -359,7 +379,9 @@ class WatchBridge {
       final SharedPreferences p = await SharedPreferences.getInstance();
       _enabled = p.getBool(enabledKey) ?? true;
       _showPrivate = p.getBool(showPrivateKey) ?? true;
+      _clearPending = p.getBool(clearPendingKey) ?? false;
     } catch (_) {}
+
     _transport.listen(onCommand: handleCommand, onPeerChanged: () => unawaited(refreshLink(forcePublish: true)));
     _keepAliveTimer = Timer.periodic(keepAlive, (_) => unawaited(refreshLink(forcePublish: true)));
     await refreshLink(forcePublish: true);
@@ -369,7 +391,36 @@ class WatchBridge {
   Future<void> refreshLink({bool forcePublish = false}) async {
     if (!_supported || !_started) return;
     link.value = await _transport.status();
+    if (_clearPending) {
+      await _deliverClear();
+      return;
+    }
     if (forcePublish) await publish(force: true);
+  }
+
+  Future<void> _setPending(bool v) async {
+    _clearPending = v;
+    try {
+      (await SharedPreferences.getInstance()).setBool(clearPendingKey, v);
+    } catch (_) {}
+  }
+
+  /// Tries to remove the watch's copy; keeps the flag when it cannot be confirmed.
+  Future<void> _deliverClear() async {
+    final bool ok = await _transport.clear();
+    if (ok) {
+      // Only a sign-out clear is final; "bridge off" is also finished once delivered.
+      await _setPending(false);
+    }
+  }
+
+  /// The user signed in again (called after a successful login).
+  Future<void> signedIn() async {
+    if (!_supported) return;
+    _signedIn = true;
+    if (_clearPending) await _setPending(false);
+    await _transport.allowPublish();
+    if (_started) await publish(force: true);
   }
 
   Future<void> setEnabled(bool v) async {
@@ -379,8 +430,11 @@ class WatchBridge {
     } catch (_) {}
     if (!v) {
       _lastHash = null;
-      await _transport.clear();
+      await _setPending(true);
+      await _deliverClear();
     } else {
+      if (_clearPending) await _setPending(false);
+      await _transport.allowPublish();
       await publish(force: true);
     }
   }
@@ -401,22 +455,25 @@ class WatchBridge {
     _lastHash = null;
     _seenCommandIds.clear();
     if (!_supported) return;
-    await _transport.clear();
+    // Not best effort: the flag survives a restart and a missing watch, and is
+    // retried when a watch connects.
+    await _setPending(true);
+    await _deliverClear();
   }
 
   /// Called with every new roster (FamilyService, same place as the home widget).
   void onMembers(List<Member> members, {String? selfId}) {
     if (!_supported || !_started) return;
+    if (_clearPending || !_signedIn) return; // roster events after sign-out are stale
     _members = members;
     if (selfId != null) _selfId = selfId;
-    _signedIn = true;
     unawaited(publish());
   }
 
   /// Publishes at most once per [minInterval] (the newest state always wins),
   /// and only when the content changed or [force] is set.
   Future<void> publish({bool force = false}) async {
-    if (!_supported || !_started || !_enabled) return;
+    if (!_supported || !_started || !_enabled || _clearPending || !_signedIn) return;
     if (!link.value.connected) return;
     final DateTime now = _clock();
     if (_publishing) {
@@ -434,7 +491,7 @@ class WatchBridge {
     _publishing = true;
     try {
       final WatchContext c = await _source.read();
-      final String? selfId = _selfId ?? ChatService.selfUserId;
+      final String? selfId = _selfId ?? ChatEvents.selfUserId;
       final Map<String, dynamic> snap = buildWatchSnapshot(WatchSnapshotInput(
         now: now,
         signedIn: _signedIn && c.signedIn,
@@ -454,6 +511,9 @@ class WatchBridge {
       ));
       final String hash = watchContentHash(snap);
       if (!force && hash == _lastHash) return;
+      // Re-check right before sending: a sign-out or switch-off while this
+      // snapshot was being built must win over the in-flight push.
+      if (!_enabled || _clearPending || !_signedIn) return;
       final bool ok = await _transport.publish(encodeWatchSnapshot(snap));
       if (ok) {
         _lastHash = hash;

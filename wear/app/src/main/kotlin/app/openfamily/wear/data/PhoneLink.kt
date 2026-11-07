@@ -12,11 +12,15 @@ class PhoneLink(context: Context) {
 
     /** Reads the stored Data Layer item (the service only fires on changes) and the connection state. */
     suspend fun syncNow() {
+        var readable = false
+        var found = false
         runCatching {
             val items = Wearable.getDataClient(app).dataItems.await()
+            readable = true
             try {
                 for (item in items) {
                     if (item.uri.path == Commands.SNAPSHOT_PATH) {
+                        found = true
                         DataMapItem.fromDataItem(item).dataMap.getString("json")?.let { SnapshotRepository.accept(app, it) }
                     }
                 }
@@ -25,6 +29,9 @@ class PhoneLink(context: Context) {
             }
         }
         refreshConnection()
+        // The phone deleted the snapshot (sign-out, bridge off) while this watch was away:
+        // forget the stored copy, tile and complication data too.
+        if (readable && !found && SnapshotRepository.phoneConnected.value) SnapshotRepository.clear(app)
     }
 
     suspend fun refreshConnection() {

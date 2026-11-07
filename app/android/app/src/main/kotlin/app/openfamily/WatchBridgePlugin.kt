@@ -50,7 +50,8 @@ class WatchBridgePlugin private constructor(
         when (call.method) {
             "publish" -> {
                 val json = call.arguments as? String
-                if (json == null || !available()) {
+                // A clear that has not reached the watch yet blocks every publish until sign-in.
+                if (json == null || !available() || clearPending(context)) {
                     result.success(false)
                     return
                 }
@@ -62,13 +63,14 @@ class WatchBridgePlugin private constructor(
                     .addOnFailureListener { result.success(false) }
             }
             "clear" -> {
-                if (!available()) {
-                    result.success(null)
-                    return
-                }
-                val uri = android.net.Uri.Builder().scheme("wear").path(SNAPSHOT_PATH).build()
-                Wearable.getDataClient(context).deleteDataItems(uri)
-                    .addOnCompleteListener { result.success(null) }
+                // Not best effort: remember the debt first, pay it now if possible, otherwise
+                // when a watch connects (WatchListenerService), even with the app closed.
+                setClearPending(context, true)
+                deleteSnapshot(context) { delivered -> result.success(delivered) }
+            }
+            "allowPublish" -> {
+                setClearPending(context, false)
+                result.success(null)
             }
             "status" -> {
                 if (!available()) {
@@ -108,6 +110,45 @@ class WatchBridgePlugin private constructor(
         const val SNAPSHOT_PATH = "/orbitly/snapshot"
         const val COMMAND_PATH = "/orbitly/cmd"
         const val ACK_PATH = "/orbitly/ack"
+
+        private const val PREFS = "orbitly_watch"
+        private const val KEY_PENDING = "clear_pending"
+
+        fun clearPending(c: Context): Boolean =
+            c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_PENDING, false)
+
+        fun setClearPending(c: Context, v: Boolean) {
+            c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_PENDING, v).apply()
+        }
+
+        /**
+         * Deletes the snapshot DataItem and reports whether the removal is confirmed:
+         * true only with Play services, a successful delete and at least one connected
+         * watch to receive it. On true the pending flag is cleared.
+         */
+        fun deleteSnapshot(c: Context, done: (Boolean) -> Unit) {
+            try {
+                val ok = GoogleApiAvailability.getInstance().isGooglePlayServicesAvailable(c) == ConnectionResult.SUCCESS
+                if (!ok) {
+                    done(false)
+                    return
+                }
+                val uri = android.net.Uri.Builder().scheme("wear").path(SNAPSHOT_PATH).build()
+                Wearable.getDataClient(c).deleteDataItems(uri)
+                    .addOnSuccessListener {
+                        Wearable.getNodeClient(c).connectedNodes
+                            .addOnSuccessListener { nodes ->
+                                val delivered = nodes.isNotEmpty()
+                                if (delivered) setClearPending(c, false)
+                                done(delivered)
+                            }
+                            .addOnFailureListener { done(false) }
+                    }
+                    .addOnFailureListener { done(false) }
+            } catch (_: Throwable) {
+                done(false)
+            }
+        }
 
         @Volatile
         private var current: WatchBridgePlugin? = null

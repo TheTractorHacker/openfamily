@@ -32,7 +32,17 @@ class WatchListenerService : WearableListenerService() {
     }
 
     override fun onPeerConnected(peer: Node) {
+        payClearDebt()
         WatchBridgePlugin.peerChanged()
+    }
+
+    override fun onCapabilityChanged(info: com.google.android.gms.wearable.CapabilityInfo) {
+        payClearDebt()
+    }
+
+    /** A sign-out clear that could not reach the watch earlier is delivered as soon as one connects. */
+    private fun payClearDebt() {
+        if (WatchBridgePlugin.clearPending(this)) WatchBridgePlugin.deleteSnapshot(this) {}
     }
 
     override fun onPeerDisconnected(peer: Node) {
