@@ -12,7 +12,7 @@
                "admin/app-versions.md", "admin/troubleshooting.md", "troubleshooting/no-locations.md",
                "self-hosting.md", "custom-domain.md", "backup-restore.md", "android-install-and-updates.md"]},
     {"id": "developers", "title": "For developers", "description": "How it is built, the API and the compatibility rules.",
-     "items": ["developers/architecture.md", "developers/api.md", "developers/compatibility.md", "developers/build.md",
+     "items": ["developers/architecture.md", "developers/api.md", "developers/api-efficiency.md", "developers/compatibility.md", "developers/build.md",
                "developers/screenshots.md", "developers/naming.md", "api-compat.md"]}
   ]
 }

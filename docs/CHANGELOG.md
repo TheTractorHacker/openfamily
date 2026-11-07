@@ -10,6 +10,25 @@ for the **last 5 minor versions** of the app (see
 [API compatibility](api-compat.md)), so you can update the server first and
 the phones afterwards.
 
+## Unreleased
+
+Works with apps 0.20 and newer; nothing here needs an app update.
+
+- **Faster on mobile data.** The server now compresses its answers, the app
+  reuses its connection to the server instead of reconnecting for every
+  request, and unchanged lists come back as a tiny "not modified" answer.
+- **Smaller updates.** The people list and saved places can be fetched as
+  "only what changed", with a compact view for the map and watch. One start-up
+  request (`/app/bootstrap`) replaces five.
+- **Lighter history.** A day's trail can be thinned on the server to as many
+  points as the map can draw; the audit log can be paged.
+- **Steadier connection.** Reads retry a couple of times with a short random
+  pause when the network blips; writes are never repeated automatically.
+- **Optional HTTP QUERY method** for multi-window history reads, off by default
+  (`QUERY_METHOD=1`); the app falls back to POST by itself. Details and the
+  Cloudflare check are in [API wire efficiency](developers/api-efficiency.md).
+- Database: places gain an `updated_at` (migration 000360).
+
 ## v0.24.1 (2026-11-08)
 
 - Build fix: the v0.24.0 release files were not produced because of a file-name

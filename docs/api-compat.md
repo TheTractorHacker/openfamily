@@ -89,6 +89,16 @@ the user.
    The guard sees named struct fields only; fields built with `map[string]any`
    are not covered, so keep those stable by review.
 
+## Wire efficiency (feature `wire_v2`, apps 0.25 and newer use it)
+
+Additive only, so apps 0.20-0.24 are unaffected: gzip responses, `ETag` /
+`If-None-Match` on authenticated JSON GETs, `view=compact` / `fields=` and
+`?since=` on `/family/members` and `/family/places`, `simplify` / `max_points`
+on member history, `limit` / `before` on `/audit`, `GET /app/bootstrap`, and
+`POST|QUERY /family/history/query`. A new app checks `features.wire_v2` in
+`GET /compat` (or just handles 404 / a plain array) and falls back to the old
+requests. See [API wire efficiency](developers/api-efficiency.md).
+
 ## Shims in place
 
 | Situation | Who | What the server does |
