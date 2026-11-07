@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -273,7 +274,9 @@ func (s *Server) runAPKBuild(userID, ip string) {
 
 // latestAPK returns the most recently modified *.apk file in dir. It returns an
 // error when the directory cannot be read or contains no APK.
-func latestAPK(dir string) (string, error) {
+func latestAPK(dir string) (string, error) { return latestFileExt(dir, ".apk") }
+
+func latestFileExt(dir, ext string) (string, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return "", err
@@ -285,7 +288,7 @@ func latestAPK(dir string) (string, error) {
 			continue
 		}
 		name := e.Name()
-		if filepath.Ext(name) != ".apk" {
+		if !strings.EqualFold(filepath.Ext(name), ext) {
 			continue
 		}
 		info, err := e.Info()
@@ -298,7 +301,7 @@ func latestAPK(dir string) (string, error) {
 		}
 	}
 	if newest == "" {
-		return "", errors.New("no apk found")
+		return "", errors.New("no " + ext + " file found")
 	}
 	return newest, nil
 }

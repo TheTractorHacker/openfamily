@@ -608,3 +608,28 @@ func (h *hub) notifyCircleAware(circleID string, msg []byte) {
 		}
 	}
 }
+
+// clientCount returns the number of distinct connected WebSocket clients
+// (family members and platform admins), for the System health page.
+func (h *hub) clientCount() int {
+	if h == nil {
+		return 0
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	seen := map[*wsClient]struct{}{}
+	for _, set := range h.families {
+		for c := range set {
+			seen[c] = struct{}{}
+		}
+	}
+	for _, set := range h.familyUsers {
+		for c := range set {
+			seen[c] = struct{}{}
+		}
+	}
+	for c := range h.admins {
+		seen[c] = struct{}{}
+	}
+	return len(seen)
+}

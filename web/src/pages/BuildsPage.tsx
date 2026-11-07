@@ -1,210 +1,350 @@
+// Builds — everything the latest GitHub release offers for installing the app:
+// Android APK/AAB, Wear OS APK, the unsigned iOS IPA, the SBOM and checksums,
+// plus the five releases before it. Read-only; downloads come from the public
+// release (or the server's /app.apk and /app.ipa for the latest build).
+
 import React from 'react'
-import { ApiError, downloadApk, getApkStatus } from '../lib/api'
-import type { ApkReleaseInfo, ApkStatus } from '../lib/types'
-import { Badge, Button, Card, Mono } from '../components/primitives'
+import { getAdminBuilds } from '../lib/api'
+import { isAccessDenied } from '../lib/useAsync'
+import { ApiError } from '../lib/api'
+import type { AdminBuilds, BuildAsset, BuildRelease } from '../lib/types'
+import { AccessDenied, Badge, Button, Card, CopyButton, ErrorState } from '../components/primitives'
+import { Alert, PageHeader, Section } from '../components/patterns'
+import { REPO_URL } from '../lib/brand'
+import { abiLabel, formatSize, IOS_DOC_PATH, releaseSlots, shareUrl, shortSha } from '../lib/builds'
+import { qrSvg } from '../lib/qr'
 import './pages.css'
 import './BuildsPage.css'
 
 function formatDate(value?: string): string {
-  if (!value) return 'Not reported'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return 'Not reported'
-  return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(date)
+  if (!value) return '—'
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return '—'
+  return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(d)
 }
 
-function formatBytes(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes <= 0) return 'Not reported'
-  const megabytes = bytes / (1024 * 1024)
-  return `${megabytes < 10 ? megabytes.toFixed(1) : Math.round(megabytes)} MB`
+const KIND_LABEL: Record<string, string> = {
+  android_apk: 'Android phone (APK)',
+  android_aab: 'Android bundle (AAB)',
+  wear_apk: 'Wear OS watch (APK)',
+  ios_ipa: 'iPhone (unsigned IPA)',
+  sbom: 'Software list (SBOM)',
+  checksums: 'Checksums (SHA-256)',
+  other: 'Other file',
 }
 
-function releaseTitle(release?: ApkReleaseInfo): string {
-  return release?.name?.trim() || release?.tag_name || 'Latest Android release'
+function kindText(a: BuildAsset): string {
+  if (a.kind === 'android_apk' || a.kind === 'wear_apk') return `${KIND_LABEL[a.kind]} · ${abiLabel(a.abi)}`
+  return KIND_LABEL[a.kind] ?? a.name
 }
 
 export function BuildsPage() {
-  const [status, setStatus] = React.useState<ApkStatus | null>(null)
+  const [data, setData] = React.useState<AdminBuilds | null>(null)
   const [loading, setLoading] = React.useState(true)
-  const [loadError, setLoadError] = React.useState<string | null>(null)
-  const [downloadState, setDownloadState] = React.useState<'idle' | 'downloading' | 'done' | 'error'>('idle')
-  const [actionError, setActionError] = React.useState<string | null>(null)
+  const [failure, setFailure] = React.useState<{ status: number; message: string } | null>(null)
 
-  const loadRelease = React.useCallback(async () => {
-    setLoadError(null)
+  const load = React.useCallback(async (refresh: boolean) => {
+    setLoading(true)
     try {
-      setStatus(await getApkStatus())
-    } catch (error) {
-      setLoadError(error instanceof ApiError ? error.message : 'Could not load release information.')
+      setData(await getAdminBuilds(refresh))
+      setFailure(null)
+    } catch (e) {
+      setFailure(
+        e instanceof ApiError
+          ? { status: e.status, message: e.message }
+          : { status: 0, message: e instanceof Error ? e.message : 'Could not load releases.' },
+      )
     } finally {
       setLoading(false)
     }
   }, [])
 
   React.useEffect(() => {
-    void loadRelease()
-  }, [loadRelease])
+    void load(false)
+  }, [load])
 
-  const download = async () => {
-    setActionError(null)
-    setDownloadState('downloading')
-    try {
-      const blob = await downloadApk()
-      const url = URL.createObjectURL(blob)
-      const anchor = document.createElement('a')
-      anchor.href = url
-      anchor.download = status?.release?.asset_name || 'openfamily.apk'
-      document.body.appendChild(anchor)
-      anchor.click()
-      anchor.remove()
-      URL.revokeObjectURL(url)
-      setDownloadState('done')
-    } catch (error) {
-      setActionError(error instanceof ApiError ? error.message : 'Download failed')
-      setDownloadState('error')
-    }
+  if (isAccessDenied(failure)) {
+    return (
+      <div className="wb-page">
+        <AccessDenied />
+      </div>
+    )
   }
 
-  const release = status?.release
-  const releaseError = loadError || status?.release_error
+  const latest = data?.releases[0]
+  const older = data?.releases.slice(1, 6) ?? []
 
   return (
     <div className="wb-page">
-      <div className="wb-page-header wb-builds-page-header">
-        <div>
-          <h1 className="wb-page-title">Android builds</h1>
-          <p className="wb-page-subtitle">Download and install the latest Orbitly release.</p>
-        </div>
-        <Button variant="secondary" size="sm" loading={loading} onClick={() => void loadRelease()}>
-          Refresh release
-        </Button>
-      </div>
-
-      <Card className="wb-build-release-card">
-        <div className="wb-build-release-head">
-          <div className="wb-build-release-heading">
-            <span className="wb-build-app-icon" aria-hidden="true"><AndroidIcon /></span>
-            <div>
-              <div className="wb-build-eyebrow">Latest release</div>
-              <h2 className="wb-build-release-title">
-                {loading && !release ? 'Loading release…' : releaseTitle(release)}
-              </h2>
-              {release?.tag_name && release.name?.trim() && (
-                <Mono truncate="none">{release.tag_name}</Mono>
-              )}
-            </div>
-          </div>
-          <Badge tone={release ? 'green' : releaseError ? 'red' : 'neutral'} dot={Boolean(release)}>
-            {release ? 'Ready to install' : releaseError ? 'Release unavailable' : 'Checking…'}
-          </Badge>
-        </div>
-
-        {releaseError && (
-          <div className="wb-build-error" role="alert">
-            <span>{releaseError}</span>
-            <button type="button" onClick={() => void loadRelease()}>Try again</button>
-          </div>
-        )}
-
-        <dl className="wb-build-meta">
-          <div>
-            <dt>Published</dt>
-            <dd>{loading ? 'Checking…' : formatDate(release?.published_at)}</dd>
-          </div>
-          <div>
-            <dt>Download size</dt>
-            <dd>{loading ? 'Checking…' : formatBytes(release?.asset_size ?? 0)}</dd>
-          </div>
-          <div>
-            <dt>File</dt>
-            <dd className="wb-build-filename">{loading ? 'Checking…' : release?.asset_name || 'Not reported'}</dd>
-          </div>
-          <div>
-            <dt>Platform</dt>
-            <dd>Android APK</dd>
-          </div>
-        </dl>
-
-        <div className="wb-build-actions">
-          <Button
-            onClick={() => void download()}
-            disabled={downloadState === 'downloading'}
-            loading={downloadState === 'downloading'}
-            icon={<DownloadIcon />}
-          >
-            {downloadState === 'downloading' ? 'Downloading…' : 'Download APK'}
+      <PageHeader
+        title="App builds"
+        subtitle="Install Orbitly on Android, Wear OS and iPhone from the newest release."
+        actions={
+          <Button variant="secondary" size="sm" loading={loading && !!data} onClick={() => void load(true)}>
+            Refresh
           </Button>
-          {release?.html_url && (
-            <a className="wb-build-release-link" href={release.html_url} target="_blank" rel="noreferrer">
-              View release <ExternalIcon />
-            </a>
+        }
+      />
+
+      {failure && !data && (
+        <ErrorState title="Couldn’t load the release list" description={failure.message} onRetry={() => void load(true)} />
+      )}
+
+      {data?.error && (
+        <Alert tone="warning" title={data.stale ? 'Showing the last list we could get' : 'GitHub could not be reached'}>
+          {data.error}
+          {data.stale && data.fetched_at && ` (list from ${new Date(data.fetched_at).toLocaleString()})`}
+        </Alert>
+      )}
+
+      {loading && !data && !failure && <BuildsSkeleton />}
+
+      {data && !latest && !data.error && (
+        <Card>
+          <p className="wb-build-empty">No published release was found for {data.repo}.</p>
+        </Card>
+      )}
+
+      {data && latest && (
+        <>
+          <LatestRelease rel={latest} data={data} />
+          <InstallHelp rel={latest} origin={window.location.origin} />
+          {older.length > 0 && (
+            <Section title="Earlier releases" description="The five releases before the latest.">
+              <div className="wb-build-older">
+                {older.map((rel) => (
+                  <details key={rel.tag_name} className="wb-build-old">
+                    <summary>
+                      <span className="wb-build-old-tag">{rel.tag_name}</span>
+                      <span className="wb-build-old-date">{formatDate(rel.published_at)}</span>
+                      <span className="wb-build-old-count">{rel.assets.length} files</span>
+                    </summary>
+                    <AssetTable assets={orderedAssets(rel)} latestPaths={{}} origin={window.location.origin} />
+                  </details>
+                ))}
+              </div>
+            </Section>
           )}
-        </div>
-
-        {downloadState === 'done' && <p className="wb-build-download-message" role="status">Download started.</p>}
-        {actionError && <p className="wb-error-text wb-build-action-error" role="alert">{actionError}</p>}
-      </Card>
-
-      <div className="wb-builds-grid">
-        <Card className="wb-build-notes-card">
-          <div className="wb-build-section-icon" aria-hidden="true"><NotesIcon /></div>
-          <h3 className="wb-build-info-title">What’s in this release</h3>
-          <p className={release?.body ? 'wb-build-release-notes' : 'wb-build-info-text'}>
-            {release?.body?.trim() || 'Release notes have not been added for this build.'}
-          </p>
-        </Card>
-
-        <Card className="wb-build-install-card">
-          <div className="wb-build-section-icon" aria-hidden="true"><PhoneIcon /></div>
-          <h3 className="wb-build-info-title">Install on Android</h3>
-          <ol className="wb-build-install-steps">
-            <li>Download the APK on your phone.</li>
-            <li>Open the downloaded file and allow installs when prompted.</li>
-            <li>Install over the existing app to keep your settings.</li>
-          </ol>
-          <p className="wb-build-info-foot">Android may warn that the file came from outside the Play Store.</p>
-        </Card>
-      </div>
+        </>
+      )}
     </div>
   )
 }
 
-function DownloadIcon() {
+function BuildsSkeleton() {
   return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
+    <div className="wb-build-skeleton" aria-busy="true" aria-label="Loading releases">
+      <div className="wb-skeleton" style={{ height: 120 }} />
+      <div className="wb-skeleton wb-skeleton-row" />
+      <div className="wb-skeleton wb-skeleton-row" />
+      <div className="wb-skeleton wb-skeleton-row" />
+    </div>
   )
 }
 
-function AndroidIcon() {
+function orderedAssets(rel: BuildRelease): BuildAsset[] {
+  const s = releaseSlots(rel)
+  return [...s.androidApks, ...(s.aab ? [s.aab] : []), ...s.wear, ...(s.ipa ? [s.ipa] : []), ...s.sbom, ...(s.checksums ? [s.checksums] : [])]
+}
+
+function LatestRelease({ rel, data }: { rel: BuildRelease; data: AdminBuilds }) {
+  const s = releaseSlots(rel)
+  const origin = window.location.origin
+  const primaryApk = s.androidApks[0]
+  const latestPaths: Record<string, string> = {}
+  if (primaryApk) latestPaths[primaryApk.name] = data.public_apk
+  if (s.ipa) latestPaths[s.ipa.name] = data.public_ipa
+
   return (
-    <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
-      <path d="M7 8h10a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2Zm1-3-1.5-2M16 5l1.5-2M9 12h.01M15 12h.01" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-    </svg>
+    <Card className="wb-build-latest">
+      <div className="wb-build-latest-head">
+        <div>
+          <div className="wb-build-eyebrow">Latest release</div>
+          <h2 className="wb-build-title">{rel.name?.trim() || rel.tag_name}</h2>
+          <div className="wb-build-sub">
+            {rel.tag_name} · published {formatDate(rel.published_at)}
+            {rel.prerelease && <Badge tone="orange">pre-release</Badge>}
+          </div>
+        </div>
+        {rel.html_url && (
+          <a className="wb-build-link" href={rel.html_url} target="_blank" rel="noreferrer">
+            Release notes on GitHub
+          </a>
+        )}
+      </div>
+
+      <div className="wb-build-platforms">
+        <Platform title="Android phone and tablet" present={s.androidApks.length > 0} absent="No Android APK in this release.">
+          <AssetTable assets={[...s.androidApks, ...(s.aab ? [s.aab] : [])]} latestPaths={latestPaths} origin={origin} />
+          {s.androidApks.length > 1 && (
+            <p className="wb-build-note">
+              Several versions of the app are listed, one per phone type. If unsure, pick “All phones”, or “Most phones” for any
+              phone from the last several years.
+            </p>
+          )}
+        </Platform>
+
+        <Platform title="Wear OS watch" present={s.wear.length > 0} absent="Not in this release.">
+          <AssetTable assets={s.wear} latestPaths={{}} origin={origin} />
+        </Platform>
+
+        <Platform title="iPhone" present={!!s.ipa} absent="Not in this release.">
+          {s.ipa && <AssetTable assets={[s.ipa]} latestPaths={latestPaths} origin={origin} />}
+        </Platform>
+
+        <div className="wb-build-platform">
+          <h3 className="wb-build-platform-title">Apple Watch</h3>
+          <p className="wb-build-absent">
+            The Apple Watch app is not published as a download. It installs together with the iPhone app after it has been
+            signed with an Apple developer account.
+          </p>
+        </div>
+
+        <Platform title="Check your download" present={s.sbom.length > 0 || !!s.checksums} absent="Not in this release.">
+          <AssetTable assets={[...s.sbom, ...(s.checksums ? [s.checksums] : [])]} latestPaths={{}} origin={origin} />
+          <p className="wb-build-note">
+            To check a file, run <code>sha256sum &lt;file&gt;</code> and compare it with the SHA-256 shown here.
+          </p>
+        </Platform>
+      </div>
+    </Card>
   )
 }
 
-function ExternalIcon() {
+function Platform({
+  title,
+  present,
+  absent,
+  children,
+}: {
+  title: string
+  present: boolean
+  absent: string
+  children: React.ReactNode
+}) {
   return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path d="M14 5h5v5m0-5-8 8M19 13v5a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
+    <div className="wb-build-platform">
+      <h3 className="wb-build-platform-title">{title}</h3>
+      {present ? children : <p className="wb-build-absent">{absent}</p>}
+    </div>
   )
 }
 
-function NotesIcon() {
+function AssetTable({
+  assets,
+  latestPaths,
+  origin,
+}: {
+  assets: BuildAsset[]
+  latestPaths: Record<string, string>
+  origin: string
+}) {
   return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-      <path d="M7 4h10a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Zm2 5h6M9 13h6M9 17h4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-    </svg>
+    <div className="wb-build-table" role="table" aria-label="Files">
+      <div className="wb-build-tr wb-build-th" role="row">
+        <span role="columnheader">File</span>
+        <span role="columnheader">Version</span>
+        <span role="columnheader">Size</span>
+        <span role="columnheader">SHA-256</span>
+        <span role="columnheader">Released</span>
+        <span role="columnheader">Link</span>
+      </div>
+      {assets.map((a) => {
+        const link = shareUrl(origin, a, latestPaths[a.name] ?? null)
+        return (
+          <div className="wb-build-tr" role="row" key={a.name}>
+            <span role="cell" className="wb-build-file" data-label="File">
+              <span className="wb-build-filename">{a.name}</span>
+              <span className="wb-build-kind">{kindText(a)}</span>
+            </span>
+            <span role="cell" data-label="Version">{a.version || '—'}</span>
+            <span role="cell" data-label="Size">{formatSize(a.size)}</span>
+            <span role="cell" data-label="SHA-256" className="wb-build-sha">
+              {a.sha256 ? (
+                <>
+                  <code title={a.sha256}>{shortSha(a.sha256)}…</code>
+                  <CopyButton value={a.sha256} label={`Copy SHA-256 of ${a.name}`} />
+                </>
+              ) : (
+                '—'
+              )}
+            </span>
+            <span role="cell" data-label="Released">{formatDate(a.updated_at)}</span>
+            <span role="cell" data-label="Link" className="wb-build-actions">
+              {link ? (
+                <>
+                  <a className="wb-build-dl" href={link} download>
+                    Download
+                  </a>
+                  <CopyButton value={link} label={`Copy download link for ${a.name}`} />
+                </>
+              ) : (
+                '—'
+              )}
+            </span>
+          </div>
+        )
+      })}
+    </div>
   )
 }
 
-function PhoneIcon() {
+function InstallHelp({ rel, origin }: { rel: BuildRelease; origin: string }) {
+  const s = releaseSlots(rel)
+  const apkLink = origin + '/app.apk'
+  const qr = React.useMemo(() => qrSvg(apkLink, 4, 2), [apkLink])
   return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-      <rect x="6" y="2.5" width="12" height="19" rx="2.5" stroke="currentColor" strokeWidth="1.7" />
-      <path d="M10 18.5h4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-    </svg>
+    <div className="wb-build-help">
+      <Card className="wb-build-help-card">
+        <h3 className="wb-build-help-title">Install on Android</h3>
+        <div className="wb-build-android">
+          {s.androidApks.length > 0 && (
+            <div className="wb-build-qr">
+              <div className="wb-build-qr-img" role="img" aria-label="QR code for the Android download" dangerouslySetInnerHTML={{ __html: qr }} />
+              <span>Scan with the phone camera</span>
+            </div>
+          )}
+          <ol>
+            <li>Open the download link on the phone, or scan the code.</li>
+            <li>Open the downloaded file. Android asks once to allow installs from your browser; allow it.</li>
+            <li>Tap Install. Installing over the existing app keeps all settings.</li>
+          </ol>
+        </div>
+        <p className="wb-build-note">
+          Android may warn that the file did not come from the Play Store. That is expected for a family-run server. The SHA-256
+          above proves the file is the one that was published.
+        </p>
+      </Card>
+
+      <Card className="wb-build-help-card">
+        <h3 className="wb-build-help-title">Install on iPhone</h3>
+        <ol>
+          <li>
+            Download the <strong>unsigned IPA</strong> on a computer. iPhones refuse an unsigned app, so it must be signed with
+            your own Apple ID first.
+          </li>
+          <li>
+            Use <strong>AltStore</strong> or <strong>Sideloadly</strong> on a Mac or PC: connect the iPhone, pick the IPA, enter
+            your Apple ID. The tool signs it and installs it.
+          </li>
+          <li>On the iPhone: Settings, General, VPN &amp; Device Management, trust your Apple ID.</li>
+        </ol>
+        <p className="wb-build-note">
+          <strong>Limits:</strong> with a free Apple ID the app stops working after 7 days and must be installed again (AltStore
+          can refresh it automatically while the computer is on), and at most 3 sideloaded apps are allowed. Lasting installs,
+          TestFlight and the App Store need a paid Apple Developer account (99 USD a year).
+        </p>
+        <p className="wb-build-note">
+          Step by step:{' '}
+          <a href={`${REPO_URL}/blob/main/${IOS_DOC_PATH}`} target="_blank" rel="noreferrer">
+            iOS release guide
+          </a>
+          {' · '}
+          <a href={`${REPO_URL}/blob/main/docs/android-install-and-updates.md`} target="_blank" rel="noreferrer">
+            Android install guide
+          </a>
+        </p>
+      </Card>
+    </div>
   )
 }

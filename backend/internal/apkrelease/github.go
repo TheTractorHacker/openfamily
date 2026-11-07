@@ -23,7 +23,9 @@ import (
 const (
 	defaultAPI      = "https://api.github.com"
 	cachedName      = "openfamily-release.apk"
+	cachedIPAName   = "openfamily-release.ipa"
 	metaName        = ".apk-release.json"
+	metaIPAName     = ".ipa-release.json"
 	userAgent       = "openfamily-apk-sync"
 	metaTimeout     = 15 * time.Second
 	fetchTimeout    = 5 * time.Minute
@@ -71,10 +73,13 @@ type semver struct {
 }
 
 type asset struct {
-	ID   int64  `json:"id"`
-	Name string `json:"name"`
-	URL  string `json:"url"`
-	Size int64  `json:"size"`
+	ID                 int64     `json:"id"`
+	Name               string    `json:"name"`
+	URL                string    `json:"url"`
+	Size               int64     `json:"size"`
+	Digest             string    `json:"digest"`
+	BrowserDownloadURL string    `json:"browser_download_url"`
+	UpdatedAt          time.Time `json:"updated_at"`
 }
 
 type cacheMeta struct {
@@ -139,6 +144,25 @@ func LatestInfo(ctx context.Context, opts Options) (ReleaseInfo, error) {
 // semver GitHub Release. If the cached file already matches that asset, it is
 // reused. The returned path is the local APK. CI apk-* tags are ignored.
 func Sync(ctx context.Context, opts Options) (string, error) {
+	return syncKind(ctx, opts, KindAndroidAPK)
+}
+
+// SyncIPA is Sync for the unsigned iOS IPA of the latest release that has one.
+func SyncIPA(ctx context.Context, opts Options) (string, error) {
+	return syncKind(ctx, opts, KindIOSIPA)
+}
+
+// CachedName returns the original release file name (for example
+// orbitly-0.24.1.apk) of the cached APK or IPA, or "" when unknown.
+func CachedName(dir, kind string) string {
+	meta, err := readMetaFile(metaPath(dir, kind))
+	if err != nil {
+		return ""
+	}
+	return meta.Name
+}
+
+func syncKind(ctx context.Context, opts Options, kind string) (string, error) {
 	if opts.DestDir == "" {
 		return "", errors.New("APK_DIR is not configured")
 	}
@@ -157,11 +181,18 @@ func Sync(ctx context.Context, opts Options) (string, error) {
 
 	metaCtx, cancel := context.WithTimeout(ctx, metaTimeout)
 	defer cancel()
-	rel, err := fetchLatest(metaCtx, client, api, owner, name, opts.Token)
+	pick := pickAPKAsset
+	if kind == KindIOSIPA {
+		pick = pickIPAAsset
+	}
+	rel, err := fetchLatestWith(metaCtx, client, api, owner, name, opts.Token, func(as []asset) bool {
+		_, e := pick(as)
+		return e == nil
+	})
 	if err != nil {
 		return "", err
 	}
-	asset, err := pickAPKAsset(rel.Assets)
+	asset, err := pick(rel.Assets)
 	if err != nil {
 		return "", err
 	}
@@ -169,8 +200,8 @@ func Sync(ctx context.Context, opts Options) (string, error) {
 	if err := os.MkdirAll(opts.DestDir, 0o755); err != nil {
 		return "", fmt.Errorf("create APK_DIR: %w", err)
 	}
-	dest := filepath.Join(opts.DestDir, cachedName)
-	if cacheFresh(opts.DestDir, dest, asset.ID) {
+	dest := filepath.Join(opts.DestDir, cachedFile(kind))
+	if cacheFreshKind(opts.DestDir, kind, dest, asset.ID) {
 		return dest, nil
 	}
 
@@ -180,7 +211,7 @@ func Sync(ctx context.Context, opts Options) (string, error) {
 		return "", err
 	}
 	meta := cacheMeta{AssetID: asset.ID, TagName: rel.TagName, Name: asset.Name}
-	if metaErr := writeMeta(opts.DestDir, meta); metaErr != nil {
+	if metaErr := writeMetaFile(metaPath(opts.DestDir, kind), meta); metaErr != nil {
 		// The APK is usable even if the sidecar fails; the next sync will
 		// re-download.
 		return dest, nil
@@ -197,9 +228,29 @@ func parseRepo(repo string) (owner, name string, err error) {
 	return parts[0], parts[1], nil
 }
 
+// pickAPKAsset chooses the phone APK to serve. Wear OS APKs are never chosen.
+// When several phone APKs exist (per-ABI splits), the universal one wins, then
+// arm64-v8a, then the other ABIs in a fixed order.
 func pickAPKAsset(assets []asset) (asset, error) {
+	best, bestRank := asset{}, 1<<30
 	for _, a := range assets {
-		if strings.EqualFold(filepath.Ext(a.Name), ".apk") {
+		if Classify(a.Name) != KindAndroidAPK {
+			continue
+		}
+		if r := abiRank(ParseABI(a.Name)); r < bestRank {
+			best, bestRank = a, r
+		}
+	}
+	if bestRank == 1<<30 {
+		return asset{}, ErrNotFound
+	}
+	return best, nil
+}
+
+// pickIPAAsset returns the iOS IPA asset, if any.
+func pickIPAAsset(assets []asset) (asset, error) {
+	for _, a := range assets {
+		if Classify(a.Name) == KindIOSIPA {
 			return a, nil
 		}
 	}
@@ -207,22 +258,40 @@ func pickAPKAsset(assets []asset) (asset, error) {
 }
 
 func cacheFresh(dir, dest string, assetID int64) bool {
+	return cacheFreshKind(dir, KindAndroidAPK, dest, assetID)
+}
+
+func cacheFreshKind(dir, kind, dest string, assetID int64) bool {
 	if _, err := os.Stat(dest); err != nil {
 		return false
 	}
-	meta, err := readMeta(dir)
+	meta, err := readMetaFile(metaPath(dir, kind))
 	if err != nil {
 		return false
 	}
 	return meta.AssetID == assetID
 }
 
+func cachedFile(kind string) string {
+	if kind == KindIOSIPA {
+		return cachedIPAName
+	}
+	return cachedName
+}
+
 func fetchLatest(ctx context.Context, client *http.Client, api, owner, name, token string) (*release, error) {
+	return fetchLatestWith(ctx, client, api, owner, name, token, func(as []asset) bool {
+		_, e := pickAPKAsset(as)
+		return e == nil
+	})
+}
+
+func fetchLatestWith(ctx context.Context, client *http.Client, api, owner, name, token string, has func([]asset) bool) (*release, error) {
 	rels, err := listReleases(ctx, client, api, owner, name, token)
 	if err != nil {
 		return nil, err
 	}
-	rel, err := pickLatestSemverRelease(rels)
+	rel, err := pickLatestRelease(rels, has)
 	if err != nil {
 		return nil, err
 	}
@@ -230,9 +299,13 @@ func fetchLatest(ctx context.Context, client *http.Client, api, owner, name, tok
 }
 
 func listReleases(ctx context.Context, client *http.Client, api, owner, name, token string) ([]release, error) {
-	url := fmt.Sprintf("%s/repos/%s/%s/releases?per_page=%d", api, owner, name, releasesPerPage)
+	return listReleasesPaged(ctx, client, api, owner, name, token, releasesPerPage, maxReleasePages)
+}
+
+func listReleasesPaged(ctx context.Context, client *http.Client, api, owner, name, token string, perPage, maxPages int) ([]release, error) {
+	url := fmt.Sprintf("%s/repos/%s/%s/releases?per_page=%d", api, owner, name, perPage)
 	var all []release
-	for page := 0; page < maxReleasePages; page++ {
+	for page := 0; page < maxPages; page++ {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 		if err != nil {
 			return nil, err
@@ -327,6 +400,13 @@ func (v semver) prerelease() bool {
 // has an APK asset. Drafts and apk-* CI tags are ignored. A GitHub or semver
 // prerelease is used only when no stable v* APK exists.
 func pickLatestSemverRelease(rels []release) (*release, error) {
+	return pickLatestRelease(rels, func(as []asset) bool {
+		_, e := pickAPKAsset(as)
+		return e == nil
+	})
+}
+
+func pickLatestRelease(rels []release, has func([]asset) bool) (*release, error) {
 	var bestStable, bestPre *release
 	var bestStableVer, bestPreVer semver
 	for i := range rels {
@@ -338,7 +418,7 @@ func pickLatestSemverRelease(rels []release) (*release, error) {
 		if !ok {
 			continue
 		}
-		if _, err := pickAPKAsset(rel.Assets); err != nil {
+		if !has(rel.Assets) {
 			continue
 		}
 		if rel.Prerelease || ver.prerelease() {
@@ -405,13 +485,16 @@ func defaultClient() *http.Client {
 	}
 }
 
-func metaPath(dir string) string {
+func metaPath(dir, kind string) string {
+	if kind == KindIOSIPA {
+		return filepath.Join(dir, metaIPAName)
+	}
 	return filepath.Join(dir, metaName)
 }
 
-func readMeta(dir string) (cacheMeta, error) {
+func readMetaFile(path string) (cacheMeta, error) {
 	var meta cacheMeta
-	data, err := os.ReadFile(metaPath(dir))
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return meta, err
 	}
@@ -421,16 +504,21 @@ func readMeta(dir string) (cacheMeta, error) {
 	return meta, nil
 }
 
-func writeMeta(dir string, meta cacheMeta) error {
+func writeMetaFile(path string, meta cacheMeta) error {
 	data, err := json.Marshal(meta)
 	if err != nil {
 		return err
 	}
-	tmp := metaPath(dir) + ".tmp"
+	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, data, 0o644); err != nil {
 		return err
 	}
-	return os.Rename(tmp, metaPath(dir))
+	return os.Rename(tmp, path)
+}
+
+// writeMeta stores the APK sidecar (kept for tests).
+func writeMeta(dir string, meta cacheMeta) error {
+	return writeMetaFile(metaPath(dir, KindAndroidAPK), meta)
 }
 
 func writeAtomic(dest string, r io.Reader) error {

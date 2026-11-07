@@ -33,6 +33,8 @@ import type {
   BackupSettingsResponse,
   BackupSettingsSubmit,
   AdminHealth,
+  AdminBuilds,
+  SystemChecks,
   AdminAlertPage,
   MapStyleSettings,
   AdminShareLink,
@@ -936,4 +938,14 @@ export function getDocText(path: string): Promise<string> {
 /** An image from the docs as a Blob (images need the bearer token, so they are fetched, not linked). */
 export function getDocImage(path: string): Promise<Blob> {
   return request<Blob>(`/api/docs/${path.split('/').map(encodeURIComponent).join('/')}`, { binary: true })
+}
+
+// ---- Builds page and System checklist ----
+
+export function getAdminBuilds(refresh = false): Promise<AdminBuilds> {
+  return request<AdminBuilds>(`/api/admin/builds${refresh ? '?refresh=1' : ''}`)
+}
+
+export function getSystemChecks(): Promise<SystemChecks> {
+  return request<SystemChecks>('/api/admin/system/checks')
 }

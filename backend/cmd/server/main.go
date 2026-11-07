@@ -300,6 +300,8 @@ func main() {
 	r.Get("/.well-known/apple-app-site-association", srv.AppleAppSiteAssociation)
 	// Public signed-APK download for invited family members (rate limited).
 	r.Get("/app.apk", srv.PublicDownloadAPK)
+	// Unsigned iOS build, same rules; it must be re-signed to install.
+	r.Get("/app.ipa", srv.PublicDownloadIPA)
 	// Public share-link viewer (docs/share-links.md): hash lookup, generic 404,
 	// per-IP rate limit.
 	r.Get("/s/{token}", srv.ShareViewPage)
@@ -624,6 +626,7 @@ func main() {
 		r.Get("/api/admin/apk", srv.AdminDownloadAPK)
 		r.Post("/api/admin/apk/build", srv.AdminBuildAPK)
 		r.Get("/api/admin/apk/status", srv.AdminAPKStatus)
+		r.Get("/api/admin/builds", srv.AdminBuilds)
 
 		r.Get("/api/admin/settings/sms", srv.AdminGetSMSSettings)
 		r.Put("/api/admin/settings/sms", srv.AdminPutSMSSettings)
@@ -650,6 +653,7 @@ func main() {
 		// Read-only running version. Upgrades happen on the host (scripts/upgrade.sh).
 		r.Get("/api/admin/version", srv.AdminVersion)
 		r.Get("/api/admin/health", srv.AdminHealth)
+		r.Get("/api/admin/system/checks", srv.AdminSystemChecks)
 		// Backups card: state published by the optional `backup` compose
 		// service, plus queued "back up now" / "test S3" requests for it. The
 		// API never holds S3 credentials.
