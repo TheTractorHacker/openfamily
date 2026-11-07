@@ -22,6 +22,7 @@ class FakeE2eeServer {
 
   /// Trusted-server mode switch and the pinned server key (null = none yet).
   bool serverModeEnabled = false;
+  bool trustedServerDefault = false;
   String? pinnedServerDevice;
 
   FakeCircle circle(String id, {required List<String> members, required String admin}) =>
@@ -179,6 +180,9 @@ class FakeE2eeClient implements E2eeApi {
 
   @override
   Future<List<DeviceKey>> userKeys(String userId) async => s.activeOf(userId);
+
+  @override
+  Future<bool> trustedServerDefault() async => s.trustedServerDefault;
 
   @override
   Future<ServerMemberState> serverMemberState(String circleId) async {

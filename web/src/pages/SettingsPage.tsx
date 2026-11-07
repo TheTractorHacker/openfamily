@@ -24,6 +24,7 @@ import { DawarichSettingsCard } from './DawarichSettingsCard'
 import { IntegrationsCard } from './IntegrationsCard'
 import { ThemeAccentCard } from './ThemeAccentCard'
 import { UnitsDefaultCard } from './UnitsDefaultCard'
+import { TrustedServerDefaultCard } from './TrustedServerDefaultCard'
 import { DomainSettingsCard } from './DomainSettingsCard'
 import { MapStyleCard } from './MapStyleCard'
 import './pages.css'
@@ -343,6 +344,7 @@ export function SettingsPage({ email, onLogout }: SettingsPageProps) {
           {isPlatformAdmin && <TwilioSettingsCard />}
           {isPlatformAdmin && <ThemeAccentCard />}
           {isPlatformAdmin && <UnitsDefaultCard />}
+          {isPlatformAdmin && <TrustedServerDefaultCard />}
           {isPlatformAdmin && <MapStyleCard />}
           {isPlatformAdmin && <DawarichSettingsCard />}
           <IntegrationsCard />

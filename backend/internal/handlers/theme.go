@@ -28,7 +28,11 @@ func (s *Server) EnsureThemeSchema(ctx context.Context) error {
 		return err
 	}
 	// Admin-set vector map style URL (overrides MAP_STYLE_URL; see admin_mapstyle.go).
-	_, err = s.Pool.Exec(ctx, `ALTER TABLE app_theme_settings ADD COLUMN IF NOT EXISTS map_style_url TEXT NOT NULL DEFAULT ''`)
+	if _, err = s.Pool.Exec(ctx, `ALTER TABLE app_theme_settings ADD COLUMN IF NOT EXISTS map_style_url TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
+	// Trusted-server default (docs/design/E2EE.md): a recommendation only.
+	_, err = s.Pool.Exec(ctx, `ALTER TABLE app_theme_settings ADD COLUMN IF NOT EXISTS e2ee_trusted_server_default BOOLEAN NOT NULL DEFAULT FALSE`)
 	return err
 }
 
