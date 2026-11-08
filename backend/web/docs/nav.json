@@ -32,6 +32,7 @@
         "user/members-and-devices.md",
         "user/battery-and-permissions.md",
         "user/older-phones.md",
+        "user/foldables-and-tablets.md",
         "user/when-the-server-is-down.md",
         "user/watch.md"
       ],
@@ -76,7 +77,8 @@
         "developers/apple-watch.md",
         "api-compat.md",
         "developers/api-efficiency.md",
-        "developers/performance-low-memory.md"
+        "developers/performance-low-memory.md",
+        "developers/performance-foldables.md"
       ],
       "icon": "code"
     },
