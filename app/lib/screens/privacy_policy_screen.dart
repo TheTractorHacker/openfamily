@@ -62,8 +62,10 @@ class PrivacyPolicyScreen extends StatelessWidget {
       'Turn off Location sharing in Settings to stop this device reporting '
           'its location. You can also revoke Android location permissions, '
           'manage notifications, change your profile or log out. Orbitly '
-          'only connects to HTTPS servers, encrypting network traffic in transit. Locations are readable '
-          'by the server; they are not end-to-end encrypted. Optional biometric '
+          'only connects to HTTPS servers, encrypting network traffic in transit. In a Normal circle, '
+          'locations and chat are readable by the server. In a Private circle they are end-to-end '
+          'encrypted between members\' phones, except the location data of members who let the server '
+          'process it, which the server can read. Optional biometric '
           'unlock protects access to the app interface. Orbitly contains no '
           'advertising, analytics or crash-reporting SDK.'
     ),

@@ -40,6 +40,18 @@ void main() {
       expect(find.byIcon(Icons.lock_outline), findsOneWidget);
     });
 
+    testWidgets('a circle with server help never claims end-to-end for everyone', (WidgetTester t) async {
+      await t.pumpWidget(_wrap(const Scaffold(body: Column(children: <Widget>[
+        PrivateCircleBadge(serverAssist: true),
+        PrivateCircleBadge(serverAssist: true, compact: true),
+      ]))));
+      expect(find.text('End-to-end encrypted'), findsNothing);
+      expect(find.text('Encrypted'), findsNothing);
+      expect(find.text('Private, server helps some'), findsOneWidget);
+      expect(find.text('Private + server'), findsOneWidget);
+      expect(find.bySemanticsLabel(RegExp('server can read the data of members who use the server')), findsNWidgets(2));
+    });
+
     for (final PrivateFeature f in PrivateFeature.values) {
       testWidgets('${f.title} has an explicit not-available state', (WidgetTester t) async {
         await t.pumpWidget(_wrap(Scaffold(body: NotAvailableInPrivate(feature: f, circleName: 'Family'))));
