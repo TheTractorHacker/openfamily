@@ -31,7 +31,10 @@ type refreshStore interface {
 	Create(ctx context.Context, userID, jti string, expires time.Time) error
 	// Rotate atomically spends oldJTI and records newJTI in the same family.
 	// Presenting a spent or revoked token revokes the whole family.
-	Rotate(ctx context.Context, userID, oldJTI, newJTI string, expires time.Time) (rotateOutcome, error)
+	// The returned jti is the successor to hand out: newJTI normally, or the
+	// already-issued successor when the same token is presented again within
+	// refreshIdempotentWindow (several parts of one app refreshing at once).
+	Rotate(ctx context.Context, userID, oldJTI, newJTI string, expires time.Time) (rotateOutcome, string, error)
 	// Purge deletes long-expired rows.
 	Purge(ctx context.Context) error
 }
@@ -48,6 +51,13 @@ func newTokenID() (string, error) {
 // it again is treated as a lost-response retry instead of token theft.
 const refreshReuseGrace = 60 * time.Second
 
+// refreshIdempotentWindow: within this long after a refresh token is spent, presenting it again
+// (for any number of times) returns the SAME successor instead of counting as reuse. One phone has
+// several parts that refresh together on start-up (the screen, the background location service, a
+// retry after a lost answer); treating the third as token theft signed people out. A successor
+// that was already used, or a presentation after the window, keeps the strict rules below.
+var refreshIdempotentWindow = 10 * time.Second
+
 type pgRefreshStore struct{ pool *pgxpool.Pool }
 
 func (p pgRefreshStore) Create(ctx context.Context, userID, jti string, expires time.Time) error {
@@ -57,10 +67,10 @@ func (p pgRefreshStore) Create(ctx context.Context, userID, jti string, expires 
 	return err
 }
 
-func (p pgRefreshStore) Rotate(ctx context.Context, userID, oldJTI, newJTI string, expires time.Time) (rotateOutcome, error) {
+func (p pgRefreshStore) Rotate(ctx context.Context, userID, oldJTI, newJTI string, expires time.Time) (rotateOutcome, string, error) {
 	tx, err := p.pool.Begin(ctx)
 	if err != nil {
-		return rotateUnknown, err
+		return rotateUnknown, "", err
 	}
 	defer tx.Rollback(ctx)
 
@@ -73,12 +83,12 @@ func (p pgRefreshStore) Rotate(ctx context.Context, userID, oldJTI, newJTI strin
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO refresh_sessions (jti, family_id, user_id, expires_at, parent_jti, client_key, user_agent)
 			SELECT $1::text, $2::text, $3::uuid, $4::timestamptz, $5::text, client_key, user_agent FROM refresh_sessions WHERE jti = $5`, newJTI, family, userID, expires, oldJTI); err != nil {
-			return rotateUnknown, err
+			return rotateUnknown, "", err
 		}
-		return rotateOK, tx.Commit(ctx)
+		return rotateOK, newJTI, tx.Commit(ctx)
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
-		return rotateUnknown, err
+		return rotateUnknown, "", err
 	}
 
 	// Not live: distinguish "never heard of it / expired" from reuse.
@@ -88,14 +98,32 @@ func (p pgRefreshStore) Rotate(ctx context.Context, userID, oldJTI, newJTI strin
 		SELECT family_id, used_at, revoked_at, expires_at FROM refresh_sessions
 		WHERE jti = $1 AND user_id = $2`, oldJTI, userID).Scan(&family, &used, &revoked, &expiresAt)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return rotateUnknown, nil
+		return rotateUnknown, "", nil
 	}
 	if err != nil {
-		return rotateUnknown, err
+		return rotateUnknown, "", err
 	}
 	if used == nil && revoked == nil {
-		return rotateUnknown, nil // simply expired
+		return rotateUnknown, "", nil // simply expired
 	}
+	// Several parts of one app refreshing at the same moment: hand every one of them the same
+	// successor (it has not been used yet), so nobody is treated as a thief.
+	var sameChild string
+	err = tx.QueryRow(ctx, `
+		SELECT c.jti FROM refresh_sessions p
+		JOIN refresh_sessions c ON c.parent_jti = p.jti
+		WHERE p.jti = $1 AND p.user_id = $2
+		  AND p.used_at IS NOT NULL AND p.revoked_at IS NULL
+		  AND p.used_at > now() - make_interval(secs => $3)
+		  AND c.used_at IS NULL AND c.revoked_at IS NULL AND c.expires_at > now()
+		ORDER BY c.created_at LIMIT 1`, oldJTI, userID, refreshIdempotentWindow.Seconds()).Scan(&sameChild)
+	if err == nil {
+		return rotateOK, sameChild, tx.Commit(ctx)
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return rotateUnknown, "", err
+	}
+
 	// A refresh response can be lost after the server rotated: the app is
 	// killed by an update, the phone drops off the network, or the proxy
 	// resets the connection. The client then legitimately retries the token
@@ -117,19 +145,19 @@ func (p pgRefreshStore) Rotate(ctx context.Context, userID, oldJTI, newJTI strin
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO refresh_sessions (jti, family_id, user_id, expires_at, parent_jti, client_key, user_agent)
 			SELECT $1::text, $2::text, $3::uuid, $4::timestamptz, $5::text, client_key, user_agent FROM refresh_sessions WHERE jti = $5`, newJTI, graceFamily, userID, expires, oldJTI); err != nil {
-			return rotateUnknown, err
+			return rotateUnknown, "", err
 		}
-		return rotateOK, tx.Commit(ctx)
+		return rotateOK, newJTI, tx.Commit(ctx)
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
-		return rotateUnknown, err
+		return rotateUnknown, "", err
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE refresh_sessions SET revoked_at = now()
 		WHERE family_id = $1 AND revoked_at IS NULL`, family); err != nil {
-		return rotateUnknown, err
+		return rotateUnknown, "", err
 	}
-	return rotateReused, tx.Commit(ctx)
+	return rotateReused, "", tx.Commit(ctx)
 }
 
 func (p pgRefreshStore) Purge(ctx context.Context) error {

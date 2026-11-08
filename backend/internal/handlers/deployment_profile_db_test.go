@@ -159,6 +159,10 @@ func TestColumnsAreCoveredAndDawarichKeyRoundTrips(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The Dawarich columns are added lazily by the server at start-up; make the test independent of test order.
+	if err := e.srv.EnsureDawarichSchema(ctx); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := e.pool.Exec(ctx, `INSERT INTO dawarich_settings (id, base_url, api_key) VALUES (1, 'http://d', $1)`, sealed); err != nil {
 		t.Fatal(err)
 	}

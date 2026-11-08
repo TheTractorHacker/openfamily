@@ -12,8 +12,11 @@ the phones afterwards.
 
 ## Unreleased
 
-Nothing yet. The owner moves these notes under a version heading when a
-release is tagged.
+- **Fewer surprise sign-outs.** One phone has several parts that refresh the sign-in together
+  (the screen, the background location service, a retry). The server treated the third as token
+  theft and signed the person out, which showed up as "Couldn't reach the server". For 10 seconds
+  after a refresh token is used, repeated refreshes now get the same new token. After that, and
+  if the new token was already used, the strict theft rules still apply.
 
 ## v0.25.2 (2026-11-08)
 

@@ -266,7 +266,7 @@ func TestRevocationCoversRotatedFamilies(t *testing.T) {
 	}
 	_, _ = fx.pool.Exec(ctx, `UPDATE refresh_sessions SET client_key = 'rotated-install' WHERE jti = 'rf-A'`)
 	for _, pair := range [][2]string{{"rf-A", "rf-A2"}, {"rf-A2", "rf-A3"}} {
-		if out, err := store.Rotate(ctx, fx.c, pair[0], pair[1], exp); err != nil || out != rotateOK {
+		if out, _, err := store.Rotate(ctx, fx.c, pair[0], pair[1], exp); err != nil || out != rotateOK {
 			t.Fatalf("rotate: %v %v", out, err)
 		}
 	}
@@ -290,7 +290,7 @@ func TestRevocationCoversRotatedFamilies(t *testing.T) {
 	}
 	// Bulk revoke from C's point of view: rotate B twice, then revoke all but C.
 	for _, pair := range [][2]string{{"rf-B", "rf-B2"}, {"rf-B2", "rf-B3"}} {
-		if out, err := store.Rotate(ctx, fx.c, pair[0], pair[1], exp); err != nil || out != rotateOK {
+		if out, _, err := store.Rotate(ctx, fx.c, pair[0], pair[1], exp); err != nil || out != rotateOK {
 			t.Fatalf("rotate: %v %v", out, err)
 		}
 	}

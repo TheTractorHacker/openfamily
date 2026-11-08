@@ -30,25 +30,25 @@ func (m *memRefreshStore) Create(_ context.Context, userID, jti string, exp time
 	return nil
 }
 
-func (m *memRefreshStore) Rotate(_ context.Context, userID, oldJTI, newJTI string, exp time.Time) (rotateOutcome, error) {
+func (m *memRefreshStore) Rotate(_ context.Context, userID, oldJTI, newJTI string, exp time.Time) (rotateOutcome, string, error) {
 	r, ok := m.rows[oldJTI]
 	if !ok || r.user != userID {
-		return rotateUnknown, nil
+		return rotateUnknown, "", nil
 	}
 	if !r.used && !r.revoked {
 		if !time.Now().Before(r.expires) {
-			return rotateUnknown, nil
+			return rotateUnknown, "", nil
 		}
 		r.used = true
 		m.rows[newJTI] = &memRefreshRow{family: r.family, user: userID, expires: exp}
-		return rotateOK, nil
+		return rotateOK, newJTI, nil
 	}
 	for _, o := range m.rows {
 		if o.family == r.family {
 			o.revoked = true
 		}
 	}
-	return rotateReused, nil
+	return rotateReused, "", nil
 }
 
 func (m *memRefreshStore) Purge(context.Context) error { return nil }
@@ -168,23 +168,28 @@ func TestPGRefreshStore(t *testing.T) {
 
 	st := pgRefreshStore{pool}
 	exp := time.Now().Add(time.Hour)
+	// This test pins the strict once-per-token grace rules: the short idempotent window is off here
+	// (see TestPGRefreshConcurrentPresentations for it).
+	oldIdem := refreshIdempotentWindow
+	refreshIdempotentWindow = 0
+	t.Cleanup(func() { refreshIdempotentWindow = oldIdem })
 	if err := st.Create(ctx, uid, "pg-a", exp); err != nil {
 		t.Fatal(err)
 	}
-	if out, err := st.Rotate(ctx, uid, "pg-a", "pg-b", exp); err != nil || out != rotateOK {
+	if out, _, err := st.Rotate(ctx, uid, "pg-a", "pg-b", exp); err != nil || out != rotateOK {
 		t.Fatalf("rotate: %v %v", out, err)
 	}
 	// A retry right after the rotation (lost response) is tolerated once and
 	// gets a sibling token in the same family.
-	if out, err := st.Rotate(ctx, uid, "pg-a", "pg-c", exp); err != nil || out != rotateOK {
+	if out, _, err := st.Rotate(ctx, uid, "pg-a", "pg-c", exp); err != nil || out != rotateOK {
 		t.Fatalf("lost-response retry within grace: %v %v", out, err)
 	}
 	// ...but only once: a second replay of the same spent token is theft and
 	// revokes the family, including the sibling just issued.
-	if out, err := st.Rotate(ctx, uid, "pg-a", "pg-c2", exp); err != nil || out != rotateReused {
+	if out, _, err := st.Rotate(ctx, uid, "pg-a", "pg-c2", exp); err != nil || out != rotateReused {
 		t.Fatalf("second replay within grace: %v %v", out, err)
 	}
-	if out, err := st.Rotate(ctx, uid, "pg-c", "pg-c3", exp); err != nil || out != rotateReused {
+	if out, _, err := st.Rotate(ctx, uid, "pg-c", "pg-c3", exp); err != nil || out != rotateReused {
 		t.Fatalf("sibling after revoke: %v %v", out, err)
 	}
 
@@ -192,13 +197,13 @@ func TestPGRefreshStore(t *testing.T) {
 	if err := st.Create(ctx, uid, "old-a", exp); err != nil {
 		t.Fatal(err)
 	}
-	if out, err := st.Rotate(ctx, uid, "old-a", "old-b", exp); err != nil || out != rotateOK {
+	if out, _, err := st.Rotate(ctx, uid, "old-a", "old-b", exp); err != nil || out != rotateOK {
 		t.Fatalf("rotate: %v %v", out, err)
 	}
 	if _, err := pool.Exec(ctx, `UPDATE refresh_sessions SET used_at = now() - interval '5 minutes' WHERE jti = 'old-a'`); err != nil {
 		t.Fatal(err)
 	}
-	if out, err := st.Rotate(ctx, uid, "old-a", "old-c", exp); err != nil || out != rotateReused {
+	if out, _, err := st.Rotate(ctx, uid, "old-a", "old-c", exp); err != nil || out != rotateReused {
 		t.Fatalf("replay after grace: %v %v", out, err)
 	}
 
@@ -206,13 +211,13 @@ func TestPGRefreshStore(t *testing.T) {
 	if err := st.Create(ctx, uid, "ok-a", exp); err != nil {
 		t.Fatal(err)
 	}
-	if out, _ := st.Rotate(ctx, uid, "ok-a", "ok-b", exp); out != rotateOK {
+	if out, _, _ := st.Rotate(ctx, uid, "ok-a", "ok-b", exp); out != rotateOK {
 		t.Fatal("rotate ok-a")
 	}
-	if out, _ := st.Rotate(ctx, uid, "ok-b", "ok-c", exp); out != rotateOK {
+	if out, _, _ := st.Rotate(ctx, uid, "ok-b", "ok-c", exp); out != rotateOK {
 		t.Fatal("rotate ok-b")
 	}
-	if out, err := st.Rotate(ctx, uid, "ok-a", "ok-d", exp); err != nil || out != rotateReused {
+	if out, _, err := st.Rotate(ctx, uid, "ok-a", "ok-d", exp); err != nil || out != rotateReused {
 		t.Fatalf("replay after successor used: %v %v", out, err)
 	}
 
@@ -220,19 +225,84 @@ func TestPGRefreshStore(t *testing.T) {
 	if err := st.Create(ctx, uid, "pg-x", exp); err != nil {
 		t.Fatal(err)
 	}
-	if out, _ := st.Rotate(ctx, uid, "pg-x", "pg-y", exp); out != rotateOK {
+	if out, _, _ := st.Rotate(ctx, uid, "pg-x", "pg-y", exp); out != rotateOK {
 		t.Fatal("rotate pg-x")
 	}
-	if out, err := st.Rotate(ctx, uid, "pg-b", "pg-d", exp); err != nil || out != rotateReused {
+	if out, _, err := st.Rotate(ctx, uid, "pg-b", "pg-d", exp); err != nil || out != rotateReused {
 		t.Fatalf("family revoked: %v %v", out, err)
 	}
-	if out, err := st.Rotate(ctx, uid, "pg-y", "pg-z", exp); err != nil || out != rotateOK {
+	if out, _, err := st.Rotate(ctx, uid, "pg-y", "pg-z", exp); err != nil || out != rotateOK {
 		t.Fatalf("unrelated family unaffected: %v %v", out, err)
 	}
-	if out, _ := st.Rotate(ctx, uid, "missing", "pg-e", exp); out != rotateUnknown {
+	if out, _, _ := st.Rotate(ctx, uid, "missing", "pg-e", exp); out != rotateUnknown {
 		t.Fatalf("unknown: %v", out)
 	}
 	if err := st.Purge(ctx); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestPGRefreshConcurrentPresentations: the screen, the background service and a retry of one phone present the
+// same spent token within seconds. All of them get the SAME successor and nobody is signed out; after the window
+// the strict rules apply again, and a used successor still makes a replay theft.
+func TestPGRefreshConcurrentPresentations(t *testing.T) {
+	url := os.Getenv("TEST_DATABASE_URL")
+	if url == "" {
+		t.Skip("TEST_DATABASE_URL not set")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	var uid string
+	if err := pool.QueryRow(ctx, `INSERT INTO users (email, name, password_hash) VALUES ($1,'t','x') RETURNING id`,
+		"idem-"+time.Now().Format("150405.000000")+"@example.com").Scan(&uid); err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Exec(ctx, `DELETE FROM users WHERE id=$1`, uid)
+	st := pgRefreshStore{pool}
+	exp := time.Now().Add(time.Hour)
+
+	if err := st.Create(ctx, uid, "idem-a", exp); err != nil {
+		t.Fatal(err)
+	}
+	out, got, err := st.Rotate(ctx, uid, "idem-a", "idem-b", exp)
+	if err != nil || out != rotateOK || got != "idem-b" {
+		t.Fatalf("first presentation: %v %q %v", out, got, err)
+	}
+	// Three more presentations of the same spent token, all within the window: same successor each time.
+	for i, cand := range []string{"idem-c", "idem-d", "idem-e"} {
+		out, got, err := st.Rotate(ctx, uid, "idem-a", cand, exp)
+		if err != nil || out != rotateOK || got != "idem-b" {
+			t.Fatalf("concurrent presentation %d: %v %q %v", i, out, got, err)
+		}
+	}
+	// No orphan siblings were created.
+	var n int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM refresh_sessions WHERE parent_jti = 'idem-a'`).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("children of idem-a: %d %v", n, err)
+	}
+	// The client uses the successor: the family moves on.
+	if out, _, _ := st.Rotate(ctx, uid, "idem-b", "idem-f", exp); out != rotateOK {
+		t.Fatal("rotate idem-b")
+	}
+	// A replay of idem-a once its successor was used is theft, even inside the window.
+	if out, _, err := st.Rotate(ctx, uid, "idem-a", "idem-g", exp); err != nil || out != rotateReused {
+		t.Fatalf("replay after the successor was used: %v %v", out, err)
+	}
+	// A replay after the window (and no strict grace left) is theft.
+	if err := st.Create(ctx, uid, "late-a", exp); err != nil {
+		t.Fatal(err)
+	}
+	if out, _, _ := st.Rotate(ctx, uid, "late-a", "late-b", exp); out != rotateOK {
+		t.Fatal("rotate late-a")
+	}
+	if _, err := pool.Exec(ctx, `UPDATE refresh_sessions SET used_at = now() - interval '5 minutes' WHERE jti = 'late-a'`); err != nil {
+		t.Fatal(err)
+	}
+	if out, _, err := st.Rotate(ctx, uid, "late-a", "late-c", exp); err != nil || out != rotateReused {
+		t.Fatalf("replay long after the window: %v %v", out, err)
 	}
 }

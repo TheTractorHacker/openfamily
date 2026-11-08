@@ -336,13 +336,13 @@ func (s *Server) rotateRefreshToken(ctx context.Context, userID, oldJTI string) 
 		}
 		return newJTI, refreshRotated
 	}
-	out, err := s.refreshSessions().Rotate(ctx, userID, oldJTI, newJTI, expires)
+	out, issued, err := s.refreshSessions().Rotate(ctx, userID, oldJTI, newJTI, expires)
 	if err != nil {
 		return "", refreshError
 	}
 	switch out {
 	case rotateOK:
-		return newJTI, refreshRotated
+		return issued, refreshRotated
 	case rotateReused:
 		return "", refreshReuse
 	}
