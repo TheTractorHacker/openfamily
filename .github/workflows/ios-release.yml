@@ -55,7 +55,7 @@ jobs:
       BUNDLE_ID: ${{ vars.IOS_BUNDLE_ID || 'app.openfamily' }}
       ASSOCIATED_DOMAIN: ${{ vars.IOS_ASSOCIATED_DOMAIN }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Every missing or malformed input is reported in ONE pass, each with how to fix it
       # (docs/release/APP_STORE.md, "Secrets and variables"), before any signing work starts.
