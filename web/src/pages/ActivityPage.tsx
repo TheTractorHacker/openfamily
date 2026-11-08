@@ -114,7 +114,7 @@ export function ActivityPage() {
         <div>
           <h1 className="wb-page-title">Activity</h1>
           <p className="wb-page-subtitle">
-            Arrivals, departures, alerts, check-ins and crash reports from every family.
+            Arrivals, departures, alerts, check-ins and crash reports from every group.
           </p>
         </div>
         <Button variant="secondary" size="sm" onClick={() => void load()}>
@@ -137,14 +137,14 @@ export function ActivityPage() {
           ))}
         </div>
         <label className="wb-field" htmlFor="activity-family">
-          <span className="wb-label">Family</span>
+          <span className="wb-label">Group</span>
           <select
             id="activity-family"
             className="wb-select"
             value={family}
             onChange={(e) => setFamily(e.target.value)}
           >
-            <option value="">All families</option>
+            <option value="">All groups</option>
             {(familiesQ.data ?? []).map((f) => (
               <option key={f.id} value={f.id}>
                 {f.name}
@@ -176,7 +176,7 @@ export function ActivityPage() {
                       <strong>{e.user_name}</strong> {d.text}
                     </span>
                     <span className="wb-activity-sub">
-                      {e.family_name || 'No family'}
+                      {e.family_name || 'No group'}
                       {e.status && e.kind !== 'arrival' && e.kind !== 'departure' ? ` · ${e.status}` : ''}
                       {link && (
                         <>

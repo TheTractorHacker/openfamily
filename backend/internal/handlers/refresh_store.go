@@ -71,8 +71,8 @@ func (p pgRefreshStore) Rotate(ctx context.Context, userID, oldJTI, newJTI strin
 		RETURNING family_id`, oldJTI, userID).Scan(&family)
 	if err == nil {
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO refresh_sessions (jti, family_id, user_id, expires_at, parent_jti)
-			VALUES ($1, $2, $3, $4, $5)`, newJTI, family, userID, expires, oldJTI); err != nil {
+			INSERT INTO refresh_sessions (jti, family_id, user_id, expires_at, parent_jti, client_key, user_agent)
+			SELECT $1::text, $2::text, $3::uuid, $4::timestamptz, $5::text, client_key, user_agent FROM refresh_sessions WHERE jti = $5`, newJTI, family, userID, expires, oldJTI); err != nil {
 			return rotateUnknown, err
 		}
 		return rotateOK, tx.Commit(ctx)
@@ -115,8 +115,8 @@ func (p pgRefreshStore) Rotate(ctx context.Context, userID, oldJTI, newJTI strin
 		RETURNING family_id`, oldJTI, userID, refreshReuseGrace.Seconds()).Scan(&graceFamily)
 	if err == nil {
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO refresh_sessions (jti, family_id, user_id, expires_at, parent_jti)
-			VALUES ($1, $2, $3, $4, $5)`, newJTI, graceFamily, userID, expires, oldJTI); err != nil {
+			INSERT INTO refresh_sessions (jti, family_id, user_id, expires_at, parent_jti, client_key, user_agent)
+			SELECT $1::text, $2::text, $3::uuid, $4::timestamptz, $5::text, client_key, user_agent FROM refresh_sessions WHERE jti = $5`, newJTI, graceFamily, userID, expires, oldJTI); err != nil {
 			return rotateUnknown, err
 		}
 		return rotateOK, tx.Commit(ctx)

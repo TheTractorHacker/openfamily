@@ -4,7 +4,7 @@
 // works the same for Private circles.
 
 import React from 'react'
-import { getFleetHealth } from '../lib/api'
+import { getFleetHealth, hideStaleDevices } from '../lib/api'
 import { isAccessDenied, useAsync } from '../lib/useAsync'
 import { AccessDenied, Badge, Button, Card, EmptyState, ErrorState, Spinner } from '../components/primitives'
 import { formatRelativeTime } from '../lib/format'
@@ -38,15 +38,12 @@ function DeviceDetail({ d, now, m }: { d: FleetDevice; now: number; m: FleetMemb
           {d.diag_reported_at ? `Health report ${formatRelativeTime(d.diag_reported_at)}` : reportNote(d)}
         </span>
       </div>
-      {m.in_private_circle && (
-        <p className="wb-fleet-sub">
-          Private circle: updates are encrypted, so the server only knows when one arrived. Last update received{' '}
-          {formatRelativeTime(m.last_private_update_at ?? m.last_activity_at)}.
-        </p>
-      )}
       <dl className="wb-fleet-facts">
         <div><dt>Last seen</dt><dd>{formatRelativeTime(d.last_seen)}</dd></div>
-        <div><dt>App version</dt><dd>{bestVersion(d)}</dd></div>
+        <div><dt>App version</dt><dd>{d.app_version || 'Not reported'}</dd></div>
+        {d.client_version && d.client_version !== d.app_version && (
+          <div><dt>Newest version seen for this account</dt><dd>{d.client_version} <span className="wb-fleet-sub">(any phone of theirs, not necessarily this one)</span></dd></div>
+        )}
         <div><dt>OS</dt><dd>{d.os_version || 'Not reported'}</dd></div>
         <div><dt>Battery optimisation</dt><dd>{batteryLabel(d.battery_opt)}</dd></div>
         <div><dt>Location permission</dt><dd>{locText}</dd></div>
@@ -58,7 +55,10 @@ function DeviceDetail({ d, now, m }: { d: FleetDevice; now: number; m: FleetMemb
       {findings.length > 0 && (
         <ul className="wb-fleet-findings" aria-label="Findings">
           {findings.map((f) => (
-            <li key={f.text}><Badge tone={TONE[f.level]} dot>{f.text}</Badge></li>
+            <li key={f.text}>
+              <Badge tone={TONE[f.level]} dot>{f.text}</Badge>
+              {f.hint && <span className="wb-fleet-hint"> What to do: {f.hint}</span>}
+            </li>
           ))}
         </ul>
       )}
@@ -89,6 +89,12 @@ function MemberRow({ m, now, open, onToggle }: { m: FleetMember; now: number; op
       </button>
       {open && (
         <div className="wb-fleet-detail">
+          {m.in_private_circle && (
+            <p className="wb-fleet-private-note">
+              Private circle: updates are encrypted, so the server only knows when one arrived. Last update received{' '}
+              {formatRelativeTime(m.last_private_update_at ?? m.last_activity_at)}.
+            </p>
+          )}
           {m.devices.map((d) => (
             <DeviceDetail key={d.id} d={d} now={now} m={m} />
           ))}
@@ -102,6 +108,34 @@ export function FleetPage() {
   const q = useAsync(getFleetHealth, [])
   const [filter, setFilter] = React.useState<Filter>('all')
   const [openId, setOpenId] = React.useState<string | null>(null)
+  const [staleDays, setStaleDays] = React.useState(7)
+  const [stale, setStale] = React.useState<{ count: number; devices: { id: string; user_name: string; platform: string; name: string; last_seen: string | null }[] } | null>(null)
+  const [staleMsg, setStaleMsg] = React.useState<{ tone: 'ok' | 'error'; text: string } | null>(null)
+  const [staleBusy, setStaleBusy] = React.useState(false)
+  const previewStale = async () => {
+    setStaleBusy(true)
+    setStaleMsg(null)
+    try {
+      setStale(await hideStaleDevices(staleDays, true))
+    } catch (e) {
+      setStaleMsg({ tone: 'error', text: e instanceof Error ? e.message : 'Could not check for stale devices.' })
+    } finally {
+      setStaleBusy(false)
+    }
+  }
+  const confirmStale = async () => {
+    setStaleBusy(true)
+    try {
+      const r = await hideStaleDevices(staleDays, false)
+      setStale(null)
+      setStaleMsg({ tone: 'ok', text: `Hid ${r.count} stale device row${r.count === 1 ? '' : 's'}. Nothing was deleted; a phone that reports again shows up again.` })
+      q.refetch()
+    } catch (e) {
+      setStaleMsg({ tone: 'error', text: e instanceof Error ? e.message : 'Could not hide stale devices.' })
+    } finally {
+      setStaleBusy(false)
+    }
+  }
 
   if (isAccessDenied(q.error)) {
     return (
@@ -148,6 +182,37 @@ export function FleetPage() {
             <Card className="wb-fleet-stat"><span className="wb-fleet-stat-num">{s.noPush}</span><span className="wb-fleet-stat-label">No push channel</span></Card>
             <Card className="wb-fleet-stat"><span className="wb-fleet-stat-num">{s.pendingPoints}</span><span className="wb-fleet-stat-label">Points waiting</span></Card>
           </div>
+
+          <Card className="wb-fleet-stale">
+            <div className="wb-row">
+              <strong>Tidy up old phones</strong>
+              <label className="wb-fleet-stale-days">
+                not seen for{' '}
+                <input className="wb-input" type="number" min={1} max={3650} value={staleDays} aria-label="Days since last seen"
+                  onChange={(e) => { setStaleDays(Math.max(1, Number(e.target.value) || 7)); setStale(null) }} />{' '}
+                days
+              </label>
+              <Button variant="secondary" size="sm" loading={staleBusy && !stale} onClick={() => void previewStale()}>Review stale devices</Button>
+            </div>
+            <p className="wb-help">Hides old duplicate rows from this page. Each person always keeps their newest phone. History is not deleted.</p>
+            {stale && (
+              <div role="region" aria-label="Stale devices preview">
+                {stale.count === 0 ? <p>Nothing to hide.</p> : (
+                  <>
+                    <p><strong>{stale.count}</strong> device row{stale.count === 1 ? '' : 's'} would be hidden{stale.devices.length < stale.count ? ` (showing ${stale.devices.length})` : ''}:</p>
+                    <ul className="wb-fleet-stale-list">
+                      {stale.devices.slice(0, 12).map((d) => (
+                        <li key={d.id}>{d.user_name} · {d.name || d.platform} · {d.last_seen ? formatRelativeTime(d.last_seen) : 'never seen'}</li>
+                      ))}
+                    </ul>
+                    <Button variant="danger" size="sm" loading={staleBusy} onClick={() => void confirmStale()}>Hide {stale.count} device{stale.count === 1 ? '' : 's'}</Button>{' '}
+                  </>
+                )}
+                <Button variant="ghost" size="sm" onClick={() => setStale(null)}>Cancel</Button>
+              </div>
+            )}
+            {staleMsg && <p className={staleMsg.tone === 'error' ? 'wb-error-text' : 'wb-help'} role="status">{staleMsg.text}</p>}
+          </Card>
 
           <div className="wb-fleet-filters" role="group" aria-label="Filter by health">
             {FILTERS.map((f) => (

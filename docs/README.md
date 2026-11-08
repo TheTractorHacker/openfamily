@@ -13,7 +13,7 @@ Start with [Getting started](user/getting-started.md), then:
 
 - [Create a circle](user/create-a-circle.md) and [invite people](user/invite-and-join.md)
 - [Locations and the map](user/locations-and-map.md), [Places](user/places.md)
-- [Driving reports](user/driving-reports.md), [Family chat](user/chat.md)
+- [Driving reports](user/driving-reports.md), [Chat](user/chat.md)
 - **[Privacy modes explained](user/privacy-modes.md)**: Normal, Private (phone-to-phone), Server-assisted
 - [Safety: SOS, check-ins, pausing](user/safety-and-check-ins.md), [Sharing links](user/sharing-links.md)
 - [Removing a member, lost phone](user/members-and-devices.md), [Battery and permissions](user/battery-and-permissions.md)

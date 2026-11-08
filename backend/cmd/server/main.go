@@ -215,6 +215,7 @@ func main() {
 	// or was interrupted during ingest.
 	go srv.ReconcileGeofences(ctx)
 	go srv.RunCirclePurge(ctx)
+	go srv.RunSessionSweep(ctx)
 	go srv.RunUserRetention(ctx)
 	go srv.RunE2EEItemPurge(ctx)
 	if err := srv.EnsureCrashSchema(ctx); err != nil {
@@ -305,6 +306,7 @@ func main() {
 	r.Get("/.well-known/apple-app-site-association", srv.AppleAppSiteAssociation)
 	// Public signed-APK download for invited family members (rate limited).
 	r.Get("/app.apk", srv.PublicDownloadAPK)
+	r.Get("/app.ipa", srv.PublicDownloadIPA)
 	// Public share-link viewer (docs/share-links.md): hash lookup, generic 404,
 	// per-IP rate limit.
 	r.Get("/s/{token}", srv.ShareViewPage)
@@ -596,6 +598,8 @@ func main() {
 		r.Get("/api/admin/families/{id}/members", srv.AdminListFamilyMembers)
 		r.Get("/api/admin/members", srv.AdminListMembers)
 		r.Get("/api/admin/fleet", srv.AdminFleetHealth)
+		r.Post("/api/admin/fleet/hide-stale", srv.AdminHideStaleDevices)
+		r.Get("/api/admin/processing-overview", srv.AdminProcessingOverview)
 		r.Get("/api/admin/members/{id}/avatar", srv.GetAdminMemberAvatar)
 		r.Get("/api/admin/members/{id}/history", srv.AdminGetMemberHistory)
 		r.Get("/api/admin/members/{id}/history/export", srv.AdminExportMemberHistory)
@@ -616,6 +620,9 @@ func main() {
 		r.Get("/api/admin/audit/actions", srv.AdminListAuditActions)
 		r.Get("/api/admin/audit/export", srv.AdminExportAudit)
 		r.Get("/api/admin/sessions", srv.AdminListSessions)
+		r.Get("/api/admin/settings/security", srv.AdminGetSecuritySettings)
+		r.Put("/api/admin/settings/security", srv.AdminPutSecuritySettings)
+		r.Post("/api/admin/sessions/bulk-revoke", srv.AdminBulkRevokeSessions)
 		r.Delete("/api/admin/sessions/{id}", srv.AdminRevokeSession)
 		r.Get("/api/admin/activity", srv.AdminActivityFeed)
 		r.Get("/api/admin/bubbles", srv.AdminListBubbles)
@@ -634,6 +641,8 @@ func main() {
 		r.Post("/api/admin/settings/map-style/test", srv.AdminTestMapStyle)
 
 		r.Get("/api/admin/apk", srv.AdminDownloadAPK)
+		r.Get("/api/admin/ipa", srv.AdminDownloadIPA)
+		r.Get("/api/admin/builds", srv.AdminBuildsOverview)
 		r.Post("/api/admin/apk/build", srv.AdminBuildAPK)
 		r.Get("/api/admin/apk/status", srv.AdminAPKStatus)
 

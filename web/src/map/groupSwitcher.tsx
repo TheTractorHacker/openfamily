@@ -51,8 +51,8 @@ export function GroupSwitcher({
 
   const selectedName =
     selectedId == null
-      ? "All families"
-      : groups.find((g) => g.id === selectedId)?.name ?? "All families";
+      ? "All groups"
+      : groups.find((g) => g.id === selectedId)?.name ?? "All groups";
   const total = groups.reduce((sum, g) => sum + (countsById.get(g.id) ?? 0), 0);
   const chip = selectedId == null ? total : countsById.get(selectedId) ?? 0;
 
@@ -124,7 +124,7 @@ export function GroupSwitcher({
             }}
           >
             <GroupsIcon />
-            <span>All families</span>
+            <span>All groups</span>
             <span className="wb-switcher-count">{total}</span>
           </button>
           {groups.map((g) => (

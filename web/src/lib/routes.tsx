@@ -73,7 +73,7 @@ export const ROUTES: RouteDef[] = [
   },
   {
     key: 'families',
-    label: 'Families',
+    label: 'Groups',
     hash: '#/families',
     icon: icon(
       <path

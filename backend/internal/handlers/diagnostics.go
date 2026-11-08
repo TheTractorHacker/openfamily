@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -196,7 +197,7 @@ func (s *Server) GetMyDiagnostics(w http.ResponseWriter, r *http.Request) {
 // themselves.
 func (s *Server) AdminFleetHealth(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	rows, err := s.Pool.Query(ctx, diagDeviceSelect+`ORDER BY d.last_seen DESC NULLS LAST LIMIT 2000`)
+	rows, err := s.Pool.Query(ctx, diagDeviceSelect+`WHERE d.hidden_at IS NULL OR d.last_seen > d.hidden_at ORDER BY d.last_seen DESC NULLS LAST LIMIT 2000`)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load fleet")
 		return
@@ -264,7 +265,85 @@ func (s *Server) AdminFleetHealth(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, m)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"server_time": time.Now().UTC(), "members": out})
+	var hidden int
+	_ = s.Pool.QueryRow(ctx, `SELECT count(*) FROM devices WHERE hidden_at IS NOT NULL AND (last_seen IS NULL OR last_seen <= hidden_at)`).Scan(&hidden)
+	writeJSON(w, http.StatusOK, map[string]any{"server_time": time.Now().UTC(), "members": out, "hidden_devices": hidden})
+}
+
+type staleDeviceOut struct {
+	ID       string     `json:"id"`
+	UserName string     `json:"user_name"`
+	Platform string     `json:"platform"`
+	Name     string     `json:"name"`
+	LastSeen *time.Time `json:"last_seen"`
+}
+
+// AdminHideStaleDevices is POST /api/admin/fleet/hide-stale (platform admin):
+// hides device rows not seen for `days` (default 7, min 1) from Fleet health.
+// Nothing is deleted, so stored history stays; a hidden device that reports
+// again shows up again. dry_run:true only returns the preview. Hiding a user's
+// only device is never done: each user keeps their newest row.
+func (s *Server) AdminHideStaleDevices(w http.ResponseWriter, r *http.Request) {
+	claims := middleware.ClaimsFromContext(r.Context())
+	if claims == nil {
+		writeError(w, http.StatusUnauthorized, "unauthenticated")
+		return
+	}
+	var req struct {
+		Days   int  `json:"days"`
+		DryRun bool `json:"dry_run"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Days == 0 {
+		req.Days = 7
+	}
+	if req.Days < 1 || req.Days > 3650 {
+		writeError(w, http.StatusBadRequest, "days must be between 1 and 3650")
+		return
+	}
+	const stale = `
+		FROM (
+		  SELECT d.id, d.platform, COALESCE(d.name,'') AS name, d.last_seen, u.name AS uname,
+		         row_number() OVER (PARTITION BY d.user_id ORDER BY d.last_seen DESC NULLS LAST, d.created_at DESC) = 1 AS newest,
+		         d.hidden_at, d.created_at
+		  FROM devices d JOIN users u ON u.id = d.user_id
+		) x
+		WHERE NOT x.newest AND COALESCE(x.last_seen, x.created_at) < now() - make_interval(days => $1)
+		  AND (x.hidden_at IS NULL OR x.last_seen > x.hidden_at)`
+	rows, err := s.Pool.Query(r.Context(), `SELECT x.id::text, x.uname, x.platform, x.name, x.last_seen `+stale+` ORDER BY x.last_seen NULLS FIRST LIMIT 500`, req.Days)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to preview stale devices")
+		return
+	}
+	list := []staleDeviceOut{}
+	for rows.Next() {
+		var o staleDeviceOut
+		if rows.Scan(&o.ID, &o.UserName, &o.Platform, &o.Name, &o.LastSeen) == nil {
+			list = append(list, o)
+		}
+	}
+	rows.Close()
+	var count int
+	if err := s.Pool.QueryRow(r.Context(), `SELECT count(*) `+stale, req.Days).Scan(&count); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to count stale devices")
+		return
+	}
+	if req.DryRun {
+		writeJSON(w, http.StatusOK, map[string]any{"count": count, "devices": list, "dry_run": true})
+		return
+	}
+	tag, err := s.Pool.Exec(r.Context(), `
+		UPDATE devices SET hidden_at = now() WHERE id IN (SELECT x.id `+stale+`)`, req.Days)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to hide stale devices")
+		return
+	}
+	s.logAudit(r.Context(), claims.UserID, "", "admin.devices_hidden",
+		fmt.Sprintf("hid %d device rows not seen for %d days", tag.RowsAffected(), req.Days), clientIP(r))
+	writeJSON(w, http.StatusOK, map[string]any{"count": tag.RowsAffected(), "hidden": tag.RowsAffected(), "dry_run": false})
 }
 
 // SendTestPush is POST /me/diagnostics/test-push: sends the caller a harmless
