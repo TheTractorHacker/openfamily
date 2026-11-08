@@ -22,9 +22,9 @@ dependencies:
   # Plain key-value storage readable from the background isolate (credentials).
   shared_preferences: ^2.3.0
   # Interactive map (OpenStreetMap tiles) for the map-first home screen.
-  flutter_map: ^7.0.2
+  flutter_map: ^8.3.2
   # Vector (OpenMapTiles) rendering for crisp maps; 8.0.x targets flutter_map 7.
-  vector_map_tiles: ^8.0.0
+  vector_map_tiles: ^10.0.0-beta.2
   # Geographic coordinate type used by flutter_map.
   latlong2: ^0.9.1
   # Pure-Dart QR code rendering for invite links.
