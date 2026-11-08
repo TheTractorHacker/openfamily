@@ -231,11 +231,13 @@ void main() {
       expect(find.text('Processed by server'), findsOneWidget);
     });
 
-    testWidgets('not part of the lanes view: explicit "not available", not an empty list', (t) async {
+    testWidgets('lanes unreadable: a retry state, never "not available in Private circles"', (t) async {
       _big(t);
       await t.pumpWidget(_wrap(TripsScreen(member: _member('u9', 'Zed'), api: _FakeTrips(), lanes: () async => null)));
       await t.pumpAndSettle();
-      expect(find.byKey(const ValueKey<String>('not-available-title')), findsOneWidget);
+      expect(find.byKey(const ValueKey<String>('lanes-unavailable-title')), findsOneWidget);
+      expect(find.byKey(const ValueKey<String>('not-available-title')), findsNothing);
+      expect(find.text('Try again'), findsOneWidget);
     });
   });
 
@@ -294,7 +296,8 @@ void main() {
       expect(find.byKey(const Key('waiting-phone-Alex')), findsOneWidget);
       await t.pumpWidget(_wrap(DrivingReportScreen(key: const Key('zed'), member: _member('u9', 'Zed'), api: _FakeTrips(), lanes: () async => null)));
       await t.pumpAndSettle();
-      expect(find.byKey(const ValueKey<String>('not-available-title')), findsOneWidget);
+      expect(find.byKey(const ValueKey<String>('lanes-unavailable-title')), findsOneWidget);
+      expect(find.byKey(const ValueKey<String>('not-available-title')), findsNothing);
     });
 
     testWidgets('family screen: phone-only member from their phone, server member from the server report, both badged', (t) async {
@@ -314,7 +317,7 @@ void main() {
       )));
       await t.pumpAndSettle();
       expect(api.calls, 1);
-      expect(find.byKey(const Key('driving-private-list')), findsOneWidget);
+      expect(find.text('Weekly Driving Report'), findsOneWidget);
       expect(find.text('Processed by server'), findsOneWidget);
       expect(find.byKey(const Key('phone-driving-Alex')), findsOneWidget);
       expect(find.byKey(const Key('driving-private-note')), findsOneWidget);
@@ -405,6 +408,7 @@ class _FakeReport implements TripReportApi {
       'end': '2026-11-08',
       'prev_start': '2026-10-26',
       'prev_end': '2026-11-01',
+      'totals': <String, dynamic>{'drives': 2, 'distance_m': 5000.0, 'top_speed_mps': 20.0, 'top_speed_user_id': 'u2'},
       'members': <Map<String, dynamic>>[
         <String, dynamic>{'user_id': 'u2', 'name': 'Sam', 'drives': 2, 'distance_m': 5000.0, 'duration_s': 600.0, 'top_speed_mps': 20.0},
       ],

@@ -6,6 +6,8 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:openfamily/models/circle.dart';
+import 'package:openfamily/models/trip_report.dart';
+import 'package:openfamily/services/trip_report_service.dart';
 import 'package:openfamily/services/api_client.dart';
 import 'package:openfamily/services/e2ee/add_server_flow.dart';
 import 'package:openfamily/services/e2ee/e2ee_api.dart';
@@ -191,6 +193,59 @@ void main() {
       // the sidecar + the new fix: 3 rows, none for Cleo.
       expect(await db.locationsOf(b.userId), 3);
       expect(await db.locationsOf(c.userId), 0);
+    });
+  });
+
+  group('scenario 2d: the Driving tab data of a server-lane member (regression: "the driving features are gone")', () {
+    test('Ben\'s drive becomes a trip with speeding in the family report, for Ben and for Cleo; Cleo (phone lane) has none on the server', () async {
+      // A drive as the sidecar delivers it: fixes with speed, read from Ben\'s server-line items.
+      final DateTime begin = DateTime.now().toUtc().subtract(const Duration(hours: 3)).copyWith(microsecond: 0, millisecond: 0);
+      final String benDevice = (await b.run(() => b.service.identity()))!.deviceId;
+      final List<Map<String, dynamic>> pts = <Map<String, dynamic>>[];
+      double lat = 52.0;
+      DateTime t = begin;
+      void add(double speed) => pts.add(<String, dynamic>{
+            'kind': 'history', 'user_id': b.userId, 'sender_device_id': benDevice,
+            'ts_ms': t.millisecondsSinceEpoch, 'lat': lat, 'lon': 13.0, 'acc': 6, 'spd': speed,
+          });
+      for (int i = 0; i < 60; i++) {
+        add(0);
+        t = t.add(const Duration(seconds: 5));
+      }
+      for (int i = 0; i < 144; i++) {
+        final double sp = (i >= 40 && i < 64) ? 40 : 25; // two minutes above the speeding limit
+        lat += sp * 5 / 111195;
+        add(sp);
+        t = t.add(const Duration(seconds: 5));
+      }
+      for (int i = 0; i < 60; i++) {
+        add(0);
+        t = t.add(const Duration(seconds: 5));
+      }
+      for (int i = 0; i < pts.length; i += 250) {
+        final Map<String, dynamic> ing = await directIngest(env, circle, server.deviceId, pts.sublist(i, i + 250 > pts.length ? pts.length : i + 250));
+        expect(ing['_status'], 200, reason: '$ing');
+      }
+      // The background trips worker runs every few minutes; the app can ask for it right away.
+      final String from = begin.subtract(const Duration(hours: 1)).toIso8601String();
+      final String to = t.add(const Duration(hours: 1)).toIso8601String();
+      await rawJson(env, 'POST', '/trips/compute?from=${Uri.encodeQueryComponent(from)}&to=${Uri.encodeQueryComponent(to)}', token: b.token);
+
+      final DateTime weekOfDrive = weekStartOf(begin.add(const Duration(minutes: 8)).toLocal());
+      for (final Phone viewer in <Phone>[b, c]) {
+        final TripReport r = await viewer.run(() => TripReportService.instance.report(start: weekOfDrive, circleId: circle));
+        final MemberReport ben = r.members.firstWhere((MemberReport m) => m.userId == b.userId, orElse: () => throw StateError('Ben is missing from ${viewer.name}\'s driving report'));
+        expect(ben.drives, 1, reason: '${viewer.name} sees Ben\'s drive');
+        expect(ben.events.speeding, greaterThanOrEqualTo(1), reason: 'the speeding event is detected on server-lane fixes');
+        expect(r.totals.drives, greaterThanOrEqualTo(1));
+        expect(r.totals.topSpeedMps, greaterThan(35));
+        expect(r.recentTrips.any((RecentTrip x) => x.userId == b.userId), isTrue);
+        expect(r.days.length, 7);
+        final Iterable<MemberReport> cleo = r.members.where((MemberReport m) => m.userId == c.userId);
+        expect(cleo.every((MemberReport m) => m.drives == 0), isTrue, reason: 'nothing of Cleo\'s phone-lane drives is on the server');
+      }
+      expect(await db.count("SELECT count(*) FROM trips WHERE user_id = '${c.userId}'"), 0);
+      expect(await db.count("SELECT count(*) FROM trips WHERE user_id = '${b.userId}' AND mode = 'driving'"), 1);
     });
   });
 

@@ -175,12 +175,14 @@ class WaitingForPhoneCard extends StatelessWidget {
   /// Only for the person's own card.
   final VoidCallback? onUseServer, onComputeOnPhone;
 
+  bool get own => onUseServer != null && onComputeOnPhone != null;
+
   @override
   Widget build(BuildContext context) {
     final ColorScheme cs = Theme.of(context).colorScheme;
     return Semantics(
       container: true,
-      label: 'Waiting for $name\'s phone',
+      label: own ? 'Your driving report is not switched on' : 'Waiting for $name\'s phone',
       child: Container(
         key: Key('waiting-phone-$name'),
         padding: const EdgeInsets.all(AppSpace.lg),
@@ -194,11 +196,20 @@ class WaitingForPhoneCard extends StatelessWidget {
             const LaneChip(server: false),
           ]),
           const SizedBox(height: AppSpace.sm),
-          Text('Waiting for $name\'s phone', style: AppType.body.copyWith(fontWeight: FontWeight.w700)),
-          Text(
-            '$name keeps data on their phone and it has not shared a summary yet (it may be off or not have moved).',
-            style: AppType.secondary.copyWith(color: cs.onSurfaceVariant),
-          ),
+          if (own) ...<Widget>[
+            Text('Your driving report is not switched on', style: AppType.body.copyWith(fontWeight: FontWeight.w700)),
+            Text(
+              'Your location stays on this phone, so the server has no drives to count for you yet. '
+              'Choose how you would like your driving report made.',
+              style: AppType.secondary.copyWith(color: cs.onSurfaceVariant),
+            ),
+          ] else ...<Widget>[
+            Text('Waiting for $name\'s phone', style: AppType.body.copyWith(fontWeight: FontWeight.w700)),
+            Text(
+              '$name keeps data on their phone and it has not shared a summary yet (it may be off or not have moved).',
+              style: AppType.secondary.copyWith(color: cs.onSurfaceVariant),
+            ),
+          ],
           if (onUseServer != null && onComputeOnPhone != null)
             PhoneOnlyActions(onUseServer: onUseServer!, onComputeOnPhone: onComputeOnPhone!),
         ]),

@@ -157,7 +157,7 @@ class _TripsScreenState extends State<TripsScreen> {
           if (p == null) {
             return Scaffold(
               appBar: AppBar(title: const Text('Trips')),
-              body: const SafeArea(child: NotAvailableInPrivate(feature: PrivateFeature.trips)),
+              body: SafeArea(child: LanesUnavailable(title: 'Could not load the trips', onRetry: _loadLanes)),
             );
           }
           if (p.origin == ProcessingOrigin.server) return _buildScreen(context);

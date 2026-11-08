@@ -260,6 +260,24 @@ class TripReport {
   /// The newest drives (at most 10) of the period, newest first.
   final List<RecentTrip> recentTrips;
 
+  /// The same report with another member list (totals are unchanged).
+  TripReport withMembers(List<MemberReport> m) => TripReport(
+        period: period,
+        start: start,
+        end: end,
+        prevStart: prevStart,
+        prevEnd: prevEnd,
+        totals: totals,
+        previousTotals: previousTotals,
+        members: m,
+        thresholds: thresholds,
+        estimated: estimated,
+        sensorMembers: sensorMembers,
+        phoneUseMembers: phoneUseMembers,
+        days: days,
+        recentTrips: recentTrips,
+      );
+
   /// True when no member has the phone sensor on, so every braking /
   /// acceleration count is a GPS estimate.
   bool get gpsOnly => sensorMembers.isEmpty;
@@ -318,6 +336,7 @@ class RecentTrip {
     this.durationS = 0,
     this.maxSpeedMps = 0,
     this.events = const EventCounts(),
+    this.onDevice = false,
   });
 
   static RecentTrip? tryParse(Map<String, dynamic> j) {
@@ -346,6 +365,10 @@ class RecentTrip {
   final double durationS;
   final double maxSpeedMps;
   final EventCounts events;
+
+  /// Worked out on the driver's own phone (Private circle, phone-only
+  /// member): there is no route map or server detail to open for it.
+  final bool onDevice;
 
   Duration get duration => Duration(seconds: durationS.round());
 }

@@ -88,7 +88,7 @@ class _DrivingReportScreenState extends State<DrivingReportScreen> {
           if (p == null) {
             return Scaffold(
               appBar: AppBar(title: const Text('Driving report')),
-              body: const SafeArea(child: NotAvailableInPrivate(feature: PrivateFeature.drivingReport)),
+              body: SafeArea(child: LanesUnavailable(title: 'Could not load the driving report', onRetry: _loadLanes)),
             );
           }
           if (p.origin == ProcessingOrigin.server) return _buildScreen(context);
