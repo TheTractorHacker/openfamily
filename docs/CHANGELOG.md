@@ -15,6 +15,16 @@ the phones afterwards.
 Nothing yet. The owner moves these notes under a version heading when a
 release is tagged.
 
+## v0.26.1 (2026-11-08)
+
+Fixes for Private circles on Android.
+
+- **Honest errors.** "Can't reach the server" now appears only for real network failures. A problem with this phone's encryption key says so and offers a repair ("Set this phone up again", then restore with the recovery phrase or link from another phone).
+- **Background location in Private circles.** The Android Keystore plugin is now registered in every Flutter engine, so the background service can seal positions while the app is closed. Before, they were parked on the phone until the app was opened.
+- **Sequence numbers** for encrypted items are read fresh, so the app and the background service never reuse one.
+- **Built-in server device** renews its token before it expires, which removes a harmless 401 line from the server log every 15 minutes.
+- Unit-preference tests no longer depend on test order; container images in the server-device build are pinned.
+
 ## v0.26.0 (2026-11-08)
 
 Works with app versions 0.22 to 0.26. The server update is safe to apply first.

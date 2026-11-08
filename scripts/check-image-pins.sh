@@ -8,7 +8,7 @@ cd "$(dirname "$0")/.."
 bad=0
 check() { # $1 file:line  $2 image ref
   local ref="$2"
-  case "$ref" in openfamily-api:local|openfamily-backup:local|scratch|build|'${'*) return 0 ;; esac
+  case "$ref" in openfamily-api:local|openfamily-backup:local|openfamily-e2ee-server-device:local|scratch|build|'${'*) return 0 ;; esac
   if [[ "$ref" == *":latest"* ]] || [[ "$ref" != *"@sha256:"* ]]; then
     echo "unpinned image at $1: $ref" >&2; bad=1
   fi
