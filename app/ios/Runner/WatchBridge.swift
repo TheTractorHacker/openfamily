@@ -6,7 +6,9 @@ import WatchConnectivity
 ///
 /// Same MethodChannel contract as the Wear OS plugin (WatchBridgePlugin.kt), so
 /// ONE Dart bridge (app/lib/services/watch/watch_bridge.dart) drives both:
-///   publish(json) -> bool   latest snapshot via updateApplicationContext
+///   publish({json, urgent}) -> bool   latest snapshot via updateApplicationContext
+///                                     (`urgent` has no WatchConnectivity equivalent; a
+///                                     bare json string from older Dart code also works)
 ///   clear()       -> bool   wipe for the watch; true only once it was handed over
 ///   allowPublish()          sign-in / switch on: sending is allowed again
 ///   status()      -> map    {available, nodes, names}; nodes is 1 with a watch app
@@ -107,7 +109,8 @@ final class WatchBridge: NSObject, WCSessionDelegate {
       }
       // First publish of a session that has no identity yet (restored login).
       if sessionId == nil { sessionId = UUID().uuidString }
-      if let s = usable(), let json = call.arguments as? String, let sid = sessionId {
+      let json = (call.arguments as? String) ?? ((call.arguments as? [String: Any])?["json"] as? String)
+      if let s = usable(), let json = json, let sid = sessionId {
         // Latest value wins; delivered when the watch next wakes. No polling.
         do {
           try s.updateApplicationContext(

@@ -144,6 +144,12 @@
                 <action android:name="com.google.android.gms.wearable.MESSAGE_RECEIVED"/>
                 <data android:scheme="wear" android:host="*" android:pathPrefix="/orbitly/cmd"/>
             </intent-filter>
+            <!-- The Orbitly watch app (wear.xml: orbitly_watch_app) connected or went away:
+                 pays an owed sign-out wipe and tells the bridge, instead of peer events. -->
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.CAPABILITY_CHANGED"/>
+                <data android:scheme="wear" android:host="*" android:pathPrefix="/orbitly_watch_app"/>
+            </intent-filter>
         </service>
     </application>
 </manifest>

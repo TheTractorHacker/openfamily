@@ -1,16 +1,20 @@
 package app.openfamily
 
 import com.google.android.gms.wearable.MessageEvent
-import com.google.android.gms.wearable.Node
 import com.google.android.gms.wearable.Wearable
 import com.google.android.gms.wearable.WearableListenerService
 import org.json.JSONObject
 
 /**
- * Woken by Google Play services when a paired watch sends a command or
- * connects. Commands are run by the Flutter app (it holds the tokens and the
- * Private-circle keys); if the app is not running the watch gets an immediate
- * "open Orbitly" answer instead of a command that fires minutes later.
+ * Woken by Google Play services when a paired watch sends a command, or when
+ * the Orbitly watch app's capability (`orbitly_watch_app`) appears or goes
+ * away (the watch connects or disconnects). Commands are run by the Flutter
+ * app (it holds the tokens and the Private-circle keys); if the app is not
+ * running the watch gets an immediate "open Orbitly" answer instead of a
+ * command that fires minutes later.
+ *
+ * Peer connect/disconnect callbacks need the deprecated BIND_LISTENER action
+ * (rejected by lint), so they are not used: the capability replaces them.
  */
 class WatchListenerService : WearableListenerService() {
     override fun onMessageReceived(event: MessageEvent) {
@@ -31,21 +35,14 @@ class WatchListenerService : WearableListenerService() {
         Wearable.getMessageClient(this).sendMessage(event.sourceNodeId, WatchBridgePlugin.ACK_PATH, reply)
     }
 
-    override fun onPeerConnected(peer: Node) {
+    override fun onCapabilityChanged(info: com.google.android.gms.wearable.CapabilityInfo) {
+        if (info.name != WatchBridgePlugin.CAPABILITY) return
         payClearDebt()
         WatchBridgePlugin.peerChanged()
-    }
-
-    override fun onCapabilityChanged(info: com.google.android.gms.wearable.CapabilityInfo) {
-        payClearDebt()
     }
 
     /** A sign-out clear that could not reach the watch earlier is delivered as soon as one connects. */
     private fun payClearDebt() {
         if (WatchBridgePlugin.clearPending(this)) WatchBridgePlugin.payClearDebt(this, announce = !WatchBridgePlugin.appRunning()) {}
-    }
-
-    override fun onPeerDisconnected(peer: Node) {
-        WatchBridgePlugin.peerChanged()
     }
 }

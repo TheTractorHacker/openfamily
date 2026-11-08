@@ -143,4 +143,36 @@ final class PhoneLink: NSObject, ObservableObject, WCSessionDelegate {
     func refresh() {
         command("refresh") { _, _ in }
     }
+
+    /// Tells the iPhone whether this app is on screen ("visible", "visible ambient",
+    /// "hidden") so it sends every few seconds only while it is
+    /// (docs/design/WATCH_APPS.md, Cadence). Fire and forget: no answer is expected,
+    /// and a lost one is harmless (the iPhone forgets "visible" after 150 s).
+    func presence(visible: Bool, ambient: Bool = false) {
+        let session = WCSession.default
+        guard WCSession.isSupported(), session.activationState == .activated, session.isReachable else { return }
+        var object: [String: Any] = [
+            "id": UUID().uuidString,
+            "cmd": visible ? "visible" : "hidden",
+            "at": Int64(Date().timeIntervalSince1970 * 1000.0),
+        ]
+        if visible && ambient { object["arg"] = "ambient" }
+        guard let data = try? JSONSerialization.data(withJSONObject: object),
+              let text = String(data: data, encoding: .utf8) else { return }
+        session.sendMessage(["json": text], replyHandler: { _ in }, errorHandler: { _ in })
+    }
+
+    private var presenceTimer: Timer? = nil
+
+    /// Called on scene phase changes. While active, "visible" is repeated once a minute.
+    func setOnScreen(_ onScreen: Bool, ambient: Bool) {
+        presenceTimer?.invalidate()
+        presenceTimer = nil
+        presence(visible: onScreen, ambient: ambient)
+        if onScreen && !ambient {
+            presenceTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+                self?.presence(visible: true)
+            }
+        }
+    }
 }

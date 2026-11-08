@@ -59,13 +59,15 @@ struct WMember: Decodable, Identifiable {
     var place: String = ""
     var address: String = ""
     var line: String = ""
+    /// When set, "<line> 25 min ago": the phone leaves relative times out of `line`.
+    var lineAt: Double? = nil
     var priv: Bool = false
     var you: Bool = false
 
     init() {}
     enum CodingKeys: String, CodingKey {
         case id, name, initials, color, lat, lon, fixAt, battery, state, speedKmh
-        case place, address, line, priv = "private", you
+        case place, address, line, lineAt, priv = "private", you
     }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -82,6 +84,7 @@ struct WMember: Decodable, Identifiable {
         place = c.val(String.self, .place, "")
         address = c.val(String.self, .address, "")
         line = c.val(String.self, .line, "")
+        lineAt = c.opt(Double.self, .lineAt).flatMap { $0 > 0 ? $0 : nil }
         priv = c.val(Bool.self, .priv, false)
         you = c.val(Bool.self, .you, false)
     }

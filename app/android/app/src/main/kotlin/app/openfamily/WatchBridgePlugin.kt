@@ -5,6 +5,8 @@ import android.os.Handler
 import android.os.Looper
 import com.google.android.gms.common.ConnectionResult
 import com.google.android.gms.common.GoogleApiAvailability
+import com.google.android.gms.wearable.CapabilityClient
+import com.google.android.gms.wearable.CapabilityInfo
 import com.google.android.gms.wearable.PutDataMapRequest
 import com.google.android.gms.wearable.Wearable
 import io.flutter.plugin.common.BinaryMessenger
@@ -15,10 +17,16 @@ import io.flutter.plugin.common.MethodChannel
  * Phone side of the Wear OS companion (docs/design/WATCH_APPS.md).
  *
  * MethodChannel `app.openfamily/watch`:
- *   publish(json)  -> bool   puts the snapshot into the Wearable Data Layer
+ *   publish({json, urgent}) -> bool   puts the snapshot into the Wearable Data Layer
+ *                                      (a bare json string from older Dart code = urgent)
  *   clear()                  deletes it (sign-out, bridge off)
  *   status()       -> map    {available, nodes, names}
  * and calls back into Dart: command(json), peerChanged().
+ *
+ * Link state is event driven: the watch app advertises the capability
+ * [CAPABILITY] and this plugin listens for it while the app runs (plus
+ * WatchListenerService through the manifest while it does not), so Dart hears
+ * within seconds when an Orbitly watch connects or goes away.
  *
  * Everything degrades to a harmless no-op without Google Play services or a
  * paired watch; nothing here ever throws into Dart.
@@ -30,6 +38,15 @@ class WatchBridgePlugin private constructor(
     private val channel = MethodChannel(messenger, CHANNEL)
     private val main = Handler(Looper.getMainLooper())
 
+    /** The watch app appeared or went away: pay an owed wipe, then let Dart re-read the link. */
+    private val capabilityListener = CapabilityClient.OnCapabilityChangedListener { _: CapabilityInfo ->
+        try {
+            if (clearPending(context)) payClearDebt(context, announce = false) {}
+        } catch (_: Throwable) {
+        }
+        deliver("peerChanged", null)
+    }
+
     init {
         channel.setMethodCallHandler { call, result ->
             try {
@@ -37,6 +54,19 @@ class WatchBridgePlugin private constructor(
             } catch (_: Throwable) {
                 result.success(null)
             }
+        }
+        if (available()) {
+            try {
+                Wearable.getCapabilityClient(context).addListener(capabilityListener, CAPABILITY)
+            } catch (_: Throwable) {
+            }
+        }
+    }
+
+    private fun detach() {
+        try {
+            Wearable.getCapabilityClient(context).removeListener(capabilityListener, CAPABILITY)
+        } catch (_: Throwable) {
         }
     }
 
@@ -49,7 +79,10 @@ class WatchBridgePlugin private constructor(
     private fun handle(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
             "publish" -> {
-                val json = call.arguments as? String
+                val args = call.arguments
+                val json = (args as? String) ?: ((args as? Map<*, *>)?.get("json") as? String)
+                // Older Dart code sent a bare string and always wanted urgent delivery.
+                val urgent = ((args as? Map<*, *>)?.get("urgent") as? Boolean) ?: true
                 // Signed out / switched off: never send family data (until allowPublish).
                 if (json == null || !available() || isBlocked(context)) {
                     result.success(false)
@@ -57,7 +90,7 @@ class WatchBridgePlugin private constructor(
                 }
                 // First publish of a login that has no identity yet (restored session).
                 val sid = session(context) ?: newSession(context)
-                putSnapshot(context, json, sid)
+                putSnapshot(context, json, sid, urgent)
                     .addOnSuccessListener { result.success(true) }
                     .addOnFailureListener { result.success(false) }
             }
@@ -83,19 +116,21 @@ class WatchBridgePlugin private constructor(
                     result.success(mapOf("available" to false, "nodes" to 0, "names" to emptyList<String>()))
                     return
                 }
-                Wearable.getNodeClient(context).connectedNodes
-                    .addOnSuccessListener { nodes ->
-                        result.success(
-                            mapOf(
-                                "available" to true,
-                                "nodes" to nodes.size,
-                                "names" to nodes.map { it.displayName },
-                            ),
-                        )
-                    }
-                    .addOnFailureListener {
-                        result.success(mapOf("available" to true, "nodes" to 0, "names" to emptyList<String>()))
-                    }
+                fun answer(nodes: Collection<com.google.android.gms.wearable.Node>) = result.success(
+                    mapOf("available" to true, "nodes" to nodes.size, "names" to nodes.map { it.displayName }),
+                )
+                fun connected() {
+                    Wearable.getNodeClient(context).connectedNodes
+                        .addOnSuccessListener { answer(it) }
+                        .addOnFailureListener { answer(emptyList()) }
+                }
+                // Reachable watches running an Orbitly app that advertises the capability. A watch
+                // with an older Orbitly app does not advertise it: then any connected watch counts,
+                // as before, so it keeps getting snapshots.
+                Wearable.getCapabilityClient(context)
+                    .getCapability(CAPABILITY, CapabilityClient.FILTER_REACHABLE)
+                    .addOnSuccessListener { info -> if (info.nodes.isNotEmpty()) answer(info.nodes) else connected() }
+                    .addOnFailureListener { connected() }
             }
             else -> result.notImplemented()
         }
@@ -116,6 +151,9 @@ class WatchBridgePlugin private constructor(
         const val SNAPSHOT_PATH = "/orbitly/snapshot"
         const val COMMAND_PATH = "/orbitly/cmd"
         const val ACK_PATH = "/orbitly/ack"
+
+        /** Advertised by the Wear app (wear/app/src/main/res/values/wear.xml). */
+        const val CAPABILITY = "orbitly_watch_app"
 
         private const val PREFS = "orbitly_watch"
         private const val KEY_PENDING = "clear_pending"
@@ -138,12 +176,17 @@ class WatchBridgePlugin private constructor(
             java.util.UUID.randomUUID().toString().also { prefs(c).edit().putString(KEY_SESSION, it).apply() }
         fun dropSession(c: Context) { prefs(c).edit().remove(KEY_SESSION).apply() }
 
-        fun putSnapshot(c: Context, json: String, sid: String) =
+        /**
+         * [urgent]: delivered at once (alerts, command answers, sign-in, the watch app on
+         * screen). Otherwise the system may batch the item for a few minutes to save battery
+         * on both devices; the Dart bridge decides (docs/design/WATCH_APPS.md, Cadence).
+         */
+        fun putSnapshot(c: Context, json: String, sid: String, urgent: Boolean = true) =
             Wearable.getDataClient(c).putDataItem(
                 PutDataMapRequest.create(SNAPSHOT_PATH).apply {
                     dataMap.putString("json", json)
                     dataMap.putString("session", sid)
-                }.asPutDataRequest().setUrgent(),
+                }.asPutDataRequest().let { if (urgent) it.setUrgent() else it },
             )
 
         /**
@@ -208,6 +251,7 @@ class WatchBridgePlugin private constructor(
         /** The Flutter engine is gone; commands can no longer be executed. */
         fun unregister() {
             current?.channel?.setMethodCallHandler(null)
+            current?.detach()
             current = null
         }
 
