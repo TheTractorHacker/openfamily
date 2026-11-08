@@ -41,14 +41,27 @@ Known and left alone: Android lint (non-fatal here, `abortOnError = false`) flag
 
 ## The phone side
 
-`WatchBridge` (`app/lib/services/watch/watch_bridge.dart`) already protects the watch:
+`WatchBridge` (`app/lib/services/watch/watch_bridge.dart`) decides how often the watch is woken. The full rules are in [Watch apps, Cadence](../design/WATCH_APPS.md#cadence); in short:
 
-- At most one publish per 5 seconds (`minInterval`); newer state replaces a waiting one.
-- A content hash skips a publish when nothing visible changed.
-- Snapshots are capped at 100 KB, 15 people and 5 alerts; the watch rejects larger ones.
-- A keep-alive publish every 10 minutes while a watch is connected. A forced publish also follows each command (limited by the per-command cooldowns, 2 s, SOS 60 s).
+- Nothing in the snapshot changes by itself as time passes. The status line no longer carries "25 min ago" or the exact speed; the watch formats ages from `fixAt` and the new `lineAt`.
+- Each new snapshot is compared with the last one the watch got: alerts, command answers and a new sign-in go out at once and urgent; unread and sharing within 5 s; a move of more than 100 m, a state, place or battery step at the pace of the tier; GPS jitter and newer fix times only with the keep-alive.
+- The watch app sends `visible` (every 60 s while on screen), `visible ambient` and `hidden`. Visible: at most every 5 s, urgent. Ambient: meaningful changes once a minute. Hidden (default): meaningful changes at most every 2 minutes, not urgent (the Data Layer may batch them), keep-alive every 10 minutes.
+- Alerts and the sharing pause are no longer fetched every minute; they are refreshed on live-socket events and every 10 minutes (126 requests an hour down to 18 while a watch is connected).
+- Link state: the Wear app advertises the `orbitly_watch_app` capability; the phone listens for it at runtime and through `WatchListenerService`, so it stops building snapshots for a watch that left within seconds instead of up to 10 minutes.
 
-Not changed: items are sent `urgent`, so the watch is woken right away. That is right for people moving on a map, but if battery turns out to be an issue the first thing to try is non-urgent puts for the 10 minute keep-alive.
+Measured in `app/test/services/watch/watch_cadence_test.dart` (simulated hours, before = the previous logic on the same data):
+
+| Hour | Before | After |
+|---|---|---|
+| someone driving, watch app not open | 720 snapshots, all urgent | 31, 2 urgent (start-up and first roster) |
+| still family with GPS jitter | 125, all urgent | 7, 2 urgent |
+| still family, 4 alerts, 20 messages, a pause | 125, all urgent | 31, 7 urgent |
+| someone driving, watch app open | 720 | 721 (all urgent, by design) |
+| someone driving, watch in always-on | 720 | 61 |
+
+On the watch, `SurfaceGate` (`wear/.../logic/SurfaceGate.kt`) redraws the tile and complication only when what they show changed: at most about 60 redraws in an hour of driving with the app open, instead of one per snapshot (720), and none for keep-alives. Tested in `CadenceLogicTest.kt`.
+
+To check it on a watch: `adb shell dumpsys activity service WearableService` on the phone and the watch lists the Data Layer items and their delivery; over one idle hour with the app closed expect about 6 to 7 snapshot writes. `adb logcat -s WearableService` shows each `onDataChanged`. Not measured yet.
 
 ## Baseline profile
 
@@ -91,6 +104,10 @@ The Gradle Baseline Profile plugin needs a device. On a machine with a Wear OS e
 ## Tests added
 
 `wear/app/src/test/kotlin/app/openfamily/wear/PerfLogicTest.kt`: duplicate-push dropping, heading filter (wrap-around at north, dead band, convergence), unique list ids after parsing, row text, oversized snapshot rejection, and the SOS hold timing in 50 ms steps. They run in `./gradlew :app:testDebugUnitTest` in `wear/`.
+
+## Status of OPT-10 (baseline profile and list keys)
+
+Done in the change above: `androidx.profileinstaller`, the hand-written `baseline-prof.txt` (covers the activity, view model, data and logic packages, UI package, tile and complication services), list keys on every `items(...)` and snapshot parsing off the main thread. Not done: a device-generated profile and the before/after cold-start numbers on the Galaxy Watch Ultra (needs a watch), and a separate content flow with a 60-second age ticker (the identical-push drop and the slower phone cadence already remove most recompositions; revisit if the device trace shows otherwise).
 
 ## Not done, on purpose
 
