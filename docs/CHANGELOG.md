@@ -10,6 +10,10 @@ for the **last 5 minor versions** of the app (see
 [API compatibility](api-compat.md)), so you can update the server first and
 the phones afterwards.
 
+## v0.26.8 (2026-11-08)
+
+- **No more "Add server" when the server is already added.** In a Private circle's settings, once your data is on the server the row reads **Server is processing** (tap it to manage or remove), and the extra "Add server to this circle" button on the invite page is hidden.
+
 ## v0.26.7 (2026-11-08)
 
 Same as v0.26.6 with the server-key repair hardened: the server now answers "key revoked" only when the key really is revoked (a database hiccup is a plain error), and a revoked key's secrets are removed instead of archived. Install v0.26.7.

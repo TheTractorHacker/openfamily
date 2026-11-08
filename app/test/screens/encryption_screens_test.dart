@@ -202,12 +202,13 @@ void main() {
   group('Private circle toggle in circle settings', () {
     Finder toggle() => find.widgetWithText(DsToggleRow, 'Private circle');
 
-    Future<void> openDetail(WidgetTester t, String role) async {
+    Future<void> openDetail(WidgetTester t, String role, {bool serverOn = false}) async {
       CircleService.instance = FakeCircles(me: role == 'admin' ? uA : uB);
       E2eeApp.override = alice;
       addTearDown(() => E2eeApp.override = null);
       await t.pumpWidget(wrap(CircleDetailScreen(
-          circle: Circle(id: circleId, name: 'Family', role: role, sharingEnabled: true, memberCount: 2))));
+          circle: Circle(id: circleId, name: 'Family', role: role, sharingEnabled: true, memberCount: 2,
+              e2eeMode: serverOn ? 'private' : 'off', myLaneServer: serverOn))));
       await t.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 300)));
       await t.pump(const Duration(milliseconds: 100));
     }
@@ -230,6 +231,15 @@ void main() {
       await t.pump(const Duration(milliseconds: 300));
       expect(server.circles[circleId]!.mode, 'private');
       expect(t.widget<DsToggleRow>(toggle()).value, isTrue);
+    });
+
+    testWidgets('once the server is added the row says so instead of offering to add it', (t) async {
+      tall(t);
+      await setup(t);
+      await t.runAsync(() => alice.enableCircle(circleId));
+      await openDetail(t, 'admin', serverOn: true);
+      expect(find.text('Server is processing'), findsOneWidget);
+      expect(find.text('Add server to this circle'), findsNothing);
     });
 
     testWidgets('cancelling the explanation leaves the circle unchanged; members do not see the toggle', (t) async {

@@ -229,10 +229,12 @@ class _CircleDetailScreenState extends State<CircleDetailScreen> {
           if (st.isPrivate)
             DsListRow(
               key: const Key('circle-add-server'),
-              leading: DsListRow.iconTile(context, Icons.dns_outlined),
-              title: 'Add server to this circle',
-              subtitle: 'Keep history, trips and driving reports',
-              info: 'Lets your own server keep history, trips and driving reports for this circle. Takes three taps.',
+              leading: DsListRow.iconTile(context, _circle.myLaneServer ? Icons.check_circle_outline : Icons.dns_outlined),
+              title: _circle.myLaneServer ? 'Server is processing' : 'Add server to this circle',
+              subtitle: _circle.myLaneServer ? 'Your data is kept on the server. Tap to manage.' : 'Keep history, trips and driving reports',
+              info: _circle.myLaneServer
+                  ? 'Your own server keeps your history, trips and driving reports for this circle. Open it to remove the server or see who else uses it.'
+                  : 'Lets your own server keep history, trips and driving reports for this circle. Takes three taps.',
               chevron: true,
               onTap: _addServer,
             ),
@@ -845,7 +847,7 @@ class _CircleDetailScreenState extends State<CircleDetailScreen> {
         icon: Icons.person_add_alt_1,
         label: 'New invite code',
       ),
-      if (_circle.isAdmin && (_e2eeState?.isPrivate ?? false)) ...<Widget>[
+      if (_circle.isAdmin && (_e2eeState?.isPrivate ?? false) && !_circle.myLaneServer) ...<Widget>[
         const SizedBox(height: AppSpace.sm),
         DsPillButton(
           key: const Key('invite-add-server'),
