@@ -1,3 +1,4 @@
+import '../utils/self_label.dart';
 import 'package:flutter/material.dart';
 
 import '../services/speed_units.dart';
@@ -159,7 +160,7 @@ class _WeeklySummaryScreenState extends State<WeeklySummaryScreen> {
   }
 
   Widget _privateMember(BuildContext context, MemberProcessing m, PrimaryLanes l, WeeklyMember? w, UnitSystem units, double maxM) {
-    final String name = m.userId == widget.selfId ? 'You' : l.nameOf(m.userId);
+    final String name = m.userId == widget.selfId ? selfLabel(l.nameOf(m.userId)) : l.nameOf(m.userId);
     if (w == null) {
       if (m.origin == ProcessingOrigin.server) {
         return Container(
@@ -277,7 +278,7 @@ class _WeeklySummaryScreenState extends State<WeeklySummaryScreen> {
                 child: _MemberCard(
                   member: m,
                   name: m.userId == widget.selfId
-                      ? 'You'
+                      ? selfLabel(m.name)
                       : (m.name.isEmpty ? 'Member' : m.name),
                   units: units,
                   maxMeters: maxM,

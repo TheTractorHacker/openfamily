@@ -142,7 +142,7 @@ ChatMessage chatMessageFromStored(StoredChat m, String circleId, String authorNa
       seq: m.seq,
       circleId: circleId,
       senderId: m.author,
-      senderName: mine ? 'You' : authorName,
+      senderName: authorName.isNotEmpty && authorName != 'Someone' ? authorName : (mine ? 'You' : authorName),
       body: m.text,
       hasImage: m.attachment != null,
       createdAt: DateTime.fromMillisecondsSinceEpoch(m.tsMs),

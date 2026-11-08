@@ -125,7 +125,7 @@ class MemberAvatarBubble extends StatelessWidget {
 
   /// Colorblind-safe, screen-reader-friendly description of this bubble.
   String _tooltip() {
-    final StringBuffer sb = StringBuffer(member.name);
+    final StringBuffer sb = StringBuffer(member.displayName);
     sb.write(' — ${member.status.description}');
     if (member.movement != MovementType.none) {
       final double? mps = MemberMotionHub.shared.liveSpeedMps(member);

@@ -743,7 +743,7 @@ class FamilyService {
   /// A member the server sent without a position, but whose phone shared one with this phone before.
   Member _withLastKnown(Member m) {
     if (m.position != null || m.id.isEmpty) return m;
-    final LastPosition? p = PrivateRuntime.instance.lastKnown(m.id);
+    final LastPosition? p = PrivateRuntime.instance.lastKnown(m.id, circleId: (_circleId == null || _circleId == 'all') ? null : _circleId);
     if (p == null) return m;
     return applyPlaceAddress(memberFromLocationUpdate(m, p.toFrame()), _places);
   }

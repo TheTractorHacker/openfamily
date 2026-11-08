@@ -2,6 +2,7 @@ import 'package:latlong2/latlong.dart';
 
 import '../models/member.dart';
 import '../models/place.dart';
+import '../utils/self_label.dart';
 
 /// Maps backend member JSON (from `GET /family/members` and the `/ws/stream`
 /// `members` frame) into a [Member].
@@ -39,7 +40,7 @@ Member memberFromJson(Map<String, dynamic> json) {
 
   return Member(
     id: (json['id'] as String?) ?? '',
-    name: (json['name'] as String?) ?? 'Member',
+    name: nameOrEmail(json['name'] as String?, json['email'] as String?),
     position: position,
     status: _statusFrom(
       position: position,

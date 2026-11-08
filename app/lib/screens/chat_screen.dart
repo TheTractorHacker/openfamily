@@ -1,3 +1,4 @@
+import '../utils/self_label.dart';
 import 'dart:async';
 import 'dart:typed_data';
 
@@ -781,7 +782,7 @@ class _Bubble extends StatelessWidget {
     final ColorScheme cs = Theme.of(context).colorScheme;
     final Color bg = mine ? cs.primaryContainer : cs.surfaceContainerHighest;
     final Color fg = mine ? cs.onPrimaryContainer : cs.onSurface;
-    final String who = mine ? 'You' : message.senderName;
+    final String who = mine ? (message.senderName == 'You' ? 'You' : selfLabel(message.senderName)) : message.senderName;
     return Align(
       alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
       child: Semantics(

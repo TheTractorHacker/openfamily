@@ -288,7 +288,7 @@ class _PersonPanelState extends State<PersonPanel> {
                         AppSpace.xs, AppSpace.sm, 0, AppSpace.md),
                     child: Semantics(
                       header: true,
-                      child: Text(m.name,
+                      child: Text(m.displayName,
                           key: const Key('person_name'),
                           style: AppType.title
                               .copyWith(fontSize: 28, fontWeight: FontWeight.w800)),

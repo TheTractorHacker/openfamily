@@ -132,10 +132,18 @@ class Member {
     this.accuracyMeters,
     this.placePresence,
     this.phone,
+    this.isSelf = false,
   }) : speedMps = speedMps ?? (speedMph == null ? null : speedMph / kMpsToMph);
 
   final String id;
   final String name;
+
+  /// True for the signed-in person's own entry. The name stays the real name; only
+  /// [displayName] adds a small "(you)" tag.
+  final bool isSelf;
+
+  /// The name to show in lists and cards: the real name, tagged "(you)" for the caller.
+  String get displayName => isSelf ? '$name (you)' : name;
 
   /// Geographic position pinned on the map (the "home" / base position).
   ///
@@ -256,6 +264,7 @@ class Member {
     DateTime? lastSeen,
     double? accuracyMeters,
     PlacePresence? placePresence,
+    bool? isSelf,
   }) {
     return Member(
       id: id,
@@ -279,6 +288,7 @@ class Member {
       accuracyMeters: accuracyMeters ?? this.accuracyMeters,
       placePresence: placePresence ?? this.placePresence,
       phone: phone,
+      isSelf: isSelf ?? this.isSelf,
     );
   }
 
@@ -313,6 +323,7 @@ class Member {
       accuracyMeters: accuracyMeters,
       placePresence: placePresence,
       phone: phone,
+      isSelf: isSelf,
     );
   }
 }

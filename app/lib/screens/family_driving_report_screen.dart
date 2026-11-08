@@ -1,3 +1,4 @@
+import '../utils/self_label.dart';
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:latlong2/latlong.dart';
@@ -240,7 +241,7 @@ class _State extends State<FamilyDrivingReportScreen> {
   }
 
   String _nameOf(MemberReport m) =>
-      m.userId == widget.userId.value ? 'You' : (m.name.isEmpty ? 'Member' : m.name);
+      m.userId == widget.userId.value ? selfLabel(m.name) : (m.name.isEmpty ? 'Member' : m.name);
 
   void _openMember(Member m) {
     Navigator.of(context).push(
@@ -363,7 +364,7 @@ class _State extends State<FamilyDrivingReportScreen> {
   }
 
   Widget _privateMemberCard(BuildContext context, MemberProcessing m, PrimaryLanes l, UnitSystem units, DateTime from, DateTime to) {
-    final String name = m.userId == widget.userId.value ? 'You' : l.nameOf(m.userId);
+    final String name = m.userId == widget.userId.value ? selfLabel(l.nameOf(m.userId)) : l.nameOf(m.userId);
     if (m.origin == ProcessingOrigin.phone) {
       final bool mine = m.userId == widget.userId.value;
       void openMine() => Navigator.of(context).push<void>(MaterialPageRoute<void>(builder: (_) => const MyProcessingScreen()));
@@ -767,7 +768,7 @@ class _State extends State<FamilyDrivingReportScreen> {
               child: RecentDriveTile(
                 trip: t,
                 member: _memberFor(t.userId, t.name),
-                name: t.userId == me ? 'You' : (t.name.isEmpty ? 'Member' : t.name),
+                name: t.userId == me ? selfLabel(t.name) : (t.name.isEmpty ? 'Member' : t.name),
                 units: units,
                 now: _now,
                 onTap: () => _openTrip(t),

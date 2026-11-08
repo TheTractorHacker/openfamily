@@ -73,7 +73,7 @@ class EncryptedChatService implements ChatService, ChatProtection {
   }
 
   Future<ChatMessage> _toMessage(String circle, StoredChat m, String me) async =>
-      chatMessageFromStored(m, circle, m.author == me ? 'You' : await _nameOf(circle, m.author), mine: m.author == me);
+      chatMessageFromStored(m, circle, await _nameOf(circle, m.author), mine: m.author == me);
 
   /// Pending messages: the sealed item left the upload queue = sent, and the
   /// echo (the relay returning it) marks it delivered. No echo after ten
