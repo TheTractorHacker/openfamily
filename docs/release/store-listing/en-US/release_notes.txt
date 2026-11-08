@@ -1,0 +1,7 @@
+Welcome to Orbitly 1.0.
+- Live map, places, arrival alerts, SOS and check-ins for your circle
+- Private circles with end-to-end encryption, including chat
+- Driving reports and optional crash detection
+- Wear OS companion app
+- More reliable background location and fewer surprise sign-outs
+Needs an Orbitly server run by you or someone in your circle.
