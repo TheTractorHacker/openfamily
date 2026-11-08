@@ -643,6 +643,35 @@ class LanesService {
     return AutoApplyOutcome.applied;
   }
 
+  /// "Set this phone up again" revokes every older key of the account, and a lane pref only counts while the
+  /// key that signed it is active (here in [_verifiedPref] and on the server in `e2ee_pref_lane_server`). So a
+  /// member who had chosen the server falls back to the phone lane after a reset, silently. This finds that
+  /// case: my NEWEST pref in [circleId] chose the server and was signed by a key of mine that is gone. Returns
+  /// that old key's device id (so the re-offer is remembered per reset) and whether the admin's signed policy
+  /// recommends the server for new members; null in every other case (never chose, chose the phone, offline).
+  Future<({String oldDeviceId, bool recommended})?> serverChoiceLostToNewKey(String circleId) async {
+    final LocalIdentity? me = await service.identity();
+    if (me == null) return null;
+    final CircleE2eeState st = await api.circleState(circleId);
+    if (!st.isPrivate) return null;
+    final List<LogEntry>? log = await _verifiedLog();
+    if (log == null) return null;
+    LogEntry? newest;
+    for (final LogEntry e in log) {
+      if (!e.redacted && e.action == E2ee.actProcessingPref && e.userId == me.userId && e.circleId == circleId) {
+        if (newest == null || e.seq > newest.seq) newest = e;
+      }
+    }
+    if (newest == null || (newest.subjectId ?? E2ee.zeroUuid) == E2ee.zeroUuid) return null;
+    final String? actor = newest.actorDeviceId;
+    if (actor == null || actor == me.deviceId) return null;
+    for (final DeviceKey d in st.allDevices) {
+      if (d.deviceId == actor && d.isActive) return null;
+    }
+    final StoredPolicy policy = await store.policy(circleId);
+    return (oldDeviceId: actor, recommended: policy.defaultForNew == E2ee.lineServer);
+  }
+
   /// One tap on "Keep on my phone" in the auto-apply notice: signs `lane = phone` now (the existing opt-out, effective
   /// at once on this phone), asks the server to delete this member's copies, and remembers the choice for good.
   Future<int> keepOnPhone(String circleId, {bool deleteCopies = true}) async {

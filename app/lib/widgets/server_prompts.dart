@@ -8,14 +8,17 @@ import '../services/e2ee/e2ee_app.dart';
 import '../services/e2ee/e2ee_models.dart' show ServerJoinInfo;
 import '../services/e2ee/lanes_store.dart' show AutoApplyRecord;
 import '../services/e2ee/private_runtime.dart' show PrivateRuntime;
-import 'add_server_sheet.dart';
 
-// Server by default (docs/design/PRIVACY_PROCESSING.md section 22). Three small cards:
-//   * member: "Use the server (recommended)" / "Keep on my phone" on first open of a circle
-//     whose admin turned the server on. Nothing is signed until the person taps through the
-//     add-server sheet; "Keep on my phone" signs nothing and the server never reads them.
-//   * admin: "Let the server do the processing (recommended)" for a private circle that has no
-//     server yet, plus the one-tap "switch this circle to normal mode".
+// Server by default (docs/design/PRIVACY_PROCESSING.md section 22). The questions themselves are
+// items of the attention center (services/attention_service.dart); this file keeps their rules and
+// what they remember:
+//   * member: "Use the server" / "Keep on my phone" on first open of a circle whose admin turned
+//     the server on. Nothing is signed until the person taps through the add-server sheet; "Keep on
+//     my phone" signs nothing and the server never reads them.
+//   * member after "Set this phone up again": the earlier server choice was signed by the old key,
+//     so it no longer counts; one tap re-offers it ([ServerChoiceStore.reofferAnswered]).
+//   * admin: "Let the server do the processing" for a private circle that has no server yet, plus
+//     the one-tap "switch this circle to normal mode".
 //   * update: a soft "Update available" card with the Play/APK hint.
 
 /// Remembers, per circle on this phone, that the person already answered the first-open question.
@@ -39,6 +42,25 @@ class ServerChoiceStore {
   static bool answered(String circleId) => _answered.contains(circleId);
   static bool snoozed(String circleId) => _snoozed.contains(circleId);
 
+  static String _reofferKey(String circleId, String oldDeviceId) => 'server_choice_reoffer_${circleId}_$oldDeviceId';
+  static final Set<String> _reoffered = <String>{};
+
+  /// Reads whether the re-offer after the reset that revoked [oldDeviceId] was already answered.
+  static Future<void> loadReoffer(String circleId, String oldDeviceId) async {
+    final SharedPreferences p = await SharedPreferences.getInstance();
+    if (p.getBool(_reofferKey(circleId, oldDeviceId)) == true && _reoffered.add(_reofferKey(circleId, oldDeviceId))) changed.value++;
+  }
+
+  static bool reofferAnswered(String circleId, String oldDeviceId) => _reoffered.contains(_reofferKey(circleId, oldDeviceId));
+
+  /// "Keep on my phone" (or a finished "Use the server again") after a key reset. A later reset asks again.
+  static Future<void> markReofferAnswered(String circleId, String oldDeviceId) async {
+    _reoffered.add(_reofferKey(circleId, oldDeviceId));
+    changed.value++;
+    final SharedPreferences p = await SharedPreferences.getInstance();
+    await p.setBool(_reofferKey(circleId, oldDeviceId), true);
+  }
+
   static Future<void> markAnswered(String circleId) async {
     _answered.add(circleId);
     changed.value++;
@@ -54,6 +76,7 @@ class ServerChoiceStore {
   static void debugReset() {
     _answered.clear();
     _snoozed.clear();
+    _reoffered.clear();
   }
 }
 
@@ -61,16 +84,26 @@ class ServerChoiceStore {
 enum ServerPromptKind { none, memberChoice, adminSetup }
 
 ({ServerPromptKind kind, Circle? circle}) pickServerPrompt(Iterable<Circle> circles, {bool Function(String id)? answered, bool Function(String id)? snoozed}) {
-  final bool Function(String) isAnswered = answered ?? ServerChoiceStore.answered;
-  final bool Function(String) isSnoozed = snoozed ?? ServerChoiceStore.snoozed;
-  for (final Circle c in circles) {
-    if (c.isPrivate && c.serverAssist && !c.myLaneServer && !isAnswered(c.id)) return (kind: ServerPromptKind.memberChoice, circle: c);
-  }
-  for (final Circle c in circles) {
-    if (c.isPrivate && c.isAdmin && !c.serverAssist && !isSnoozed(c.id)) return (kind: ServerPromptKind.adminSetup, circle: c);
+  for (final ServerPromptKind want in <ServerPromptKind>[ServerPromptKind.memberChoice, ServerPromptKind.adminSetup]) {
+    for (final Circle c in circles) {
+      if (serverPromptFor(c, answered: answered, snoozed: snoozed) == want) return (kind: want, circle: c);
+    }
   }
   return (kind: ServerPromptKind.none, circle: null);
 }
+
+/// The question (if any) for one circle; the attention center asks it per circle.
+ServerPromptKind serverPromptFor(Circle c, {bool Function(String id)? answered, bool Function(String id)? snoozed}) {
+  final bool Function(String) isAnswered = answered ?? ServerChoiceStore.answered;
+  final bool Function(String) isSnoozed = snoozed ?? ServerChoiceStore.snoozed;
+  if (c.isPrivate && c.serverAssist && !c.myLaneServer && !isAnswered(c.id)) return ServerPromptKind.memberChoice;
+  if (c.isPrivate && c.isAdmin && !c.serverAssist && !isSnoozed(c.id)) return ServerPromptKind.adminSetup;
+  return ServerPromptKind.none;
+}
+
+/// The admin's circle is stuck because some members' app is too old for Private mode.
+bool serverSetupStalled(Circle c) =>
+    DeliveryHints.reports.value[c.id]?.members.any((MemberDelivery m) => m.reason == DeliveryReason.updateNeeded) ?? false;
 
 /// The copy-paste message for members whose app is too old to choose.
 String updateMessageText(String serverHost) =>
@@ -82,20 +115,29 @@ String updateMessageText(String serverHost) =>
 const String remindMessageText = 'Please open the Orbitly app once. Your circle uses the family server so maps, history and driving reports work. '
     'You will see a short notice and can tap "Keep on my phone" if you prefer that. If the app is old, update it first.';
 
-class ServerPrompts extends StatelessWidget {
-  const ServerPrompts({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(mainAxisSize: MainAxisSize.min, children: const <Widget>[ServerJoinCard(), AutoApplyNotice(), _CirclePrompts()]);
-  }
-}
-
 /// A circle where this phone signed the server lane on its own (admin setting "members are on the server by default").
 class AutoNotice {
   const AutoNotice(this.circleId, this.circleName);
   final String circleId;
   final String circleName;
+}
+
+/// The circles where this phone signed the server lane on its own and the person has not answered the notice yet.
+Future<List<AutoNotice>> loadAutoNotices() async {
+  final PrivateRuntime rt = PrivateRuntime.instance;
+  final List<AutoNotice> out = <AutoNotice>[];
+  for (final Circle c in DeliveryHints.circleById.values) {
+    if (!c.isPrivate) continue;
+    final AutoApplyRecord? r = await rt.lanesService.store.autoRecord(c.id);
+    if (r != null && r.applied && !r.dismissed && c.myLaneServer) out.add(AutoNotice(c.id, c.name));
+  }
+  return out;
+}
+
+/// "Keep on my phone" on the auto-apply notice: signs the phone lane, asks the server to delete the copies, remembers it.
+Future<void> keepAutoAppliedOnPhone(String circleId) async {
+  await PrivateRuntime.instance.lanesService.keepOnPhone(circleId);
+  await ServerChoiceStore.markAnswered(circleId);
 }
 
 /// The words of the notice. One place so tests and docs quote the same text.
@@ -135,20 +177,9 @@ class _AutoApplyNoticeState extends State<AutoApplyNotice> {
     super.dispose();
   }
 
-  static Future<List<AutoNotice>> _realLoad() async {
-    final PrivateRuntime rt = PrivateRuntime.instance;
-    final List<AutoNotice> out = <AutoNotice>[];
-    for (final Circle c in DeliveryHints.circleById.values) {
-      if (!c.isPrivate) continue;
-      final AutoApplyRecord? r = await rt.lanesService.store.autoRecord(c.id);
-      if (r != null && r.applied && !r.dismissed && c.myLaneServer) out.add(AutoNotice(c.id, c.name));
-    }
-    return out;
-  }
-
   Future<void> _load() async {
     try {
-      final List<AutoNotice> l = await (widget.loader ?? _realLoad)();
+      final List<AutoNotice> l = await (widget.loader ?? loadAutoNotices)();
       if (mounted) setState(() => _items = l);
     } catch (_) {}
   }
@@ -190,10 +221,7 @@ class _AutoApplyNoticeState extends State<AutoApplyNotice> {
               onPressed: _busy
                   ? null
                   : () => _run(() async {
-                        await (widget.keep ?? (String id) async {
-                          await PrivateRuntime.instance.lanesService.keepOnPhone(id);
-                          await ServerChoiceStore.markAnswered(id);
-                        })(n.circleId);
+                        await (widget.keep ?? keepAutoAppliedOnPhone)(n.circleId);
                       }, 'Could not switch to your phone. Check the connection and try again.'),
               child: const Text('Keep on my phone'),
             ),
@@ -283,71 +311,6 @@ class _ServerJoinCardState extends State<ServerJoinCard> {
           ]),
         ]),
       ),
-    );
-  }
-}
-
-class _CirclePrompts extends StatelessWidget {
-  const _CirclePrompts();
-
-  @override
-  Widget build(BuildContext context) {
-    return ListenableBuilder(
-      listenable: Listenable.merge(<Listenable>[DeliveryHints.reports, ServerChoiceStore.changed]),
-      builder: (BuildContext context, _) {
-        final Iterable<Circle> circles = DeliveryHints.circleById.values;
-        ServerChoiceStore.load(circles.map((Circle c) => c.id));
-        final ({ServerPromptKind kind, Circle? circle}) pick = pickServerPrompt(circles);
-        if (pick.kind == ServerPromptKind.none) return const SizedBox.shrink();
-        final Circle c = pick.circle!;
-        final ColorScheme cs = Theme.of(context).colorScheme;
-        final bool member = pick.kind == ServerPromptKind.memberChoice;
-        final bool stalled = !member && (DeliveryHints.reports.value[c.id]?.members.any((MemberDelivery m) => m.reason == DeliveryReason.updateNeeded) ?? false);
-        return Material(
-          color: cs.primaryContainer,
-          child: Padding(
-            key: Key(member ? 'server-choice-card' : 'server-admin-card'),
-            padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[
-              Text(
-                member ? 'Use the server for ${c.name}? (recommended)' : 'Let the server do the processing (recommended)',
-                style: TextStyle(fontWeight: FontWeight.w700, color: cs.onPrimaryContainer),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                member
-                    ? 'Your server keeps your locations so maps, history and driving reports just work. Or keep your location on your phone: it is shared privately, encrypted from phone to phone, with no reports unless you turn on phone reports.'
-                    : '${c.name} is private, so the server cannot show maps, history or driving reports yet. One tap lets your server join. Each other member then opens the app and taps "Use the server"; nobody is switched on for them.',
-                style: TextStyle(color: cs.onPrimaryContainer),
-              ),
-              Wrap(spacing: 8, children: <Widget>[
-                FilledButton(
-                  key: const Key('server-prompt-use'),
-                  onPressed: () async {
-                    final bool? ok = await showAddServerSheet(context, circle: c);
-                    if (ok == true) await ServerChoiceStore.markAnswered(c.id);
-                  },
-                  child: Text(member ? 'Use the server (recommended)' : 'Let the server do it'),
-                ),
-                if (member)
-                  TextButton(
-                    key: const Key('server-prompt-phone'),
-                    onPressed: () => ServerChoiceStore.markAnswered(c.id),
-                    child: const Text('Keep on my phone'),
-                  )
-                else
-                  TextButton(key: const Key('server-prompt-later'), onPressed: () => ServerChoiceStore.snooze(c.id), child: const Text('Not now')),
-                if (stalled)
-                  TextButton(
-                    key: const Key('server-prompt-normal'),
-                    onPressed: () => confirmSwitchToNormal(context, c),
-                    child: const Text('Switch this circle to normal mode so everyone shows up again'),
-                  ),
-              ]),
-            ]),
-          ),
-        );
-      },
     );
   }
 }

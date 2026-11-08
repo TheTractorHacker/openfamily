@@ -47,8 +47,7 @@ void main() {
       ]))));
       expect(find.text('End-to-end encrypted'), findsNothing);
       expect(find.text('Encrypted'), findsNothing);
-      expect(find.text('Private, server helps some'), findsOneWidget);
-      expect(find.text('Private + server'), findsOneWidget);
+      expect(find.text('Private + server'), findsNWidgets(2), reason: 'short words so the chip never collides');
       expect(find.bySemanticsLabel(RegExp('server can read the data of members who use the server')), findsNWidgets(2));
     });
 

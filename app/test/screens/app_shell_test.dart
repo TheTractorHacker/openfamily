@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:openfamily/screens/app_shell.dart';
 import 'package:openfamily/services/app_compat.dart';
 import 'package:openfamily/theme/app_theme.dart';
+import 'package:openfamily/widgets/attention_center.dart';
 
 class _Counter extends StatefulWidget {
   const _Counter(this.label);
@@ -30,7 +31,10 @@ Widget _shell({AppTab initial = AppTab.location}) {
       tabBuilders: <AppTab, WidgetBuilder>{
         AppTab.location: (_) => const _Counter('loc'),
         AppTab.driving: (_) => const _Counter('drv'),
-        AppTab.safety: (_) => const _Counter('saf'),
+        AppTab.safety: (_) => Scaffold(
+          appBar: AppBar(title: const Text('Safety tab'), actions: const <Widget>[AttentionButton()]),
+          body: const _Counter('saf'),
+        ),
         AppTab.circle: (_) => const _Counter('cir'),
       },
     ),
@@ -144,16 +148,36 @@ void main() {
     expect(find.text('cir 0'), findsOneWidget);
   });
 
-  testWidgets('shows the update banner above the tabs when required', (
+  testWidgets('an update is an item in the attention center, not a banner above the tabs', (
     tester,
   ) async {
     AppCompat.debugReset();
     addTearDown(AppCompat.debugReset);
-    await _pumpShell(tester, _shell());
-    expect(find.byKey(const Key('update-banner-text')), findsNothing);
+    await _pumpShell(tester, _shell(initial: AppTab.safety));
+    expect(find.byKey(const Key('attention-button')), findsNothing, reason: 'hidden when nothing needs attention');
     AppCompat.state.value = const CompatState(status: CompatStatus.required);
     await tester.pump();
-    expect(find.textContaining('Update required'), findsOneWidget);
-    expect(find.text('loc 0'), findsOneWidget);
+    expect(find.textContaining('update', findRichText: true), findsNothing, reason: 'no banner text in the shell');
+    expect(find.byKey(const Key('attention-button')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('attention-button')));
+    await tester.pumpAndSettle();
+    expect(find.text('Needs your attention'), findsOneWidget);
+    expect(find.text('Please update Orbitly.'), findsOneWidget);
+  });
+
+  testWidgets('no banner widgets in the shell: the tabs sit directly in the body and keep the status-bar inset', (
+    tester,
+  ) async {
+    AppCompat.debugReset();
+    addTearDown(AppCompat.debugReset);
+    tester.view.padding = const FakeViewPadding(top: 24);
+    await _pumpShell(tester, _shell());
+    AppCompat.state.value = const CompatState(status: CompatStatus.required);
+    AppCompat.circlesNeedingUpdate.value = 1;
+    await tester.pump();
+    expect(find.ancestor(of: find.byType(IndexedStack), matching: find.byType(Column)), findsNothing);
+    expect(MediaQuery.paddingOf(tester.element(find.text('loc 0'))).top, 24,
+        reason: 'nothing above the tab takes the inset away');
+    expect(tester.getRect(find.byType(IndexedStack)).top, 0, reason: 'nothing pushes the tabs down');
   });
 }

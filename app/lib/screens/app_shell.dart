@@ -1,4 +1,4 @@
-import '../services/app_compat.dart';
+import '../services/attention_service.dart';
 import '../services/chat_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -7,10 +7,6 @@ import '../models/member.dart';
 import '../services/driving/crash_watcher.dart';
 import '../services/perf/perf_monitor.dart';
 import '../theme/app_theme.dart';
-import '../services/delivery_status.dart';
-import '../widgets/delivery_banner.dart';
-import '../widgets/server_prompts.dart';
-import '../widgets/update_banner.dart';
 import 'circle_tab_screen.dart';
 import 'driving_tab_screen.dart';
 import 'map_screen.dart';
@@ -79,6 +75,8 @@ class _AppShellState extends State<AppShell> {
   void initState() {
     super.initState();
     _crashWatcher.start();
+    // The real app (tests pass tabBuilders) wires the attention center's network-backed sources.
+    if (widget.tabBuilders == null) AttentionService.instance.start();
     AppShell.requestedTab.addListener(_onRequested);
     _userId.addListener(_onUser);
     WidgetsBinding.instance.addPostFrameCallback((_) => _onRequested());
@@ -125,7 +123,7 @@ class _AppShellState extends State<AppShell> {
   /// means switching tabs no longer rebuilds all visited tabs, map included.
   final Map<AppTab, Widget> _bodies = <AppTab, Widget>{};
 
-  /// The banners plus tabs. It is moved (not rebuilt) between the phone layout
+  /// The tabs. It is moved (not rebuilt) between the phone layout
   /// and the rail layout, so folding or unfolding the phone, rotating it or
   /// resizing a multi-window pane never recreates the map, its camera, the
   /// live connection or any tab's state.
@@ -177,9 +175,6 @@ class _AppShellState extends State<AppShell> {
     (Icons.groups_outlined, Icons.groups, 'Circle'),
   ];
 
-  static bool get _bannerShown =>
-      AppShellBanner.updateShown || DeliveryBanner.silentCircle() != null;
-
   @override
   Widget build(BuildContext context) {
     final bool rail = AppShell.useRail(MediaQuery.sizeOf(context));
@@ -194,34 +189,11 @@ class _AppShellState extends State<AppShell> {
           ),
       ],
     );
-    // The update banner sits above the tabs; when it shows it already covers
-    // the status-bar inset, so the tabs below drop their top padding.
-    final Widget stack = KeyedSubtree(
-      key: _stackKey,
-      child: Column(
-      children: <Widget>[
-        const UpdateBanner(),
-        const DeliveryBanner(),
-        const ServerPrompts(),
-        Expanded(
-          child: ListenableBuilder(
-            listenable: Listenable.merge(<Listenable>[
-              AppCompat.state,
-              AppCompat.dismissed,
-              AppCompat.circlesNeedingUpdate,
-              DeliveryHints.reports,
-            ]),
-            builder: (BuildContext context, Widget? child) =>
-                MediaQuery.removePadding(
-              context: context,
-              removeTop: _bannerShown,
-              child: child!,
-            ),
-            child: tabs,
-          ),
-        ),
-      ],
-    ));
+    // No banner sits above the tabs any more: whatever needs the person's
+    // attention is an item behind the small icon in each tab's top bar
+    // (widgets/attention_center.dart), so nothing pushes a screen down and
+    // every tab keeps its own status-bar inset.
+    final Widget stack = KeyedSubtree(key: _stackKey, child: tabs);
     return PopScope(
       canPop: _tab == AppTab.location,
       onPopInvokedWithResult: (bool didPop, Object? _) {

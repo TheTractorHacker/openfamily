@@ -14,6 +14,7 @@ import '../services/member_day_service.dart';
 import 'person_panel.dart';
 import 'package:latlong2/latlong.dart' show LatLng;
 import '../theme/app_theme.dart';
+import 'attention_center.dart';
 import 'private_circle_widgets.dart';
 import '../utils/member_status.dart';
 import '../services/perf/perf_monitor.dart';
@@ -334,7 +335,7 @@ class _LocationTabViewState extends State<LocationTabView> {
                           '${c.memberCount} '
                           '${c.memberCount == 1 ? 'person' : 'people'}'
                           '${c.isAdmin ? ' - Admin' : ''}'
-                          '${c.isPrivate ? (c.e2eeServerMember ? ' - Server can read' : c.serverAssist ? ' - Private, server helps some' : ' - End-to-end encrypted') : ''}'
+                          '${c.isPrivate ? (c.e2eeServerMember ? ' - Server can read' : c.serverAssist ? ' - Private + server' : ' - End-to-end encrypted') : ''}'
                           '${c.sharingEnabled ? '' : ' - Sharing paused'}'
                           '${_isActive(c) ? ' - Shown on the map' : ''}',
                       leading: _circleLeading(ctx, c),
@@ -605,7 +606,8 @@ class _LocationTabViewState extends State<LocationTabView> {
                     ),
                   ),
                   const SizedBox(width: AppSpace.sm),
-                  // A chat button would live here once the backend has chat.
+                  // Hidden unless something needs attention (then it adds its own gap).
+                  const AttentionButton(onMap: true),
                   DsMapButton(
                     icon: Icons.person_add_alt_1_outlined,
                     tooltip: 'Invite someone',

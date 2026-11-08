@@ -10,6 +10,10 @@ for the **last 5 minor versions** of the app (see
 [API compatibility](api-compat.md)), so you can update the server first and
 the phones afterwards.
 
+## v0.26.5 (2026-11-08)
+
+- **Attention icon instead of banners.** The notices that were stacked across the top of every screen (update, "nobody has sent an update", "Use the server?", the server-join and auto-apply cards) are now one small icon with a count in the top bar, red when something is broken and amber when you have a choice or an update. Tap it for **Needs your attention**: one card per item, one sentence each and one button. Nothing pushes the app down any more. The map's offline notice is a small "Offline · last synced" pill, and the Private circle chip says "Private + server". After **Set this phone up again**, a circle where you had chosen the server offers **Use the server again** (one tap) instead of the first-time question. See [The attention icon](user/attention-icon.md).
+
 ## v0.26.4 (2026-11-08)
 
 Same as v0.26.3 (its release build stopped at an analyzer warning, so v0.26.3 has no app files). Install v0.26.4.

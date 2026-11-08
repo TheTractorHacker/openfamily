@@ -4,13 +4,13 @@ What Orbitly shows and keeps for you when your server cannot be reached, and wha
 
 Orbitly keeps working when your server cannot be reached (a restart, an update, a home internet outage, or a phone with no signal). The phone remembers what it last knew and keeps what you do until the server answers again.
 
-A small bar at the top of the map tells you what is going on:
+A small pill at the top of the map tells you what is going on. It never blocks the map:
 
-- **Server unreachable. Showing last known. Will sync when it is back.** The app tries again
-  by itself, a little less often the longer it takes (so it does not drain your battery).
-  Tap **Try again** to check right now.
+- **Offline · last synced 9:02.** The app tries again by itself, a little less often the longer it
+  takes (so it does not drain your battery). The [attention icon](attention-icon.md) turns red and
+  its card **Can't reach your server** has **Try again** to check right now.
 - **Syncing…** The server is back and things that were waiting are being sent.
-- **Up to date** Everything has been sent. The bar then goes away.
+- **Up to date** Everything has been sent. The pill then goes away.
 
 ## What you still see
 

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../widgets/attention_center.dart';
 import '../theme/app_theme.dart';
 import '../widgets/ds/ds.dart';
 import 'alerts_history_screen.dart';
@@ -26,6 +27,7 @@ class SafetyHubScreen extends StatelessWidget {
       appBar: AppBar(
         title: const Text('Safety'),
         centerTitle: false,
+        actions: const <Widget>[AttentionButton()],
         titleTextStyle: AppType.title.copyWith(color: cs.onSurface),
       ),
       body: DsBody(child: ListView(

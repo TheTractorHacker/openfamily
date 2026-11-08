@@ -1,3 +1,4 @@
+import '../widgets/attention_center.dart';
 import '../utils/self_label.dart';
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
@@ -452,6 +453,7 @@ class _State extends State<FamilyDrivingReportScreen> {
                             ),
                           ),
                           )),
+                          const AttentionButton(),
                           IconButton(
                             key: const ValueKey<String>('driving-inbox'),
                             tooltip: 'Inbox',

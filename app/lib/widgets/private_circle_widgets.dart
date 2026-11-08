@@ -31,6 +31,7 @@ class PrivateCircleBadge extends StatelessWidget {
               ? 'Private circle with server help. The server can read the data of members who use the server; '
                   'members who keep data on their phone stay end-to-end encrypted.'
               : 'End-to-end encrypted circle. The server cannot read locations in this circle.',
+      excludeSemantics: true,
       child: Container(
         key: const ValueKey<String>('private-circle-badge'),
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
@@ -44,13 +45,18 @@ class PrivateCircleBadge extends StatelessWidget {
           children: <Widget>[
             Icon(serverMember || serverAssist ? Icons.dns_outlined : Icons.lock_outline, size: 15, color: brand.accentInk),
             const SizedBox(width: 5),
-            Text(
-              serverMember
-                  ? (compact ? 'Server can read' : 'Server can read (trusted server)')
-                  : serverAssist
-                      ? (compact ? 'Private + server' : 'Private, server helps some')
-                      : (compact ? 'Encrypted' : 'End-to-end encrypted'),
-              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: brand.accentInk),
+            // Short words: the chip sits under the circle switcher and must never push into it.
+            Flexible(
+              child: Text(
+                serverMember
+                    ? (compact ? 'Server can read' : 'Server can read (trusted server)')
+                    : serverAssist
+                        ? 'Private + server'
+                        : (compact ? 'Encrypted' : 'End-to-end encrypted'),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: brand.accentInk),
+              ),
             ),
           ],
         ),

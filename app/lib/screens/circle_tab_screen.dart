@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 
+import '../widgets/attention_center.dart';
 import '../models/circle.dart';
 import '../models/member.dart';
 import '../services/chat_service.dart';
@@ -78,6 +79,7 @@ class CircleTabScreen extends StatelessWidget {
       appBar: AppBar(
         title: const Text('Circle'),
         centerTitle: false,
+        actions: const <Widget>[AttentionButton()],
         titleTextStyle: AppType.title.copyWith(color: cs.onSurface),
       ),
       body: DsBody(child: ListView(
