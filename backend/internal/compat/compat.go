@@ -42,7 +42,7 @@ var Features = map[string]string{
 	"processing_lanes":    "0.22.0", // per-member privacy lanes: key-log actions 10/11, server key line
 	"chat_e2ee":           "0.23.0", // chat sealed phone to phone in Private circles
 	"wire_v2":             "0.25.0", // API wire efficiency: bootstrap, ETag, delta lists, compact views, history simplify
-	"owner_approval":      "0.27.0", // circle owner may approve their own replacement device (key-log action 12, opt-in via ?owner_approval=1)
+	"owner_approval":      "0.26.3", // circle owner may approve their own replacement device (key-log action 12, opt-in via ?owner_approval=1)
 }
 
 // Version is a parsed x.y.z app version. Pre-release and build suffixes are
