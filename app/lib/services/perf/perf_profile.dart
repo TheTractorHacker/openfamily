@@ -156,9 +156,12 @@ class PerfProfile {
   }
 
   void applyToImageCache() {
-    final ImageCache c = PaintingBinding.instance.imageCache;
-    c.maximumSizeBytes = imageCacheMaxBytes;
-    c.maximumSize = imageCacheMaxCount;
+    // The background isolate has no painting binding (and no images).
+    try {
+      final ImageCache c = PaintingBinding.instance.imageCache;
+      c.maximumSizeBytes = imageCacheMaxBytes;
+      c.maximumSize = imageCacheMaxCount;
+    } catch (_) {}
   }
 
   /// [d] scaled by [animationScale].
