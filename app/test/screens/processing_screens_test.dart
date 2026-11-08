@@ -291,6 +291,7 @@ void main() {
       final FakeProcessingController c = FakeProcessingController(FakeProcessingController.snapshot(assist: false, serverKey: false));
       await pumpScreen(t, ProcessingPolicyScreen(circle: adminCircle, controller: c));
       expect(txt('no approved server key'), findsOneWidget);
+      expect(find.byKey(const Key('policy-setup-server')), findsOneWidget);
     });
 
     testWidgets('admin chooses required_server with the warning and sets the default for new members', (t) async {

@@ -217,7 +217,7 @@ class _AddServerSheetState extends State<AddServerSheet> {
         return <Widget>[
           _title('The server is not ready yet'),
           _p(p.profile.device == null
-              ? 'Whoever runs your server still has to give it its key. They can follow the steps in the admin page (Settings > Server setup) or in docs /docs/server-setup. Come back here when that is done.'
+              ? 'The server makes its own key and asks you to approve it. That can take about a minute, for example after keys were reset. Tap "Check again". If it stays like this, open the admin page (Settings > Server setup) or docs /docs/server-setup.'
               : 'The server has a key, but this circle does not accept it yet. Ask the person who runs the server to finish the steps in docs /docs/server-setup, then try again.',
               key: const Key('add-server-notenrolled')),
           Row(children: <Widget>[TextButton(key: const Key('add-server-retry'), onPressed: _load, child: const Text('Check again')), _close()]),

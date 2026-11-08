@@ -19,6 +19,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/TheTractorHacker/openfamily/backend/internal/e2ee"
@@ -31,6 +32,10 @@ type pointSink interface {
 }
 
 func (d *dawarichSink) setBackoff(bo backoff) { d.bo = bo }
+
+// errServerKeyGone: the API has no active server key with this id any more (it was revoked,
+// for example when the owner account's keys were reset). Not an ingest-token problem.
+var errServerKeyGone = errors.New("the Orbitly server no longer has an active key for this server (it was revoked)")
 
 var errIngestAuth = errors.New("the Orbitly server refused the ingest token (401/404); check E2EE_SERVER_INGEST_TOKEN on both sides")
 
@@ -81,6 +86,8 @@ func (s *serverSink) call(ctx context.Context, method, path string, body any, ou
 					_ = json.Unmarshal(data, out)
 				}
 				return status, nil
+			case status == 404 && strings.Contains(errText(data), "no active server key"):
+				return status, errServerKeyGone
 			case status == 401 || status == 404:
 				return status, errIngestAuth
 			case !retryableStatus(status):

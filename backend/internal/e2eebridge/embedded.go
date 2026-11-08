@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -293,6 +294,44 @@ func (e *Embedded) Run(ctx context.Context) {
 	}
 }
 
+// replaceRevokedKey is the self-repair for a server key the API revoked behind our back (the
+// owner account's keys were reset, or an admin revoked it). The old files are moved into
+// archive/revoked-<time>/ (never deleted), a new key is made and the state goes back to
+// "waiting for approval", so an admin phone is offered "Your server wants to join" again.
+func (e *Embedded) replaceRevokedKey() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	old := e.id
+	if old == nil {
+		return
+	}
+	dir := filepath.Join(e.opt.Dir, "archive", "revoked-"+time.Now().UTC().Format("20060102T150405Z"))
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		e.log.Error("the server key was revoked but cannot be archived", "err", err)
+		return
+	}
+	for _, f := range []string{fileIdentity, fileSession, fileState, fileKeys} {
+		if err := os.Rename(filepath.Join(e.opt.Dir, f), filepath.Join(dir, f)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			e.log.Error("the server key was revoked but its files cannot be archived", "file", f, "err", err)
+			return
+		}
+	}
+	id, err := e.st.createIdentity("Orbitly server")
+	if err == nil {
+		id.f.Kind = "server"
+		err = e.st.saveIdentity(id)
+	}
+	if err != nil {
+		e.state, e.detail = StateError, "cannot create a new server key: "+err.Error()
+		e.log.Error("cannot create a new server key after a revocation", "err", err)
+		return
+	}
+	e.id = id
+	e.state, e.detail = StateWaitingApproval, ""
+	e.log.Warn("the server key was revoked; made a new one and waiting for an admin phone to approve it",
+		"old", old.f.DeviceID[:8], "new", id.f.DeviceID[:8])
+}
+
 func (e *Embedded) runOnce(ctx context.Context) int {
 	e.mu.Lock()
 	id := e.id
@@ -311,6 +350,10 @@ func (e *Embedded) runOnce(ctx context.Context) int {
 			ss.http = api.http
 		}
 		if err := ss.pin(ctx); err != nil {
+			if errors.Is(err, errServerKeyGone) {
+				e.replaceRevokedKey()
+				return exitError
+			}
 			e.log.Warn("could not register the server key with the API yet", "err", err)
 			return exitError
 		}

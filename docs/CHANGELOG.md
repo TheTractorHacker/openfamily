@@ -10,6 +10,11 @@ for the **last 5 minor versions** of the app (see
 [API compatibility](api-compat.md)), so you can update the server first and
 the phones afterwards.
 
+## v0.26.6 (2026-11-08)
+
+- **The server key repairs itself.** When the server's own key was revoked (for example when your account's keys were reset, because the server key belongs to the account that approved it), the server kept retrying the dead key forever and logged "refused the ingest token", so circles showed "no approved server key". It now notices, puts the old key files aside in `archive/` inside the `server_device` volume (nothing is deleted), makes a new key and asks an admin phone to approve it again ("Your server wants to join"). The log also says what really happened instead of blaming the token.
+- **Circle processing setting is no longer a dead end.** When the server has no approved key for a circle, an admin sees a **Set up the server key** button (it opens the guided "Add server" sheet) instead of being told to ask the server operator. The sheet's wording for a server that has not joined yet is clearer.
+
 ## v0.26.5 (2026-11-08)
 
 - **Attention icon instead of banners.** The notices that were stacked across the top of every screen (update, "nobody has sent an update", "Use the server?", the server-join and auto-apply cards) are now one small icon with a count in the top bar, red when something is broken and amber when you have a choice or an update. Tap it for **Needs your attention**: one card per item, one sentence each and one button. Nothing pushes the app down any more. The map's offline notice is a small "Offline · last synced" pill, and the Private circle chip says "Private + server". After **Set this phone up again**, a circle where you had chosen the server offers **Use the server again** (one tap) instead of the first-time question. See [The attention icon](user/attention-icon.md).

@@ -7,6 +7,7 @@ import '../services/e2ee/lanes_service.dart' show LanesNotReady;
 import '../services/e2ee/processing_controller.dart';
 import '../theme/app_theme.dart';
 import '../widgets/ds/ds.dart';
+import '../widgets/add_server_sheet.dart';
 import '../widgets/processing_widgets.dart';
 import 'security_widgets.dart';
 
@@ -94,6 +95,11 @@ class _ProcessingPolicyScreenState extends State<ProcessingPolicyScreen> {
         done: on ? 'Server processing is on. Nobody is opted in until they choose.' : 'Server processing is off');
   }
 
+  Future<void> _setUpServerKey() async {
+    await showAddServerSheet(context, circle: widget.circle, controller: _c);
+    if (mounted) await _load();
+  }
+
   Future<void> _setOptOut(int mode) async {
     final ProcessingSnapshot s = _s!;
     if (s.policy.memberOptOut == mode) return;
@@ -145,7 +151,7 @@ class _ProcessingPolicyScreenState extends State<ProcessingPolicyScreen> {
     } else if (!s.assistOn && s.notReady.isNotEmpty) {
       blocked = s.notReady.map((String n) => '$n\'s app is out of date and cannot use this yet.').join(' ');
     } else if (!s.assistOn && !s.hasServerKey) {
-      blocked = 'This Orbitly server has no approved server key for this circle. The server operator has to set that up first.';
+      blocked = 'This Orbitly server has no approved server key for this circle yet. Tap "Set up the server key" below: if you run this server you can finish it from here.';
     }
     final bool canTurnOn = canEdit && (s.assistOn || blocked == null);
     return ListView(
@@ -168,6 +174,19 @@ class _ProcessingPolicyScreenState extends State<ProcessingPolicyScreen> {
           Padding(
             padding: const EdgeInsets.only(top: AppSpace.sm),
             child: Text(blocked, key: const Key('policy-blocked'), style: AppType.secondary.copyWith(color: AppColors.statusRed)),
+          ),
+        if (admin && !s.assistOn && s.isPrivate && !s.legacy && s.notReady.isEmpty && !s.hasServerKey)
+          Padding(
+            padding: const EdgeInsets.only(top: AppSpace.md),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: OutlinedButton.icon(
+                key: const Key('policy-setup-server'),
+                onPressed: _busy ? null : _setUpServerKey,
+                icon: const Icon(Icons.vpn_key_outlined),
+                label: const Text('Set up the server key'),
+              ),
+            ),
           ),
         if (s.assistOn) ...<Widget>[
           const DsSectionHeader('Can members keep data on their phone?', padding: EdgeInsets.fromLTRB(0, AppSpace.xl, 0, AppSpace.xs)),
