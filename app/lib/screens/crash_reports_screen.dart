@@ -1,3 +1,4 @@
+import '../utils/self_label.dart';
 import 'package:flutter/material.dart';
 
 import '../services/api_client.dart';
@@ -201,7 +202,7 @@ class _CrashReportsScreenState extends State<CrashReportsScreen> {
     return Column(
       children: <Widget>[
         DsListRow(
-          title: c.mine ? 'You' : (c.name.isEmpty ? 'Circle member' : c.name),
+          title: c.mine ? selfLabel(c.name) : (c.name.isEmpty ? 'Circle member' : c.name),
           subtitle: <String>[_when(c.at), speed]
               .where((String s) => s.isNotEmpty)
               .join(' · '),

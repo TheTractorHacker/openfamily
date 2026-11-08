@@ -191,6 +191,7 @@ class AlertSummary {
     required this.createdAt,
     this.note = '',
     this.resolvedAt,
+    this.acknowledgedAt,
   });
 
   factory AlertSummary.fromJson(Map<String, dynamic> j) => AlertSummary(
@@ -204,6 +205,7 @@ class AlertSummary {
         note: j['note'] as String? ?? '',
         createdAt: _time(j['created_at']) ?? DateTime.fromMillisecondsSinceEpoch(0),
         resolvedAt: _time(j['resolved_at']),
+        acknowledgedAt: _time(j['acknowledged_at']),
       );
 
   final String id;
@@ -214,6 +216,9 @@ class AlertSummary {
   final String note;
   final DateTime createdAt;
   final DateTime? resolvedAt;
+
+  /// When the signed-in person acknowledged this alert (null: not yet / unknown).
+  final DateTime? acknowledgedAt;
 
   bool get isActive => status == 'active';
 }

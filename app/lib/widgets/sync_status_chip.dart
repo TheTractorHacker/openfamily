@@ -83,10 +83,12 @@ class _SyncStatusChipState extends State<SyncStatusChip> {
           return const SizedBox.shrink();
         }
         final ColorScheme cs = Theme.of(context).colorScheme;
-        final bool down = s == SyncState.unreachable;
+        final bool signedOut = s == SyncState.signedOut;
+        final bool down = s == SyncState.unreachable || signedOut;
         final String waiting = n > 0 ? ' $n update${n == 1 ? '' : 's'} waiting.' : '';
         final String text = switch (s) {
           SyncState.unreachable => 'Server unreachable. Showing last known. Will sync when it is back.$waiting',
+          SyncState.signedOut => 'Please sign in again. The server is fine; this phone\'s login ran out.${n > 0 ? ' $n update${n == 1 ? '' : 's'} will be sent after you sign in.' : ''}',
           SyncState.syncing => 'Syncing…${n > 0 ? ' $n update${n == 1 ? '' : 's'}' : ''}',
           SyncState.upToDate => 'Up to date',
         };
@@ -106,7 +108,7 @@ class _SyncStatusChipState extends State<SyncStatusChip> {
                 mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
                   Icon(
-                    down ? Icons.cloud_off : (s == SyncState.syncing ? Icons.sync : Icons.cloud_done_outlined),
+                    signedOut ? Icons.lock_outline : down ? Icons.cloud_off : (s == SyncState.syncing ? Icons.sync : Icons.cloud_done_outlined),
                     size: 16,
                     color: down ? cs.onErrorContainer : cs.onSurfaceVariant,
                   ),
@@ -117,7 +119,7 @@ class _SyncStatusChipState extends State<SyncStatusChip> {
                       style: TextStyle(fontSize: 12, color: down ? cs.onErrorContainer : cs.onSurfaceVariant),
                     ),
                   ),
-                  if (down) ...<Widget>[
+                  if (s == SyncState.unreachable) ...<Widget>[
                     const SizedBox(width: 8),
                     InkWell(
                       key: const Key('sync-try-again'),

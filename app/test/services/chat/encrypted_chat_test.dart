@@ -148,7 +148,7 @@ void main() {
     test('send, receive, the server relay holds no plaintext, local notification shows the text', () async {
       final ChatMessage sent = await a.chat.send(priv, 'dinner at 7? the secret word is pineapple');
       expect(sent.sendState, ChatSendState.sending);
-      expect(sent.senderName, 'You');
+      expect(sent.senderName, 'Alice');
       await a.sync();
       await b.sync();
       final List<ChatMessage> got = await b.list();

@@ -17,6 +17,7 @@ import 'perf/perf_monitor.dart';
 import 'server_config.dart';
 import 'session_diary.dart';
 import 'session_gate.dart';
+import 'refresh_lease.dart';
 import 'token_storage.dart';
 
 /// Thrown when the backend returns a non-2xx response.
@@ -31,6 +32,12 @@ class ApiException implements Exception {
 
   @override
   String toString() => 'ApiException($status): $message';
+}
+
+/// The server answered, but this phone's login is no longer accepted (a 401 even after a fresh token pair).
+/// It is NOT "unreachable": the person needs to sign in again. Tokens are kept (nothing proves the pair is dead).
+class SignInNeededException extends ApiException {
+  const SignInNeededException() : super(401, 'Please sign in again.');
 }
 
 /// Outcome of a mid-session token refresh.
@@ -809,10 +816,8 @@ class ApiClient {
           // after it is a server hiccup (or a request that is refused for
           // another reason), never proof the login is gone. Keep the tokens;
           // a genuinely dead session is rejected by the refresh itself.
-          throw const ApiException(
-            0,
-            'Could not reach the server. Check your connection.',
-          );
+          ServerReachability.instance.signedOut();
+          throw const SignInNeededException();
         }
         return retry;
       }
@@ -996,13 +1001,39 @@ class ApiClient {
   }
 
   static Future<_RefreshResult> _performRefresh() async {
+    // The UI isolate and the background/push isolates must never present the same single-use refresh token.
+    // Read the newest stored token, take the cross-isolate lease, and read again: when it changed meanwhile,
+    // another isolate already rotated the pair, so adopt it instead of presenting a spent token.
+    String? before;
+    try {
+      final List<String> c = await TokenStorage.refreshCandidates();
+      before = c.isEmpty ? null : c.first;
+    } catch (_) {}
+    final RefreshLease lease = await RefreshLease.acquire();
+    try {
+      final String? after = await TokenStorage.adoptNewestStored();
+      if (before != null && after != null && after != before) {
+        SessionDiary.instance.record('refresh', 'adopted=${SessionDiary.shortHash(after)}');
+        return _RefreshResult.ok;
+      }
+      return await _performRefreshLocked();
+    } finally {
+      await lease.release();
+    }
+  }
+
+  static Future<_RefreshResult> _performRefreshLocked() async {
     final SessionDiary diary = SessionDiary.instance;
     try {
       // Every candidate (both redundant stores, newest first) is tried before
       // the session is declared dead: a stale token being rejected must not
       // sign the user out while a newer valid one exists.
       final List<String> candidates = await TokenStorage.refreshCandidates();
-      for (final String refreshToken in candidates) {
+      final Set<String> tried = <String>{};
+      bool rechecked = false;
+      for (int i = 0; i < candidates.length; i++) {
+        final String refreshToken = candidates[i];
+        tried.add(refreshToken);
         final String tag = SessionDiary.shortHash(refreshToken);
         final http.Response response = await _rawSend(
           'POST',
@@ -1027,6 +1058,14 @@ class ApiClient {
             response.statusCode == 401 ||
             response.statusCode == 403) {
           TokenStorage.markRejected(refreshToken);
+          if (i == candidates.length - 1 && !rechecked) {
+            // "Invalid refresh": before giving up, look once more - another isolate may have stored a newer
+            // pair while this one was being refused. Retry once with whatever is new.
+            rechecked = true;
+            for (final String c in await TokenStorage.refreshCandidates()) {
+              if (!tried.contains(c)) candidates.add(c);
+            }
+          }
           continue;
         }
         return _RefreshResult.transient;
@@ -1039,7 +1078,9 @@ class ApiClient {
           return _RefreshResult.transient;
         case SilentLoginOutcome.unavailable:
         case SilentLoginOutcome.failed:
-          await TokenStorage.clear(reason: 'refresh rejected, no re-login');
+          // The session ran out; nobody chose to sign out. Whatever waits to be sent (SOS, check-ins, chat) stays
+          // on the phone for the next sign-in of the same person.
+          await TokenStorage.clear(reason: 'refresh rejected, no re-login', keepOfflineData: true);
           return _RefreshResult.rejected;
       }
     } catch (e) {
@@ -1114,12 +1155,14 @@ class ApiClient {
     _sessionExpiredFired = true;
     _epoch++;
     ApiWire.cache.clear();
+    ServerReachability.instance.signedOut();
     onSessionExpired?.call();
   }
 
   /// Marks a fresh session as active, re-arming the session-expired redirect
   /// so a later expiry fires [onSessionExpired] again.
   static void markSessionActive() {
+    ServerReachability.instance.signedIn();
     _sessionExpiredFired = false;
     _epoch++;
     ApiWire.cache.clear();

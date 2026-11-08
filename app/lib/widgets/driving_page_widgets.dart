@@ -1,3 +1,4 @@
+import '../utils/self_label.dart';
 import 'package:flutter/material.dart';
 
 import '../models/member.dart';
@@ -122,7 +123,7 @@ class DrivingNowStrip extends StatelessWidget {
             padding: const EdgeInsets.only(bottom: AppSpace.sm),
             child: _NowRow(
               member: m,
-              name: m.id == selfId ? 'You' : m.name,
+              name: m.id == selfId ? selfLabel(m.name) : m.name,
               units: units,
               cs: cs,
               onTap: () => onTap(m),

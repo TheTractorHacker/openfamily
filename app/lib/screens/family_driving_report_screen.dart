@@ -1,3 +1,4 @@
+import '../utils/self_label.dart';
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:latlong2/latlong.dart';
@@ -309,7 +310,7 @@ class _State extends State<FamilyDrivingReportScreen> {
   }
 
   String _nameOf(MemberReport m) =>
-      m.userId == widget.userId.value ? 'You' : (m.name.isEmpty ? 'Member' : m.name);
+      m.userId == widget.userId.value ? selfLabel(m.name) : (m.name.isEmpty ? 'Member' : m.name);
 
   void _openMember(Member m) {
     Navigator.of(context).push(
@@ -806,7 +807,7 @@ class _State extends State<FamilyDrivingReportScreen> {
               child: RecentDriveTile(
                 trip: t,
                 member: _memberFor(t.userId, t.name),
-                name: t.userId == me ? 'You' : (t.name.isEmpty ? 'Member' : t.name),
+                name: t.userId == me ? selfLabel(t.name) : (t.name.isEmpty ? 'Member' : t.name),
                 units: units,
                 now: _now,
                 onTap: () => _openTrip(t),

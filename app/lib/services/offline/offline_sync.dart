@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:shared_preferences/shared_preferences.dart';
+
 import 'package:connectivity_plus/connectivity_plus.dart';
 
 import '../api_client.dart';
@@ -93,8 +95,28 @@ class OfflineSync {
   static Future<void> clearAll() async {
     await OfflineCache.instance.clearAll();
     await OfflineQueue.instance.clear();
+    try {
+      await PrivateRuntime.instance.forgetAccount();
+    } catch (_) {}
+    try {
+      (await SharedPreferences.getInstance()).remove(_ownerKey);
+    } catch (_) {}
     ServerReachability.instance.setPending(0);
   }
+
+  /// After a sign-in: what waits on this phone belongs to whoever created it. A session that only ran out is
+  /// kept for the same person; a different person signing in must never inherit (or send) it.
+  static Future<void> adoptAccount(String? userId) async {
+    if (userId == null || userId.isEmpty) return;
+    try {
+      final SharedPreferences prefs = await SharedPreferences.getInstance();
+      final String? owner = prefs.getString(_ownerKey);
+      if (owner != null && owner.isNotEmpty && owner != userId) await clearAll();
+      await prefs.setString(_ownerKey, userId);
+    } catch (_) {}
+  }
+
+  static const String _ownerKey = 'offline_owner_user_id';
 
   static Future<void> stop() async {
     await _net?.cancel();

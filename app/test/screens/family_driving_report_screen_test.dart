@@ -96,7 +96,7 @@ void main() {
     await _pump(t, api);
     expect(find.text('Weekly Driving Report'), findsOneWidget);
     expect(find.text('Blake', skipOffstage: false), findsOneWidget);
-    expect(find.text('You'), findsOneWidget, reason: 'self is labelled You');
+    expect(find.text('Brian (you)'), findsOneWidget, reason: 'self keeps the real name with a (you) tag');
     expect(find.text('84 mph'), findsOneWidget);
     expect(find.text('GPS speed'), findsOneWidget);
     expect(find.text('1 drive · 30 mi'), findsOneWidget);
@@ -442,7 +442,7 @@ void main() {
       expect(find.text('Recent drives'), findsOneWidget);
       expect(find.text('Blake · Today 8:00 am'), findsOneWidget);
       expect(find.text('Blake · Fri Oct 23 5:00 pm'), findsOneWidget);
-      expect(find.text('You · Fri Oct 23 9:00 am'), findsOneWidget);
+      expect(find.text('Brian (you) · Fri Oct 23 9:00 am'), findsOneWidget);
       expect(find.text('7.5 mi · 25 min · top 65 mph'), findsWidgets);
       expect(find.text('1 speeding'), findsWidgets);
       expect(find.text('2 hard braking'), findsOneWidget);

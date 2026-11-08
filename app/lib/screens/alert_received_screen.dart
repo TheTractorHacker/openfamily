@@ -42,7 +42,7 @@ class AlertReceivedScreen extends StatefulWidget {
 
 class _AlertReceivedScreenState extends State<AlertReceivedScreen> {
   bool _busy = false;
-  DateTime? _ackedAt;
+  late DateTime? _ackedAt = widget.alert.acknowledgedAt;
   String? _error;
 
   Future<void> _ack() async {

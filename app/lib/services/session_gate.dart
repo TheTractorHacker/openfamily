@@ -215,6 +215,20 @@ DateTime? jwtExpiryOf(String token) => _jwtTimeClaim(token, 'exp');
 /// Decodes a JWT's `iat` (issued-at) claim, or null when absent/malformed.
 DateTime? jwtIssuedAtOf(String token) => _jwtTimeClaim(token, 'iat');
 
+/// The `uid` (user id) claim of a JWT, or null.
+String? jwtUserIdOf(String token) {
+  final List<String> parts = token.split('.');
+  if (parts.length != 3) return null;
+  try {
+    final String n = parts[1].replaceAll('-', '+').replaceAll('_', '/');
+    final dynamic d = jsonDecode(utf8.decode(base64Decode(n.padRight(((n.length + 3) ~/ 4) * 4, '='))));
+    final dynamic v = d is Map ? d['uid'] : null;
+    return v is String && v.isNotEmpty ? v : null;
+  } catch (_) {
+    return null;
+  }
+}
+
 DateTime? _jwtTimeClaim(String token, String claim) {
   final List<String> parts = token.split('.');
   if (parts.length != 3) return null;

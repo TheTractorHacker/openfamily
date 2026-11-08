@@ -132,7 +132,7 @@ class _MapScreenState extends State<MapScreen>
   List<Member> _members = <Member>[];
 
   /// What the map layers and the People list render: the roster with the
-  /// caller relabeled "You", republished (a fresh list) whenever the service
+  /// caller tagged as yourself, republished (a fresh list) whenever the service
   /// emits. Live WebSocket frames update ONLY this notifier, so they never
   /// rebuild [MapScreen], the tab view, the tile layer or the sheet chrome.
   final ValueNotifier<List<Member>> _roster =
@@ -712,7 +712,7 @@ class _MapScreenState extends State<MapScreen>
 
   Member _asYou(Member m) {
     if (identical(m, _youSource)) return _youLive!;
-    final Member live = m.copyWith(name: 'You');
+    final Member live = m.copyWith(isSelf: true);
     _youSource = m;
     _youLive = live;
     return live;

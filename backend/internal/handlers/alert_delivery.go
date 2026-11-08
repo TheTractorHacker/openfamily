@@ -571,6 +571,9 @@ type alertListItem struct {
 	Note       string     `json:"note,omitempty"`
 	CreatedAt  time.Time  `json:"created_at"`
 	ResolvedAt *time.Time `json:"resolved_at,omitempty"`
+	// AcknowledgedAt is when THE CALLER acknowledged this alert (null: not yet). The app uses it to stop
+	// showing the same alert pop-up after it was acknowledged.
+	AcknowledgedAt *time.Time `json:"acknowledged_at,omitempty"`
 }
 
 const (
@@ -610,10 +613,12 @@ func (s *Server) ListAlerts(w http.ResponseWriter, r *http.Request) {
 		before = v
 	}
 	rows, err := s.Pool.Query(r.Context(), `
-		SELECT a.id, a.type, a.status, a.user_id, u.name, a.lat, a.lon, COALESCE(a.note, ''), a.created_at, a.resolved_at
+		SELECT a.id, a.type, a.status, a.user_id, u.name, a.lat, a.lon, COALESCE(a.note, ''), a.created_at, a.resolved_at,
+		       (SELECT min(d.acknowledged_at) FROM alert_deliveries d
+		         WHERE d.alert_id = a.id AND d.recipient_key = 'u:' || $4::text)
 		FROM alerts a JOIN users u ON u.id = a.user_id
 		WHERE a.family_id = $1
-		  AND (a.type NOT LIKE 'bubble\_%' OR a.user_id = $4)
+		  AND (a.type NOT LIKE 'bubble\_%' OR a.user_id::text = $4::text)
 		  AND ($2::text IS NULL OR (a.created_at, a.id) < (
 		        SELECT b.created_at, b.id FROM alerts b WHERE b.id::text = $2 AND b.family_id = $1))
 		ORDER BY a.created_at DESC, a.id DESC
@@ -626,7 +631,7 @@ func (s *Server) ListAlerts(w http.ResponseWriter, r *http.Request) {
 	items := []alertListItem{}
 	for rows.Next() {
 		var it alertListItem
-		if err := rows.Scan(&it.ID, &it.Type, &it.Status, &it.UserID, &it.SenderName, &it.Lat, &it.Lon, &it.Note, &it.CreatedAt, &it.ResolvedAt); err != nil {
+		if err := rows.Scan(&it.ID, &it.Type, &it.Status, &it.UserID, &it.SenderName, &it.Lat, &it.Lon, &it.Note, &it.CreatedAt, &it.ResolvedAt, &it.AcknowledgedAt); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to read alerts")
 			return
 		}

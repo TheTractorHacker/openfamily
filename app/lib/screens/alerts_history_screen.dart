@@ -1,3 +1,4 @@
+import '../utils/self_label.dart';
 import 'package:flutter/material.dart';
 
 import '../models/alert.dart';
@@ -215,7 +216,7 @@ class AlertTile extends StatelessWidget {
         Icons.bubble_chart_outlined,
       AlertKind.unknown => Icons.notifications_none,
     };
-    final String who = isMine ? 'You' : alert.senderName;
+    final String who = isMine ? selfLabel(alert.senderName) : alert.senderName;
     final String status = alert.isActive ? 'Active' : 'Resolved';
     final bool bubble = alert.kind.isBubble;
     final String line = bubble

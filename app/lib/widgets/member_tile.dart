@@ -43,7 +43,7 @@ class MemberTile extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    member.name,
+                    member.displayName,
                     style: AppType.body,
                   ),
                   const SizedBox(height: 4),

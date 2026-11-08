@@ -356,3 +356,47 @@ func TestListAlertsPaginationAndFamilyScope(t *testing.T) {
 		t.Log("invalid cursor accepted as empty page")
 	}
 }
+
+// After B acknowledges an alert, B's list says so (and only B's): the app must stop popping the same alert
+// up on every start, while C, who has not acknowledged, still sees it as open.
+func TestListAlertsReportsMyAcknowledgement(t *testing.T) {
+	fx := newAlertFixture(t)
+	a := fx.newSOS(t)
+	type page struct {
+		Alerts []alertListItem `json:"alerts"`
+	}
+	ackedFor := func(uid string) *time.Time {
+		w := fx.do("GET", "/alerts?limit=5", uid)
+		var p page
+		if err := json.Unmarshal(w.Body.Bytes(), &p); err != nil {
+			t.Fatal(err)
+		}
+		for _, it := range p.Alerts {
+			if it.ID == a.ID {
+				return it.AcknowledgedAt
+			}
+		}
+		t.Fatalf("alert missing for %s", uid)
+		return nil
+	}
+	if ackedFor(fx.b) != nil || ackedFor(fx.c) != nil {
+		t.Fatal("nobody acknowledged yet")
+	}
+	if w := fx.do("POST", "/alerts/"+a.ID+"/ack", fx.b); w.Code != 200 {
+		t.Fatalf("ack %d %s", w.Code, w.Body.String())
+	}
+	first := ackedFor(fx.b)
+	if first == nil {
+		t.Fatal("B acknowledged but the list does not say so: the pop-up would come back on every start")
+	}
+	if ackedFor(fx.c) != nil {
+		t.Fatal("C must not appear acknowledged because B did")
+	}
+	// Acknowledging again changes nothing (idempotent), and the time stays the original one.
+	if w := fx.do("POST", "/alerts/"+a.ID+"/ack", fx.b); w.Code != 200 {
+		t.Fatalf("second ack %d", w.Code)
+	}
+	if again := ackedFor(fx.b); again == nil || !again.Equal(*first) {
+		t.Fatalf("ack time moved: %v -> %v", first, again)
+	}
+}

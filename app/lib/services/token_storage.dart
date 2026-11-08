@@ -283,6 +283,19 @@ class TokenStorage {
     return out;
   }
 
+  /// Another isolate may have rotated the pair since this one last saved: re-reads every store and makes the
+  /// newest pair this isolate's own (so its access token matches). Returns the newest refresh token, or null.
+  static Future<String?> adoptNewestStored() async {
+    final List<StoredSession> ranked = await _ranked();
+    for (final StoredSession s in ranked) {
+      final String? r = s.refresh;
+      if (r == null || r.isEmpty || isRejected(r)) continue;
+      if (s.source != 'M') _mem = StoredSession(source: 'M', access: s.access, refresh: r);
+      return r;
+    }
+    return null;
+  }
+
   /// Remembers that the server rejected [refresh] so it is never retried.
   static void markRejected(String refresh) {
     _rejected.add(SessionDiary.shortHash(refresh));
@@ -345,7 +358,7 @@ class TokenStorage {
   /// The device id is tied to the authenticated user, so it must be cleared
   /// whenever tokens are cleared — otherwise a later login by a different user
   /// would reuse the previous user's device id.
-  static Future<bool> clear({String reason = 'unspecified'}) async {
+  static Future<bool> clear({String reason = 'unspecified', bool keepOfflineData = false}) async {
     _diary.record('clear', 'reason=$reason');
     _mem = null;
     // Keep the lock enabled until every credential has been deleted and its
@@ -377,7 +390,9 @@ class TokenStorage {
     await attempt(LocationOutbox.clear);
     // Same for the local-first snapshot and the store-and-forward queue (docs/design/OFFLINE_RESILIENCE.md):
     // they belong to the account that created them.
-    await attempt(OfflineSync.clearAll);
+    // A session that merely ran out (not a sign-out) keeps what is waiting to be sent: an SOS or a check-in
+    // must reach the family after the person signs in again. A different account clears it on sign-in.
+    if (!keepOfflineData) await attempt(OfflineSync.clearAll);
 
     try {
       final List<String?> remaining = <String?>[
