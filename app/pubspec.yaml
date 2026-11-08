@@ -43,7 +43,7 @@ dependencies:
   # fallback when permission is denied or services are off.
   geolocator: ^13.0.2
   # Reads the device battery level so location reports can carry battery_pct.
-  battery_plus: ^6.0.0
+  battery_plus: ^7.1.2
   # Detects Google Play Services availability on Android so motion & fitness
   # is only requested on devices that actually support activity recognition.
   google_api_availability: ^5.0.1
