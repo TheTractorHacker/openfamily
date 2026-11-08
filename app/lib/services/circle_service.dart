@@ -1,18 +1,26 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show debugPrint;
+
 import '../models/circle.dart';
 import 'api_client.dart';
 import 'app_compat.dart';
+import 'e2ee/e2ee_service.dart' show LocalKeyException, LocalKeyProblem, localKeyProblemOf;
 import 'offline/offline_cache.dart';
 import 'offline/offline_errors.dart';
+import 'session_diary.dart';
 
 export 'api_client.dart' show SessionExpiredException;
 
 /// A failure from the circles API, already worded for the user.
 class CircleException implements Exception {
-  const CircleException(this.message, {this.status = 0, this.offline = false});
+  const CircleException(this.message, {this.status = 0, this.offline = false, this.keyProblem});
 
   final String message;
+
+  /// Set when the failure is this phone's own encryption key (the screen offers
+  /// "Encryption keys" to repair it).
+  final LocalKeyProblem? keyProblem;
 
   /// HTTP status, or 0 when the request never got a response.
   final int status;
@@ -27,6 +35,11 @@ class CircleException implements Exception {
 /// Converts any thrown object into a [CircleException]. Server messages are
 /// shown verbatim (they explain refusals such as "cannot remove or leave as
 /// the last admin"); transport failures become a friendly offline message.
+///
+/// Only a real transport failure may say "can't reach the server". A failure
+/// on the phone itself (this phone's encryption key, the Keystore, a parse or
+/// programming error) gets its own short reason, and its type is logged so a
+/// diagnostics report shows what actually happened.
 CircleException describeCircleError(Object error) {
   if (error is CircleException) return error;
   if (error is ApiException) {
@@ -36,10 +49,28 @@ CircleException describeCircleError(Object error) {
   if (error is SessionExpiredException) {
     return CircleException(error.message, status: 401);
   }
-  return const CircleException(
-    'Can\'t reach the server. Check your connection and try again.',
-    offline: true,
+  final LocalKeyException? key = localKeyProblemOf(error);
+  if (key != null) {
+    _logCircleError(error, key.problem.name);
+    return CircleException(key.message, keyProblem: key.problem);
+  }
+  if (isOfflineError(error)) {
+    return const CircleException(
+      'Can\'t reach the server. Check your connection and try again.',
+      offline: true,
+    );
+  }
+  _logCircleError(error, 'unexpected');
+  return CircleException(
+    'Something went wrong on this phone (${error.runtimeType}). Try again, and if it keeps happening send a diagnostics report.',
   );
+}
+
+/// Type only: an exception's text can carry server data or file paths.
+void _logCircleError(Object error, String kind) {
+  final String type = error is LocalKeyException ? error.toString() : error.runtimeType.toString();
+  debugPrint('circle action failed on the phone: $kind ($type)');
+  SessionDiary.instance.record('circle_error', '$kind $type');
 }
 
 /// Circles operations used by the circle screens. Abstract so widget tests can

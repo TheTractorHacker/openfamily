@@ -1,0 +1,24 @@
+name: e2ee_keystore
+description: >-
+  Android Keystore wrapping key for Orbitly's end-to-end encryption vault, on
+  the method channel `app.openfamily/keystore`. A plugin (not a channel set up
+  in MainActivity) so Flutter registers it in EVERY FlutterEngine, including the
+  headless background-location engine that seals positions for Private circles
+  while the app is closed. The Dart side lives in the app (e2ee_vault.dart).
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+  flutter: ">=3.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: app.openfamily.e2ee_keystore
+        pluginClass: E2eeKeystorePlugin

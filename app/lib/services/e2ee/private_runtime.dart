@@ -297,8 +297,12 @@ class LocalDelivery {
     required this.lastPulledCursor,
     required this.undelivered,
     required this.undeliveredCode,
+    this.sealProblem = '',
   });
   final bool hasKey;
+
+  /// Why the last fix could not be encrypted on this phone ('' = it was).
+  final String sealProblem;
   final int heldEpoch;
 
   /// Sealed updates waiting for the network.
@@ -643,6 +647,7 @@ class PrivateRuntime {
     try {
       final SenderIdentity? me = await _me();
       if (me == null) {
+        await _noteSealError(const LocalKeyException(LocalKeyProblem.missing));
         await _park(loc);
         return;
       }
@@ -684,12 +689,65 @@ class PrivateRuntime {
         }
       }
       if (!resend) await _processOnDevice(me, loc, ts);
+      await _clearSealError();
       // Batched, jittered upload: do not wake the radio for every fix.
       _scheduleFlush();
-    } catch (_) {
-      // Never throw into the location pipeline and never fall back to plaintext.
+    } catch (e) {
+      // Never throw into the location pipeline and never fall back to plaintext. But remember WHY, so the
+      // Delivery screen can say "this phone's key cannot be read" instead of "waiting for the circle key".
+      await _noteSealError(e);
       await _park(loc, circles: only?.toList());
     }
+  }
+
+  static const String _sealErrKey = 'sealerr/v1';
+  bool _sealErrSet = true; // unknown at start: the first success clears whatever an earlier run left
+
+  /// Records the last reason a fix could not be sealed (a type name and a coarse class, never key material).
+  Future<void> _noteSealError(Object e) async {
+    try {
+      final LocalKeyException? k = localKeyProblemOf(e);
+      await kv.set(_sealErrKey, jsonEncode(<String, dynamic>{
+        'at': clock.now().toUtc().toIso8601String(),
+        'problem': k?.problem.name ?? 'other',
+        'cause': k?.cause ?? e.runtimeType.toString(),
+      }));
+      _sealErrSet = true;
+    } catch (_) {}
+  }
+
+  DateTime? _sealErrClearedAt;
+
+  /// After a successful seal. Also clears, at most once a minute, a note the OTHER isolate left.
+  Future<void> _clearSealError() async {
+    final DateTime now = clock.now();
+    final DateTime? last = _sealErrClearedAt;
+    if (!_sealErrSet && last != null && now.difference(last) < const Duration(minutes: 1)) return;
+    try {
+      await kv.remove(_sealErrKey);
+      _sealErrSet = false;
+      _sealErrClearedAt = now;
+    } catch (_) {}
+  }
+
+  /// The last sealing failure on this phone (either isolate), or null when the last fix sealed fine.
+  Future<({DateTime? at, String problem, String cause})?> lastSealError() async {
+    try {
+      final String? raw = await kv.getFresh(_sealErrKey);
+      if (raw == null || raw.isEmpty) return null;
+      final Map<String, dynamic> m = jsonDecode(raw) as Map<String, dynamic>;
+      return (at: DateTime.tryParse('${m['at']}'), problem: '${m['problem']}', cause: '${m['cause']}');
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// User-facing words for [lastSealError], or '' when there is nothing to say.
+  static String sealProblemText(String problem) {
+    for (final LocalKeyProblem p in LocalKeyProblem.values) {
+      if (p.name == problem) return LocalKeyException(p).message;
+    }
+    return problem.isEmpty ? '' : 'Positions could not be encrypted on this phone. Open "Fix this circle" or Encryption keys.';
   }
 
   static const String _lastFixKey = 'lastfix/v1';
@@ -1201,7 +1259,9 @@ class PrivateRuntime {
     } catch (_) {}
     final int epoch = await keys.latestEpoch(circleId);
     final und = await queue.undelivered(circleId);
+    final ({DateTime? at, String problem, String cause})? se = await lastSealError();
     return LocalDelivery(
+      sealProblem: se == null ? '' : sealProblemText(se.problem),
       hasKey: epoch > 0,
       heldEpoch: epoch,
       queued: await queue.length(),
@@ -1217,6 +1277,17 @@ class PrivateRuntime {
   /// parked fixes, sends the last known position, uploads, and downloads everything new. Returns what was done, in words.
   Future<List<String>> fixCircle(String circleId) async {
     final List<String> done = <String>[];
+    // Without this phone's own key nothing below can work (fetching the circle key, sealing, reading): say so.
+    try {
+      await service.requireIdentity();
+    } catch (e) {
+      final LocalKeyException? k = localKeyProblemOf(e);
+      if (k != null) {
+        await _noteSealError(k);
+        return <String>[k.message];
+      }
+      // A network or session problem: the steps below report it in their own words.
+    }
     final int before = await keys.latestEpoch(circleId);
     final bool got = await ensureKeys(circleId, force: true);
     final int after = await keys.latestEpoch(circleId);

@@ -82,8 +82,13 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
     final LocalDelivery? l = _local;
     final List<String> out = <String>[];
     if (l == null) return out;
+    // The phone's OWN key comes first: without it nothing else on this list can be fixed.
+    if (l.sealProblem.isNotEmpty) out.add(l.sealProblem);
     if (!l.hasKey) out.add('This phone does not have the circle key yet, so it can neither send nor show positions. Tap "Fix this circle".');
-    if (l.parked > 0) out.add('${l.parked} position${l.parked == 1 ? ' is' : 's are'} waiting for the circle key.');
+    if (l.parked > 0) {
+      out.add('${l.parked} position${l.parked == 1 ? ' is' : 's are'} waiting to be encrypted'
+          '${l.sealProblem.isEmpty ? ' (for the circle key)' : ''}.');
+    }
     if (l.queued > 0) out.add('${l.queued} update${l.queued == 1 ? ' is' : 's are'} waiting for a connection.');
     if (l.undelivered > 0) {
       out.add('${l.undelivered} update${l.undelivered == 1 ? ' was' : 's were'} refused by the server (${l.undeliveredCode}). Updating the app or asking an admin to approve this phone usually fixes it.');

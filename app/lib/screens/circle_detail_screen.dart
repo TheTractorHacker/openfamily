@@ -16,6 +16,7 @@ import '../widgets/circle_widgets.dart';
 import '../widgets/add_server_sheet.dart';
 import '../widgets/trusted_server_prompt.dart';
 import 'processing_screen.dart';
+import 'encryption_keys_screen.dart';
 
 /// Extension presets for an admin, label to hours.
 const Map<String, int> kTempCircleExtensions = <String, int>{
@@ -155,8 +156,14 @@ class _CircleDetailScreenState extends State<CircleDetailScreen> {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
       }
     } catch (e) {
+      final CircleException err = describeCircleError(e);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(describeCircleError(e).message)));
+        if (err.keyProblem != null) {
+          setState(() => _e2eeBusy = false);
+          await showPrivateKeyProblem(context, err, turningOff: !on);
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
+        }
       }
     } finally {
       if (mounted) setState(() => _e2eeBusy = false);
@@ -850,4 +857,25 @@ class _CircleDetailScreenState extends State<CircleDetailScreen> {
       ],
     ];
   }
+}
+
+/// This phone's own encryption key cannot be used, so a Private-circle action
+/// that must be signed by it failed. Says why and leads to the repair instead of
+/// a dead end. Turning Private OFF is signed by a circle admin's phone key on
+/// purpose (the key log shows every phone who did it, and the server can never
+/// switch a circle back to readable on its own), so there is no server-side
+/// shortcut: repair this phone's key, or switch it off from another admin phone.
+Future<void> showPrivateKeyProblem(BuildContext context, CircleException err, {required bool turningOff}) async {
+  final bool open = await showDsConfirm(
+    context,
+    title: "This phone's encryption key can't be used",
+    message: '${err.message}\n\n'
+        '${turningOff ? 'Turning Private off must be signed by a circle admin\'s phone key. ' : ''}'
+        'In Encryption keys you can restore the key with your recovery phrase, link this phone from your other phone, '
+        'or create new keys for this phone (the other members then see that your key changed).'
+        '${turningOff ? ' Another admin of this circle can also turn Private off from their phone.' : ''}',
+    confirmLabel: 'Open Encryption keys',
+  );
+  if (!open || !context.mounted) return;
+  await Navigator.of(context).push<void>(MaterialPageRoute<void>(builder: (_) => const EncryptionKeysScreen()));
 }

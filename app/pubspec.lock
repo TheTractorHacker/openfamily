@@ -167,6 +167,13 @@ packages:
       relative: true
     source: path
     version: "0.1.0"
+  e2ee_keystore:
+    dependency: "direct main"
+    description:
+      path: "packages/e2ee_keystore"
+      relative: true
+    source: path
+    version: "0.1.0"
   executor_lib:
     dependency: transitive
     description:

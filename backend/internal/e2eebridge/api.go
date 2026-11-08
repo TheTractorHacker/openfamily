@@ -110,8 +110,23 @@ type apiClient struct {
 	// mint, when set, replaces the refresh-token login: the API's built-in server
 	// device asks its host process for a short-lived access token.
 	mint func(ctx context.Context) (string, error)
-	// onStatus, when set, hears about every non-2xx answer (built-in device logging).
+	// mintMaxAge, with mint: a minted token older than this is replaced BEFORE the
+	// next request, so the API never has to answer an expired token with a 401.
+	// Keep it well below the API's access-token lifetime (ACCESS_TOKEN_TTL).
+	mintMaxAge time.Duration
+	mintedAt   time.Time
+	now        func() time.Time
+	// onStatus, when set, hears about non-2xx answers (built-in device logging).
+	// A 401 that one token renewal fixes is routine and not reported; a 401 that
+	// survives the renewal is.
 	onStatus func(method, path string, status int)
+}
+
+func (c *apiClient) clock() time.Time {
+	if c.now != nil {
+		return c.now()
+	}
+	return time.Now()
 }
 
 func newAPIClient(base string, refresh string, onRotate func(string) error) *apiClient {
@@ -147,7 +162,7 @@ func (c *apiClient) send(ctx context.Context, method, path string, body []byte, 
 		}
 		var retryAfter time.Duration
 		resp, err := c.http.Do(req)
-		if err == nil && c.onStatus != nil && (resp.StatusCode < 200 || resp.StatusCode >= 300) {
+		if err == nil && c.onStatus != nil && resp.StatusCode != http.StatusUnauthorized && (resp.StatusCode < 200 || resp.StatusCode >= 300) {
 			c.onStatus(method, path, resp.StatusCode)
 		}
 		if err == nil {
@@ -228,7 +243,7 @@ func (c *apiClient) refreshAccess(ctx context.Context, stale string) error {
 		if err != nil {
 			return err
 		}
-		c.access = tok
+		c.access, c.mintedAt = tok, c.clock()
 		return nil
 	}
 	if c.refresh == "" {
@@ -272,6 +287,10 @@ func (c *apiClient) do(ctx context.Context, method, path string, in, out any) er
 	for {
 		c.mu.Lock()
 		tok := c.access
+		if tok != "" && c.mint != nil && c.mintMaxAge > 0 && c.clock().Sub(c.mintedAt) >= c.mintMaxAge {
+			// About to expire: mint a fresh one first instead of collecting a 401.
+			c.access, tok = "", ""
+		}
 		c.mu.Unlock()
 		if tok == "" {
 			if err := c.refreshAccess(ctx, ""); err != nil {
@@ -286,6 +305,9 @@ func (c *apiClient) do(ctx context.Context, method, path string, in, out any) er
 		}
 		if st == http.StatusUnauthorized {
 			if refreshed {
+				if c.onStatus != nil {
+					c.onStatus(method, path, st)
+				}
 				return errReauth
 			}
 			if err := c.refreshAccess(ctx, tok); err != nil {

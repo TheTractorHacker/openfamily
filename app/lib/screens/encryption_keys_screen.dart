@@ -1,4 +1,4 @@
-import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatform;
+import 'package:flutter/foundation.dart' show TargetPlatform, debugPrint, defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
@@ -59,10 +59,14 @@ class _EncryptionKeysScreenState extends State<EncryptionKeysScreen> {
     _load();
   }
 
+  /// Set when this phone's own key cannot be used (the screen then offers the repair).
+  LocalKeyProblem? _keyProblem;
+
   Future<void> _load() async {
     setState(() {
       _loading = true;
       _error = null;
+      _keyProblem = null;
     });
     try {
       final LocalIdentity? id = await _svc.identity();
@@ -151,8 +155,29 @@ class _EncryptionKeysScreenState extends State<EncryptionKeysScreen> {
       if (!mounted) return;
       setState(() {
         _loading = false;
+        _keyProblem = LocalKeyProblem.invalidated;
         _error = 'This phone\'s key storage was reset (for example the screen lock was removed). '
-            'The private keys cannot be read any more. Restore with your recovery phrase.';
+            'The private keys cannot be read any more. Set this phone up again, then restore with your recovery phrase '
+            'or link it from your other phone.';
+      });
+    } on LocalKeyException catch (e) {
+      // Stored but unreadable: not a network problem, and Retry alone will not fix it. Offer the way out.
+      debugPrint('encryption keys: ${e.toString()}');
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _keyProblem = e.problem;
+        _error = e.problem == LocalKeyProblem.locked
+            ? e.message
+            : '${e.message} The stored key cannot be used as it is. Set this phone up again, then restore with your '
+                'recovery phrase or link it from your other phone.';
+      });
+    } on VaultLockedException {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _keyProblem = LocalKeyProblem.locked;
+        _error = const LocalKeyException(LocalKeyProblem.locked).message;
       });
     } catch (e) {
       if (!mounted) return;
@@ -216,7 +241,9 @@ class _EncryptionKeysScreenState extends State<EncryptionKeysScreen> {
         child: _loading
             ? const Center(child: CircularProgressIndicator())
             : _error != null
-                ? LoadStateView(error: _error, offline: false, onRetry: _load)
+                ? (_keyProblem == LocalKeyProblem.unreadable || _keyProblem == LocalKeyProblem.invalidated
+                    ? _repairView()
+                    : LoadStateView(error: _error, offline: false, onRetry: _load))
                 : _body(),
       ),
     );
@@ -317,6 +344,49 @@ class _EncryptionKeysScreenState extends State<EncryptionKeysScreen> {
         ),
       ];
 
+  /// This phone's stored key cannot be read. Retrying does not help; the way out is to drop the unreadable copy
+  /// (it is useless) and set the phone up again: restore with the recovery phrase, link from another phone, or new keys.
+  Widget _repairView() => ListView(
+        padding: const EdgeInsets.all(AppSpace.xl),
+        children: <Widget>[
+          const Text("This phone's encryption key can't be read", key: Key('keys-repair-title'), style: AppType.headline),
+          const SizedBox(height: AppSpace.sm),
+          Text(_error ?? ''),
+          const SizedBox(height: AppSpace.lg),
+          DsPillButton(label: 'Try again', icon: Icons.refresh, onPressed: _busy ? null : _load),
+          const SizedBox(height: AppSpace.sm),
+          DsPillButton(
+            key: const Key('keys-repair-reset'),
+            label: 'Set this phone up again',
+            icon: Icons.build_outlined,
+            onPressed: _busy ? null : _repair,
+          ),
+        ],
+      );
+
+  Future<void> _repair() async {
+    final bool ok = await showDsConfirm(
+      context,
+      title: 'Set this phone up again?',
+      message: 'The key stored on this phone cannot be read, so it is removed from this phone. Nothing is deleted on the '
+          'server. Next, restore with your recovery phrase or link this phone from your other phone, so it gets your '
+          'circles back. If neither is possible, create new keys: the other members will see that your key changed, and '
+          'an admin shares the circle keys with this phone again.',
+      confirmLabel: 'Remove and set up',
+      destructive: true,
+    );
+    if (!ok || !mounted) return;
+    setState(() => _busy = true);
+    try {
+      await _svc.eraseLocalKeys();
+    } catch (e) {
+      debugPrint('encryption keys: erase failed (${e.runtimeType})');
+    }
+    if (!mounted) return;
+    setState(() => _busy = false);
+    await _load();
+  }
+
   Widget _setupCard(LocalIdentity? id) => DsRowGroup(children: <Widget>[
         Padding(
           padding: const EdgeInsets.all(AppSpace.lg),
@@ -327,6 +397,13 @@ class _EncryptionKeysScreenState extends State<EncryptionKeysScreen> {
                 'If your account already has keys, you will be asked to link this phone from your other phone or restore with your recovery phrase.'),
             const SizedBox(height: AppSpace.lg),
             DsPillButton(label: 'Create keys on this phone', icon: Icons.key, onPressed: _busy ? null : _setup),
+            const SizedBox(height: AppSpace.sm),
+            DsPillButton(
+              key: const Key('keys-setup-restore'),
+              label: 'Restore with recovery phrase',
+              icon: Icons.restore,
+              onPressed: _busy ? null : () => _push(RestoreScreen(service: _svc, circles: _circles)),
+            ),
           ]),
         ),
       ]);

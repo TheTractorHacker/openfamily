@@ -67,11 +67,9 @@ class MainActivity : FlutterFragmentActivity() {
         }
         deviceChannel = device
 
-        // Keystore-backed wrapping key + FLAG_SECURE for the end-to-end encryption
-        // secrets (see KeystoreChannel.kt).
-        val keystore = KeystoreChannel(this)
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "app.openfamily/keystore")
-            .setMethodCallHandler { call, result -> keystore.handle(call, result) }
+        // The Keystore wrapping key of the end-to-end encryption vault (and
+        // FLAG_SECURE) is the e2ee_keystore plugin (packages/e2ee_keystore), so it
+        // is registered in every engine, the background-location one included.
 
         // Read-only phone health facts and OEM settings deep links for the
         // Diagnostics screen (see DiagnosticsChannel.kt).

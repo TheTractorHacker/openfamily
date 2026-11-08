@@ -82,9 +82,15 @@ type EmbeddedOptions struct {
 	// MintAccess returns a short-lived access token for userID (the account the
 	// server key is registered under).
 	MintAccess func(ctx context.Context, userID string) (string, error)
-	Poll       time.Duration
-	Log        *slog.Logger
+	// MintEvery renews the minted token before it is this old (default
+	// [defaultMintEvery]; must stay below the access-token lifetime).
+	MintEvery time.Duration
+	Poll      time.Duration
+	Log       *slog.Logger
 }
+
+// defaultMintEvery is well below the shortest sensible ACCESS_TOKEN_TTL.
+const defaultMintEvery = 5 * time.Minute
 
 // Embedded is the built-in server device.
 type Embedded struct {
@@ -202,6 +208,14 @@ func (e *Embedded) JoinRequestFor(userID string) (JoinRequest, error) {
 func (e *Embedded) client(userID string) *apiClient {
 	c := newAPIClient(e.opt.BaseURL, "", nil)
 	c.mint = func(ctx context.Context) (string, error) { return e.opt.MintAccess(ctx, userID) }
+	// The API's access tokens live ACCESS_TOKEN_TTL (15 min by default). Without a
+	// renewal ahead of time every poll after the expiry got a 401 first (logged as
+	// "the server answered its own device with an error" every ~15 min), and only
+	// the retry with a new token went through.
+	c.mintMaxAge = e.opt.MintEvery
+	if c.mintMaxAge <= 0 {
+		c.mintMaxAge = defaultMintEvery
+	}
 	c.onStatus = func(method, path string, status int) {
 		e.log.Warn("the server answered its own device with an error", "method", method, "path", path, "status", status)
 	}

@@ -77,6 +77,10 @@ dependencies:
   # moving" estimate). Local plugin, no permissions.
   driving_native:
     path: packages/driving_native
+  # Android Keystore channel for the E2EE vault, registered in every engine
+  # (the background-location isolate seals Private-circle fixes with it).
+  e2ee_keystore:
+    path: packages/e2ee_keystore
 
 dev_dependencies:
   flutter_test:

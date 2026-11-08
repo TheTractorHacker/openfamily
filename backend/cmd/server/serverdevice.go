@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -72,6 +73,20 @@ func loopbackBase(cfg config.Config) (string, bool) {
 	return "http://127.0.0.1:" + port, false
 }
 
+// mintEveryFor is how often the built-in device renews its minted access token:
+// a third of the access-token lifetime, at most 5 minutes, so a token is always
+// replaced well before the API would refuse it.
+func mintEveryFor(accessTTL time.Duration) time.Duration {
+	d := accessTTL / 3
+	if d <= 0 || d > 5*time.Minute {
+		d = 5 * time.Minute
+	}
+	if d < 10*time.Second {
+		d = 10 * time.Second
+	}
+	return d
+}
+
 // startServerDevice opens the built-in device and starts its loop. It returns
 // the host for the handlers, or nil when the mode is not built in. A failure
 // never stops the API: the family keeps working without server processing.
@@ -99,6 +114,7 @@ func startServerDevice(ctx context.Context, cfg config.Config, pool *pgxpool.Poo
 	base, insecure := loopbackBase(cfg)
 	dev, err := e2eebridge.OpenEmbedded(e2eebridge.EmbeddedOptions{
 		Dir: dir, DataKey: key, BaseURL: base, Insecure: insecure, Token: tok,
+		MintEvery: mintEveryFor(tm.AccessTTL()),
 		MintAccess: func(ctx context.Context, userID string) (string, error) {
 			var ver int
 			if err := pool.QueryRow(ctx, `SELECT token_version FROM users WHERE id = $1`, userID).Scan(&ver); err != nil {

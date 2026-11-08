@@ -123,7 +123,7 @@ class MemoryVault implements E2eeVault {
 /// Thin wrapper over the native key-store channel, which has the same name and
 /// contract on both platforms (`encrypt`, `decrypt`, `status`, `recreateKey`,
 /// `setSecure`):
-///  * Android (KeystoreChannel.kt): ONE non-extractable AES-256-GCM key in the
+///  * Android (packages/e2ee_keystore, E2eeKeystorePlugin.kt, registered in every engine): ONE non-extractable AES-256-GCM key in the
 ///    Android Keystore (StrongBox / TEE).
 ///  * iOS (SecureKeyChannel.swift): ONE non-extractable P-256 key (Secure
 ///    Enclave when present) used for ECIES, so secrets are encrypted with the

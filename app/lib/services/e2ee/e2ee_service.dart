@@ -28,6 +28,60 @@ class LocalIdentity {
   Future<String> get digits => E2ee.digitGroups(fingerprint);
 }
 
+/// Why this phone's own encryption key cannot be used right now.
+enum LocalKeyProblem {
+  /// No key on this phone (never created, erased, or the app data was cleared).
+  missing,
+
+  /// The key is stored but could not be read back (the Keystore refused, the
+  /// stored blob does not open, the key-store channel is not available here).
+  unreadable,
+
+  /// The Keystore key that protects it was invalidated (screen lock removed...).
+  invalidated,
+
+  /// The key exists but cannot be used while the phone is locked.
+  locked,
+}
+
+/// This phone cannot sign or open anything because its own key is not usable.
+/// Raised instead of a bare null-check failure, so screens can say what is
+/// wrong and offer the repair (Encryption keys) instead of "can't reach the server".
+class LocalKeyException implements Exception {
+  const LocalKeyException(this.problem, {this.cause = ''});
+  final LocalKeyProblem problem;
+
+  /// Type name of the underlying failure (for logs; never key material).
+  final String cause;
+
+  /// Short, user-facing reason with the next step.
+  String get message {
+    switch (problem) {
+      case LocalKeyProblem.missing:
+        return 'This phone has no encryption key. Open Encryption keys to set it up or restore it.';
+      case LocalKeyProblem.unreadable:
+        return "This phone's encryption key could not be read. Open Encryption keys to repair.";
+      case LocalKeyProblem.invalidated:
+        return "This phone's key storage was reset, so its encryption key is lost. "
+            'Open Encryption keys and restore with your recovery phrase.';
+      case LocalKeyProblem.locked:
+        return 'Unlock the phone and try again: its encryption key only works while unlocked.';
+    }
+  }
+
+  @override
+  String toString() => 'LocalKeyException(${problem.name}${cause.isEmpty ? '' : ', $cause'})';
+}
+
+/// The [LocalKeyException] that [e] amounts to, or null when [e] is not about
+/// this phone's own key (a server answer, the network, a session problem).
+LocalKeyException? localKeyProblemOf(Object e) {
+  if (e is LocalKeyException) return e;
+  if (e is VaultInvalidatedException) return const LocalKeyException(LocalKeyProblem.invalidated, cause: 'VaultInvalidatedException');
+  if (e is VaultLockedException) return const LocalKeyException(LocalKeyProblem.locked, cause: 'VaultLockedException');
+  return null;
+}
+
 class NeedsCrossSignatureException implements Exception {
   const NeedsCrossSignatureException();
   @override
@@ -115,7 +169,34 @@ class E2eeService {
 
   // ------------------------------------------------------------- identity
 
-  Future<bool> hasIdentity() async => (await vault.read(_seedName)) != null;
+  Future<bool> hasIdentity() async => (await _readKey(_seedName)) != null;
+
+  /// A vault read for identity material. The two vault exceptions that already
+  /// say what happened pass through; anything else the platform throws (a
+  /// Keystore error, a missing channel, a blob that does not decode) becomes
+  /// [LocalKeyException] `unreadable`, so no caller mistakes it for a network
+  /// failure. Never regenerates anything.
+  Future<Uint8List?> _readKey(String name) async {
+    try {
+      return await vault.read(name);
+    } on VaultInvalidatedException {
+      rethrow;
+    } on VaultLockedException {
+      rethrow;
+    } catch (e) {
+      throw LocalKeyException(LocalKeyProblem.unreadable, cause: e.runtimeType.toString());
+    }
+  }
+
+  /// [identity] for actions that must sign: never null. Throws
+  /// [LocalKeyException] (missing / unreadable), [VaultInvalidatedException] or
+  /// [VaultLockedException] when this phone's key cannot be used. Failures of
+  /// [userIdProvider] (network, session) pass through unchanged.
+  Future<LocalIdentity> requireIdentity() async {
+    final LocalIdentity? id = await identity();
+    if (id == null) throw const LocalKeyException(LocalKeyProblem.missing);
+    return id;
+  }
 
   /// The account the stored identity belongs to (for the headless background
   /// isolate, which cannot ask the API who is signed in).
@@ -130,17 +211,29 @@ class E2eeService {
     final LocalIdentity? c = _cached;
     if (c != null) return c;
     final String uid = await userIdProvider();
-    Uint8List? seed = await vault.read(_seedName);
-    final Uint8List? owner = await vault.read(_userName);
-    if (seed != null && owner != null && utf8.decode(owner) != uid) {
+    Uint8List? seed = await _readKey(_seedName);
+    final Uint8List? owner = await _readKey(_userName);
+    String? ownerId;
+    try {
+      ownerId = owner == null ? null : utf8.decode(owner);
+    } on FormatException {
+      throw const LocalKeyException(LocalKeyProblem.unreadable, cause: 'FormatException');
+    }
+    // An empty answer is not "another account": never wipe on it.
+    if (uid.isEmpty && seed != null) throw const LocalKeyException(LocalKeyProblem.unreadable, cause: 'empty user id');
+    if (seed != null && ownerId != null && ownerId != uid) {
       // A different account signed in on this phone: its identity is not ours.
       await _wipeIdentity();
       seed = null;
     }
     String? deviceId;
     if (seed != null) {
-      final Uint8List? d = await vault.read(_deviceName);
-      deviceId = d == null ? null : utf8.decode(d);
+      final Uint8List? d = await _readKey(_deviceName);
+      try {
+        deviceId = d == null ? null : utf8.decode(d);
+      } on FormatException {
+        throw const LocalKeyException(LocalKeyProblem.unreadable, cause: 'FormatException');
+      }
     }
     if (seed == null || deviceId == null) {
       if (!create) return null;
@@ -150,6 +243,7 @@ class E2eeService {
       await vault.write(_deviceName, Uint8List.fromList(utf8.encode(deviceId)));
       await vault.write(_userName, Uint8List.fromList(utf8.encode(uid)));
     }
+    if (seed.length != 32) throw LocalKeyException(LocalKeyProblem.unreadable, cause: 'seed of ${seed.length} bytes');
     final (Uint8List es, Uint8List xs) = await E2ee.deriveIdentity(seed);
     final Uint8List ed = await E2ee.edPublicFromSeed(es);
     final Uint8List x = await E2ee.xPublicFromSecret(xs);
@@ -242,7 +336,7 @@ class E2eeService {
     final Map<String, dynamic> m = jsonDecode(utf8.decode(base64Url.decode(code.trim()))) as Map<String, dynamic>;
     final Uint8List ed = E2ee.unb64(m['e']), x = E2ee.unb64(m['x']);
     final String uid = m['u'], did = m['d'];
-    final LocalIdentity me = (await identity())!;
+    final LocalIdentity me = await requireIdentity();
     if (uid != me.userId) throw const E2eeFormatException('this request is for another account');
     if (!await E2ee.verify(ed, E2ee.bindingMessage(uid, did, ed, x), E2ee.unb64(m['b']))) {
       throw const E2eeAuthException('the request is corrupted or forged');
@@ -275,7 +369,7 @@ class E2eeService {
   /// Existing phone: signs the new phone's registration. Returns the approval
   /// code to type into the new phone.
   Future<String> approveLinkRequest(LinkRequestInfo info) async {
-    final LocalIdentity me = (await identity())!;
+    final LocalIdentity me = await requireIdentity();
     final Uint8List sig = await E2ee.sign(me.edSeed,
         E2ee.logActionMessage(E2ee.actRegister, me.userId, me.deviceId, subjectId: info.deviceId, ref: info.fingerprint));
     return base64Url.encode(utf8.encode(jsonEncode(<String, String>{'a': me.deviceId, 's': E2ee.b64(sig)})));
@@ -291,7 +385,7 @@ class E2eeService {
     if (await identity() == null) await registerThisDevice(label: 'This phone');
     final LinkRequestInfo info = await inspectLinkRequest(j.requestCode);
     if (info.kind != 'server') throw const E2eeFormatException('this is not the request of a server');
-    final LocalIdentity me = (await identity())!;
+    final LocalIdentity me = await requireIdentity();
     final Uint8List sig = await E2ee.sign(me.edSeed,
         E2ee.logActionMessage(E2ee.actRegister, me.userId, me.deviceId, subjectId: info.deviceId, ref: info.fingerprint));
     await api.approveServerJoin(<String, dynamic>{
@@ -511,7 +605,7 @@ class E2eeService {
   /// refused). Returns the number of new keys stored.
   Future<int> syncServerKeys(String circleId, Map<int, Uint8List> commitments,
       {String? asDeviceId, Uint8List? xSecret, Uint8List? xPub}) async {
-    final LocalIdentity me = (await identity())!;
+    final LocalIdentity me = await requireIdentity();
     final String dev = asDeviceId ?? me.deviceId;
     final Uint8List sec = xSecret ?? me.xSecret;
     final Uint8List pub = xPub ?? me.xPub;
@@ -639,7 +733,7 @@ class E2eeService {
   /// Admin: switches a circle to Private mode. Generates the epoch-1 key on this
   /// phone, wraps it to every member key and sends only the wraps.
   Future<int> enableCircle(String circleId) async {
-    final LocalIdentity me = (await identity())!;
+    final LocalIdentity me = await requireIdentity();
     final CircleE2eeState st = await api.circleState(circleId);
     final int epoch = st.epoch + 1;
     final Uint8List key = E2ee.randomBytes(32);
@@ -653,7 +747,7 @@ class E2eeService {
 
   /// Admin: publishes the next epoch after a member left or a key was revoked.
   Future<int> bumpEpoch(String circleId) async {
-    final LocalIdentity me = (await identity())!;
+    final LocalIdentity me = await requireIdentity();
     final CircleE2eeState st = await api.circleState(circleId);
     final int epoch = st.epoch + 1;
     final Uint8List key = E2ee.randomBytes(32);
@@ -671,7 +765,7 @@ class E2eeService {
   /// this phone. Used by the legacy upgrade, which sends it together with the
   /// signed policy in one request. The phone line is never wrapped to a server key.
   Future<({int epoch, Map<String, dynamic> body, Future<void> Function() commit})> prepareNextEpoch(String circleId) async {
-    final LocalIdentity me = (await identity())!;
+    final LocalIdentity me = await requireIdentity();
     final CircleE2eeState st = await api.circleState(circleId);
     final int epoch = st.epoch + 1;
     final Uint8List key = E2ee.randomBytes(32);
@@ -685,7 +779,7 @@ class E2eeService {
   }
 
   Future<void> disableCircle(String circleId) async {
-    final LocalIdentity me = (await identity())!;
+    final LocalIdentity me = await requireIdentity();
     final CircleE2eeState st = await api.circleState(circleId);
     final Uint8List msg = E2ee.logActionMessage(E2ee.actDisable, me.userId, me.deviceId, circleId: circleId, epoch: st.epoch);
     await api.disable(circleId, <String, dynamic>{
@@ -704,7 +798,7 @@ class E2eeService {
   /// and the unwrapped key must match the publisher's KEY COMMITMENT. A bogus or
   /// substituted wrap therefore never gets stored. Returns the NEW keys stored.
   Future<int> syncCircleKeys(String circleId, {String? asDeviceId, Uint8List? xSecret, Uint8List? xPub}) async {
-    final LocalIdentity me = (await identity())!;
+    final LocalIdentity me = await requireIdentity();
     final String dev = asDeviceId ?? me.deviceId;
     final Uint8List sec = xSecret ?? me.xSecret;
     final Uint8List pub = xPub ?? me.xPub;
@@ -762,7 +856,7 @@ class E2eeService {
   /// Wraps the current circle key for members' keys that lack one, following the
   /// policy: automatic where safe, otherwise returned for explicit confirmation.
   Future<PendingReport> processPending(String circleId) async {
-    final LocalIdentity me = (await identity())!;
+    final LocalIdentity me = await requireIdentity();
     final CircleE2eeState st = await api.circleState(circleId);
     if (!st.isPrivate) return const PendingReport();
     final Uint8List? key = await circleKey(circleId, st.epoch);
@@ -801,7 +895,7 @@ class E2eeService {
   /// After the user compared the safety number: wrap for [key] and (optionally)
   /// pin its owner as verified.
   Future<void> confirmWrap(String circleId, DeviceKey key, {bool markVerified = false, bool viewerInformed = false}) async {
-    final LocalIdentity me = (await identity())!;
+    final LocalIdentity me = await requireIdentity();
     final CircleE2eeState st = await api.circleState(circleId);
     final Uint8List? k = await circleKey(circleId, st.epoch);
     if (k == null) throw StateError('This phone does not hold the current circle key yet.');
@@ -882,7 +976,7 @@ class E2eeService {
   /// A member allows the Orbitly server key to read this circle. The signature
   /// names the circle, this person and the exact key; it is made by this phone.
   Future<void> consentToServer(String circleId) async {
-    final LocalIdentity me = (await identity())!;
+    final LocalIdentity me = await requireIdentity();
     final CircleE2eeState st = await api.circleState(circleId);
     final ServerMemberState ss = await api.serverMemberState(circleId);
     final DeviceKey? key = serverKeyOf(st, ss);
@@ -916,7 +1010,7 @@ class E2eeService {
   /// Circle admin: approves a replacement key for THIS circle after comparing
   /// its safety number out of band. Logged in the transparency log.
   Future<void> approveDevice(String circleId, DeviceKey key) async {
-    final LocalIdentity me = (await identity())!;
+    final LocalIdentity me = await requireIdentity();
     final Uint8List msg = E2ee.logActionMessage(E2ee.actApprove, me.userId, me.deviceId,
         circleId: circleId, subjectId: key.deviceId, ref: E2ee.unhex(key.fingerprint));
     await api.approve(circleId, <String, dynamic>{
@@ -927,7 +1021,7 @@ class E2eeService {
   }
 
   Future<void> revokeKey(DeviceKey key) async {
-    final LocalIdentity me = (await identity())!;
+    final LocalIdentity me = await requireIdentity();
     final Uint8List msg = E2ee.logActionMessage(E2ee.actRevoke, me.userId, me.deviceId,
         subjectId: key.deviceId, ref: E2ee.unhex(key.fingerprint));
     await api.revoke(key.deviceId, <String, dynamic>{
@@ -940,7 +1034,7 @@ class E2eeService {
 
   /// Safety number between me and [userId], from the keys the server shows now.
   Future<({String number, List<DeviceKey> theirs, TrustAssessment trust})> safetyWith(String userId) async {
-    final LocalIdentity me = (await identity())!;
+    final LocalIdentity me = await requireIdentity();
     final List<DeviceKey> theirs = (await api.userKeys(userId)).where((DeviceKey k) => k.isActive).toList();
     final List<DeviceKey> mine = (await api.myKeys()).where((DeviceKey k) => k.isActive).toList();
     final String number = await E2ee.safetyNumber(
@@ -1015,7 +1109,7 @@ class E2eeService {
   /// Registers the recovery identity (PUBLIC keys only), cross-signed by this
   /// phone, and wraps every circle key this phone holds to it.
   Future<DeviceKey> registerRecovery(Uint8List entropy, {String passphrase = ''}) async {
-    final LocalIdentity me = (await identity())!;
+    final LocalIdentity me = await requireIdentity();
     final r = await _recoveryKeys(entropy, passphrase);
     final String rid = E2ee.newUuid();
     final Uint8List binding = await E2ee.sign(r.edSeed, E2ee.bindingMessage(me.userId, rid, r.edPub, r.xPub));
@@ -1037,7 +1131,7 @@ class E2eeService {
   /// Wraps every epoch key this phone holds, per private circle, to [target]
   /// (the recovery identity or a new own device).
   Future<int> wrapHeldKeysTo(DeviceKey target, {LocalIdentity? as, Uint8List? wrapperEdSeed, String? wrapperId}) async {
-    final LocalIdentity me = as ?? (await identity())!;
+    final LocalIdentity me = as ?? await requireIdentity();
     int n = 0;
     final Set<String> circles = <String>{};
     for (final String name in await vault.names()) {

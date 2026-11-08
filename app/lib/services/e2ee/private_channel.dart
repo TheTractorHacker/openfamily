@@ -439,7 +439,9 @@ class ChannelSealer {
     final Completer<int> c = Completer<int>();
     _lock = _lock.then((_) async {
       try {
-        final int cur = int.tryParse(await kv.get(_seqKey(circle, device)) ?? '') ?? 0;
+        // Fresh read: the background isolate seals with the same device and counter. A value cached in this
+        // isolate would hand out a seq the other one already used, and the server drops the second as a duplicate.
+        final int cur = int.tryParse(await kv.getFresh(_seqKey(circle, device)) ?? '') ?? 0;
         await kv.set(_seqKey(circle, device), '${cur + 1}');
         c.complete(cur + 1);
       } catch (e) {

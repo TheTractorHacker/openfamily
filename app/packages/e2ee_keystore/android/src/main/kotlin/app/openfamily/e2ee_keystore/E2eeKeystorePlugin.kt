@@ -1,6 +1,7 @@
-package app.openfamily
+package app.openfamily.e2ee_keystore
 
 import android.app.Activity
+import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import android.security.keystore.KeyGenParameterSpec
@@ -9,6 +10,9 @@ import android.security.keystore.KeyPermanentlyInvalidatedException
 import android.security.keystore.KeyProperties
 import android.security.keystore.StrongBoxUnavailableException
 import android.view.WindowManager
+import io.flutter.embedding.engine.plugins.FlutterPlugin
+import io.flutter.embedding.engine.plugins.activity.ActivityAware
+import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import java.security.KeyStore
@@ -35,13 +39,56 @@ import javax.crypto.spec.GCMParameterSpec
  * `legacyAlias` (v1), which required an unlocked device; the legacy key is only
  * used to decrypt old blobs while migrating (see E2eeVault.migrateLegacy) and is
  * deleted only after Dart confirmed every blob was re-wrapped and read back.
+ *
+ * Registered as a plugin, so Flutter attaches it to EVERY engine: the app's and
+ * the headless background-location engine (background_locator_2). It used to be
+ * set up in MainActivity.configureFlutterEngine, i.e. only on the app's engine,
+ * so in the background isolate every vault read failed with
+ * MissingPluginException and every Private-circle fix was parked until the app
+ * was opened (and was lost after 12 h). All engines share the one Keystore key;
+ * Android serialises the calls on the main thread.
+ *
+ * `setSecure` needs an Activity and is a no-op in an engine without one.
  */
-class KeystoreChannel(private val activity: Activity) {
+class E2eeKeystorePlugin : FlutterPlugin, ActivityAware {
+    private var channel: MethodChannel? = null
+    private var context: Context? = null
+    private var activity: Activity? = null
+
+    override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
+        context = binding.applicationContext
+        channel = MethodChannel(binding.binaryMessenger, "app.openfamily/keystore").also {
+            it.setMethodCallHandler { call, result -> handle(call, result) }
+        }
+    }
+
+    override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
+        channel?.setMethodCallHandler(null)
+        channel = null
+        context = null
+    }
+
+    override fun onAttachedToActivity(binding: ActivityPluginBinding) {
+        activity = binding.activity
+    }
+
+    override fun onDetachedFromActivityForConfigChanges() {
+        activity = null
+    }
+
+    override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
+        activity = binding.activity
+    }
+
+    override fun onDetachedFromActivity() {
+        activity = null
+    }
+
     private val alias = "openfamily_e2ee_wrap_v2"
     private val legacyAlias = "openfamily_e2ee_wrap_v1"
     private val provider = "AndroidKeyStore"
 
-    fun handle(call: MethodCall, result: MethodChannel.Result) {
+    private fun handle(call: MethodCall, result: MethodChannel.Result) {
         try {
             when (call.method) {
                 "encrypt" -> result.success(encrypt(call.arguments as ByteArray))
@@ -62,9 +109,10 @@ class KeystoreChannel(private val activity: Activity) {
                 }
                 "setSecure" -> {
                     val on = call.arguments == true
-                    activity.runOnUiThread {
-                        if (on) activity.window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
-                        else activity.window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                    val a = activity
+                    a?.runOnUiThread {
+                        if (on) a.window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                        else a.window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
                     }
                     result.success(null)
                 }
@@ -120,7 +168,7 @@ class KeystoreChannel(private val activity: Activity) {
         }
         val gen = javax.crypto.KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, provider)
         val sbOk = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
-            activity.packageManager.hasSystemFeature(PackageManager.FEATURE_STRONGBOX_KEYSTORE)
+            context?.packageManager?.hasSystemFeature(PackageManager.FEATURE_STRONGBOX_KEYSTORE) == true
         if (sbOk) {
             try {
                 gen.init(spec(true))
