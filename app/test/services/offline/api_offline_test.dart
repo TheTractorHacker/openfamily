@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:openfamily/services/api_client.dart';
+import 'package:openfamily/services/api_wire.dart';
 import 'package:openfamily/services/offline/offline_errors.dart';
 import 'package:openfamily/services/offline/server_reachability.dart';
 import 'package:openfamily/services/server_config.dart';
@@ -125,6 +126,10 @@ void main() {
   });
 
   testWidgets('requests that fail feed the reachability probe; a 404 does not', (WidgetTester t) async {
+    // GET retries use a real-time jittered delay that never fires under the fake clock.
+    final int oldRetries = ApiWire.maxGetRetries;
+    ApiWire.maxGetRetries = 0;
+    addTearDown(() => ApiWire.maxGetRetries = oldRetries);
     int probes = 0;
     final ServerReachability r = ServerReachability.instance;
     final Future<bool> Function() old = r.probe;

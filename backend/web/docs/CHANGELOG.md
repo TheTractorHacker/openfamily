@@ -12,7 +12,28 @@ the phones afterwards.
 
 ## Unreleased
 
-Works with apps 0.20 and newer; nothing here needs an app update.
+Nothing yet. The owner moves these notes under a version heading when a
+release is tagged.
+
+## v0.25.0 (2026-11-08)
+
+Works with app versions 0.21 to 0.25. The phone and watch apps are the big
+change; the server update is safe to apply first.
+
+- **Admin site overhaul.** A grouped, collapsible menu with page and settings
+  search, a Settings page with its own section menu and (i) help, new
+  administrator settings (sign-in session lifetime, idle timeout and sessions per
+  person, and the default for members), a Builds page that lists the Android
+  APK and the iPhone IPA (plus the Wear OS watch APK), a System health checklist
+  with a fix hint for every row, a **Server processing** panel on the Dashboard
+  and Private circles pages, and Fleet health that shows one row per phone with
+  the real app version and 'what to do' hints.
+- **Sessions.** Signing in again from the same phone replaces its old session
+  instead of adding another, idle sessions expire after 14 days, there is a limit
+  per person, and administrators can sign out sessions in bulk.
+- **Phones on low memory.** The app picks a profile by the phone's RAM (under 4 GB
+  lite, 4 to under 6 GB standard, 6 GB and up full), trims caches when Android asks
+  for memory, and the release now ships a combined APK plus per-CPU APKs.
 
 - **Faster on mobile data.** The server now compresses its answers, the app
   reuses its connection to the server instead of reconnecting for every
@@ -41,8 +62,6 @@ Works with apps 0.20 and newer; nothing here needs an app update.
   because of a network error; Diagnostics counts every waiting update.
 - Server: SOS, Help alerts and check-ins accept an optional `client_id` so a replay after a lost
   answer is stored once (database migration 340).
-
-## v0.24.2 (unreleased)
 
 - **Private circles keep sending when the phone is locked.** The key that
   protects your keys on the phone no longer needs the screen to be unlocked
