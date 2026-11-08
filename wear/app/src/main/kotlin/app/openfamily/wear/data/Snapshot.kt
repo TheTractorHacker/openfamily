@@ -106,14 +106,14 @@ data class Snapshot(
                             isPrivate = m.optBoolean("private", false),
                             isYou = m.optBoolean("you", false),
                         )
-                    },
+                    }.distinctBy { it.id }, // the screens use the id as list key: duplicates would crash the list
                     alerts = o.optJSONArray("alerts").objects().mapNotNull { a ->
                         val id = a.optString("id")
                         if (id.isEmpty()) null else Alert(
                             id, a.optString("kind"), a.optString("from").ifEmpty { "Someone" },
                             a.optLong("at", 0), a.optString("note"), a.optBoolean("active", true),
                         )
-                    },
+                    }.distinctBy { it.id },
                     lastCommand = o.optJSONObject("lastCommand")?.let {
                         val id = it.optString("id")
                         if (id.isEmpty()) null else CommandResult(
