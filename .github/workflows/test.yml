@@ -106,6 +106,12 @@ jobs:
         run: flutter pub get
       - name: Lint plists (Info, entitlements, privacy manifest, export options)
         run: plutil -lint ios/Runner/Info.plist ios/Runner/Runner.entitlements ios/Runner/PrivacyInfo.xcprivacy ios/ExportOptions.plist
+      - name: Take the Apple Watch target out of this workspace copy (simulator builds)
+        # Flutter refuses `flutter build ios --simulator` without a device id when a watchOS
+        # companion exists. This job tests the iPhone app on its own; the `watchos` job below
+        # builds the watch app and checks it embeds in a device-style build.
+        working-directory: .
+        run: python3 scripts/ios-watch-target.py disable
       - name: Build for the iOS Simulator (unsigned)
         run: flutter build ios --simulator --no-codesign --debug
       - name: Boot a simulator, install, and launch the app
@@ -189,10 +195,10 @@ jobs:
             -destination 'generic/platform=watchOS Simulator' \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
             | tail -80
-      - name: Build the iPhone app with the watch app embedded (unsigned, simulator)
-        run: flutter build ios --simulator --no-codesign --debug
+      - name: Build the iPhone app with the watch app embedded (unsigned, device build like the IPA)
+        run: flutter build ios --release --no-codesign
       - name: The watch app is inside the iPhone app
         run: |
           set -euo pipefail
-          ls build/ios/iphonesimulator/Runner.app/Watch
-          test -f build/ios/iphonesimulator/Runner.app/Watch/OrbitlyWatch.app/Info.plist
+          ls build/ios/iphoneos/Runner.app/Watch
+          test -f build/ios/iphoneos/Runner.app/Watch/OrbitlyWatch.app/Info.plist

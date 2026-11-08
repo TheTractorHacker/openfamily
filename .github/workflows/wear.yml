@@ -101,7 +101,7 @@ jobs:
             printf 'storePassword=%s\n' "$ANDROID_KEYSTORE_PASSWORD"
             printf 'keyPassword=%s\n' "$ANDROID_KEY_PASSWORD"
             printf 'keyAlias=%s\n' "$ANDROID_KEY_ALIAS"
-            printf 'storeFile=%s\n' "release.jks"
+            printf 'storeFile=%s\n' "../release.jks"
           } > wear/key.properties
           echo "signed=true" >> "$GITHUB_OUTPUT"
 

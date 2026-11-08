@@ -15,6 +15,12 @@ the phones afterwards.
 Nothing yet. The owner moves these notes under a version heading when a
 release is tagged.
 
+## v0.25.1 (2026-11-08)
+
+- Build fixes only: the v0.25.0 Android and Wear OS release files were not produced
+  (code-style checks and a signing-key path in the build scripts). Same app and
+  server as v0.25.0; the files are attached to this release.
+
 ## v0.25.0 (2026-11-08)
 
 Works with app versions 0.21 to 0.25. The phone and watch apps are the big

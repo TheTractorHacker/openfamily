@@ -39,6 +39,7 @@ DENY_PREFIX = (
     'backend/internal/db/migrations/', 'scripts/rebrand.sh', 'scripts/license-check.sh',
     'app/lib/screens/about_screen.dart', 'app/lib/brand.dart', 'web/src/lib/brand.ts',
     'node_modules/', 'web/node_modules/', 'app/build/', 'assets/google-play/tiles/',
+    'backend/internal/apkrelease/',   # recognises both the orbitly- and the older openfamily- release file names
 )
 DENY_SUFFIX = ('package-lock.json', 'go.sum', 'pubspec.lock')
 BINARY_EXT = {'.png', '.jpg', '.jpeg', '.gif', '.ico', '.webp', '.jks', '.keystore', '.ttf', '.otf',
@@ -46,7 +47,7 @@ BINARY_EXT = {'.png', '.jpg', '.jpeg', '.gif', '.ico', '.webp', '.jks', '.keysto
 # Lines containing any of these are credits / historical references and stay verbatim.
 PROTECT = re.compile(r'wheresfrank|formerly OpenFamily|Formerly OpenFamily|Based on OpenFamily|based on OpenFamily|'
                      r'fork of OpenFamily|original OpenFamily|published as OpenFamily|called OpenFamily|Was Orbitly called OpenFamily|NexaFlow|rebrand-keep|X-OpenFamily-|OpenFamily_AppStore|'
-                     r'/home/dockhub/OpenFamily')
+                     r'before the rename|Yes, OpenFamily|/home/dockhub/OpenFamily')
 
 WORD = re.compile(r'(?<![\w\-/.:@])OpenFamily(?![\w\-]|\.\w)')   # not a hostname like OpenFamily.Example.COM
 URL = re.compile(r'TheTractorHacker/openfamily(?!/backend)')

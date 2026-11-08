@@ -585,6 +585,7 @@ class ApiClient {
     final QueryCapability cap = ApiWire.queryCapability;
     if (await cap.shouldTryQuery(server)) {
       bool fellBack = false;
+      http.Response? answer;
       try {
         final http.Response r = await _sendResponse(
           'QUERY',
@@ -594,13 +595,17 @@ class ApiClient {
         );
         if (r.statusCode >= 200 && r.statusCode < 300) {
           await cap.recordQueryWorked(server);
-          return _decodeMaybeOffThread(r);
+          answer = r;
+        } else {
+          fellBack = ApiWire.queryUnsupportedStatus(r.statusCode) || r.statusCode >= 500;
+          if (!fellBack) answer = r; // a real answer (403, 404, ...)
         }
-        fellBack = ApiWire.queryUnsupportedStatus(r.statusCode) || r.statusCode >= 500;
-        if (!fellBack) return _decodeMaybeOffThread(r); // a real answer (403, 404, ...)
       } on ApiException {
         fellBack = true; // network / proxy dropped the unknown verb
       }
+      // Decoding happens outside the try block: a real error answer (403, 404)
+      // must reach the caller and must not be mistaken for "QUERY unsupported".
+      if (answer != null) return _decodeMaybeOffThread(answer);
       if (fellBack) {
         final dynamic data = await _send('POST', _uri(path), body: body);
         await cap.recordFellBack(server); // only reached when POST worked
@@ -723,7 +728,7 @@ class ApiClient {
               : <String, String>{'If-None-Match': cached.etag},
         );
         if (r.statusCode == 304 && cached != null) {
-          return _decodeMaybeOffThread(ApiWire.fromCache(cached, r.headers));
+          return await _decodeMaybeOffThread(ApiWire.fromCache(cached, r.headers));
         }
         if (r.statusCode == 200 && cacheable) {
           final String? etag = r.headers['etag'];
@@ -740,7 +745,7 @@ class ApiClient {
           await Future<void>.delayed(retryDelay(attempt, ApiWire.random));
           continue;
         }
-        return _decodeMaybeOffThread(r);
+        return await _decodeMaybeOffThread(r);
       } on ApiException catch (e) {
         if (isTransientStatus(e.status) && attempt < maxRetries) {
           await Future<void>.delayed(retryDelay(attempt, ApiWire.random));
