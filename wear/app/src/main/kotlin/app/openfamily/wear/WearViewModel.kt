@@ -9,7 +9,9 @@ import app.openfamily.wear.data.Snapshot
 import app.openfamily.wear.data.SnapshotRepository
 import app.openfamily.wear.logic.Commands
 import app.openfamily.wear.logic.Presenter
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -63,6 +65,18 @@ class WearViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { link.requestRefresh() }
     }
 
+    /**
+     * Tells the phone whether this app is on screen, so it sends every few seconds
+     * while it is and only meaningful changes while it is not (docs/design/WATCH_APPS.md,
+     * Cadence). Fire and forget, and outside the view model's scope so a "hidden" sent
+     * while the activity closes still goes out. A lost one is harmless: the phone
+     * forgets "visible" after 150 s by itself.
+     */
+    fun presence(visible: Boolean, ambient: Boolean = false) {
+        val cmd = if (visible) Commands.build(Commands.Cmd.Visible, if (ambient) "ambient" else null) else Commands.build(Commands.Cmd.Hidden)
+        background.launch { link.send(cmd) }
+    }
+
     fun send(cmd: Commands.Cmd, arg: String? = null) {
         val built = Commands.build(cmd, arg)
         _status.value = CommandStatus.Sending(built.id, cmd)
@@ -90,5 +104,6 @@ class WearViewModel(app: Application) : AndroidViewModel(app) {
 
     companion object {
         const val ANSWER_TIMEOUT_MS = 20_000L
+        private val background = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     }
 }

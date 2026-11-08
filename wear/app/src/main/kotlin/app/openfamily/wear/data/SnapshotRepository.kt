@@ -6,6 +6,7 @@ import androidx.wear.watchface.complications.datasource.ComplicationDataSourceUp
 import android.content.ComponentName
 import app.openfamily.wear.logic.Dedupe
 import app.openfamily.wear.logic.SessionGate
+import app.openfamily.wear.logic.SurfaceGate
 import app.openfamily.wear.tile.CircleTileService
 import app.openfamily.wear.tile.NearestComplicationService
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -33,6 +34,7 @@ object SnapshotRepository {
     val restored: StateFlow<Boolean> = _restored.asStateFlow()
 
     private val dedupe = Dedupe()
+    private val surfaces = SurfaceGate()
     private val lock = Any()
     private var storedSession: String? = null
 
@@ -81,6 +83,7 @@ object SnapshotRepository {
                 e.remove(KEY)
                 _snapshot.value = null
                 _external.value = null
+                surfaces.reset()
             }
             SessionGate.next(storedSession, session)?.let { storedSession = it; e.putString(KEY_SESSION, it) }
             // A signed-out phone sends an empty snapshot: forget everything on this watch too.
@@ -88,7 +91,15 @@ object SnapshotRepository {
             e.apply()
             _snapshot.value = parsed
         }
-        refreshSurfaces(app)
+        // Only when what the tile and complication show changed (SurfaceGate), not on every push.
+        if (surfaces.shouldRefresh(parsed, System.currentTimeMillis())) refreshSurfaces(app)
+    }
+
+    /** The app left the screen: draw the latest data once, whatever the gate held back. */
+    fun flushSurfaces(context: Context) {
+        val app = context.applicationContext
+        surfaces.reset()
+        if (surfaces.shouldRefresh(_snapshot.value, System.currentTimeMillis())) refreshSurfaces(app)
     }
 
     fun clear(context: Context) {
@@ -97,6 +108,7 @@ object SnapshotRepository {
             prefs(app).edit().remove(KEY).remove(KEY_SESSION).apply()
             storedSession = null
             dedupe.reset()
+            surfaces.reset()
             _snapshot.value = null
             _restored.value = true
         }

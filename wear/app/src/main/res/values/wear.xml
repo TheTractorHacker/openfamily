@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools" tools:keep="@array/android_wear_capabilities">
+    <!-- Advertised to the paired phone through the Data Layer. The phone listens for this
+         capability (WatchBridgePlugin.kt, WatchListenerService.kt) to learn within seconds when
+         an Orbitly watch connects or goes away, instead of re-checking every 10 minutes. -->
+    <string-array name="android_wear_capabilities">
+        <item>orbitly_watch_app</item>
+    </string-array>
+</resources>
