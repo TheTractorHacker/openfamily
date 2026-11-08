@@ -243,7 +243,7 @@ func (s *Server) checkDisk() SystemCheck {
 			continue
 		}
 		pct := float64(free) / float64(total) * 100
-		c.Summary = fmt.Sprintf("%s free of %s (%.0f%%).", humanBytes(free), humanBytes(total), pct)
+		c.Summary = fmt.Sprintf("Server data volume: %s free of %s (%.0f%%). The database disk is separate; its size is shown under Database.", humanBytes(free), humanBytes(total), pct)
 		switch {
 		case pct < 5 || free < 200<<20:
 			c.Status = checkFail
@@ -257,7 +257,7 @@ func (s *Server) checkDisk() SystemCheck {
 		return c
 	}
 	c.Status, c.Summary = checkInfo, "Not measurable from inside the server container."
-	c.Hint = "Check the host with: df -h"
+	c.Hint = "Check the host with: df -h (the database volume lives there too)."
 	return c
 }
 
