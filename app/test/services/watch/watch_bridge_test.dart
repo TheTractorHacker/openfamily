@@ -195,7 +195,7 @@ void main() {
   test('unchanged content is not published again, changed content is, within the rate limit', () async {
     await make();
     t.published.clear();
-    // Same content: dropped.
+    now = now.add(const Duration(seconds: 1)); // past the publish interval of the start-up snapshot
     b.onMembers(<Member>[_m('u1')]);
     await settle();
     final int afterFirst = t.published.length;
@@ -210,6 +210,7 @@ void main() {
     b.onMembers(<Member>[_m('u1', battery: 40)]);
     b.onMembers(<Member>[_m('u1', battery: 30)]);
     b.onMembers(<Member>[_m('u1', battery: 20)]);
+    now = now.add(const Duration(milliseconds: 100)); // the fake clock reaches the trailing edge
     await Future<void>.delayed(const Duration(milliseconds: 250));
     expect(t.published.length, afterFirst + 1);
     final List<dynamic> ms = lastPublished()['members'] as List<dynamic>;
@@ -219,6 +220,7 @@ void main() {
   test('a failed publish is retried by the next change', () async {
     await make();
     t.published.clear();
+    now = now.add(const Duration(seconds: 1));
     t.failNext = true;
     b.onMembers(<Member>[_m('u1')]);
     await settle();

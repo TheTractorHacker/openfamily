@@ -31,6 +31,7 @@ class WatchAlert {
     required this.kind,
     required this.from,
     required this.at,
+    this.fromId = '',
     this.note = '',
     this.active = true,
   });
@@ -39,6 +40,9 @@ class WatchAlert {
   final String id;
   final String kind;
   final String from;
+
+  /// User id of the sender (not sent to the watch); lets Private-circle senders be hidden.
+  final String fromId;
   final DateTime at;
   final String note;
   final bool active;
@@ -197,7 +201,7 @@ Map<String, dynamic> buildWatchSnapshot(WatchSnapshotInput i) {
     ..['unread'] = i.unread
     ..['members'] = <Map<String, dynamic>>[for (final Member m in members.take(kWatchMemberCap)) _member(i, m)]
     ..['alerts'] = <Map<String, dynamic>>[
-      for (final WatchAlert a in i.alerts.take(kWatchAlertCap))
+      for (final WatchAlert a in i.alerts.where((WatchAlert a) => !(hidePrivate && a.fromId.isNotEmpty && i.privateMemberIds.contains(a.fromId) && a.fromId != i.selfId)).take(kWatchAlertCap))
         <String, dynamic>{
           'id': a.id,
           'kind': a.kind,

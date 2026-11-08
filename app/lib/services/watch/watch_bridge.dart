@@ -258,6 +258,7 @@ class ServiceWatchContextSource implements WatchContextSource {
                 id: a.id,
                 kind: switch (a.kind) { AlertKind.sos => 'sos', AlertKind.help => 'help', _ => 'check_in' },
                 from: a.senderName,
+                fromId: a.userId,
                 at: a.createdAt,
                 note: a.note,
               ),

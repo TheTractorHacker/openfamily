@@ -55,7 +55,7 @@ WatchSnapshotInput _input({
       sharingPaused: true,
       pausedUntil: _now.add(const Duration(hours: 1)),
       unread: 3,
-      alerts: <WatchAlert>[WatchAlert(id: 'a1', kind: 'sos', from: 'Sam', at: _now, note: 'x' * 200)],
+      alerts: <WatchAlert>[WatchAlert(id: 'a1', kind: 'sos', from: 'Sam', fromId: 'u1', at: _now, note: 'x' * 200)],
       privateMemberIds: priv,
       showPrivate: showPrivate,
       lastCommand: last,
@@ -85,7 +85,7 @@ void main() {
       expect(me['you'], true);
       expect(me['initials'], 'MM');
       expect(me['lat'], 51.5);
-      expect(me['lon'], -0.12);
+      expect(me['lon'], -0.12001); // rounded to 5 decimals
       final Map<String, dynamic> sam = members[1] as Map<String, dynamic>;
       expect(sam['state'], 'driving');
       expect(sam['speedKmh'], 36);
@@ -141,8 +141,8 @@ void main() {
 
     test('an oversized snapshot drops members from the end until it fits', () {
       final Map<String, dynamic> s = buildWatchSnapshot(_input(members: <Member>[for (int i = 0; i < 10; i++) _m('u$i', 'P$i')]));
-      final String enc = encodeWatchSnapshot(s, maxBytes: 2500);
-      expect(utf8.encode(enc).length, lessThanOrEqualTo(2500));
+      final String enc = encodeWatchSnapshot(s, maxBytes: 1200);
+      expect(utf8.encode(enc).length, lessThanOrEqualTo(1200));
       final List<dynamic> kept = (jsonDecode(enc) as Map<String, dynamic>)['members'] as List<dynamic>;
       expect(kept.length, lessThan(10));
       expect(kept.first['id'], 'u0');
