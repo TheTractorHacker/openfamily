@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/tls"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -101,6 +102,8 @@ type Embedded struct {
 
 	mu     sync.Mutex
 	id     *identity
+
+	goneCount int // consecutive "key revoked" answers (Run loop only)
 	state  EmbeddedState
 	detail string
 	pass   bool
@@ -295,8 +298,8 @@ func (e *Embedded) Run(ctx context.Context) {
 }
 
 // replaceRevokedKey is the self-repair for a server key the API revoked behind our back (the
-// owner account's keys were reset, or an admin revoked it). The old files are moved into
-// archive/revoked-<time>/ (never deleted), a new key is made and the state goes back to
+// owner account's keys were reset, or an admin revoked it). Only the old key's public facts are kept in
+// archive/revoked-<time>/ (the seed, session and circle keys are removed), a new key is made and the state goes back to
 // "waiting for approval", so an admin phone is offered "Your server wants to join" again.
 func (e *Embedded) replaceRevokedKey() {
 	e.mu.Lock()
@@ -310,9 +313,21 @@ func (e *Embedded) replaceRevokedKey() {
 		e.log.Error("the server key was revoked but cannot be archived", "err", err)
 		return
 	}
+	// The revoked key is useless: keep only its public facts for diagnostics (no seed), and remove
+	// the session and circle keys instead of archiving them.
+	pub := old.f
+	pub.Secret = box{}
+	pubJSON, err := json.MarshalIndent(pub, "", "  ")
+	if err == nil {
+		err = os.WriteFile(filepath.Join(dir, fileIdentity), pubJSON, 0o600)
+	}
+	if err != nil {
+		e.log.Error("the server key was revoked but its public facts cannot be archived", "err", err)
+		return
+	}
 	for _, f := range []string{fileIdentity, fileSession, fileState, fileKeys} {
-		if err := os.Rename(filepath.Join(e.opt.Dir, f), filepath.Join(dir, f)); err != nil && !errors.Is(err, os.ErrNotExist) {
-			e.log.Error("the server key was revoked but its files cannot be archived", "file", f, "err", err)
+		if err := os.Remove(filepath.Join(e.opt.Dir, f)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			e.log.Error("the server key was revoked but its files cannot be removed", "file", f, "err", err)
 			return
 		}
 	}
@@ -351,9 +366,16 @@ func (e *Embedded) runOnce(ctx context.Context) int {
 		}
 		if err := ss.pin(ctx); err != nil {
 			if errors.Is(err, errServerKeyGone) {
-				e.replaceRevokedKey()
+				// Only after several answers in a row (about 90 s): one odd answer never replaces a key.
+				if e.goneCount++; e.goneCount >= 3 {
+					e.goneCount = 0
+					e.replaceRevokedKey()
+				} else {
+					e.log.Warn("the API says the server key is revoked; checking again before replacing it", "seen", e.goneCount)
+				}
 				return exitError
 			}
+			e.goneCount = 0
 			e.log.Warn("could not register the server key with the API yet", "err", err)
 			return exitError
 		}

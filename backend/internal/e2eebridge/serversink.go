@@ -86,7 +86,7 @@ func (s *serverSink) call(ctx context.Context, method, path string, body any, ou
 					_ = json.Unmarshal(data, out)
 				}
 				return status, nil
-			case status == 404 && strings.Contains(errText(data), "no active server key"):
+			case status == 404 && strings.Contains(errText(data), "server_key_revoked"):
 				return status, errServerKeyGone
 			case status == 401 || status == 404:
 				return status, errIngestAuth

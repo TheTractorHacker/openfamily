@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -17,7 +18,7 @@ import (
 func TestRevokedServerKeyIsReplaced(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
-		_, _ = w.Write([]byte(`{"error":"no active server key with that id"}`))
+		_, _ = w.Write([]byte(`{"code":"server_key_revoked","error":"no active server key with that id"}`))
 	}))
 	defer srv.Close()
 
@@ -50,7 +51,14 @@ func TestRevokedServerKeyIsReplaced(t *testing.T) {
 	if len(matches) != 1 {
 		t.Fatalf("old identity not archived: %v", matches)
 	}
-	if b, err := os.ReadFile(matches[0]); err != nil || len(b) == 0 {
+	b, err := os.ReadFile(matches[0])
+	if err != nil || len(b) == 0 {
 		t.Fatalf("archived identity unreadable: %v", err)
+	}
+	if strings.Contains(string(b), `"seed"`) || strings.Contains(string(b), `"ct"`) {
+		t.Fatalf("archive keeps secret material: %s", b)
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(matches[0]), fileKeys)); err == nil {
+		t.Fatal("circle keys were archived")
 	}
 }

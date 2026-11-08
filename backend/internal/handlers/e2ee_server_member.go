@@ -578,7 +578,11 @@ func (s *Server) E2EEPinServerDevice(w http.ResponseWriter, r *http.Request) {
 	var owner string
 	if err := s.Pool.QueryRow(ctx, `SELECT user_id::text FROM device_keys
 		WHERE device_id = $1 AND kind = 'server' AND revoked_at IS NULL`, req.DeviceID).Scan(&owner); err != nil {
-		writeError(w, http.StatusNotFound, "no active server key with that id")
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeE2EECode(w, http.StatusNotFound, "server_key_revoked", "no active server key with that id")
+		} else {
+			writeError(w, http.StatusInternalServerError, "failed to pin")
+		}
 		return
 	}
 	cur, err := s.pinnedServerDevice(ctx)
