@@ -43,13 +43,16 @@ import '../support/fake_processing_controller.dart';
 import '../support/fake_security_api.dart';
 import '../support/trip_report_fixtures.dart';
 
+/// The fixtures below (docsCircles, docsFamily, docsChat, ...) are shared with
+/// store_screenshots_test.dart, which renders the store listing images.
+///
 /// Renders real app screens (from the widget tree, with fake data) to PNGs for
 /// the user documentation. Skipped unless `DOCS_SCREENSHOTS=1`. Output goes to
 /// `$DOCS_OUT` (default `../docs/images/app`). See scripts/docs-screenshots-app.sh.
 final bool _on = Platform.environment['DOCS_SCREENSHOTS'] == '1';
 final String _out = Platform.environment['DOCS_OUT'] ?? '../docs/images/app';
 
-Future<void> _loadFonts() async {
+Future<void> loadDocsFonts() async {
   final String? root = Platform.environment['FLUTTER_ROOT'];
   if (root == null) return;
   final String dir = '$root/bin/cache/artifacts/material_fonts';
@@ -123,13 +126,13 @@ void _shoot(
   }, skip: !_on);
 }
 
-const String _circleName = 'The Rivera Family';
+const String docsCircleName = 'The Rivera Family';
 
-FakeCircleService _circles() => FakeCircleService()
+FakeCircleService docsCircles() => FakeCircleService()
   ..circles = <Circle>[
     const Circle(
       id: 'c1',
-      name: _circleName,
+      name: docsCircleName,
       role: 'admin',
       sharingEnabled: true,
       memberCount: 4,
@@ -157,7 +160,7 @@ FakeCircleService _circles() => FakeCircleService()
     const CircleMember(userId: 'u4', name: 'Mateo', role: 'member', sharingEnabled: false),
   ];
 
-Member _member(String id, String name, Color c, MemberStatus s, int battery,
+Member docsMember(String id, String name, Color c, MemberStatus s, int battery,
         String address,
         {MovementType movement = MovementType.none}) =>
     Member(
@@ -173,16 +176,16 @@ Member _member(String id, String name, Color c, MemberStatus s, int battery,
       avatarColor: c,
     );
 
-final List<Member> _family = <Member>[
-  _member('me', 'Maria', const Color(0xFF7C3AED), MemberStatus.normal, 82,
+final List<Member> docsFamily = <Member>[
+  docsMember('me', 'Maria', const Color(0xFF7C3AED), MemberStatus.normal, 82,
       '12 Oak Street',
       movement: MovementType.home),
-  _member('u2', 'Carlos', const Color(0xFF0284C7), MemberStatus.normal, 64,
+  docsMember('u2', 'Carlos', const Color(0xFF0284C7), MemberStatus.normal, 64,
       'Riverside Office Park',
       movement: MovementType.work),
-  _member('u3', 'Sofia', const Color(0xFFDB2777), MemberStatus.normal, 91,
+  docsMember('u3', 'Sofia', const Color(0xFFDB2777), MemberStatus.normal, 91,
       'Maple Elementary'),
-  _member('u4', 'Mateo', const Color(0xFF16A34A), MemberStatus.stopped, 0,
+  docsMember('u4', 'Mateo', const Color(0xFF16A34A), MemberStatus.stopped, 0,
       'Last seen at 12 Oak Street'),
 ];
 
@@ -230,9 +233,9 @@ List<ChatMessage> _conversation() {
   return out.reversed.toList();
 }
 
-Widget _chat() => ChatScreen(
+Widget docsChat() => ChatScreen(
       circleId: 'c1',
-      circleName: _circleName,
+      circleName: docsCircleName,
       service: _FakeChat(_conversation()),
       incoming: const Stream<ChatMessage>.empty(),
       edits: const Stream<ChatMessage>.empty(),
@@ -240,7 +243,7 @@ Widget _chat() => ChatScreen(
       reconnects: const Stream<void>.empty(),
     );
 
-Place _p(String id, String name, double lat, String type, String address) =>
+Place docsPlace(String id, String name, double lat, String type, String address) =>
     Place(
       id: id,
       name: name,
@@ -253,8 +256,8 @@ Place _p(String id, String name, double lat, String type, String address) =>
 
 Widget _drivingReport() => FamilyDrivingReportScreen(
       members: ValueNotifier<List<Member>>(<Member>[
-        _member('u1', 'Maria', const Color(0xFF7C3AED), MemberStatus.normal, 80, ''),
-        _member('u2', 'Carlos', const Color(0xFF0284C7), MemberStatus.normal, 80, ''),
+        docsMember('u1', 'Maria', const Color(0xFF7C3AED), MemberStatus.normal, 80, ''),
+        docsMember('u2', 'Carlos', const Color(0xFF0284C7), MemberStatus.normal, 80, ''),
       ]),
       userId: ValueNotifier<String?>(null),
       api: FakeTripReportApi(result: reportJson(twoMembers: true, speeding: 2)),
@@ -262,7 +265,7 @@ Widget _drivingReport() => FamilyDrivingReportScreen(
     );
 
 /// Four fictional members; Maria (you) lets the server help, the rest stay phone-only.
-ProcessingSnapshot _processing() {
+ProcessingSnapshot docsProcessing() {
   final ProcessingSnapshot b = FakeProcessingController.snapshot(
     lanes: <String, int>{pA: E2ee.lineServer, pB: E2ee.linePhone},
   );
@@ -294,7 +297,7 @@ ProcessingSnapshot _processing() {
 }
 
 void main() {
-  setUpAll(_loadFonts);
+  setUpAll(loadDocsFonts);
   setUp(() {
     SharedPreferences.setMockInitialValues(<String, Object>{
       'sos_intro_seen': true,
@@ -306,22 +309,22 @@ void main() {
   _shoot('login', () => const LoginScreen());
   _shoot('create-or-join', () => const CreateOrJoinCircleScreen());
   _shoot('create-circle', () => const CreateCircleScreen());
-  _shoot('invite', () => const InviteScreen(circleName: _circleName, step: 5));
+  _shoot('invite', () => const InviteScreen(circleName: docsCircleName, step: 5));
   _shoot('permissions', () => const PermissionsScreen());
-  _shoot('circles', () => CirclesScreen(service: _circles()));
-  _shoot('circles', () => CirclesScreen(service: _circles()), dark: true);
+  _shoot('circles', () => CirclesScreen(service: docsCircles()));
+  _shoot('circles', () => CirclesScreen(service: docsCircles()), dark: true);
   _shoot(
     'circle-detail',
     () => CircleDetailScreen(
-      circle: _circles().circles.first,
-      service: _circles(),
+      circle: docsCircles().circles.first,
+      service: docsCircles(),
     ),
   );
   _shoot(
     'people',
     () => PeopleScreen(
-      circleName: _circleName,
-      members: ValueNotifier<List<Member>>(_family),
+      circleName: docsCircleName,
+      members: ValueNotifier<List<Member>>(docsFamily),
     ),
   );
   _shoot('settings', () => const SettingsScreen());
@@ -343,13 +346,13 @@ void main() {
     () => ProcessingScreen(
       circle: const Circle(
         id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
-        name: _circleName,
+        name: docsCircleName,
         role: 'admin',
         sharingEnabled: true,
         memberCount: 4,
         e2eeMode: 'private',
       ),
-      controller: FakeProcessingController(_processing()),
+      controller: FakeProcessingController(docsProcessing()),
     ),
   );
   _shoot(
@@ -357,13 +360,13 @@ void main() {
     () => ProcessingPolicyScreen(
       circle: const Circle(
         id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
-        name: _circleName,
+        name: docsCircleName,
         role: 'admin',
         sharingEnabled: true,
         memberCount: 4,
         e2eeMode: 'private',
       ),
-      controller: FakeProcessingController(_processing()),
+      controller: FakeProcessingController(docsProcessing()),
     ),
   );
   _shoot('sos', () => SosScreen(smsConfigured: true, dialer: FakeDialer()));
@@ -371,22 +374,22 @@ void main() {
     'check-in',
     () => CheckInScreen(
       loadPlaces: () async => <Place>[
-        _p('a', 'Home', 0.001, 'home', '12 Oak Street'),
-        _p('b', 'Maple Elementary', 0.004, 'school', '400 Maple Avenue'),
+        docsPlace('a', 'Home', 0.001, 'home', '12 Oak Street'),
+        docsPlace('b', 'Maple Elementary', 0.004, 'school', '400 Maple Avenue'),
       ],
       loadPosition: () async => const LatLng(0, 0),
       send: (Map<String, dynamic> b) async => null,
     ),
   );
-  _shoot('chat', _chat);
-  _shoot('chat', _chat, dark: true);
+  _shoot('chat', docsChat);
+  _shoot('chat', docsChat, dark: true);
   _shoot(
     'places',
     () => PlacesScreen(
       loader: () async => PlacesSnapshot(places: <Place>[
-        _p('p1', 'Home', 37.78, 'home', '12 Oak Street'),
-        _p('p2', 'Maple Elementary', 37.79, 'school', '400 Maple Avenue'),
-        _p('p3', 'Grandma', 37.80, 'custom', '8 Pine Lane'),
+        docsPlace('p1', 'Home', 37.78, 'home', '12 Oak Street'),
+        docsPlace('p2', 'Maple Elementary', 37.79, 'school', '400 Maple Avenue'),
+        docsPlace('p3', 'Grandma', 37.80, 'custom', '8 Pine Lane'),
       ]),
     ),
   );

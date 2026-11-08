@@ -44,3 +44,6 @@ key.properties
 *.jks
 *.keystore
 app/android/release.jks
+
+# Store listing images and the upload bundle built by scripts/store-assets.sh
+dist/
