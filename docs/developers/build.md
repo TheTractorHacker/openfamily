@@ -12,6 +12,8 @@ Everything can run in Docker; nothing needs installing on the host.
 | Screenshots | `scripts/docs-screenshots.sh`, see [Screenshots](screenshots.md) |
 | Licences | `scripts/license-check.sh` (every dependency must be in [THIRD_PARTY_LICENSES](../THIRD_PARTY_LICENSES.md)) |
 
+Fast local APKs and targeted tests: `scripts/dev/apk-fast.sh`, `scripts/dev/test-fast.sh`; CI timings and caches: [Build and CI speed](build-speed.md).
+
 Android releases: [android-release.md](../android-release.md),
 [google-play-release.md](../google-play-release.md); iOS: [IOS_RELEASE.md](../design/IOS_RELEASE.md).
 Testing guides: [E2E lanes](../testing/E2E_LANES.md), [physical devices](../testing/PHYSICAL_DEVICES.md).

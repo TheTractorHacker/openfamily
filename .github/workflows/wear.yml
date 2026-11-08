@@ -38,6 +38,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 1
 
       - name: Derive version
         id: ver
@@ -73,9 +75,21 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      - name: Restore Gradle cache (written on main by android-cache.yml)
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: wear-gradle-${{ runner.os }}-${{ hashFiles('wear/**/*.gradle*', 'wear/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            wear-gradle-${{ runner.os }}-
+
       - name: Unit tests
         working-directory: wear
-        run: ./gradlew --no-daemon :app:testDebugUnitTest
+        # Before the signing material exists on disk. The Gradle daemon stays up
+        # for the build step below (no second JVM start / configuration).
+        run: ./gradlew --parallel :app:testDebugUnitTest
 
       - name: Configure Android signing
         id: sign
@@ -108,8 +122,9 @@ jobs:
       - name: Build release APK and AAB
         working-directory: wear
         run: |
-          ./gradlew --no-daemon :app:assembleRelease :app:bundleRelease \
+          ./gradlew --parallel :app:assembleRelease :app:bundleRelease \
             -PWEAR_VERSION_NAME='${{ steps.ver.outputs.name }}' -PWEAR_VERSION_CODE='${{ steps.ver.outputs.code }}'
+          ./gradlew --stop
 
       - name: Stage and checksum
         run: |
@@ -146,11 +161,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          # apk.yml creates the release (it also runs the app tests, so it is usually
-          # slower than this job). Never create it here: wait for it.
-          for i in $(seq 1 90); do
+          # apk.yml creates the release (its publish job waits for the app tests, so it is
+          # usually slower than this job; polling every 15 s so the attach lands seconds after). Never create it here: wait for it.
+          for i in $(seq 1 360); do
             if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then break; fi
-            echo "release $GITHUB_REF_NAME not there yet ($i/90), waiting"; sleep 60
+            echo "release $GITHUB_REF_NAME not there yet ($i/360), waiting"; sleep 15
           done
           gh release view "$GITHUB_REF_NAME" >/dev/null
           gh release upload "$GITHUB_REF_NAME" --clobber dist/*
