@@ -185,7 +185,7 @@ func TestAdminSystemChecksOnFreshDatabase(t *testing.T) {
 	if by["migrations"].Status != checkOK {
 		t.Errorf("migrations on a freshly migrated DB: %+v", by["migrations"])
 	}
-	if by["backup"].Status != checkFail || !strings.Contains(by["backup"].Summary, "never") {
+	if by["backup"].Status != checkFail || !strings.Contains(by["backup"].Summary, "ever been recorded") {
 		t.Errorf("no backup recorded must be a failure: %+v", by["backup"])
 	}
 	if by["server_key"].Status != checkInfo {
