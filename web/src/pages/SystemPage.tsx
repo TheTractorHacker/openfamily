@@ -1,28 +1,73 @@
-// System health — migration version, database size, last backup, release
-// version and recent server warnings/errors. Read-only; no secrets.
+// System health — a checklist of OK / Warning / Problem rows, each with a plain
+// fix hint, then the backups card and the recent warnings and errors.
+// Read-only apart from the backup buttons; no secrets are shown.
 
 import React from 'react'
-import { getAdminHealth } from '../lib/api'
-import { isAccessDenied, useAsync } from '../lib/useAsync'
-import { AccessDenied, Badge, Button, Card, EmptyState, ErrorState, Spinner } from '../components/primitives'
-import { Alert, CopyCommand, KeyValueList, PageHeader, Section } from '../components/patterns'
-import { formatBytes, formatRelativeTime } from '../lib/format'
+import { ApiError, getAdminHealth, getSystemChecks } from '../lib/api'
+import type { AdminHealth, CheckStatus, SystemCheck, SystemChecks } from '../lib/types'
+import { isAccessDenied } from '../lib/useAsync'
+import { AccessDenied, Badge, Button, Card, EmptyState, ErrorState } from '../components/primitives'
+import { Alert, PageHeader, Section } from '../components/patterns'
+import { formatRelativeTime } from '../lib/format'
+import { browserSkewSeconds, groupChecks, overallBanner, STATUS_LABEL, STATUS_TONE } from '../lib/systemChecks'
 import { BackupsCard } from './BackupsCard'
-import { destinationLabel, splitWarning } from '../lib/backups'
 import './pages.css'
 import './SystemPage.css'
 
-const BACKUP_TONE = { ok: 'green', stale: 'orange', missing: 'red' } as const
-const BACKUP_TEXT = { ok: 'Recent', stale: 'Overdue', missing: 'No backup recorded' } as const
+const AUTO_MS = 30_000
+
+interface Loaded {
+  checks: SystemChecks
+  health: AdminHealth | null
+  at: Date
+}
+
+function scrollToId(id: string) {
+  document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
 
 export function SystemPage() {
-  const q = useAsync(getAdminHealth, [])
-  const [updatedAt, setUpdatedAt] = React.useState<Date | null>(null)
-  React.useEffect(() => {
-    if (q.data) setUpdatedAt(new Date())
-  }, [q.data])
+  const [data, setData] = React.useState<Loaded | null>(null)
+  const [error, setError] = React.useState<{ status: number; message: string } | null>(null)
+  const [loading, setLoading] = React.useState(true)
+  const [auto, setAuto] = React.useState(false)
+  const inflight = React.useRef(false)
 
-  if (isAccessDenied(q.error)) {
+  const load = React.useCallback(async () => {
+    if (inflight.current) return
+    inflight.current = true
+    setLoading(true)
+    try {
+      const [checks, health] = await Promise.all([
+        getSystemChecks(),
+        // The error list is secondary: a failure here must not hide the checklist.
+        getAdminHealth().catch(() => null),
+      ])
+      setData({ checks, health, at: new Date() })
+      setError(null)
+    } catch (e) {
+      setError(
+        e instanceof ApiError
+          ? { status: e.status, message: e.message }
+          : { status: 0, message: e instanceof Error ? e.message : 'Could not load system health.' },
+      )
+    } finally {
+      inflight.current = false
+      setLoading(false)
+    }
+  }, [])
+
+  React.useEffect(() => {
+    void load()
+  }, [load])
+
+  React.useEffect(() => {
+    if (!auto) return
+    const t = window.setInterval(() => void load(), AUTO_MS)
+    return () => window.clearInterval(t)
+  }, [auto, load])
+
+  if (isAccessDenied(error)) {
     return (
       <div className="wb-page">
         <AccessDenied />
@@ -30,112 +75,169 @@ export function SystemPage() {
     )
   }
 
-  const refreshing = q.loading && !!q.data
-  const h = q.data
+  const refreshing = loading && !!data
 
   return (
     <div className="wb-page">
       <PageHeader
         title="System health"
-        subtitle="The server's state at a glance."
+        subtitle="Is the server healthy? Each row says what is checked and how to fix it."
         actions={
-          <>
-            {updatedAt && <span className="wb-sys-updated">Updated {updatedAt.toLocaleTimeString()}</span>}
-            <Button variant="secondary" size="sm" onClick={q.refetch} loading={refreshing} aria-label="Refresh system health">
+          <div className="wb-sys-tools">
+            {data && <span className="wb-sys-updated">Updated {data.at.toLocaleTimeString()}</span>}
+            <label className="wb-sys-auto">
+              <input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} />
+              Auto-refresh (30 s)
+            </label>
+            <Button variant="secondary" size="sm" onClick={() => void load()} loading={refreshing} aria-label="Refresh system health">
               {refreshing ? 'Refreshing' : 'Refresh'}
             </Button>
-          </>
+          </div>
         }
       />
 
-      {q.loading && !h ? (
-        <div className="wb-page-loading">
-          <Spinner /> Loading…
-        </div>
-      ) : q.error ? (
-        <ErrorState title="Couldn’t load system health" description={q.error.message} onRetry={q.refetch} />
-      ) : h ? (
+      {loading && !data && !error ? (
+        <SystemSkeleton />
+      ) : error && !data ? (
+        <ErrorState title="Couldn’t load system health" description={error.message} onRetry={() => void load()} />
+      ) : data ? (
         <>
-          {h.warnings.length > 0 && (
-            <div className="wb-alert-stack">
-              {h.warnings.map((w) => {
-                const { message, command } = splitWarning(w)
-                return (
-                  <Alert
-                    key={w}
-                    tone="danger"
-                    title="Needs attention"
-                    action={command ? <CopyCommand command={command} /> : undefined}
-                  >
-                    {message}
-                  </Alert>
-                )
-              })}
-            </div>
+          {error && (
+            <Alert tone="warning" title="Couldn’t refresh">
+              {error.message} Showing the information from {data.at.toLocaleTimeString()}.
+            </Alert>
           )}
-
-          <Section title="Server">
-            <Card>
-              <KeyValueList
-                label="Server facts"
-                items={[
-                  { label: 'Release', value: h.release_version || 'dev', mono: true },
-                  {
-                    label: 'Database migration',
-                    value: (
-                      <>
-                        <span>{String(h.migration.version)}</span>
-                        {h.migration.dirty && <Badge tone="red">not clean</Badge>}
-                      </>
-                    ),
-                    mono: true,
-                  },
-                  { label: 'Database size', value: formatBytes(h.database_bytes), mono: true },
-                  {
-                    label: 'Last backup',
-                    value: (
-                      <>
-                        <Badge tone={BACKUP_TONE[h.backup.status]} dot>
-                          {BACKUP_TEXT[h.backup.status]}
-                        </Badge>
-                        {h.backup.last_at && (
-                          <span className="wb-kv-note" title={new Date(h.backup.last_at).toLocaleString()}>
-                            {formatRelativeTime(h.backup.last_at)}
-                            {h.backup.destination ? ` · ${destinationLabel(h.backup.destination)}` : ''}
-                            {h.backup.size_bytes != null ? ` · ${formatBytes(h.backup.size_bytes)}` : ''}
-                          </span>
-                        )}
-                      </>
-                    ),
-                  },
-                ]}
-              />
-            </Card>
-          </Section>
-
-          <BackupsCard onChanged={q.refetch} />
-
-          <Section title="Recent warnings and errors" description="Since the server last started.">
-            {h.recent_errors.length === 0 ? (
-              <EmptyState title="Nothing to report" description="No warnings or errors since the server started." />
-            ) : (
-              <Card padded={false}>
-                <ul className="wb-sys-log">
-                  {h.recent_errors.map((e, i) => (
-                    <li key={`${e.time}-${i}`} className="wb-sys-log-row">
-                      <Badge tone={e.level === 'ERROR' ? 'red' : 'orange'}>{e.level.toLowerCase()}</Badge>
-                      <span className="wb-sys-log-msg">{e.message}</span>
-                      <span className="wb-sys-log-time" title={new Date(e.time).toLocaleString()}>
-                        {formatRelativeTime(e.time)}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              </Card>
-            )}
-          </Section>
+          <Checklist checks={data.checks} />
+          <div id="backups">
+            <BackupsCard onChanged={() => void load()} />
+          </div>
+          <div id="recent-errors">
+            <RecentErrors health={data.health} />
+          </div>
         </>
       ) : null}
     </div>
+  )
+}
+
+function SystemSkeleton() {
+  return (
+    <div className="wb-sys-skeleton" aria-busy="true" aria-label="Loading system health">
+      <div className="wb-skeleton" style={{ height: 64 }} />
+      {[0, 1, 2].map((i) => (
+        <div key={i} className="wb-sys-skel-card">
+          <div className="wb-skeleton" style={{ height: 14, width: 120 }} />
+          <div className="wb-skeleton wb-skeleton-row" />
+          <div className="wb-skeleton wb-skeleton-row" />
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function Checklist({ checks }: { checks: SystemChecks }) {
+  const list: SystemCheck[] = [...checks.checks]
+  // The browser knows its own clock; the server cannot. Flag a big gap.
+  const skew = browserSkewSeconds(checks.generated_at, Date.now())
+  const counts = { ...checks.counts }
+  if (Math.abs(skew) > 120) {
+    list.push({
+      id: 'browser_clock',
+      group: 'Server',
+      title: 'Clock (this computer)',
+      status: 'warn',
+      summary: `This computer’s clock is ${Math.abs(skew)} seconds ${skew > 0 ? 'ahead of' : 'behind'} the server.`,
+      hint: 'Check the time on the computer you are using. If the server is wrong instead, turn on automatic time on its host.',
+    })
+    counts.warn = (counts.warn ?? 0) + 1
+  }
+  const banner = overallBanner(counts)
+  const groups = groupChecks(list)
+  return (
+    <>
+      <Alert tone={banner.tone} title={banner.title}>
+        {banner.text}
+      </Alert>
+      <div className="wb-sys-counts" aria-label="Summary of checks">
+        {(['fail', 'warn', 'ok', 'info'] as CheckStatus[]).map((s) => (
+          <Badge key={s} tone={STATUS_TONE[s]} dot>
+            {counts[s] ?? 0} {STATUS_LABEL[s].toLowerCase()}
+          </Badge>
+        ))}
+      </div>
+      {groups.map((g) => (
+        <Section key={g.group} title={g.group}>
+          <Card padded={false}>
+            <ul className="wb-sys-checks">
+              {g.checks.map((c) => (
+                <CheckRow key={c.id} c={c} />
+              ))}
+            </ul>
+          </Card>
+        </Section>
+      ))}
+    </>
+  )
+}
+
+function CheckRow({ c }: { c: SystemCheck }) {
+  const needsFix = (c.status === 'fail' || c.status === 'warn') && c.hint
+  return (
+    <li className={`wb-sys-check wb-sys-check-${c.status}`}>
+      <div className="wb-sys-check-status">
+        <Badge tone={STATUS_TONE[c.status]} dot>
+          {STATUS_LABEL[c.status]}
+        </Badge>
+      </div>
+      <div className="wb-sys-check-body">
+        <div className="wb-sys-check-title">{c.title}</div>
+        <div className="wb-sys-check-summary">{c.summary}</div>
+        {needsFix && (
+          <div className="wb-sys-check-hint">
+            <strong>How to fix:</strong> {c.hint}
+          </div>
+        )}
+        {!needsFix && c.status === 'info' && c.hint && <div className="wb-sys-check-hint wb-sys-check-hint-soft">{c.hint}</div>}
+        {c.link && (
+          <div className="wb-sys-check-link">
+            {c.link.startsWith('#') ? (
+              <button type="button" className="wb-sys-linkbtn" onClick={() => scrollToId(c.link!.slice(1))}>
+                {c.link_label || 'Details'}
+              </button>
+            ) : (
+              <a href={c.link} target="_blank" rel="noreferrer">
+                {c.link_label || 'Learn more'}
+              </a>
+            )}
+          </div>
+        )}
+      </div>
+    </li>
+  )
+}
+
+function RecentErrors({ health }: { health: AdminHealth | null }) {
+  return (
+    <Section title="Recent warnings and errors" description="Since the server last started. Only short messages are kept; no personal data.">
+      {!health ? (
+        <EmptyState title="Couldn’t load the list" description="The checklist above is still accurate. Press Refresh to try again." />
+      ) : health.recent_errors.length === 0 ? (
+        <EmptyState title="Nothing to report" description="No warnings or errors since the server started." />
+      ) : (
+        <Card padded={false}>
+          <ul className="wb-sys-log">
+            {health.recent_errors.map((e, i) => (
+              <li key={`${e.time}-${i}`} className="wb-sys-log-row">
+                <Badge tone={e.level === 'ERROR' ? 'red' : 'orange'}>{e.level.toLowerCase()}</Badge>
+                <span className="wb-sys-log-msg">{e.message}</span>
+                <span className="wb-sys-log-time" title={new Date(e.time).toLocaleString()}>
+                  {formatRelativeTime(e.time)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
+    </Section>
   )
 }

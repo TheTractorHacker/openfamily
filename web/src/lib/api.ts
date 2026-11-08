@@ -33,6 +33,8 @@ import type {
   BackupSettingsResponse,
   BackupSettingsSubmit,
   AdminHealth,
+  AdminBuilds,
+  SystemChecks,
   AdminAlertPage,
   MapStyleSettings,
   AdminShareLink,
@@ -938,6 +940,16 @@ export function getDocImage(path: string): Promise<Blob> {
   return request<Blob>(`/api/docs/${path.split('/').map(encodeURIComponent).join('/')}`, { binary: true })
 }
 
+// ---- Builds page and System checklist ----
+
+export function getAdminBuilds(refresh = false): Promise<AdminBuilds> {
+  return request<AdminBuilds>(`/api/admin/builds${refresh ? '?refresh=1' : ''}`)
+}
+
+export function getSystemChecks(): Promise<SystemChecks> {
+  return request<SystemChecks>('/api/admin/system/checks')
+}
+
 // ---- Admin hygiene (platform admin) ----
 
 export interface StaleDevicesResult {
@@ -973,24 +985,6 @@ export function getSecuritySettings(): Promise<{ settings: SecuritySettings; def
 
 export function putSecuritySettings(s: SecuritySettings): Promise<{ settings: SecuritySettings }> {
   return request('/api/admin/settings/security', { method: 'PUT', body: s })
-}
-
-// ---- Builds overview (platform admin) ----
-
-export interface BuildAsset { kind: 'apk' | 'aab' | 'ipa'; name: string; size: number; sha256?: string }
-export interface BuildsOverview {
-  latest: { tag_name: string; name?: string; body?: string; html_url?: string; published_at?: string }
-  assets: BuildAsset[]
-  older: { tag_name: string; html_url?: string; published_at?: string; assets: BuildAsset[] }[]
-}
-
-export function getBuildsOverview(): Promise<{ configured: boolean; error?: string; overview?: BuildsOverview }> {
-  return request('/api/admin/builds')
-}
-
-/** Downloads the unsigned iOS build (.ipa) of the latest release. */
-export function downloadIpa(): Promise<Blob> {
-  return request<Blob>('/api/admin/ipa', { binary: true })
 }
 
 // ---- Member defaults (platform admin; endpoint may not exist on older servers) ----

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"sync"
 
+	"github.com/TheTractorHacker/openfamily/backend/internal/apkrelease"
 	"github.com/TheTractorHacker/openfamily/backend/internal/auth"
 	"github.com/TheTractorHacker/openfamily/backend/internal/geocode"
 	"github.com/TheTractorHacker/openfamily/backend/internal/push"
@@ -152,6 +153,9 @@ type Server struct {
 
 	// apk tracks the platform APK build job state (at most one concurrent build).
 	apk apkManager
+
+	// releases caches the GitHub release listing for the admin Builds page.
+	releases apkrelease.Lister
 
 	// viewAudit throttles repeated identical platform-admin location-view
 	// audit rows. Nil writes every row.

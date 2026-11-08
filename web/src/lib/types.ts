@@ -620,3 +620,66 @@ export interface AdminCompat {
   users_total: number
   users_with_version: number
 }
+
+// ---- Builds page and System checklist (admin) ----
+
+export type BuildAssetKind =
+  | 'android_apk'
+  | 'android_aab'
+  | 'wear_apk'
+  | 'ios_ipa'
+  | 'sbom'
+  | 'checksums'
+  | 'other'
+
+export interface BuildAsset {
+  name: string
+  kind: BuildAssetKind
+  abi?: string
+  version?: string
+  size: number
+  sha256?: string
+  download_url?: string
+  updated_at?: string
+}
+
+export interface BuildRelease {
+  tag_name: string
+  name?: string
+  html_url?: string
+  published_at?: string
+  prerelease?: boolean
+  assets: BuildAsset[]
+}
+
+export interface AdminBuilds {
+  configured: boolean
+  repo?: string
+  releases: BuildRelease[]
+  fetched_at?: string
+  stale?: boolean
+  error?: string
+  public_apk: string
+  public_ipa: string
+}
+
+export type CheckStatus = 'ok' | 'warn' | 'fail' | 'info'
+
+export interface SystemCheck {
+  id: string
+  group: string
+  title: string
+  status: CheckStatus
+  summary: string
+  hint?: string
+  link?: string
+  link_label?: string
+}
+
+export interface SystemChecks {
+  generated_at: string
+  checks: SystemCheck[]
+  counts: Record<CheckStatus, number>
+  errors_24h: { errors: number; warnings: number }
+  ws_clients: number
+}
