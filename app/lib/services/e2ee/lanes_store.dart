@@ -216,6 +216,18 @@ class LaneStore {
     }
   }
 
+  // ---- auto-apply record (section 23). Deliberately NOT cleared with the circle facts: an opt-out stays sticky.
+  String _auto(String c) => 'lanes/auto/$c';
+
+  Future<AutoApplyRecord?> autoRecord(String circleId) async => AutoApplyRecord.fromJson(await _json(_auto(circleId)));
+  Future<void> setAutoRecord(String circleId, AutoApplyRecord r) => kv.set(_auto(circleId), jsonEncode(r.toJson()));
+
+  /// Circles with a notice the member has not dismissed yet ("Your circle uses the server...").
+  Future<void> dismissAutoNotice(String circleId) async {
+    final AutoApplyRecord? r = await autoRecord(circleId);
+    if (r != null && !r.dismissed) await setAutoRecord(circleId, r.copyWith(dismissed: true));
+  }
+
   /// Forgets every stored lane fact of a circle (no longer private / left).
   Future<void> clearCircle(String circleId) async {
     // The pref history of every member we know of goes too (it names who chose what).
@@ -228,6 +240,30 @@ class LaneStore {
       await kv.remove(k);
     }
     await _bumpVer(circleId);
+  }
+}
+
+/// What this phone did on its own for the member in one circle (section 23).
+class AutoApplyRecord {
+  const AutoApplyRecord({required this.state, required this.atMs, this.dismissed = false});
+
+  /// 'applied': this phone signed the server lane by itself. 'declined': the member kept their data on the phone (sticky).
+  final String state;
+  final int atMs;
+
+  /// The in-app notice was dismissed.
+  final bool dismissed;
+
+  bool get applied => state == 'applied';
+  bool get declined => state == 'declined';
+
+  AutoApplyRecord copyWith({String? state, bool? dismissed}) => AutoApplyRecord(state: state ?? this.state, atMs: atMs, dismissed: dismissed ?? this.dismissed);
+  Map<String, dynamic> toJson() => <String, dynamic>{'s': state, 'at': atMs, 'd': dismissed};
+  static AutoApplyRecord? fromJson(Map<String, dynamic>? j) {
+    if (j == null) return null;
+    final Object? s = j['s'];
+    if (s != 'applied' && s != 'declined') return null;
+    return AutoApplyRecord(state: s as String, atMs: (j['at'] as num?)?.toInt() ?? 0, dismissed: j['d'] == true);
   }
 }
 

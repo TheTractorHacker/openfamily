@@ -205,6 +205,9 @@ func (s *Server) E2EEServerDevice(w http.ResponseWriter, r *http.Request) {
 	out["profile_effective"] = effective
 	out["data_at_rest_key"] = atrest.Enabled()
 	out["recommended_lane"] = "phone"
+	// Member defaults (section 23): read-only advice. The app's own phone signs; the server never does.
+	md := s.memberDefaults(r.Context())
+	out["member_defaults"] = map[string]any{"default_lane": md.DefaultLane, "auto_apply": md.AutoApply}
 	out["builtin"] = s.ServerDevice != nil
 	if s.ServerDevice != nil {
 		out["builtin_state"] = s.ServerDevice.Info().State

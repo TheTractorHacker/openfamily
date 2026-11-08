@@ -10,6 +10,7 @@ import '../services/e2ee/processing_controller.dart';
 import '../theme/app_theme.dart';
 import '../widgets/ds/ds.dart';
 import '../widgets/processing_widgets.dart';
+import '../widgets/server_prompts.dart' show remindMessageText;
 import 'legacy_upgrade_screen.dart';
 import 'processing_policy_screen.dart';
 import 'security_widgets.dart';
@@ -156,6 +157,36 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
 
   // ------------------------------------------------------------------ build
 
+  /// Circle admin: who is not on the server yet and the message to send them (section 23). Nothing here switches anyone.
+  List<Widget> _notYetOnServer(ProcessingSnapshot s) {
+    final List<ProcessingMember> rest = <ProcessingMember>[for (final ProcessingMember m in s.members) if (!m.serverAssisted) m];
+    return <Widget>[
+      const DsSectionHeader('Members not yet on the server', padding: EdgeInsets.fromLTRB(0, AppSpace.xl, 0, AppSpace.xs)),
+      DsRowGroup(children: <Widget>[
+        for (final ProcessingMember m in rest)
+          DsListRow(
+            key: Key('not-on-server-${m.userId}'),
+            leading: DsListRow.iconTile(context, Icons.person_outline),
+            title: m.isMe ? '${m.name} (you)' : m.name,
+            subtitle: s.notReady.contains(m.name)
+                ? 'Needs to update the app first'
+                : (m.verified ? 'Chose to keep data on their phone. Nobody can change that for them.' : 'No choice yet. Asked on their next app open.'),
+          ),
+      ]),
+      const SizedBox(height: AppSpace.sm),
+      const Text('Message to send them:', style: AppType.secondary),
+      const SelectableText(remindMessageText, key: Key('remind-message')),
+      const SizedBox(height: AppSpace.xs),
+      DsPillButton(
+        key: const Key('remind-copy'),
+        label: 'Copy message',
+        style: DsPillStyle.outlined,
+        icon: Icons.copy,
+        onPressed: () => Clipboard.setData(const ClipboardData(text: remindMessageText)),
+      ),
+    ];
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -291,6 +322,7 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
                           : LaneChip(server: m.serverAssisted)),
                 ),
             ]),
+            if (s.iAmAdmin && s.assistOn && !s.legacy && s.members.any((ProcessingMember m) => !m.serverAssisted)) ..._notYetOnServer(s),
             if (s.viewers.isNotEmpty && !s.legacy) ...<Widget>[
               const DsSectionHeader('Viewers and bridges', padding: EdgeInsets.fromLTRB(0, AppSpace.xl, 0, AppSpace.xs)),
               DsRowGroup(children: <Widget>[

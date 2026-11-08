@@ -217,6 +217,11 @@ class _JoinCircleScreenState extends State<JoinCircleScreen> {
       text = 'Private circle. Server processing: required. To take part you must give your own consent on your phone to let the '
           'server read your location, trips and driving data, otherwise you cannot share with this circle. Anyone who runs or backs '
           'up this server can read the data of members who allow it.';
+    } else if (p.autoApply) {
+      text = 'This circle uses the server by default; you can opt out. When you open the app after joining, your phone turns on '
+          'server processing for you, so maps, history and driving reports work, and you see a notice. One tap on "Keep on my phone" '
+          'switches it off and deletes what the server holds of yours. Anyone who runs or backs up this server can read the data of '
+          'members who use it.';
     } else {
       text = 'Private circle. Server processing: on, you choose. After joining you decide for your own data; '
           '"${p.defaultServer ? 'Server processing' : 'Phone only'}" is suggested, but nothing is shared with the server unless you confirm it. '

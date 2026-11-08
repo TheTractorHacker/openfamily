@@ -1105,6 +1105,31 @@ class PrivateRuntime {
     }
   }
 
+  /// Bumped when this phone signed the server lane on its own (section 23), so the notice card appears.
+  static final ValueNotifier<int> autoApplied = ValueNotifier<int>(0);
+
+  /// "Members are on the server by default": for every Private circle where the admin's setting says so, this
+  /// member's OWN phone signs the server lane once (never over an earlier choice). Offline or an older server: nothing happens.
+  Future<void> _autoApplyAll(Set<String> privs) async {
+    if (privs.isEmpty) return;
+    bool auto = false;
+    try {
+      auto = (await api.serverProfile()).autoApply;
+    } catch (_) {}
+    if (!auto) return;
+    await _declareCaps(); // the server only accepts a lane pref from a phone that declared it can read the server line
+    for (final String id in privs) {
+      try {
+        if (await lanesService.autoApplyIfDue(id, autoApply: true) == AutoApplyOutcome.applied) {
+          autoApplied.value++;
+          unawaited(lanesService.maintain(id).catchError((Object _) => lanesService.refresh(id)));
+        }
+      } catch (_) {
+        // offline or an older server: tried again at the next open
+      }
+    }
+  }
+
   Future<void> _retryOptOuts() async {
     try {
       for (final String c in await privateCircles()) {
@@ -1142,6 +1167,9 @@ class PrivateRuntime {
       } catch (_) {
         // offline or an older server: the last verified lane facts stay in force
       }
+    }
+    await _autoApplyAll(privs);
+    for (final String id in privs) {
       try {
         await catchUp(id);
       } catch (_) {

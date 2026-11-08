@@ -35,6 +35,26 @@ Future<void> tapKey(WidgetTester t, String k) async {
 }
 
 void main() {
+  group('ProcessingScreen: members not yet on the server', () {
+    testWidgets('a circle admin sees who is missing and the message to send; nobody is switched', (t) async {
+      final FakeProcessingController c = FakeProcessingController(FakeProcessingController.snapshot(
+          lanes: const <String, int>{pA: E2ee.lineServer, pB: E2ee.linePhone}, unverified: const <String>{pB}));
+      await pumpScreen(t, ProcessingScreen(circle: adminCircle, controller: c), size: const Size(390, 6000));
+      expect(txt('MEMBERS NOT YET ON THE SERVER'), findsOneWidget);
+      expect(find.byKey(Key('not-on-server-$pB')), findsOneWidget);
+      expect(find.byKey(Key('not-on-server-$pA')), findsNothing);
+      expect(txt('Asked on their next app open'), findsOneWidget);
+      expect(txt('Please open the Orbitly app once'), findsOneWidget);
+      expect(c.calls.where((String x) => x.startsWith('lane') || x.startsWith('policy')), isEmpty);
+    });
+
+    testWidgets('ordinary members do not get the list', (t) async {
+      final FakeProcessingController c = FakeProcessingController(FakeProcessingController.snapshot(me: pB, admin: false), me: pB);
+      await pumpScreen(t, ProcessingScreen(circle: memberCircle, controller: c));
+      expect(txt('MEMBERS NOT YET ON THE SERVER'), findsNothing);
+    });
+  });
+
   group('ProcessingScreen: a member', () {
     testWidgets('sees the setting read-only with the reason, and decides for their own data', (t) async {
       final FakeProcessingController c = FakeProcessingController(FakeProcessingController.snapshot(me: pB, admin: false), me: pB);
