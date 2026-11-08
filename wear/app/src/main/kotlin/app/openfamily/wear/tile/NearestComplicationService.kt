@@ -7,6 +7,8 @@ import androidx.wear.watchface.complications.data.PlainComplicationText
 import androidx.wear.watchface.complications.data.ShortTextComplicationData
 import androidx.wear.watchface.complications.datasource.ComplicationRequest
 import androidx.wear.watchface.complications.datasource.SuspendingComplicationDataSourceService
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import app.openfamily.wear.data.LastLocation
 import app.openfamily.wear.data.Snapshot
 import app.openfamily.wear.data.SnapshotRepository
@@ -24,7 +26,10 @@ class NearestComplicationService : SuspendingComplicationDataSourceService() {
         else -> null
     }
 
-    override suspend fun onComplicationRequest(request: ComplicationRequest): ComplicationData? {
+    override suspend fun onComplicationRequest(request: ComplicationRequest): ComplicationData? =
+        withContext(Dispatchers.Default) { build(request) } // first call reads disk and parses JSON
+
+    private fun build(request: ComplicationRequest): ComplicationData? {
         SnapshotRepository.restore(this)
         val s = SnapshotRepository.snapshot.value
         val now = System.currentTimeMillis()

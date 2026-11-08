@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -80,29 +81,32 @@ private fun MenuChip(label: String, secondary: String? = null, badge: String? = 
 fun HomeScreen(vm: WearViewModel, go: (String) -> Unit) {
     val s by vm.snapshot.collectAsState()
     val connected by vm.phoneConnected.collectAsState()
+    val restored by vm.restored.collectAsState()
     val ambient = LocalAmbient.current
     val snap = s
     ScreenList {
-        item { LinkBanner(snap, connected, now()) }
+        // The stored copy is still being read (background): show nothing rather than a wrong "sign in".
+        if (snap == null && !restored) return@ScreenList
+        item(key = "link") { LinkBanner(snap, connected, now()) }
         if (snap == null || !snap.signedIn) {
-            item { Text("Sign in on your phone, then open Orbitly there.", textAlign = TextAlign.Center, style = MaterialTheme.typography.body2) }
+            item(key = "signin") { Text("Sign in on your phone, then open Orbitly there.", textAlign = TextAlign.Center, style = MaterialTheme.typography.body2) }
             return@ScreenList
         }
         if (ambient) {
             val nearest = Presenter.nearest(snap, vm.here.value)
-            item {
+            item(key = "ambient") {
                 Text(nearest?.name ?: "Nobody yet", style = MaterialTheme.typography.title2, textAlign = TextAlign.Center)
                 if (nearest != null) Text(Presenter.subtitle(nearest, now()), textAlign = TextAlign.Center, style = MaterialTheme.typography.body2)
             }
             return@ScreenList
         }
-        item { MenuChip("People", "${snap.members.size} in ${snap.scope.name.ifEmpty { "your circles" }}", "●") { go("people") } }
-        item { MenuChip("I'm OK", "Tell your circle", "✓") { go("checkin") } }
-        item { MenuChip("SOS", "Hold to send", "!", danger = true) { go("sos") } }
-        item { MenuChip(Presenter.sharingLabel(snap), if (snap.sharing == Snapshot.Sharing.Paused) "Tap to resume" else "Tap to pause", "◉") { go("sharing") } }
-        item { MenuChip("Chat", if (snap.unread > 0) "${snap.unread} new" else "Quick replies", if (snap.unread > 0) "${snap.unread}" else "✉") { go("chat") } }
+        item(key = "people") { MenuChip("People", "${snap.members.size} in ${snap.scope.name.ifEmpty { "your circles" }}", "●") { go("people") } }
+        item(key = "checkin") { MenuChip("I'm OK", "Tell your circle", "✓") { go("checkin") } }
+        item(key = "sos") { MenuChip("SOS", "Hold to send", "!", danger = true) { go("sos") } }
+        item(key = "sharing") { MenuChip(Presenter.sharingLabel(snap), if (snap.sharing == Snapshot.Sharing.Paused) "Tap to resume" else "Tap to pause", "◉") { go("sharing") } }
+        item(key = "chat") { MenuChip("Chat", if (snap.unread > 0) "${snap.unread} new" else "Quick replies", if (snap.unread > 0) "${snap.unread}" else "✉") { go("chat") } }
         val active = snap.alerts.count { it.active }
-        item { MenuChip("Alerts", if (active > 0) "$active active" else "None right now", if (active > 0) "$active" else "△", danger = active > 0) { go("alerts") } }
+        item(key = "alerts") { MenuChip("Alerts", if (active > 0) "$active active" else "None right now", if (active > 0) "$active" else "△", danger = active > 0) { go("alerts") } }
     }
 }
 
@@ -110,18 +114,18 @@ fun HomeScreen(vm: WearViewModel, go: (String) -> Unit) {
 fun PeopleScreen(vm: WearViewModel, open: (String) -> Unit) {
     val s by vm.snapshot.collectAsState()
     val here by vm.here.collectAsState()
-    val rows = s?.let { Presenter.rows(it, now(), here) }.orEmpty()
+    val rows = remember(s, here) { s?.let { Presenter.rows(it, now(), here) }.orEmpty() }
+    val ambient = LocalAmbient.current
     ScreenList(title = "People") {
         if (rows.isEmpty()) item { Text("No one to show yet.", textAlign = TextAlign.Center) }
-        items(rows.size) { i ->
-            val r = rows[i]
+        items(rows, key = { it.id }) { r ->
             Chip(
                 onClick = { open(r.id) },
                 modifier = Modifier.fillMaxWidth(),
                 icon = { Avatar(r.initials, r.color) },
                 label = { Text(r.name, maxLines = 1) },
-                secondaryLabel = { Text(listOf(r.subtitle, r.battery).filter { it.isNotEmpty() }.joinToString(" · "), maxLines = 2) },
-                colors = if (LocalAmbient.current) ChipDefaults.outlinedChipColors() else ChipDefaults.secondaryChipColors(),
+                secondaryLabel = { Text(r.detail, maxLines = 2) },
+                colors = if (ambient) ChipDefaults.outlinedChipColors() else ChipDefaults.secondaryChipColors(),
             )
         }
     }
@@ -182,7 +186,9 @@ fun CompassScreen(vm: WearViewModel, id: String) {
     val here by vm.here.collectAsState()
     val m = s?.members?.firstOrNull { it.id == id }
     val ambient = LocalAmbient.current
-    val heading by rememberHeading(enabled = !ambient)
+    val headingState = rememberHeading(enabled = !ambient)
+    // Only the arrow's draw step reads the changing heading; the list is not recomposed 5 times a second.
+    val hasCompass by remember { derivedStateOf { headingState.value != null } }
     ScreenList(title = m?.name) {
         val h = here
         if (m == null || !m.hasPosition) {
@@ -192,14 +198,13 @@ fun CompassScreen(vm: WearViewModel, id: String) {
         } else {
             val dist = Geo.distanceM(h.lat, h.lon, m.lat!!, m.lon!!)
             val bearing = Geo.bearingDeg(h.lat, h.lon, m.lat, m.lon)
-            val rel = Geo.relativeDeg(bearing, heading)
             item {
-                Arrow(rel, if (ambient) Color.White else Brand.Lime)
+                Arrow({ Geo.relativeDeg(bearing, headingState.value).toFloat() }, if (ambient) Color.White else Brand.Lime)
             }
             item { Text(Geo.formatDistance(dist, isMetric()), style = MaterialTheme.typography.title2) }
             item {
                 Text(
-                    "${Geo.compassWord(bearing)} of you" + if (heading == null) " (no compass)" else "",
+                    "${Geo.compassWord(bearing)} of you" + if (!hasCompass) " (no compass)" else "",
                     style = MaterialTheme.typography.body2, textAlign = TextAlign.Center,
                 )
             }
@@ -208,14 +213,15 @@ fun CompassScreen(vm: WearViewModel, id: String) {
 }
 
 @Composable
-private fun Arrow(deg: Double, color: Color) {
+private fun Arrow(degrees: () -> Float, color: Color) {
     Canvas(Modifier.size(72.dp)) {
         val c = Offset(size.width / 2, size.height / 2)
-        rotate(deg.toFloat(), c) {
-            val w = Stroke(width = 8.dp.toPx(), cap = StrokeCap.Round)
-            drawLine(color, Offset(c.x, size.height * 0.9f), Offset(c.x, size.height * 0.1f), strokeWidth = w.width, cap = StrokeCap.Round)
-            drawLine(color, Offset(c.x, size.height * 0.1f), Offset(c.x - size.width * 0.22f, size.height * 0.36f), strokeWidth = w.width, cap = StrokeCap.Round)
-            drawLine(color, Offset(c.x, size.height * 0.1f), Offset(c.x + size.width * 0.22f, size.height * 0.36f), strokeWidth = w.width, cap = StrokeCap.Round)
+        // Read here, in the draw step: a new heading redraws this canvas only.
+        rotate(degrees(), c) {
+            val sw = 8.dp.toPx()
+            drawLine(color, Offset(c.x, size.height * 0.9f), Offset(c.x, size.height * 0.1f), strokeWidth = sw, cap = StrokeCap.Round)
+            drawLine(color, Offset(c.x, size.height * 0.1f), Offset(c.x - size.width * 0.22f, size.height * 0.36f), strokeWidth = sw, cap = StrokeCap.Round)
+            drawLine(color, Offset(c.x, size.height * 0.1f), Offset(c.x + size.width * 0.22f, size.height * 0.36f), strokeWidth = sw, cap = StrokeCap.Round)
         }
         drawCircle(color.copy(alpha = 0.25f), radius = size.minDimension / 2, center = c, style = Stroke(2.dp.toPx()))
     }
@@ -227,9 +233,13 @@ fun SosScreen(vm: WearViewModel) {
     val status by vm.status.collectAsState()
     val haptic = LocalHapticFeedback.current
     var sent by remember { mutableStateOf(false) }
+    // The hold timer rewrites [st] every 50 ms. Only phase and seconds are read while composing,
+    // so the screen recomposes when one of those changes; the progress ring reads holdMs while drawing.
+    val phase by remember { derivedStateOf { st.phase } }
+    val secondsLeft by remember { derivedStateOf { st.secondsLeft } }
 
-    LaunchedEffect(st.phase) {
-        when (st.phase) {
+    LaunchedEffect(phase) {
+        when (phase) {
             SosState.Phase.Countdown -> {
                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                 while (true) {
@@ -250,19 +260,19 @@ fun SosScreen(vm: WearViewModel) {
 
     ScreenList {
         when {
-            st.phase == SosState.Phase.Sending -> {
+            phase == SosState.Phase.Sending -> {
                 item { StatusBlock(status, "SOS sent to your circle", "Call emergency services if it is urgent.") }
                 item { Text("Emergency services were NOT contacted.", style = MaterialTheme.typography.caption1, textAlign = TextAlign.Center) }
                 item { CompactChip(onClick = { st = SosState(); sent = false; vm.dismissStatus() }, label = { Text("Done") }) }
             }
-            st.phase == SosState.Phase.Countdown -> {
+            phase == SosState.Phase.Countdown -> {
                 item { Text("Sending SOS in", textAlign = TextAlign.Center) }
-                item { Text("${st.secondsLeft}", style = MaterialTheme.typography.display1, color = Brand.Sos) }
+                item { Text("$secondsLeft", style = MaterialTheme.typography.display1, color = Brand.Sos) }
                 item { Button(onClick = { st = Sos.cancel(st); haptic.performHapticFeedback(HapticFeedbackType.LongPress) }, colors = ButtonDefaults.secondaryButtonColors()) { Text("Cancel") } }
             }
             else -> {
                 item {
-                    HoldButton(progress = st.holdMs.toFloat() / SosState.HOLD_MS, onHold = { dt -> st = Sos.hold(st, dt); st }, onRelease = { st = Sos.release(st) })
+                    HoldButton(holding = phase == SosState.Phase.Holding, progress = { st.holdMs.toFloat() / SosState.HOLD_MS }, onHold = { dt -> st = Sos.hold(st, dt); st }, onRelease = { st = Sos.release(st) })
                 }
                 item { Text("Press and hold, then you have 5 seconds to cancel.", style = MaterialTheme.typography.caption1, textAlign = TextAlign.Center) }
                 item { Text("Tells your family. Emergency services are NOT called.", style = MaterialTheme.typography.caption1, textAlign = TextAlign.Center, color = MaterialTheme.colors.onSurfaceVariant) }
@@ -272,7 +282,7 @@ fun SosScreen(vm: WearViewModel) {
 }
 
 @Composable
-private fun HoldButton(progress: Float, onHold: (Long) -> SosState, onRelease: () -> Unit) {
+private fun HoldButton(holding: Boolean, progress: () -> Float, onHold: (Long) -> SosState, onRelease: () -> Unit) {
     val haptic = LocalHapticFeedback.current
     Box(
         modifier = Modifier
@@ -297,14 +307,14 @@ private fun HoldButton(progress: Float, onHold: (Long) -> SosState, onRelease: (
         Canvas(Modifier.fillMaxSize()) {
             drawCircle(Brand.Sos)
             drawArc(
-                Color.White, -90f, 360f * progress.coerceIn(0f, 1f), false,
+                Color.White, -90f, 360f * progress().coerceIn(0f, 1f), false,
                 topLeft = Offset(6.dp.toPx(), 6.dp.toPx()), size = Size(size.width - 12.dp.toPx(), size.height - 12.dp.toPx()),
                 style = Stroke(5.dp.toPx(), cap = StrokeCap.Round),
             )
         }
         Text("SOS", color = Color.White, style = MaterialTheme.typography.title2)
     }
-    LaunchedEffect(progress > 0f) { if (progress > 0f) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove) }
+    LaunchedEffect(holding) { if (holding) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove) }
 }
 
 @Composable
@@ -349,8 +359,7 @@ fun ChatScreen(vm: WearViewModel) {
         val unread = s?.unread ?: 0
         if (unread > 0) item { Text("$unread unread on your phone", color = Brand.Lime, style = MaterialTheme.typography.caption1) }
         if (asked && status !is CommandStatus.Idle) item { StatusBlock(status, "Sent") }
-        items(QuickReplies.all.size) { i ->
-            val r = QuickReplies.all[i]
+        items(QuickReplies.all, key = { it.id }) { r ->
             MenuChip(r.label, null) { asked = true; vm.send(Commands.Cmd.Reply, r.id) }
         }
     }
@@ -362,8 +371,7 @@ fun AlertsScreen(vm: WearViewModel) {
     ScreenList(title = "Alerts") {
         val alerts = s?.alerts.orEmpty()
         if (alerts.isEmpty()) item { Text("No alerts right now.", textAlign = TextAlign.Center) }
-        items(alerts.size) { i ->
-            val a = alerts[i]
+        items(alerts, key = { it.id }) { a ->
             val kind = when (a.kind) { "sos" -> "SOS"; "help" -> "Needs help"; "check_in" -> "Check-in"; else -> "Alert" }
             Chip(
                 onClick = { vm.send(Commands.Cmd.Ack, a.id) },

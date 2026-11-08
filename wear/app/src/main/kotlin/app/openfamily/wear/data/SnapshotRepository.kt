@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.wear.tiles.TileService
 import androidx.wear.watchface.complications.datasource.ComplicationDataSourceUpdateRequester
 import android.content.ComponentName
+import app.openfamily.wear.logic.Dedupe
 import app.openfamily.wear.logic.SessionGate
 import app.openfamily.wear.tile.CircleTileService
 import app.openfamily.wear.tile.NearestComplicationService
@@ -27,31 +28,64 @@ object SnapshotRepository {
     private val _phoneConnected = MutableStateFlow(false)
     val phoneConnected: StateFlow<Boolean> = _phoneConnected.asStateFlow()
 
-    /** Loads the stored copy once per process, before the first Data Layer event arrives. */
+    /** True once the stored copy has been read (or there is none). The UI shows nothing until then, so it never flashes "sign in". */
+    private val _restored = MutableStateFlow(false)
+    val restored: StateFlow<Boolean> = _restored.asStateFlow()
+
+    private val dedupe = Dedupe()
+    private val lock = Any()
+    private var storedSession: String? = null
+
+    private fun prefs(app: Context) = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+
+    /**
+     * Loads the stored copy once per process, before the first Data Layer event is used.
+     * Reads disk and parses JSON: call it off the main thread.
+     */
     fun restore(context: Context) {
-        if (_snapshot.value != null) return
-        val json = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY, null) ?: return
-        Snapshot.parse(json)?.let { if (_snapshot.value == null) _snapshot.value = it }
+        if (_restored.value) return
+        synchronized(lock) {
+            if (_restored.value) return
+            val p = prefs(context.applicationContext)
+            storedSession = p.getString(KEY_SESSION, null)
+            val json = p.getString(KEY, null)
+            if (json != null && _snapshot.value == null) {
+                Snapshot.parse(json)?.let {
+                    _snapshot.value = it
+                    dedupe.seed(json, storedSession)
+                }
+            }
+            _restored.value = true
+        }
     }
 
-    /** Called by the Data Layer service and by the activity's initial read. */
+    /**
+     * Called by the Data Layer service and by the activity's initial read, on a
+     * background thread. An item identical to the last one is dropped at once: no parse,
+     * no disk write, no tile or complication redraw.
+     */
     fun accept(context: Context, json: String, session: String? = null) {
-        val parsed = Snapshot.parse(json) ?: return
         val app = context.applicationContext
-        val prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        // Another login than the stored data's: it is the previous user's, drop it first.
-        if (SessionGate.mustWipe(prefs.getString(KEY_SESSION, null), session)) {
-            prefs.edit().remove(KEY).apply()
-            _snapshot.value = null
-            _external.value = null
+        restore(app)
+        if (!dedupe.accept(json, session)) return
+        val parsed = Snapshot.parse(json)
+        if (parsed == null) {
+            dedupe.reset()
+            return
         }
-        SessionGate.next(prefs.getString(KEY_SESSION, null), session)?.let { prefs.edit().putString(KEY_SESSION, it).apply() }
-        // A signed-out phone sends an empty snapshot: forget everything on this watch too.
-        if (!parsed.signedIn) {
-            app.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().remove(KEY).apply()
-            _snapshot.value = parsed
-        } else {
-            app.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY, json).apply()
+        synchronized(lock) {
+            val p = prefs(app)
+            val e = p.edit()
+            // Another login than the stored data's: it is the previous user's, drop it first.
+            if (SessionGate.mustWipe(storedSession, session)) {
+                e.remove(KEY)
+                _snapshot.value = null
+                _external.value = null
+            }
+            SessionGate.next(storedSession, session)?.let { storedSession = it; e.putString(KEY_SESSION, it) }
+            // A signed-out phone sends an empty snapshot: forget everything on this watch too.
+            if (!parsed.signedIn) e.remove(KEY) else e.putString(KEY, json)
+            e.apply()
             _snapshot.value = parsed
         }
         refreshSurfaces(app)
@@ -59,8 +93,13 @@ object SnapshotRepository {
 
     fun clear(context: Context) {
         val app = context.applicationContext
-        app.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().remove(KEY).remove(KEY_SESSION).apply()
-        _snapshot.value = null
+        synchronized(lock) {
+            prefs(app).edit().remove(KEY).remove(KEY_SESSION).apply()
+            storedSession = null
+            dedupe.reset()
+            _snapshot.value = null
+            _restored.value = true
+        }
         refreshSurfaces(app)
     }
 

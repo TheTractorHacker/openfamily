@@ -6,7 +6,10 @@ import app.openfamily.wear.data.Snapshot
 object Presenter {
     data class Here(val lat: Double, val lon: Double)
 
-    data class Row(val id: String, val name: String, val initials: String, val color: Int, val subtitle: String, val battery: String, val lowBattery: Boolean)
+    data class Row(val id: String, val name: String, val initials: String, val color: Int, val subtitle: String, val battery: String, val lowBattery: Boolean) {
+        /** Second line of a list row, built once when the row is made instead of on every recomposition. */
+        val detail: String = listOf(subtitle, battery).filter { it.isNotEmpty() }.joinToString(" · ")
+    }
 
     sealed interface Link {
         data object NoData : Link

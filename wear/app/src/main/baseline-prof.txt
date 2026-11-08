@@ -1,0 +1,20 @@
+# Hand-written baseline profile (fallback). Covers the cold start path (activity, view model,
+# repository, first screen) and scrolling the lists. Wildcards are expanded by AGP at build time and
+# rewritten for R8's renaming. H = hot, S = startup, P = post startup. Library classes (Compose, Wear
+# Compose, ProtoLayout) bring their own profiles in their AARs.
+# A generated profile (module :baselineprofile, run on a real watch or emulator) replaces/extends this.
+HSPLapp/openfamily/wear/MainActivity;-><init>()V
+HSPLapp/openfamily/wear/MainActivity;->**(**)**
+HSPLapp/openfamily/wear/WearViewModel;->**(**)**
+HSPLapp/openfamily/wear/CommandStatus**;->**(**)**
+HSPLapp/openfamily/wear/data/SnapshotRepository;->**(**)**
+HSPLapp/openfamily/wear/data/Snapshot;->**(**)**
+HSPLapp/openfamily/wear/data/Snapshot$*;->**(**)**
+HSPLapp/openfamily/wear/data/PhoneLink;->**(**)**
+HSPLapp/openfamily/wear/data/LastLocation;->**(**)**
+HSPLapp/openfamily/wear/logic/**;->**(**)**
+HSPLapp/openfamily/wear/ui/**;->**(**)**
+HSPLapp/openfamily/wear/data/DataLayerService;->**(**)**
+HSPLapp/openfamily/wear/tile/CircleTileService;->**(**)**
+HSPLapp/openfamily/wear/tile/NearestComplicationService;->**(**)**
+Lapp/openfamily/wear/**;

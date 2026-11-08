@@ -9,6 +9,7 @@ import app.openfamily.wear.data.Snapshot
 import app.openfamily.wear.data.SnapshotRepository
 import app.openfamily.wear.logic.Commands
 import app.openfamily.wear.logic.Presenter
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -41,8 +42,11 @@ class WearViewModel(app: Application) : AndroidViewModel(app) {
     private val _here = MutableStateFlow<Presenter.Here?>(null)
     val here: StateFlow<Presenter.Here?> = _here.asStateFlow()
 
+    val restored: StateFlow<Boolean> = SnapshotRepository.restored
+
     init {
-        SnapshotRepository.restore(app)
+        // Disk read and JSON parse: never on the main thread, so the first frame is not held up.
+        viewModelScope.launch(Dispatchers.Default) { SnapshotRepository.restore(app) }
     }
 
     /** Called when the app comes to the front: read what the Data Layer holds and who is connected. */
@@ -81,7 +85,7 @@ class WearViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Last known location of the watch; used only for distance and direction. Never requested actively. */
     fun refreshHere() {
-        _here.value = LastLocation.get(getApplication())
+        viewModelScope.launch(Dispatchers.Default) { _here.value = LastLocation.get(getApplication()) }
     }
 
     companion object {

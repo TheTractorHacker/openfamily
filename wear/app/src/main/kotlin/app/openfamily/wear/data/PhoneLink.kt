@@ -4,14 +4,16 @@ import android.content.Context
 import app.openfamily.wear.logic.Commands
 import com.google.android.gms.wearable.DataMapItem
 import com.google.android.gms.wearable.Wearable
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withContext
 
 /** Talks to the paired phone through the Wearable Data Layer. Never throws into the UI. */
 class PhoneLink(context: Context) {
     private val app = context.applicationContext
 
     /** Reads the stored Data Layer item (the service only fires on changes) and the connection state. */
-    suspend fun syncNow() {
+    suspend fun syncNow(): Unit = withContext(Dispatchers.Default) {
         var readable = false
         var found = false
         runCatching {

@@ -11,7 +11,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -63,7 +62,7 @@ fun ScreenList(
 fun Avatar(initials: String, color: Int, size: Dp = 32.dp) {
     val ambient = LocalAmbient.current
     Box(
-        modifier = Modifier.size(size).clip(CircleShape).background(if (ambient) Color.Black else Color(color)),
+        modifier = Modifier.size(size).background(if (ambient) Color.Black else Color(color), CircleShape),
         contentAlignment = Alignment.Center,
     ) {
         Text(
@@ -80,12 +79,13 @@ fun Avatar(initials: String, color: Int, size: Dp = 32.dp) {
 /** One line telling the user how fresh the data is, and that the phone is away if it is. */
 @Composable
 fun LinkBanner(snapshot: Snapshot?, phoneConnected: Boolean, nowMs: Long) {
-    val text = when (val l = Presenter.link(snapshot, phoneConnected, nowMs)) {
+    val link = Presenter.link(snapshot, phoneConnected, nowMs)
+    val text = when (val l = link) {
         Presenter.Link.NoData -> "Open Orbitly on your phone"
         Presenter.Link.Connected -> "Updated ${Format.age(nowMs, snapshot?.ts)}"
         is Presenter.Link.Offline -> "Phone not connected · ${l.ageText}"
     }
-    val warn = Presenter.link(snapshot, phoneConnected, nowMs) !is Presenter.Link.Connected
+    val warn = link !is Presenter.Link.Connected
     Text(
         text,
         style = MaterialTheme.typography.caption2,

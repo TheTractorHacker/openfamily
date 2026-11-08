@@ -27,18 +27,24 @@ import com.google.common.util.concurrent.ListenableFuture
  * watch has no location). Redrawn only when the phone sends a new snapshot.
  */
 class CircleTileService : TileService() {
-    override fun onTileRequest(requestParams: RequestBuilders.TileRequest): ListenableFuture<TileBuilders.Tile> {
+    override fun onTileRequest(requestParams: RequestBuilders.TileRequest): ListenableFuture<TileBuilders.Tile> =
+        // The system calls this on the main thread; the first call reads disk and parses JSON, so do it elsewhere.
+        CallbackToFutureAdapter.getFuture { c ->
+            worker.execute { try { c.set(buildTile()) } catch (t: Throwable) { c.setException(t) } }
+            "orbitly-tile"
+        }
+
+    private fun buildTile(): TileBuilders.Tile {
         SnapshotRepository.restore(this)
         val snap = SnapshotRepository.snapshot.value
         val here = LastLocation.get(this)
         val layout = buildLayout(snap, here, System.currentTimeMillis(), java.util.Locale.getDefault().country !in setOf("US", "GB"))
-        val tile = TileBuilders.Tile.Builder()
+        return TileBuilders.Tile.Builder()
             .setResourcesVersion(RES_VERSION)
             .setTileTimeline(TimelineBuilders.Timeline.fromLayoutElement(layout))
             // Content is pushed by the phone; the tile never refreshes on a timer.
             .setFreshnessIntervalMillis(0)
             .build()
-        return CallbackToFutureAdapter.getFuture { c -> c.set(tile); "orbitly-tile" }
     }
 
     override fun onTileResourcesRequest(requestParams: RequestBuilders.ResourcesRequest): ListenableFuture<ResourceBuilders.Resources> =
@@ -87,6 +93,7 @@ class CircleTileService : TileService() {
             .build()
 
     private companion object {
+        val worker: java.util.concurrent.Executor by lazy { java.util.concurrent.Executors.newSingleThreadExecutor() }
         const val RES_VERSION = "1"
         const val LIME = 0xFFA3E635.toInt()
         const val INK = 0xFFF4F5F7.toInt()
