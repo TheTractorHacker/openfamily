@@ -215,6 +215,7 @@ func main() {
 	// or was interrupted during ingest.
 	go srv.ReconcileGeofences(ctx)
 	go srv.RunCirclePurge(ctx)
+	go srv.RunDeviceTidy(ctx)
 	go srv.RunSessionSweep(ctx)
 	go srv.RunUserRetention(ctx)
 	go srv.RunE2EEItemPurge(ctx)
