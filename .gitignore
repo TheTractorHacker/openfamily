@@ -47,3 +47,4 @@ app/android/release.jks
 
 # scripts/dev/apk-fast.sh output
 /.local-apks/
+/app/android/.kotlin/
