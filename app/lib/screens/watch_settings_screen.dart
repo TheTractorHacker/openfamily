@@ -49,8 +49,12 @@ class _WatchSettingsScreenState extends State<WatchSettingsScreen> {
 
   String _state(WatchLinkStatus s) {
     if (!_b.enabled) return 'Off';
-    if (!s.available) return 'Not available: this phone has no Google Play services';
-    if (s.nodes == 0) return 'No watch connected';
+    if (!s.available) {
+      return WatchBridge.isApple ? 'Not available on this device' : 'Not available: this phone has no Google Play services';
+    }
+    if (s.nodes == 0) {
+      return WatchBridge.isApple ? 'No Apple Watch with Orbitly found. Install it from the Watch app on the iPhone.' : 'No watch connected';
+    }
     return s.names.isEmpty ? 'Connected' : 'Connected: ${s.names.join(', ')}';
   }
 
@@ -67,7 +71,7 @@ class _WatchSettingsScreenState extends State<WatchSettingsScreen> {
             children: <Widget>[
               DsListRow(
                 leading: DsListRow.iconTile(c, Icons.watch_outlined),
-                title: 'Wear OS watch',
+                title: WatchBridge.isApple ? 'Apple Watch' : 'Wear OS watch',
                 subtitle: _state(s),
               ),
               DsToggleRow(
@@ -95,11 +99,14 @@ class _WatchSettingsScreenState extends State<WatchSettingsScreen> {
             ],
           ),
         ),
-        const Padding(
-          padding: EdgeInsets.fromLTRB(AppSpace.xl, AppSpace.md, AppSpace.xl, AppSpace.md),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(AppSpace.xl, AppSpace.md, AppSpace.xl, AppSpace.md),
           child: Text(
-            'Install Orbitly on your Wear OS watch (Galaxy Watch 4 or newer, Pixel Watch and others). '
-            'Older Samsung watches with Tizen are not supported. Steps: Settings, Help in the docs, "Orbitly on your watch".',
+            WatchBridge.isApple
+                ? 'Open the Watch app on your iPhone and install Orbitly (watchOS 9 or newer). '
+                    'Steps: the docs, "Orbitly on your watch".'
+                : 'Install Orbitly on your Wear OS watch (Galaxy Watch 4 or newer, Pixel Watch and others). '
+                    'Older Samsung watches with Tizen are not supported. Steps: Settings, Help in the docs, "Orbitly on your watch".',
             style: AppType.secondary,
           ),
         ),

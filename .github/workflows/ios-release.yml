@@ -96,6 +96,14 @@ jobs:
           flutter-version: '3.47.0'
           cache: true
 
+      # The Apple Watch app has its own bundle id (app.openfamily.watchkitapp) and
+      # would need its own App Store profile and an entry in ExportOptions.plist.
+      # Until the owner sets IOS_WATCH_ENABLED=true and adds that, the signed build
+      # leaves the watch app out so TestFlight keeps working as before.
+      - name: Leave the Apple Watch app out of the signed build
+        if: ${{ vars.IOS_WATCH_ENABLED != 'true' }}
+        run: python3 scripts/ios-watch-target.py disable
+
       - name: Import signing certificate and provisioning profile
         env:
           IOS_P12_BASE64: ${{ secrets.IOS_P12_BASE64 }}

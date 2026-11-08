@@ -1,6 +1,6 @@
-# Orbitly on your watch (Wear OS)
+# Orbitly on your watch (Wear OS and Apple Watch)
 
-See your people, send "I'm OK" or SOS and reply to chat from a Wear OS watch, with your phone doing the work.
+See your people, send "I'm OK" or SOS and reply to chat from a Wear OS or Apple watch, with your phone doing the work. The next sections are about **Wear OS**; the [Apple Watch](#apple-watch) section is at the end.
 
 Orbitly has a watch app for **Wear OS 3 and newer**: Samsung Galaxy Watch 4 and
 later, Google Pixel Watch, and other Wear OS 3+ watches. Older Samsung watches
@@ -98,3 +98,17 @@ Because the phone does the work:
   paired Wear OS watch (through the Google "Wear OS" app).
 - *Samsung phones*: allow Orbitly to run in the background
   ([Battery and permissions](battery-and-permissions.md)).
+
+## Apple Watch
+
+Orbitly has an Apple Watch app for **watchOS 9 or newer** that does the same as the Wear OS app, with your iPhone doing the work. **This app is new and has not yet been tried on a real watch.**
+
+**Install.** Install Orbitly on your iPhone and sign in. Open the **Watch** app on the iPhone, find **Orbitly** and switch on **Show App on Apple Watch** (it also installs by itself when automatic app install is on). In Orbitly on the iPhone, **Settings, Watch** shows whether the watch is found and has the same two switches as on Android.
+
+**What you can do.** People (name, where, how long ago, battery), a distance and direction arrow (north is at the top; it does not turn with your wrist), **SOS** (press and hold, 5 second countdown, Cancel), **I'm OK**, pause or resume sharing, quick replies with an unread count, and alerts. If the iPhone cannot be reached the watch says **"iPhone not reachable"** and shows the age of what it has. An SOS that could not be sent is shown as **not sent**: call emergency services yourself. Orbitly never calls them.
+
+**Privacy.** The watch never has your sign-in or keys. The iPhone sends it names, places and battery directly (not through the server). For a Private circle the iPhone sends the readable version the same way; turn off **Settings, Watch, Show Private circles** to leave those people out. Signing out, or switching "Send to my watch" off, removes the data from the watch; if the watch is out of reach at that moment the removal is done as soon as it is back.
+
+**Installed from the unsigned file (sideloading).** The unsigned `orbitly-<version>-unsigned.ipa` contains the watch app. The tool you re-sign with must **sign the watch app too**; some tools only sign the main app. If Orbitly does not show up in the Watch app on the iPhone, sign again with a tool that supports watch apps, or install without the watch part. A free Apple ID limits how many app identifiers you can create per week and a watch app needs one more; apps signed with a free Apple ID expire after 7 days.
+
+Technical background: [Watch apps (design)](../design/WATCH_APPS.md) and [Apple Watch app](../design/WATCH_APPS_APPLE.md).

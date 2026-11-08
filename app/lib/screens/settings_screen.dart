@@ -586,7 +586,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ? DsListRow(
                       leading: DsListRow.iconTile(context, Icons.watch_outlined),
                       title: 'Watch',
-                      subtitle: 'Orbitly on your Wear OS watch',
+                      subtitle: WatchBridge.isApple ? 'Orbitly on your Apple Watch' : 'Orbitly on your Wear OS watch',
                       chevron: true,
                       onTap: () => push(const WatchSettingsScreen()),
                     )

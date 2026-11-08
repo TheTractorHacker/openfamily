@@ -1,0 +1,11 @@
+// Build settings of the Apple Watch app only. It must NOT use the Flutter
+// Debug/Release.xcconfig of the iPhone app: the signed-release workflow appends
+// the iPhone bundle id and provisioning profile to those files.
+//
+// Version numbers follow the iPhone app (App Store validation requires the
+// watch app and the iPhone app to carry the same CFBundleShortVersionString).
+// Generated.xcconfig is written by `flutter pub get` / `flutter build ios`.
+#include? "../Flutter/Generated.xcconfig"
+
+MARKETING_VERSION = $(FLUTTER_BUILD_NAME)
+CURRENT_PROJECT_VERSION = $(FLUTTER_BUILD_NUMBER)

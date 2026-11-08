@@ -28,10 +28,10 @@
         "user/chat.md",
         "user/privacy-modes.md",
         "user/safety-and-check-ins.md",
-        "user/older-phones.md",
         "user/sharing-links.md",
         "user/members-and-devices.md",
         "user/battery-and-permissions.md",
+        "user/older-phones.md",
         "user/when-the-server-is-down.md",
         "user/watch.md"
       ],
@@ -69,12 +69,13 @@
       "items": [
         "developers/architecture.md",
         "developers/api.md",
-        "developers/api-efficiency.md",
         "developers/compatibility.md",
         "developers/build.md",
         "developers/screenshots.md",
         "developers/naming.md",
+        "developers/apple-watch.md",
         "api-compat.md",
+        "developers/api-efficiency.md",
         "developers/performance-low-memory.md"
       ],
       "icon": "code"

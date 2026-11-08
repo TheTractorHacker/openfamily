@@ -324,8 +324,14 @@ class WatchBridge {
 
   static WatchBridge instance = WatchBridge();
 
-  /// Wear OS only for now; the Apple Watch bridge has its own transport.
-  static bool get platformSupported => !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+  /// Wear OS (Android) and Apple Watch (iPhone). The Dart side is shared; the
+  /// native transport is WatchBridgePlugin.kt on Android and WatchBridge.swift
+  /// on iOS, both on the channel `app.openfamily/watch`.
+  static bool get platformSupported =>
+      !kIsWeb && (defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS);
+
+  /// True on an iPhone (Apple Watch instead of Wear OS wording).
+  static bool get isApple => !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
 
   static const String enabledKey = 'watch_bridge_enabled';
   static const String showPrivateKey = 'watch_show_private';

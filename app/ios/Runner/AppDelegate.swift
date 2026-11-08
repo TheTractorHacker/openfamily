@@ -38,6 +38,7 @@ import background_locator_2
     if let registrar = self.registrar(forPlugin: "OpenFamilySecureKey") {
       SecureKeyChannel.register(messenger: registrar.messenger())
       LinkBridge.shared.attach(messenger: registrar.messenger())
+      WatchBridge.shared.attach(messenger: registrar.messenger())
     }
 
     if let registrar = self.registrar(forPlugin: "OpenFamilyApns") {
@@ -103,6 +104,8 @@ import background_locator_2
     continue userActivity: NSUserActivity,
     restorationHandler: @escaping ([UIUserActivityRestoring]?) -> Void
   ) -> Bool {
+    // Handoff from the Apple Watch app: just bring Orbitly forward.
+    if userActivity.activityType == "app.openfamily.watch.person" { return true }
     if userActivity.activityType == NSUserActivityTypeBrowsingWeb,
       let url = userActivity.webpageURL,
       LinkBridge.shared.handle(url: url)
