@@ -165,7 +165,7 @@ void main() {
     await _pump(t, TripsScreen(member: _member, api: api));
     // There is no per-screen toggle any more.
     expect(find.text('mph'), findsNothing);
-    UnitPreferenceService.units.value = UnitSystem.metric;
+    UnitPreferenceService.setForTest(UnitSystem.metric);
     await t.pump();
     expect(find.text('97 km/h'), findsWidgets);
     UnitPreferenceService.units.value = UnitSystem.imperial;

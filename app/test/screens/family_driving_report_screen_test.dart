@@ -305,7 +305,7 @@ void main() {
   });
 
   testWidgets('metric units', (WidgetTester t) async {
-    UnitPreferenceService.units.value = UnitSystem.metric;
+    UnitPreferenceService.setForTest(UnitSystem.metric);
     await _pump(t, FakeTripReportApi());
     expect(find.text('135 km/h'), findsOneWidget);
     expect(find.text('1 drive · 48 km'), findsOneWidget);
@@ -490,7 +490,7 @@ void main() {
       await pumpRich(t, members: <Member>[driving, _brian]);
       expect(find.text('DRIVING NOW'), findsOneWidget);
       expect(find.text('Driving 42 mph'), findsOneWidget);
-      UnitPreferenceService.units.value = UnitSystem.metric;
+      UnitPreferenceService.setForTest(UnitSystem.metric);
       await t.pump();
       expect(find.text('Driving 68 km/h'), findsOneWidget);
       UnitPreferenceService.units.value = UnitSystem.imperial;

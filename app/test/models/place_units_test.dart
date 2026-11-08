@@ -23,7 +23,7 @@ void main() {
     UnitPreferenceService.resetForTest();
     expect(home.radiusLabel, '500 ft');
     expect(home.radiusLabelIn(UnitSystem.metric), '152 m');
-    UnitPreferenceService.units.value = UnitSystem.metric;
+    UnitPreferenceService.setForTest(UnitSystem.metric);
     expect(home.radiusLabel, '152 m');
     expect(home.copyWith(radiusMeters: 3218.69).radiusLabel, '3.2 km');
     UnitPreferenceService.units.value = UnitSystem.imperial;

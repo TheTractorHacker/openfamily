@@ -200,7 +200,7 @@ void main() {
     expect(launched.single.scheme, 'tel');
     expect(launched.single.path, '+15551234');
 
-    UnitPreferenceService.units.value = UnitSystem.metric;
+    UnitPreferenceService.setForTest(UnitSystem.metric);
     await _pump(t, _m(), me: const LatLng(37.77, -122.31));
     expect(find.text('Call'), findsNothing);
     expect(find.textContaining('km'), findsWidgets);

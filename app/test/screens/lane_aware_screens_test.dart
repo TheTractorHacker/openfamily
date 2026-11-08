@@ -117,7 +117,7 @@ Member _member(String id, String name) => Member(
 void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues(<String, Object>{});
-    UnitPreferenceService.units.value = UnitSystem.metric;
+    UnitPreferenceService.setForTest(UnitSystem.imperial);
     PrivateRuntime.primaryPrivate.value = true;
   });
   tearDown(() => PrivateRuntime.primaryPrivate.value = false);

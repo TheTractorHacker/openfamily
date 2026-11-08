@@ -149,6 +149,15 @@ class UnitPreferenceService {
     _recompute();
   }
 
+  /// Test hook: pretend [value] is already loaded, so no later storage read
+  /// can overwrite it.
+  @visibleForTesting
+  static void setForTest(UnitSystem value) {
+    _loading = Future<UnitSystem>.value(value);
+    _chosen = true;
+    units.value = value;
+  }
+
   /// Test hook: forget that a choice was made.
   @visibleForTesting
   static void resetForTest() {

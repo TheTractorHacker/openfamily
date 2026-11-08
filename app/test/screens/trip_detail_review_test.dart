@@ -124,7 +124,7 @@ void main() {
   });
 
   testWidgets('speeds follow the metric preference', (WidgetTester t) async {
-    UnitPreferenceService.units.value = UnitSystem.metric;
+    UnitPreferenceService.setForTest(UnitSystem.metric);
     await _pump(t, _Review(_trip()));
     expect(find.textContaining('at up to 72 km/h'), findsOneWidget);
   });

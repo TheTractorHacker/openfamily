@@ -112,7 +112,7 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
-    UnitPreferenceService.units.value = UnitSystem.metric;
+    UnitPreferenceService.setForTest(UnitSystem.metric);
     await tester.pumpWidget(
         _wrap(WeeklySummaryScreen(api: _Fake(_summary()), selfId: 'u1')));
     await tester.pumpAndSettle();
