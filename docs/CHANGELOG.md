@@ -10,6 +10,10 @@ for the **last 5 minor versions** of the app (see
 [API compatibility](api-compat.md)), so you can update the server first and
 the phones afterwards.
 
+## v0.26.4 (2026-11-08)
+
+Same as v0.26.3 (its release build stopped at an analyzer warning, so v0.26.3 has no app files). Install v0.26.4.
+
 ## v0.26.3 (2026-11-08)
 
 

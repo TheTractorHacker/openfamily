@@ -1380,7 +1380,7 @@ class E2eeService {
             circleId: e.circleId, subjectId: e.subjectId, epoch: e.epoch ?? 0, ref: e.ref);
         if (!await E2ee.verify(e.actorPub!, msg, e.signature!)) return null;
         if (!E2ee.constEq(await E2ee.logEntryHash(e.prevHash, e.seq, msg, e.signature!), e.entryHash)) return null;
-        return readOwnerPolicyEntry(e, roles);
+        return await readOwnerPolicyEntry(e, roles);
       }
     } catch (_) {}
     return null;
