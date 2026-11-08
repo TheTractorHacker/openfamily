@@ -56,11 +56,11 @@ Widget _location(double textScale) => MaterialApp(
         data: MediaQuery.of(c).copyWith(textScaler: TextScaler.linear(textScale)),
         child: child!,
       ),
-      home: LocationTabView(
-        map: const _CountingMap(),
+      home: const LocationTabView(
+        map: _CountingMap(),
         circleName: 'Frank Family',
         circles: kCircles,
-        members: const [kSelf, kDriver, kAtHome, kOffline],
+        members: [kSelf, kDriver, kAtHome, kOffline],
         selfId: 'me',
         placesLoader: fakePlaces,
       ),

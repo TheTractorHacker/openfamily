@@ -33,6 +33,12 @@ typedef PlacesLoader = Future<List<Place>> Function();
 /// The map is a black box supplied by the caller, and every action is a
 /// callback, so this widget owns no services and can be rendered in tests.
 class LocationTabView extends StatefulWidget {
+  /// The layout rule: wide or landscape bodies show the map beside a fixed
+  /// panel, narrow ones a bottom sheet. Also used by the map screen to know
+  /// whether a sheet covers the lower map.
+  static bool isTwoPaneSize(Size s) =>
+      s.width >= 720 || (s.width > s.height * 1.2 && s.width >= 560);
+
   const LocationTabView({
     super.key,
     required this.map,
@@ -516,11 +522,7 @@ class _LocationTabViewState extends State<LocationTabView> {
   /// Wide or landscape bodies show the map beside a fixed People / Places
   /// panel instead of a bottom sheet that would cover most of the map.
   static bool isTwoPane(BoxConstraints box) =>
-      isTwoPaneSize(Size(box.maxWidth, box.maxHeight));
-
-  /// Same rule for a plain size (the map screen asks it for the camera offset).
-  static bool isTwoPaneSize(Size s) =>
-      s.width >= 720 || (s.width > s.height * 1.2 && s.width >= 560);
+      LocationTabView.isTwoPaneSize(Size(box.maxWidth, box.maxHeight));
 
   final ScrollController _panelScroll = ScrollController();
 
