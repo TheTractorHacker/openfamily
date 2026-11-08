@@ -9,6 +9,9 @@ import 'package:http/http.dart' as http;
 import '../models/user_profile.dart';
 import 'api_wire.dart';
 import 'app_compat.dart';
+import 'offline/offline_cache.dart';
+import 'offline/offline_errors.dart';
+import 'offline/server_reachability.dart';
 import 'perf/perf_monitor.dart';
 import 'server_config.dart';
 import 'session_diary.dart';
@@ -305,11 +308,12 @@ class ApiClient {
   }
 
   /// GET /healthz → throws when the server is unreachable or not OK.
-  static Future<void> healthz() async {
+  static Future<void> healthz({Duration timeout = const Duration(seconds: 5)}) async {
     final http.Response response = await _rawSend(
       'GET',
       _uri('/healthz'),
       auth: false,
+      timeout: timeout,
     );
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw ApiException(response.statusCode, 'Server is not reachable.');
@@ -421,8 +425,18 @@ class ApiClient {
   /// [getProfileAvatar], rather than as a URL embedded in profile or member
   /// data. This keeps the image behind the authenticated API request.
   static Future<UserProfile> getProfile() async {
-    final dynamic data = await _send('GET', _uri('/api/profile'));
-    return UserProfile.fromJson(data as Map<String, dynamic>);
+    try {
+      final dynamic data = await _send('GET', _uri('/api/profile'));
+      unawaited(OfflineCache.instance.write('profile', data));
+      return UserProfile.fromJson(data as Map<String, dynamic>);
+    } catch (e) {
+      // Server unreachable: the last profile this phone saw. Chat, circles and trips ask for it
+      // only to learn "who am I", which must not need the network.
+      if (!isOfflineError(e)) rethrow;
+      final CacheEntry? c = await OfflineCache.instance.read('profile');
+      if (c == null || c.data is! Map) rethrow;
+      return UserProfile.fromJson(Map<String, dynamic>.from(c.data! as Map));
+    }
   }
 
   /// GET /api/profile/avatar → private avatar image bytes, or null when none is
@@ -672,7 +686,13 @@ class ApiClient {
       contentType: 'application/json',
       auth: auth,
     );
-    return _decodeMaybeOffThread(response);
+    try {
+      return await _decodeMaybeOffThread(response);
+    } on FormatException {
+      // A 2xx whose body is cut off or not JSON (a half-dead connection, a captive portal page):
+      // no usable answer, same as being offline. Never an uncaught crash in a screen.
+      throw const ApiException(0, 'The server sent an unreadable answer. Please try again.');
+    }
   }
 
   /// Incremented whenever a session starts or ends.
@@ -805,6 +825,7 @@ class ApiClient {
     String? accept,
     bool auth = true,
     Map<String, String>? extraHeaders,
+    Duration? timeout,
   }) async {
     if (ServerConfig.instance.apiBaseUrl.isEmpty) {
       throw const ApiException(
@@ -848,12 +869,17 @@ class ApiClient {
     try {
       // Uploads get a longer budget than reads: a photo on a weak mobile link
       // needs more than 15 s, a list read that is not back in 15 s is stuck.
-      final Duration timeout = bytes != null ? _uploadTimeout : _timeout;
-      final http.Response r = await _dispatch(method, uri, headers, encoded, timeout);
+      final Duration limit = timeout ?? (bytes != null ? _uploadTimeout : _timeout);
+      final http.Response r = await _dispatch(method, uri, headers, encoded, limit);
       status = r.statusCode;
       AppCompat.observeHeaders(r.headers);
       if (status == 426) AppCompat.observeUpgradeRequired();
+      ServerReachability.instance.noteResponse(status);
       return r;
+    } on ApiException catch (e) {
+      // status 0 = nothing came back (offline, refused, timed out).
+      if (e.status == 0) ServerReachability.instance.noteFailure();
+      rethrow;
     } finally {
       PerfMonitor.instance.recordHttp(method, uri.path, sw.elapsedMilliseconds, status);
     }
@@ -920,6 +946,16 @@ class ApiClient {
     } on TimeoutException {
       throw const ApiException(0, 'The request timed out. Please try again.');
     } on http.ClientException {
+      throw const ApiException(
+        0,
+        'Could not reach the server. Check your connection.',
+      );
+    } on ArgumentError {
+      rethrow;
+    } catch (e) {
+      // Anything else the transport throws (a TLS handshake failure, a
+      // connection reset that was not wrapped, an HTTP parse error) means
+      // "no usable answer", never a crash and never a sign-out.
       throw const ApiException(
         0,
         'Could not reach the server. Check your connection.',

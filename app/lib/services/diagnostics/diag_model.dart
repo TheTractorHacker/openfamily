@@ -453,17 +453,17 @@ List<DiagCheck> evaluateDiagnostics(DiagFacts f) {
   if (q != null) {
     out.add(DiagCheck(
         id: 'outbox',
-        title: 'Waiting to upload',
+        title: 'Updates waiting',
         status: q >= kOutboxFail
             ? DiagStatus.fail
             : q >= kOutboxWarn
                 ? DiagStatus.warn
                 : DiagStatus.pass,
         detail: q == 0
-            ? 'Nothing is waiting: every position has been sent.'
+            ? 'Nothing is waiting: everything has been sent.'
             : q >= kOutboxWarn
-                ? '$q positions are stuck on the phone. They are sent as soon as the connection to the server works.'
-                : '$q position${q == 1 ? ' is' : 's are'} waiting to be sent.',
+                ? '$q updates are stuck on the phone. They are sent as soon as the connection to the server works.'
+                : '$q update${q == 1 ? '' : 's'} waiting (positions, messages, check-ins). They are sent in order when the server can be reached.',
         fix: q > 0 && f.server == ServerState.ok ? const DiagFix(DiagFixKind.sendQueue, 'Send now') : null));
   }
 

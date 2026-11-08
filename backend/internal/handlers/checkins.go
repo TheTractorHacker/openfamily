@@ -13,6 +13,7 @@ import (
 	"github.com/TheTractorHacker/openfamily/backend/internal/circles"
 	"github.com/TheTractorHacker/openfamily/backend/internal/middleware"
 	"github.com/TheTractorHacker/openfamily/backend/internal/push"
+	"github.com/jackc/pgx/v5"
 )
 
 // One-time "I'm here" check-ins to chosen circle members. Distinct from the
@@ -31,6 +32,8 @@ type checkinRequest struct {
 	Note         string   `json:"note"`
 	Lat          *float64 `json:"lat"`
 	Lon          *float64 `json:"lon"`
+	// ClientID makes a replay of a queued check-in idempotent. Optional.
+	ClientID string `json:"client_id"`
 }
 
 type checkinJSON struct {
@@ -43,6 +46,18 @@ type checkinJSON struct {
 	CreatedAt  time.Time `json:"created_at"`
 	ExpiresAt  time.Time `json:"expires_at"`
 	Recipients []string  `json:"recipient_ids,omitempty"`
+}
+
+// priorCheckin returns the caller's check-in stored under clientID, if any.
+func (s *Server) priorCheckin(r *http.Request, userID, clientID string) (checkinJSON, bool) {
+	var c checkinJSON
+	err := s.Pool.QueryRow(r.Context(), `
+		SELECT c.id, c.user_id, u.name, c.lat, c.lon, c.note, c.created_at, c.expires_at,
+		       COALESCE((SELECT array_agg(cr.user_id::text) FROM checkin_recipients cr WHERE cr.checkin_id = c.id), '{}')
+		FROM checkins c JOIN users u ON u.id = c.user_id
+		WHERE c.user_id = $1 AND c.client_id = $2`, userID, clientID,
+	).Scan(&c.ID, &c.UserID, &c.Name, &c.Lat, &c.Lon, &c.Note, &c.CreatedAt, &c.ExpiresAt, &c.Recipients)
+	return c, err == nil
 }
 
 // PostCheckinTo records a check-in and delivers it (WS + push) to the chosen
@@ -68,6 +83,18 @@ func (s *Server) PostCheckinTo(w http.ResponseWriter, r *http.Request) {
 	if !validAlertCoord(req.Lat, -90, 90) || !validAlertCoord(req.Lon, -180, 180) || (req.Lat == nil) != (req.Lon == nil) {
 		writeError(w, http.StatusBadRequest, "lat/lon out of range")
 		return
+	}
+	if !validClientID(req.ClientID) {
+		writeError(w, http.StatusBadRequest, "invalid client_id")
+		return
+	}
+	// Replay of a check-in already stored: answer with it (no second delivery,
+	// not counted against the cooldown).
+	if req.ClientID != "" {
+		if prior, ok := s.priorCheckin(r, claims.UserID, req.ClientID); ok {
+			writeJSON(w, http.StatusOK, prior)
+			return
+		}
 	}
 	seen := map[string]bool{}
 	var ids []string
@@ -130,11 +157,18 @@ func (s *Server) PostCheckinTo(w http.ResponseWriter, r *http.Request) {
 	var c checkinJSON
 	c.UserID, c.Lat, c.Lon, c.Note, c.Recipients = claims.UserID, req.Lat, req.Lon, note, ids
 	if err := tx.QueryRow(r.Context(), `
-		INSERT INTO checkins (user_id, lat, lon, note, expires_at)
-		VALUES ($1, $2, $3, $4, now() + $5::interval)
+		INSERT INTO checkins (user_id, lat, lon, note, expires_at, client_id)
+		VALUES ($1, $2, $3, $4, now() + $5::interval, NULLIF($6, ''))
+		ON CONFLICT (user_id, client_id) WHERE client_id IS NOT NULL DO NOTHING
 		RETURNING id, created_at, expires_at`,
-		claims.UserID, req.Lat, req.Lon, note, strconv.Itoa(int(checkinRetention/time.Second))+" seconds",
+		claims.UserID, req.Lat, req.Lon, note, strconv.Itoa(int(checkinRetention/time.Second))+" seconds", req.ClientID,
 	).Scan(&c.ID, &c.CreatedAt, &c.ExpiresAt); err != nil {
+		if err == pgx.ErrNoRows && req.ClientID != "" {
+			if prior, ok := s.priorCheckin(r, claims.UserID, req.ClientID); ok {
+				writeJSON(w, http.StatusOK, prior)
+				return
+			}
+		}
 		writeError(w, http.StatusInternalServerError, "failed to save check-in")
 		return
 	}

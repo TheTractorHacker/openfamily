@@ -130,6 +130,9 @@ class _SharingSheetState extends State<SharingSheet> {
     }
   }
 
+  /// Replaces the success text when the action was only saved for later.
+  String? _doneOverride;
+
   Future<void> _run(String action, Future<void> Function() body,
       {String? done}) async {
     if (_busy) return;
@@ -139,9 +142,10 @@ class _SharingSheetState extends State<SharingSheet> {
       _message = null;
     });
     try {
+      _doneOverride = null;
       await body();
       if (!mounted) return;
-      setState(() => _message = done);
+      setState(() => _message = _doneOverride ?? done);
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = sharingErrorMessage(e, action: action));
@@ -153,12 +157,17 @@ class _SharingSheetState extends State<SharingSheet> {
   Future<void> _sendCheckIn() => _run('send your check-in', () async {
         final ({double lat, double lon})? pos =
             widget.locate != null ? await widget.locate!() : await _locate();
-        await widget.service.checkIn(
-          recipientIds: _recipients.toList(),
-          note: _note.text.trim(),
-          lat: pos?.lat,
-          lon: pos?.lon,
-        );
+        try {
+          await widget.service.checkIn(
+            recipientIds: _recipients.toList(),
+            note: _note.text.trim(),
+            lat: pos?.lat,
+            lon: pos?.lon,
+          );
+        } on CheckInQueued catch (q) {
+          // Saved on the phone, not delivered yet: say so, and do not ask them to press again.
+          _doneOverride = q.message;
+        }
         if (mounted) {
           _note.clear();
           _recipients.clear();

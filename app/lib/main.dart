@@ -31,6 +31,7 @@ import 'services/member_avatar_cache.dart';
 import 'services/e2ee/private_runtime.dart';
 import 'services/push_service.dart';
 import 'services/server_config.dart';
+import 'services/offline/offline_sync.dart';
 import 'services/session_gate.dart';
 import 'services/map_style_preference.dart';
 import 'services/theme_preference.dart';
@@ -245,8 +246,12 @@ class _SessionGateState extends State<_SessionGate> {
       'gate',
       () => Future.wait<Object?>(<Future<Object?>>[
         _housekeeping(),
-        TileConfig.instance.refresh().then<Object?>((_) => null),
-        ApiClient.checkSession(),
+        TileConfig.instance.refresh().timeout(const Duration(seconds: 4), onTimeout: () {}).then<Object?>((_) => null),
+        checkSessionWithin(
+          ApiClient.checkSession(),
+          const Duration(seconds: 4),
+          hasRefreshToken: () async => (await TokenStorage.readRefreshToken()) != null,
+        ),
       ]),
     );
     final SessionGateResult session = results[2] as SessionGateResult;
@@ -259,6 +264,8 @@ class _SessionGateState extends State<_SessionGate> {
       case SessionGateResult.unreachable:
         unawaited(UnitsSync.pull());
         unawaited(DiagnosticsAutoReport.maybeReport());
+        // Local-first: probe the server politely and send queued updates when it is back.
+        OfflineSync.start();
         // Unreachable (offline/5xx): keep the session and open the map; the
         // individual API calls surface connectivity errors on their own.
         return _GateResult.hasSession;

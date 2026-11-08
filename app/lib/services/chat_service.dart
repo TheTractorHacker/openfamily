@@ -7,6 +7,11 @@ import 'api_client.dart';
 import 'chat/chat_engine.dart';
 import 'chat/chat_store.dart';
 import 'chat/encrypted_chat_service.dart';
+import 'offline/offline_cache.dart';
+import 'offline/offline_errors.dart';
+import 'offline/offline_queue.dart';
+import 'offline/offline_sync.dart';
+import 'offline/server_reachability.dart';
 
 /// A chat failure already worded for the user.
 class ChatException implements Exception {
@@ -125,14 +130,26 @@ class ApiChatService implements ChatService {
   Future<ChatPage> messages(String circleId,
           {int? before, int? after, int limit = 50}) =>
       _wrap(() async {
-        final dynamic raw = await ApiClient.get(
-          '/circles/$circleId/chat',
-          query: <String, String>{
-            'limit': '$limit',
-            if (before != null) 'before': '$before',
-            if (after != null) 'after': '$after',
-          },
-        );
+        // Only the newest page is remembered: that is what opens the chat when the server is down.
+        final bool latest = before == null && after == null;
+        final String cacheKey = 'chat/$circleId';
+        dynamic raw;
+        try {
+          raw = await ApiClient.get(
+            '/circles/$circleId/chat',
+            query: <String, String>{
+              'limit': '$limit',
+              if (before != null) 'before': '$before',
+              if (after != null) 'after': '$after',
+            },
+          );
+          if (latest) unawaited(OfflineCache.instance.write(cacheKey, raw));
+        } catch (e) {
+          if (!latest || !isOfflineError(e)) rethrow;
+          final CacheEntry? c = await OfflineCache.instance.read(cacheKey);
+          if (c == null || c.data is! Map) rethrow;
+          raw = c.data;
+        }
         final Map<String, dynamic> map = raw as Map<String, dynamic>;
         final List<ChatMessage> list = ((map['messages'] as List?) ?? const [])
             .whereType<Map<String, dynamic>>()
@@ -142,17 +159,57 @@ class ApiChatService implements ChatService {
             .whereType<Map<String, dynamic>>()
             .map(ChatReader.fromJson)
             .toList();
+        if (latest) {
+          // Messages written while the server was out of reach and still waiting on this phone
+          // (also after a restart): shown as "waiting to send" at the end of the conversation.
+          for (final QueuedItem q in await OfflineQueue.instance.items(kind: QueueKind.chat)) {
+            if (q.meta['circle'] != circleId) continue;
+            list.add(ChatMessage(
+              id: 'local:${q.id}',
+              seq: 1 << 40,
+              circleId: circleId,
+              senderId: ChatEvents.selfUserId ?? '',
+              senderName: 'You',
+              body: (q.meta['text'] as String?) ?? '',
+              createdAt: DateTime.fromMillisecondsSinceEpoch(q.at),
+              sendState: ChatSendState.sending,
+            ));
+          }
+        }
         return ChatPage(list, (map['next_before'] as num?)?.toInt(), readers);
       });
 
+  /// Sends a message. When the server cannot be reached the text is saved on the
+  /// phone (it is never lost) and a local "waiting to send" message is returned;
+  /// it is sent in order when the server is back, once, thanks to the client id.
   @override
   Future<ChatMessage> send(String circleId, String body, {String? clientId}) =>
-      _wrap(() async => ChatMessage.fromJson(await ApiClient.post(
-          '/circles/$circleId/chat',
-          body: <String, dynamic>{
-            'body': body,
-            if (clientId != null) 'client_id': clientId,
-          }) as Map<String, dynamic>));
+      _wrap(() async {
+        final String id = clientId ?? 'chat-${DateTime.now().microsecondsSinceEpoch}';
+        final Submitted r = await OfflineQueue.instance.submit(
+          QueuedItem(
+            id: id,
+            kind: QueueKind.chat,
+            method: 'POST',
+            path: '/circles/$circleId/chat',
+            body: <String, dynamic>{'body': body, 'client_id': id},
+            meta: <String, dynamic>{'circle': circleId, 'text': body},
+          ),
+          serverKnownDown: () => ServerReachability.instance.unreachable,
+        );
+        if (!r.queued) return ChatMessage.fromJson(r.response as Map<String, dynamic>);
+        unawaited(OfflineSync.refreshPending());
+        return ChatMessage(
+          id: 'local:$id',
+          seq: 1 << 40,
+          circleId: circleId,
+          senderId: ChatEvents.selfUserId ?? '',
+          senderName: 'You',
+          body: body,
+          createdAt: DateTime.now(),
+          sendState: ChatSendState.sending,
+        );
+      });
 
   @override
   Future<ChatMessage> edit(String circleId, String messageId, String body) =>
@@ -196,6 +253,19 @@ class ApiChatService implements ChatService {
 /// Live chat state shared by the WebSocket (producer) and the screens.
 class ChatEvents {
   ChatEvents._();
+
+  static final StreamController<(String, ChatMessage)> _localDelivered =
+      StreamController<(String, ChatMessage)>.broadcast();
+
+  /// A message that was waiting on the phone reached the server: (client id, the stored message).
+  /// The open chat swaps its "waiting to send" bubble for the real one.
+  static Stream<(String, ChatMessage)> get localDelivered => _localDelivered.stream;
+
+  /// Hooked to [OfflineQueue.onDelivered] by [OfflineSync.start].
+  static void handleQueueDelivered(QueuedItem item, dynamic response) {
+    if (item.kind != QueueKind.chat || response is! Map<String, dynamic>) return;
+    _localDelivered.add((item.id, ChatMessage.fromJson(response)));
+  }
 
   static final StreamController<ChatMessage> _incoming =
       StreamController<ChatMessage>.broadcast();

@@ -417,7 +417,12 @@ Future<bool> _sendLocationBatch(
     '/locations/batch',
     LocationOutbox.batchBody(points),
   );
-  return response.statusCode >= 200 && response.statusCode < 300;
+  if (response.statusCode >= 200 && response.statusCode < 300) return true;
+  final int c = response.statusCode;
+  // A 4xx the server will never accept strikes the points; everything else
+  // (offline, 5xx, 401, 408, 429) keeps them without a strike.
+  if (c >= 400 && c < 500 && c != 401 && c != 408 && c != 429) throw const OutboxRejected();
+  return false;
 }
 
 Map<String, String> _ingestHeaders(_BackgroundCredentials c) =>

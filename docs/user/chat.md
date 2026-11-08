@@ -6,8 +6,9 @@ Every circle has a chat for its members only.
 
 - Open the **Circle** tab and tap **Family chat**. A badge counts unread
   messages.
-- Type a message and send. If you are offline the draft stays and is retried
-  without sending twice.
+- Type a message and send. If the server cannot be reached the message shows
+  "waiting to send", is kept on the phone and is sent in order, once, when it is
+  back ([When the server is down](when-the-server-is-down.md)).
 - **Long-press** your own message to edit or delete it. Circle admins can
   delete any message.
 - You can send a photo; location data inside it is removed.

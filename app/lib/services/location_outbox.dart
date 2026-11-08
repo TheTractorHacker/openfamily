@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'api_client.dart';
+import 'offline/offline_errors.dart';
 
 /// Sends one drained batch to the backend via the foreground API client
 /// (Bearer token + 401→refresh path). The default [OutboxSend] for
@@ -16,14 +17,25 @@ Future<bool> sendOutboxBatchViaApi(List<Map<String, dynamic>> batch) async {
       body: LocationOutbox.batchBody(batch),
     );
     return true;
-  } catch (_) {
+  } catch (e) {
+    // Only an answer that can never become a success counts against the batch.
+    if (isPermanentRejection(e)) throw const OutboxRejected();
     return false;
   }
 }
 
+/// Thrown by an [OutboxSend] when the server looked at the batch and refused it
+/// for good (a 4xx that replaying cannot fix). Only this gives the points a
+/// strike. Being offline, timeouts, 5xx and rate limits (`false`) never do:
+/// a long outage must not eat the queue.
+class OutboxRejected implements Exception {
+  const OutboxRejected();
+}
+
 /// Sends one drained batch to the backend. MUST resolve `true` only when the
-/// server accepted the batch (2xx); `false` on any failure (transport error,
-/// 4xx, 5xx). Drained points are removed from the queue only on `true`, so a
+/// server accepted the batch (2xx); `false` when it could not be delivered for
+/// now (transport error, timeout, 5xx, rate limit: the points stay, no strike);
+/// throw [OutboxRejected] when the server refused it for good (strike). Drained points are removed from the queue only on `true`, so a
 /// crash between send and removal re-sends duplicates — the batch endpoint
 /// dedupes by (device_id, ts), making retries idempotent.
 typedef OutboxSend = Future<bool> Function(List<Map<String, dynamic>> points);
@@ -198,8 +210,9 @@ class LocationOutbox {
   /// the other isolate) during the network call are preserved (MOB-007). A
   /// later crash re-sends a duplicate that the backend drops idempotently.
   ///
-  /// On failure each point in the batch gets a strike; after [maxAttempts]
-  /// strikes it is dropped so a poisoned batch cannot block newer data.
+  /// Only a permanent refusal ([OutboxRejected]) gives each point in the batch a
+  /// strike; after [maxAttempts] strikes it is dropped so a poisoned batch
+  /// cannot block newer data. Offline failures never strike.
   static Future<int> drain({
     required OutboxSend send,
     int maxPerCall = defaultMaxPerCall,
@@ -216,7 +229,14 @@ class LocationOutbox {
       if (points.isEmpty) return 0;
       final List<Map<String, dynamic>> batch =
           locationOutboxSelectBatch(points, maxPerCall);
-      final bool ok = await send(batch);
+      bool ok;
+      bool rejected = false;
+      try {
+        ok = await send(batch);
+      } on OutboxRejected {
+        ok = false;
+        rejected = true;
+      }
       final Set<Object?> batchTs =
           batch.map((Map<String, dynamic> p) => p['ts']).toSet();
 
@@ -231,6 +251,10 @@ class LocationOutbox {
         for (final Object? t in batchTs) {
           attempts.remove(t);
         }
+      } else if (!rejected) {
+        // Offline / server trouble: keep every point, count nothing. The queue
+        // is bounded by age and count instead (oldest fixes go first).
+        removeTs = <Object?>{};
       } else {
         removeTs = locationOutboxRegisterFailure(
           attempts,
@@ -270,6 +294,27 @@ class LocationOutbox {
 
   /// Current queue depth (for UI affordances and debugging). Best-effort: a
   /// storage failure reports 0.
+  /// Drains until the queue is empty, a batch fails, or [maxRounds] batches were
+  /// sent (so one recovery does not flood the radio or trip a rate limit).
+  /// [pause] is the gap between batches.
+  static Future<int> drainAll({
+    required OutboxSend send,
+    int maxPerCall = defaultMaxPerCall,
+    int maxRounds = 12,
+    Duration pause = const Duration(milliseconds: 400),
+  }) async {
+    int total = 0;
+    for (int i = 0; i < maxRounds; i++) {
+      final int before = await size();
+      if (before == 0) break;
+      final int n = await drain(send: send, maxPerCall: maxPerCall);
+      total += n;
+      if (n == 0) break; // failed or nothing deliverable: wait for the next recovery
+      if (pause > Duration.zero) await Future<void>.delayed(pause);
+    }
+    return total;
+  }
+
   static Future<int> size() async {
     try {
       final SharedPreferences prefs = await SharedPreferences.getInstance();
