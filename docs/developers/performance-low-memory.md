@@ -149,7 +149,7 @@ This does not show Lite using less memory: RSS in a long-lived VM is dominated b
 collector's timing, and 6000 points are well under 1 MB of Dart objects. The reliable, deterministic effect is the
 count of points kept and stored (500 vs 6000), and fewer items per request. Smaller pages trade more requests for lower
 peak per request; the table suggests no memory win at 300 items. A Standard run was lost when two runs wrote to the same
-file. The 50-cycle screen leak test (`screen_leak_test.dart`, leak_tracker) was written but **not run**; the
+file. The 50-cycle screen leak test (`screen_leak_test.dart`, leak_tracker, server settings and privacy policy screens) passes in the test VM; it ignores the image cache's own stream handles. Only those two screens are covered, not the map or chat screens. The
 "before vs after" comparison and the 100-member marker benchmark were not done.
 
 ## Reproducing
