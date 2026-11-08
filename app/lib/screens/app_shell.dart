@@ -7,6 +7,7 @@ import '../models/member.dart';
 import '../services/driving/crash_watcher.dart';
 import '../services/perf/perf_monitor.dart';
 import '../theme/app_theme.dart';
+import '../services/delivery_status.dart';
 import '../widgets/delivery_banner.dart';
 import '../widgets/server_prompts.dart';
 import '../widgets/update_banner.dart';
@@ -177,10 +178,7 @@ class _AppShellState extends State<AppShell> {
   ];
 
   static bool get _bannerShown =>
-      AppCompat.state.value.status == CompatStatus.required ||
-      AppCompat.circlesNeedingUpdate.value > 0 ||
-      (AppCompat.state.value.status == CompatStatus.recommended &&
-          !AppCompat.dismissed.value);
+      AppShellBanner.updateShown || DeliveryBanner.silentCircle() != null;
 
   @override
   Widget build(BuildContext context) {
@@ -211,6 +209,7 @@ class _AppShellState extends State<AppShell> {
               AppCompat.state,
               AppCompat.dismissed,
               AppCompat.circlesNeedingUpdate,
+              DeliveryHints.reports,
             ]),
             builder: (BuildContext context, Widget? child) =>
                 MediaQuery.removePadding(
