@@ -222,7 +222,7 @@ void main() {
     expect(api.calls, 0);
     expect(find.byType(DrivingDaysChart), findsOneWidget);
     expect(find.byType(RecentDriveTile), findsOneWidget);
-    expect(find.byKey(const Key('phone-driving-You')), findsOneWidget);
+    expect(find.byKey(const Key('phone-driving-Blake (you)')), findsOneWidget);
   });
 
   testWidgets('offline: the saved report is shown with its age, not an empty error', (t) async {
