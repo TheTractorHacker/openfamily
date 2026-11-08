@@ -91,7 +91,11 @@ func abiRank(abi string) int {
 
 // ParseVersion extracts a semver such as 0.24.1 from a file name ("" if none).
 func ParseVersion(name string) string {
-	return versionRE.FindString(name)
+	v := versionRE.FindString(name)
+	for _, ext := range []string{".apk", ".aab", ".ipa", ".json", ".sha256", ".txt"} {
+		v = strings.TrimSuffix(v, ext)
+	}
+	return v
 }
 
 // AssetInfo is one downloadable file of a release.

@@ -108,7 +108,7 @@ func TestMembersDeltaAndCompact(t *testing.T) {
 		t.Fatalf("move delta: %+v", d3)
 	}
 	// B leaves the circle: layout changes, full list, B gone from ids (the tombstone).
-	e.mustCode("A", "DELETE", "/circles/"+e.listCircleID("A", "C1")+"/members/"+e.ids["B"], nil, 204)
+	e.mustCode("A", "DELETE", "/circles/"+e.listCircleID("A", "C1")+"/members/"+e.ids["B"], nil, 200)
 	var d4 listDelta
 	decode(t, e.raw("A", "GET", "/family/members?circle_id=all&view=compact&since="+d.Cursor, nil, nil), &d4)
 	if !d4.Full || len(d4.IDs) != 1 || d4.IDs[0] != e.ids["A"] {

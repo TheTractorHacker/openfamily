@@ -78,7 +78,6 @@ class FakeSource implements WatchContextSource {
   int invalidations = 0;
   WatchContext ctx = const WatchContext(chatCircleId: 'c1', unread: 1);
 
-  @override
   Future<void> Function()? onRead;
 
   @override
