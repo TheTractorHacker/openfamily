@@ -120,6 +120,11 @@ speed, a moving activity state, a live boost or SOS leaves idle at once.
 Fixes without coordinates never count as stillness. The foreground reporter
 never uses it.
 
+iOS has no interval: every tier is mapped to a Core Location accuracy and
+distance filter, and idle becomes a cell-only "still" request with a 150 m exit
+region. Table, thresholds and the iPhone test plan:
+[iOS background location](developers/ios-location.md).
+
 ## Battery comparison procedure (physical device only)
 
 Emulators cannot measure this. The adaptive policy (`tracking_cadence.dart`:
