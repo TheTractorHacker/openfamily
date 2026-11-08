@@ -15,6 +15,10 @@ the phones afterwards.
 Nothing yet. The owner moves these notes under a version heading when a
 release is tagged.
 
+## v0.26.2 (2026-11-08)
+
+- **Top banner readable.** The notice banner at the top of the map ("Tap to see why and fix it") no longer draws under the status bar; it clears it, and the map moves down to make room.
+
 ## v0.26.1 (2026-11-08)
 
 Fixes for Private circles on Android.
