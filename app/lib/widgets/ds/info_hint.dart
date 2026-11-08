@@ -11,12 +11,10 @@ Future<void> showInfoSheet(BuildContext context, {required String title, require
     backgroundColor: Colors.transparent,
     builder: (BuildContext ctx) => DsSheetScaffold(
       title: title,
-      child: Flexible(
-        child: SingleChildScrollView(
-          key: const Key('info-sheet-body'),
-          padding: EdgeInsets.fromLTRB(AppSpace.xl, 0, AppSpace.xl, AppSpace.xl + MediaQuery.paddingOf(ctx).bottom),
-          child: Text(body, style: AppType.body),
-        ),
+      child: SingleChildScrollView(
+        key: const Key('info-sheet-body'),
+        padding: EdgeInsets.fromLTRB(AppSpace.xl, 0, AppSpace.xl, AppSpace.xl + MediaQuery.paddingOf(ctx).bottom),
+        child: Text(body, style: AppType.body),
       ),
     ),
   );

@@ -27,7 +27,7 @@ void main() {
       (WidgetTester tester) async {
     await tester.pumpWidget(const MaterialApp(home: SettingsScreen()));
 
-    await tester.tap(find.text('Family'));
+    await tester.tap(find.text('Family & friends'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
 
