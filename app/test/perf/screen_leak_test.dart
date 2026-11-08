@@ -11,6 +11,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   LeakTesting.enable();
+  // The image cache keeps its stream handles for cached pictures (the logo); that is the framework's
+  // cache, bounded by PerfProfile, not a screen leak.
+  LeakTesting.settings = LeakTesting.settings.withIgnored(
+    classes: <String>['ImageStreamCompleterHandle', '_LiveImage'],
+  );
 
   testWidgets('server settings and privacy policy: 50 open/close cycles leave nothing behind',
       (WidgetTester tester) async {

@@ -16,6 +16,7 @@ import 'package:openfamily/services/e2ee/item_open_job.dart';
 import 'package:openfamily/services/e2ee/last_positions.dart';
 import 'package:openfamily/services/e2ee/private_channel.dart';
 import 'package:openfamily/services/e2ee/private_runtime.dart';
+import 'package:openfamily/services/perf/perf_profile.dart';
 import 'package:openfamily/services/processing/on_device_setting.dart';
 
 import '../support/private_bench_harness.dart';
@@ -26,6 +27,10 @@ void main() {
     late SyncStats stats;
 
     setUp(() async {
+      // The frame/page counts below are defined for the full-size catch-up page (200); the page size
+      // otherwise follows the device tier (see perf_profile.dart), one frame per member per page.
+      PerfProfile.override = PerfProfile.full;
+      addTearDown(PerfProfile.reset);
       w = await BenchWorld.make();
       await w.aliceSends(300);
       w.b.kv.sets = 0;
