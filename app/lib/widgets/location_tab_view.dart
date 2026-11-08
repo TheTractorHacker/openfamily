@@ -33,6 +33,12 @@ typedef PlacesLoader = Future<List<Place>> Function();
 /// The map is a black box supplied by the caller, and every action is a
 /// callback, so this widget owns no services and can be rendered in tests.
 class LocationTabView extends StatefulWidget {
+  /// The layout rule: wide or landscape bodies show the map beside a fixed
+  /// panel, narrow ones a bottom sheet. Also used by the map screen to know
+  /// whether a sheet covers the lower map.
+  static bool isTwoPaneSize(Size s) =>
+      s.width >= 720 || (s.width > s.height * 1.2 && s.width >= 560);
+
   const LocationTabView({
     super.key,
     required this.map,
@@ -163,6 +169,11 @@ class _LocationTabViewState extends State<LocationTabView> {
   static const double _half = 0.5;
 
   final DraggableScrollableController _sheet = DraggableScrollableController();
+
+  /// The map is moved (not recreated) between the bottom-sheet layout and the
+  /// two-pane layout, so unfolding the phone keeps the camera, zoom and tiles.
+  final GlobalKey _mapKey = GlobalKey(debugLabel: 'location-map');
+  Widget get _map => KeyedSubtree(key: _mapKey, child: widget.map);
 
   // A solo circle has nothing to look at but the invite card, so the sheet
   // opens to half height once (never again, so the user's own dragging wins).
@@ -464,7 +475,7 @@ class _LocationTabViewState extends State<LocationTabView> {
           final double peek = (minSize * textScale).clamp(minSize, math.max(minSize, 0.38));
           return Stack(
             children: <Widget>[
-              Positioned.fill(child: widget.map),
+              Positioned.fill(child: _map),
               _buildTop(context),
               _buildFloating(context, h, peek),
               _buildSpeedChip(context, h, peek),
@@ -511,8 +522,7 @@ class _LocationTabViewState extends State<LocationTabView> {
   /// Wide or landscape bodies show the map beside a fixed People / Places
   /// panel instead of a bottom sheet that would cover most of the map.
   static bool isTwoPane(BoxConstraints box) =>
-      box.maxWidth >= 720 ||
-      (box.maxWidth > box.maxHeight * 1.2 && box.maxWidth >= 560);
+      LocationTabView.isTwoPaneSize(Size(box.maxWidth, box.maxHeight));
 
   final ScrollController _panelScroll = ScrollController();
 
@@ -525,7 +535,7 @@ class _LocationTabViewState extends State<LocationTabView> {
         Expanded(
           child: Stack(
             children: <Widget>[
-              Positioned.fill(child: widget.map),
+              Positioned.fill(child: _map),
               _buildTop(context),
               if (_selectedId == null)
                 Positioned(

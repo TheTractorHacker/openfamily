@@ -33,7 +33,8 @@
         "user/battery-and-permissions.md",
         "user/older-phones.md",
         "user/when-the-server-is-down.md",
-        "user/watch.md"
+        "user/watch.md",
+        "user/foldables-and-tablets.md"
       ],
       "icon": "users"
     },
@@ -82,7 +83,8 @@
         "design/OPTIMIZATION_BACKLOG.md",
         "design/RESEARCH_NOTES_PERFORMANCE.md",
         "design/PRIVACY_MODEL_V1.md",
-        "developers/performance-watch.md"
+        "developers/performance-watch.md",
+        "developers/performance-foldables.md"
       ],
       "icon": "code"
     },
