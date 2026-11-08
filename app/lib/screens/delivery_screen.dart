@@ -1,3 +1,4 @@
+import '../services/offline/server_reachability.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -117,7 +118,9 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
           ),
         if (_unavailable && !_loading)
           Text(
-            "The server could not tell us. It may be an older version, or you may be offline. Tap \"Fix this circle\" to refresh this phone anyway.",
+            ServerReachability.instance.state.value == SyncState.signedOut
+                ? 'Please sign in again. The server is working; this phone\'s login ran out, so it cannot ask about your circle.'
+                : "The server could not tell us. It may be an older version, or you may be offline. Tap \"Fix this circle\" to refresh this phone anyway.",
             key: const Key('delivery-unavailable'),
             style: AppType.secondary,
           ),

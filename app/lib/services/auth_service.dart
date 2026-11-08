@@ -2,6 +2,8 @@ import 'dart:async';
 import 'api_client.dart';
 import 'background_location_service.dart';
 import 'biometric_service.dart';
+import 'offline/offline_sync.dart';
+import 'session_gate.dart' show jwtUserIdOf;
 import 'place_service.dart';
 import 'watch/watch_bridge.dart';
 import 'widget_snapshot.dart';
@@ -146,6 +148,8 @@ class AuthService {
       access: tokens['access_token'] as String,
       refresh: tokens['refresh_token'] as String,
     );
+    // What waits on this phone (queued SOS, check-ins, chat, cached people) belongs to the person who created it.
+    await OfflineSync.adoptAccount(jwtUserIdOf(tokens['access_token'] as String));
     // A new session may feed a paired watch again (a sign-out clear is final until now).
     unawaited(WatchBridge.instance.signedIn());
     // "Keep me signed in on this device": remember the password in the

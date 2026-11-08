@@ -14,6 +14,10 @@ enum SyncState {
 
   /// The server cannot be reached: the app shows what it last knew.
   unreachable,
+
+  /// The server answers, but this phone's login is no longer accepted: the person has to sign in again.
+  /// Queued SOS, check-ins and chat stay on the phone until then.
+  signedOut,
 }
 
 /// One place that knows whether the server is reachable, probes it politely
@@ -76,7 +80,21 @@ class ServerReachability {
   /// A response arrived. 502/503/504 come from a proxy in front of a dead
   /// server and count as a failure; every other status proves the server is
   /// there (a 4xx is an answer).
+  /// The login is gone or refused. The server is reachable, so this must never read as "unreachable".
+  void signedOut() {
+    if (_disposed) return;
+    _timer?.cancel();
+    _timer = null;
+    state.value = SyncState.signedOut;
+  }
+
+  /// A fresh sign-in (or any accepted answer) ends the signed-out state.
+  void signedIn() {
+    if (state.value == SyncState.signedOut) state.value = pending.value > 0 ? SyncState.syncing : SyncState.upToDate;
+  }
+
   void noteResponse(int status) {
+    if (status < 400 && state.value == SyncState.signedOut) signedIn();
     if (status == 502 || status == 503 || status == 504) {
       noteFailure();
       return;

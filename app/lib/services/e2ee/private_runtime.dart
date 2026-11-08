@@ -617,18 +617,25 @@ class PrivateRuntime {
 
   /// Seals parked fixes (oldest first). Returns how many were handled.
   Future<int> drainParked() async {
-    final String? raw = await kv.get(_parkedKey);
+    final String? raw = await kv.getFresh(_parkedKey);
     if (raw == null || raw.isEmpty) return 0;
     await kv.remove(_parkedKey);
     int n = 0;
+    List<dynamic> entries;
     try {
-      for (final dynamic e in (jsonDecode(raw) as List<dynamic>)) {
-        final Map<String, dynamic> m = (e as Map<String, dynamic>).cast<String, dynamic>();
+      entries = jsonDecode(raw) as List<dynamic>;
+    } catch (_) {
+      return 0;
+    }
+    for (final dynamic e in entries) {
+      // One bad entry must not lose the ones behind it (the key was removed above).
+      try {
+        final Map<String, dynamic> m = (e as Map<dynamic, dynamic>).cast<String, dynamic>();
         final Object? only = m['for'];
         await _sealFix(m, only: only is List ? only.cast<String>().toSet() : null);
         n++;
-      }
-    } catch (_) {}
+      } catch (_) {}
+    }
     return n;
   }
 
@@ -751,7 +758,10 @@ class PrivateRuntime {
   }
 
   Future<void> _keysThenDrain(String circleId) async {
-    if (await ensureKeys(circleId)) {
+    final bool got = await ensureKeys(circleId);
+    // "Already has the newest key" is the other way to be ready: the key may have arrived through another path
+    // (a settings screen, an admin's wrap) after the fix was parked, and nothing else would ever seal it.
+    if (got || await keys.latestEpoch(circleId) > 0) {
       await drainParked();
       unawaited(flush());
     }
@@ -783,6 +793,8 @@ class PrivateRuntime {
     try {
       final SenderIdentity? me = await _me();
       if (me == null) return 0;
+      // Fixes parked for want of a key are sealed as soon as the key is here, whichever path brought it.
+      if ((await kv.getFresh(_parkedKey) ?? '').isNotEmpty) await drainParked();
       return await queue.flush(channel, deviceFor: (_) => me.deviceId, lanes: lanes, onNeedKeySync: (String c) => unawaited(_syncKeys(c)));
     } catch (_) {
       return 0;
@@ -1361,7 +1373,19 @@ class PrivateRuntime {
   Future<void> warmUp() => lastPositions.load();
 
   /// The last position ever received for [userId] in any Private circle (null: none yet or not loaded).
-  LastPosition? lastKnown(String userId) => lastPositions.loaded ? lastPositions.of(userId) : null;
+  LastPosition? lastKnown(String userId, {String? circleId}) {
+    if (!lastPositions.loaded) return null;
+    return circleId == null ? lastPositions.of(userId) : lastPositions.ofIn(circleId, userId);
+  }
+
+  /// Sign-out or account change: nothing remembered about other people may outlive the account.
+  Future<void> forgetAccount() async {
+    await lastPositions.clear();
+    _knownUsers.clear();
+    try {
+      await kv.remove(_parkedKey);
+    } catch (_) {}
+  }
 
   Future<void> _apply(ReceivedItem r) async {
     final SenderIdentity? me = await _me();
