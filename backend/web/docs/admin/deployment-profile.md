@@ -31,6 +31,30 @@ own disk) and what a cloud server should do (`OPENFAMILY_DATA_KEY` encrypts the 
 chose the server as the default; **Cloud** and *not chosen* keep the suggestion on "Keep on my phone" until
 you decide. Whatever is suggested, the person still taps for themselves.
 
+## Members are on the server by default (auto-apply)
+
+The member default (API `GET/PUT /api/admin/settings/member-defaults`; the admin web page for it may arrive in a later release):
+
+| Setting | Home profile (default) | Cloud or not chosen (default) |
+| --- | --- | --- |
+| Default lane | Server | Phone |
+| Auto-apply | On | Off (the app only asks) |
+
+With auto-apply on, a member of a Private circle that has server help on, an approved server key and no earlier
+choice gets "use the server" **signed by their own phone** the next time they open the app. It is the same
+signature as tapping the button, it appears in the circle's key log, and the member sees a notice with a one-tap
+**Keep on my phone** (which also deletes the copies the server holds of them). Nobody who ever chose is changed, and an
+opt-out is permanent. Not auto-applied: circles that require server processing, child accounts, old apps (they apply
+after updating) and phones that are not online. The background service cannot sign, so a member who never opens the
+app is not switched.
+
+This is **your policy**, not each person's consent in advance: say so to your family. After it applies, the server
+(and you, as its operator) can read that member's location, trips and driving data, and backups include them.
+
+**Who is not on yet.** `GET /api/admin/members-not-on-server` (and the circle's processing screen for circle admins)
+lists members whose own lane is not Server: `no_choice` (covered at their next app open), `phone` (their choice;
+nobody can change it for them) and `needs_update` (old app). `remind_text` is a message you can send.
+
 ## Circles that are already Private
 
 Open the app as the circle admin: a card says **Let the server do the processing (recommended)**. One flow

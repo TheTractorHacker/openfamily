@@ -6,6 +6,8 @@ import '../services/app_compat.dart';
 import '../services/delivery_status.dart';
 import '../services/e2ee/e2ee_app.dart';
 import '../services/e2ee/e2ee_models.dart' show ServerJoinInfo;
+import '../services/e2ee/lanes_store.dart' show AutoApplyRecord;
+import '../services/e2ee/private_runtime.dart' show PrivateRuntime;
 import 'add_server_sheet.dart';
 
 // Server by default (docs/design/PRIVACY_PROCESSING.md section 22). Three small cards:
@@ -76,12 +78,138 @@ String updateMessageText(String serverHost) =>
     'Open the Play Store and update Orbitly, or, if you installed it from the website, download the new version at '
     '${serverHost.isEmpty ? 'our server' : serverHost}/app.apk and install it.';
 
+/// The copy-paste reminder for members who are not on the server yet (same words as the admin API's `remind_text`).
+const String remindMessageText = 'Please open the Orbitly app once. Your circle uses the family server so maps, history and driving reports work. '
+    'You will see a short notice and can tap "Keep on my phone" if you prefer that. If the app is old, update it first.';
+
 class ServerPrompts extends StatelessWidget {
   const ServerPrompts({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return Column(mainAxisSize: MainAxisSize.min, children: const <Widget>[ServerJoinCard(), _CirclePrompts()]);
+    return Column(mainAxisSize: MainAxisSize.min, children: const <Widget>[ServerJoinCard(), AutoApplyNotice(), _CirclePrompts()]);
+  }
+}
+
+/// A circle where this phone signed the server lane on its own (admin setting "members are on the server by default").
+class AutoNotice {
+  const AutoNotice(this.circleId, this.circleName);
+  final String circleId;
+  final String circleName;
+}
+
+/// The words of the notice. One place so tests and docs quote the same text.
+const String autoApplyNoticeText = 'Your circle uses the server so maps, history and driving reports work. Tap to keep your data on your phone.';
+
+/// First-time, non-blocking notice after the member's own phone turned on server processing by the admin's default.
+/// "Keep on my phone" signs the phone lane at once and asks the server to delete the copies. It stays until dismissed.
+class AutoApplyNotice extends StatefulWidget {
+  const AutoApplyNotice({super.key, this.loader, this.keep, this.dismiss});
+
+  /// Test hooks (the real app reads the phone's own records).
+  final Future<List<AutoNotice>> Function()? loader;
+  final Future<void> Function(String circleId)? keep;
+  final Future<void> Function(String circleId)? dismiss;
+
+  @override
+  State<AutoApplyNotice> createState() => _AutoApplyNoticeState();
+}
+
+class _AutoApplyNoticeState extends State<AutoApplyNotice> {
+  List<AutoNotice> _items = const <AutoNotice>[];
+  bool _busy = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    PrivateRuntime.autoApplied.addListener(_load);
+    ServerChoiceStore.changed.addListener(_load);
+    _load();
+  }
+
+  @override
+  void dispose() {
+    PrivateRuntime.autoApplied.removeListener(_load);
+    ServerChoiceStore.changed.removeListener(_load);
+    super.dispose();
+  }
+
+  static Future<List<AutoNotice>> _realLoad() async {
+    final PrivateRuntime rt = PrivateRuntime.instance;
+    final List<AutoNotice> out = <AutoNotice>[];
+    for (final Circle c in DeliveryHints.circleById.values) {
+      if (!c.isPrivate) continue;
+      final AutoApplyRecord? r = await rt.lanesService.store.autoRecord(c.id);
+      if (r != null && r.applied && !r.dismissed && c.myLaneServer) out.add(AutoNotice(c.id, c.name));
+    }
+    return out;
+  }
+
+  Future<void> _load() async {
+    try {
+      final List<AutoNotice> l = await (widget.loader ?? _realLoad)();
+      if (mounted) setState(() => _items = l);
+    } catch (_) {}
+  }
+
+  Future<void> _run(Future<void> Function() f, String failure) async {
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await f();
+    } catch (_) {
+      if (mounted) setState(() => _error = failure);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+    await _load();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_items.isEmpty) return const SizedBox.shrink();
+    final AutoNotice n = _items.first;
+    final ColorScheme cs = Theme.of(context).colorScheme;
+    return Material(
+      color: cs.secondaryContainer,
+      child: Padding(
+        key: const Key('auto-apply-notice'),
+        padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[
+          Text(_items.length > 1 ? '${n.circleName} (and ${_items.length - 1} more) use the server' : '${n.circleName} uses the server',
+              style: TextStyle(fontWeight: FontWeight.w700, color: cs.onSecondaryContainer)),
+          const SizedBox(height: 4),
+          Text(autoApplyNoticeText, style: TextStyle(color: cs.onSecondaryContainer)),
+          if (_error != null) Text(_error!, style: TextStyle(color: cs.error)),
+          Wrap(spacing: 8, children: <Widget>[
+            FilledButton(
+              key: const Key('auto-apply-keep'),
+              onPressed: _busy
+                  ? null
+                  : () => _run(() async {
+                        await (widget.keep ?? (String id) async {
+                          await PrivateRuntime.instance.lanesService.keepOnPhone(id);
+                          await ServerChoiceStore.markAnswered(id);
+                        })(n.circleId);
+                      }, 'Could not switch to your phone. Check the connection and try again.'),
+              child: const Text('Keep on my phone'),
+            ),
+            TextButton(
+              key: const Key('auto-apply-ok'),
+              onPressed: _busy
+                  ? null
+                  : () => _run(() async {
+                        await (widget.dismiss ?? (String id) => PrivateRuntime.instance.lanesService.store.dismissAutoNotice(id))(n.circleId);
+                      }, 'Could not save that.'),
+              child: const Text('OK'),
+            ),
+          ]),
+        ]),
+      ),
+    );
   }
 }
 

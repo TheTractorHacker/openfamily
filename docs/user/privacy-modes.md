@@ -1,7 +1,6 @@
 # Privacy modes explained
 
-Each circle has a privacy mode. This page explains them without jargon: who can
-see what, and what you give up for more privacy.
+Each circle has a privacy mode. This page explains them without jargon: who can see what, and what you give up for more privacy.
 
 ## The three modes
 
@@ -44,13 +43,29 @@ Everyone else in the circle stays phone-to-phone.
 
 ![Server processing: who is Server-assisted and who is phone-only](../images/app/processing.png)
 
+### Server-assisted by default (when your server owner turns it on)
+
+On a server whose owner chose **Home** (hardware the family owns), people in a Private circle that has server help
+on are put on the server **by default**, so maps, history and driving reports work without everyone finding a
+setting. It works like this:
+
+- When you next open the app, **your own phone** signs "use the server" for you. It is the same signature as tapping
+  **Use the server**, and it shows in the circle's key log. The server cannot do it for you.
+- You see a notice: *Your circle uses the server so maps, history and driving reports work. Tap to keep your data on
+  your phone.* **Keep on my phone** switches you off at once and asks the server to delete what it holds of yours.
+- If you ever chose yourself, in either direction, it is never changed. Opting out stays opted out.
+- From then on the server can read your location, trips and driving data (the server owner and anyone who backs up or
+  steals the server can too). Anything it stored stays until you delete it; backups cannot be deleted.
+- Not done for you: circles that **require** server processing (you are asked to consent), child accounts, and
+  servers set to **Cloud** (the app asks you instead).
+
 ## Who decides what
 
 - The **circle admin** decides whether server help exists at all for the
   circle, and the default for new people.
   ![Circle processing setting](../images/app/processing-policy.png)
 - **Each person** decides for themselves, on their own phone. An admin cannot
-  switch you on. You can **opt out at any time**: the server stops receiving new
+  switch you on. (If your server owner chose auto-apply, your own phone does it when you open the app, and you can undo it with one tap.) You can **opt out at any time**: the server stops receiving new
   data and the app can delete copies the server already holds.
 - If you are also in a **Normal** circle, that circle still sends your position
   to the server. Opting out applies per Private circle, and the screen tells you.

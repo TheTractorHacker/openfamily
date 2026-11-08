@@ -26,6 +26,7 @@ class FakeE2eeServer {
   bool serverModeEnabled = false;
   bool trustedServerDefault = false;
   ServerProfile serverProfileValue = ServerProfile.unknown;
+  final Set<String> childUsers = <String>{};
   String? pinnedServerDevice;
 
   /// Server clock (tests that use a fake clock set this to it).
@@ -295,7 +296,7 @@ class FakeE2eeClient implements E2eeApi {
       epochs: c.epochRecords.values.toList(),
       members: <CircleE2eeMember>[
         for (final String m in c.members)
-          CircleE2eeMember(userId: m, name: s.names[m] ?? m, role: m == c.admin ? 'admin' : 'member', devices: <DeviceKey>[
+          CircleE2eeMember(userId: m, name: s.names[m] ?? m, role: m == c.admin ? 'admin' : (s.childUsers.contains(m) ? 'child' : 'member'), devices: <DeviceKey>[
             for (final DeviceKey d in s.activeOf(m)) _withApproval(d, s.approved(d, circleId), s.names[m])
           ])
       ],

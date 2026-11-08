@@ -382,7 +382,14 @@ class ServerProfile {
     this.enabled = false,
     this.device,
     this.builtin = false,
+    this.memberDefaultLane = 'phone',
+    this.autoApply = false,
   });
+
+  /// Section 23: the admin's member default ('server' | 'phone') and whether members' own phones sign it on next open.
+  /// An older server sends none: read as phone, no auto-apply, so nothing changes for anyone.
+  final String memberDefaultLane;
+  final bool autoApply;
 
   /// The server is its own device (no separate sidecar to set up).
   final bool builtin;
@@ -421,6 +428,8 @@ class ServerProfile {
       enabled: j['enabled'] == true,
       device: ServerDeviceInfo.fromJson(j['device']),
       builtin: j['builtin'] == true,
+      memberDefaultLane: (j['member_defaults'] is Map && (j['member_defaults'] as Map)['default_lane'] == 'server') ? 'server' : 'phone',
+      autoApply: j['member_defaults'] is Map && (j['member_defaults'] as Map)['auto_apply'] == true && (j['member_defaults'] as Map)['default_lane'] == 'server',
     );
   }
 }
