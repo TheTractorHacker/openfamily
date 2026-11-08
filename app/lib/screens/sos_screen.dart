@@ -88,6 +88,7 @@ class _SosScreenState extends State<SosScreen> {
   void initState() {
     super.initState();
     OfflineQueue.instance.onDelivered.add(_onQueueDelivered);
+    OfflineQueue.instance.onRejected.add(_onQueueRejected);
     _restore();
     // Keeps the emergency numbers on the phone (cached) for the "text my contacts" fallback.
     unawaited(EmergencyContactService().list().then((List<EmergencyContact> l) {
@@ -98,8 +99,22 @@ class _SosScreenState extends State<SosScreen> {
   @override
   void dispose() {
     OfflineQueue.instance.onDelivered.remove(_onQueueDelivered);
+    OfflineQueue.instance.onRejected.remove(_onQueueRejected);
     _timer?.cancel();
     super.dispose();
+  }
+
+  /// The server looked at the waiting SOS and refused it for good: never leave the person believing it is
+  /// still on its way. Say so and what to do.
+  void _onQueueRejected(QueuedItem item, String reason) {
+    if (item.kind != QueueKind.sos || !mounted) return;
+    LocationReporter.stopSosBurst();
+    setState(() {
+      _queuedSos = null;
+      _phase = _SosPhase.idle;
+      _error = 'SOS was not sent: the server refused it ($reason). Call emergency services, '
+          'or text your emergency contacts.';
+    });
   }
 
   /// The queued SOS finally reached the server: carry on as a normal sent SOS.

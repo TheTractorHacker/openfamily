@@ -207,6 +207,13 @@ class OfflineQueue {
   final List<void Function(QueuedItem item, dynamic response)> onDelivered =
       <void Function(QueuedItem, dynamic)>[];
 
+  /// Called when the server refused a queued item for good, with the reason in plain words. An SOS
+  /// screen uses it to say "SOS not sent" instead of waiting for a delivery that will never come.
+  final List<void Function(QueuedItem item, String reason)> onRejected =
+      <void Function(QueuedItem, String)>[];
+
+  Object? _lastError;
+
   List<QueuedItem>? _items;
   List<Map<String, dynamic>> _rejected = <Map<String, dynamic>>[];
   // Created on first use, in the caller's zone (a future made in another zone, for example in a
@@ -293,6 +300,12 @@ class OfflineQueue {
   Future<int> size() => _locked(() async => (await _load()).length);
 
   /// Items the server refused for good (shown in Diagnostics; bounded).
+  /// What was refused for good: kind, id, time and the server's reason (SOS, check-ins and chat only).
+  Future<List<Map<String, dynamic>>> rejectedItems() => _locked(() async {
+        await _load();
+        return List<Map<String, dynamic>>.of(_rejected);
+      });
+
   Future<int> rejectedCount() => _locked(() async {
         await _load();
         return _rejected.length;
@@ -351,13 +364,20 @@ class OfflineQueue {
           await _locked(() async {
             final List<QueuedItem> l = await _load();
             l.removeWhere((QueuedItem x) => x.id == next.id);
+            final Object? err = _lastError;
+            final String reason = err is ApiException ? '${err.status}: ${err.message}' : 'refused';
             if (next.isProtected) {
-              _rejected.add(<String, dynamic>{'k': next.kind, 'i': next.id, 't': next.at});
+              _rejected.add(<String, dynamic>{'k': next.kind, 'i': next.id, 't': next.at, 'r': reason});
               while (_rejected.length > rejectedCap) {
                 _rejected.removeAt(0);
               }
             }
             await _save(l);
+            for (final void Function(QueuedItem, String) f in List<void Function(QueuedItem, String)>.of(onRejected)) {
+              try {
+                f(next, reason);
+              } catch (_) {}
+            }
           });
         } else {
           await _locked(() async {
@@ -415,7 +435,10 @@ class OfflineQueue {
     } catch (e) {
       // An SOS the server calls "already sent a moment ago" reached the family.
       if (item.kind == QueueKind.sos && isRateLimited(e)) return (SendOutcome.delivered, null);
-      if (isPermanentRejection(e)) return (SendOutcome.rejected, null);
+      if (isPermanentRejection(e)) {
+        _lastError = e;
+        return (SendOutcome.rejected, null);
+      }
       return (SendOutcome.retryLater, null);
     }
   }

@@ -112,6 +112,16 @@ void main() {
     expect(await q.rejectedCount(), 1, reason: 'kept visible for Diagnostics, not silently forgotten');
   });
 
+  test('an SOS the server refuses for good is reported with the reason, never forgotten silently', () async {
+    await q.enqueue(item('sos', QueueKind.sos, at: t(1)));
+    final List<String> told = <String>[];
+    q.onRejected.add((QueuedItem i, String reason) => told.add('${i.kind}: $reason'));
+    await q.flush(send: (QueuedItem _) async => throw const ApiException(404, 'no family'));
+    expect(told, <String>['sos: 404: no family']);
+    expect((await q.rejectedItems()).single['r'], '404: no family');
+    expect(await q.size(), 0);
+  });
+
   test('an SOS the server calls "already notified a moment ago" counts as delivered', () async {
     await q.enqueue(item('sos', QueueKind.sos, at: t(1)));
     await q.flush(send: (QueuedItem _) async => throw const ApiException(429, 'wait'));

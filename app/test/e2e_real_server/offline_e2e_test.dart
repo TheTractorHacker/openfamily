@@ -60,6 +60,8 @@ void main() {
     for (final Phone p in <Phone>[a, b]) {
       await p.signUpAndLogin(env);
     }
+    // Like the app's onboarding: a person has a family before any alert (POST /families).
+    await rawJson(env, 'POST', '/families', body: <String, dynamic>{'name': 'Offline family'}, token: a.token);
     final Map<String, dynamic> created = await rawJson(env, 'POST', '/circles', body: <String, dynamic>{'name': 'Offline e2e'}, token: a.token);
     circle = (created['id'] ?? (created['circle'] as Map<String, dynamic>)['id']) as String;
     final Map<String, dynamic> inv = await rawJson(env, 'POST', '/circles/$circle/invites',
