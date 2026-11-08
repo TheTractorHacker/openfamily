@@ -13,7 +13,9 @@ import '../services/trips_service.dart';
 import '../theme/app_theme.dart';
 import '../services/e2ee/private_runtime.dart';
 import '../services/processing/primary_lanes.dart';
+import '../services/processing/phone_report_merge.dart';
 import '../services/processing/processing_source.dart';
+import '../services/offline/offline_cache.dart' show Cached;
 import '../widgets/phone_driving_widgets.dart';
 import '../widgets/processing_widgets.dart';
 import '../widgets/driving_event_chips.dart';
@@ -95,15 +97,41 @@ class _State extends State<FamilyDrivingReportScreen> {
   bool _disclosureSeen = true;
   int _seq = 0;
 
+  /// When the shown report was saved, if the server could not be reached and
+  /// the last saved copy is shown instead.
+  DateTime? _cachedAt;
+
   DateTime get _now => widget.clock?.call() ?? DateTime.now();
 
   @override
   void initState() {
     super.initState();
     UnitPreferenceService.ensureLoaded();
-    widget.circleId?.addListener(_load);
+    widget.circleId?.addListener(_reload);
+    PrivateRuntime.primaryPrivate.addListener(_onPrivateChanged);
     widget.optInSync?.call();
     _loadPrefs();
+    if (PrivateRuntime.primaryPrivate.value) {
+      _loadLanes();
+    } else {
+      _load();
+    }
+  }
+
+  // The app learns that the primary circle is Private a moment after start:
+  // the tab may already be open. Load the processing lanes then (never leave
+  // the "could not load" card up), and go back to the plain report when the
+  // circle turns Normal.
+  void _onPrivateChanged() {
+    if (!mounted) return;
+    if (PrivateRuntime.primaryPrivate.value) {
+      if (_lanes == null && !_lanesLoading) _loadLanes();
+    } else {
+      _load();
+    }
+  }
+
+  void _reload() {
     if (PrivateRuntime.primaryPrivate.value) {
       _loadLanes();
     } else {
@@ -117,7 +145,34 @@ class _State extends State<FamilyDrivingReportScreen> {
 
   bool get _hasServerMembers => _lanes?.members.any((MemberProcessing m) => m.origin == ProcessingOrigin.server) ?? false;
 
+  bool get _private => PrivateRuntime.primaryPrivate.value && _lanes != null;
+
+  /// People whose phone worked out their figures, with a name for each.
+  List<MemberProcessing> get _phoneMembers =>
+      _lanes?.members.where((MemberProcessing m) => m.origin == ProcessingOrigin.phone).toList() ?? const <MemberProcessing>[];
+
+  /// What the dashboard shows. Normal circle: the server's report. Private
+  /// circle: the server's report for the members whose lane is "server" plus
+  /// the figures the phone-only members shared, in one set of totals, events,
+  /// day chart and drive list.
+  TripReport? get _viewReport {
+    if (!_private) return _report;
+    final PrimaryLanes l = _lanes!;
+    final Set<String> phoneIds = <String>{for (final MemberProcessing m in _phoneMembers) m.userId};
+    TripReport? base = _report;
+    if (base != null) {
+      base = base.withMembers(<MemberReport>[for (final MemberReport m in base.members) if (!phoneIds.contains(m.userId)) m]);
+    } else if (!_hasServerMembers) {
+      base = emptyReportFor(_period, _anchor, now: _now);
+    }
+    if (base == null) return null;
+    return mergePhoneMembers(base, <PhoneReportMember>[
+      for (final MemberProcessing m in _phoneMembers) PhoneReportMember(userId: m.userId, name: l.nameOf(m.userId), processing: m),
+    ]);
+  }
+
   Future<void> _loadLanes() async {
+    if (!mounted) return;
     setState(() => _lanesLoading = true);
     PrimaryLanes? l;
     try {
@@ -125,15 +180,16 @@ class _State extends State<FamilyDrivingReportScreen> {
     } catch (_) {}
     if (!mounted) return;
     setState(() {
-      _lanes = l;
+      _lanes = l ?? _lanes; // offline: keep the last verified view
       _lanesLoading = false;
     });
-    if (_hasServerMembers) await _load();
+    await _load();
   }
 
   @override
   void dispose() {
-    widget.circleId?.removeListener(_load);
+    widget.circleId?.removeListener(_reload);
+    PrivateRuntime.primaryPrivate.removeListener(_onPrivateChanged);
     super.dispose();
   }
 
@@ -154,21 +210,34 @@ class _State extends State<FamilyDrivingReportScreen> {
   }
 
   Future<void> _load() async {
-    if (PrivateRuntime.primaryPrivate.value && !_hasServerMembers) return;
+    if (PrivateRuntime.primaryPrivate.value) {
+      if (_lanes == null) return; // the lanes decide who the server can speak for
+      if (!_hasServerMembers) {
+        // Nobody here uses the server: the dashboard is built from the phones' own figures.
+        setState(() {
+          _report = null;
+          _error = null;
+          _cachedAt = null;
+          _loading = false;
+        });
+        return;
+      }
+    }
     final int seq = ++_seq;
     setState(() {
       _loading = true;
       _error = null;
     });
     try {
-      final TripReport r = await _api.report(
-        start: _anchor,
-        period: _period,
-        circleId: _scope,
-      );
+      final Object a = _api;
+      final Cached<TripReport> r = a is CachedTripReportApi
+          ? await a.reportCached(start: _anchor, period: _period, circleId: _scope)
+          : Cached<TripReport>(await _api.report(start: _anchor, period: _period, circleId: _scope));
       if (!mounted || seq != _seq) return;
       setState(() {
-        _report = r;
+        _report = r.value;
+        _cachedAt = r.fromCache ? (r.savedAt ?? _now) : null;
+        _error = null;
         _loading = false;
       });
     } catch (e) {
@@ -251,6 +320,16 @@ class _State extends State<FamilyDrivingReportScreen> {
   }
 
   void _openTrip(RecentTrip t) {
+    if (t.onDevice) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(
+          content: Text(
+              '${t.userId == widget.userId.value ? 'This drive was' : '${t.name.isEmpty ? 'This person' : t.name}\'s drive was'} '
+              'worked out on their own phone, so the route map stays there.'),
+        ));
+      return;
+    }
     final Trip trip = Trip(
       id: t.id,
       userId: t.userId,
@@ -279,7 +358,7 @@ class _State extends State<FamilyDrivingReportScreen> {
         valueListenable: PrivateRuntime.primaryPrivate,
         builder: (BuildContext context, bool isPrivate, _) {
           if (!isPrivate) return _buildScreen(context);
-          if (_lanesLoading) return const Scaffold(body: Center(child: CircularProgressIndicator()));
+          if (_lanesLoading && _lanes == null) return const Scaffold(body: Center(child: CircularProgressIndicator()));
           if (_lanes == null) {
             // Never a dead end: the lanes could not be read just now (offline, keys still loading). Say so and retry.
             return Scaffold(
@@ -302,103 +381,9 @@ class _State extends State<FamilyDrivingReportScreen> {
               ),
             );
           }
-          return _buildPrivate(context, _lanes!);
+          return _buildScreen(context);
         },
       );
-
-  /// Private circle: one card per member from the right source. Server-assisted
-  /// members come from the server report, phone-only members from the results
-  /// their phones shared; a phone that has not shared yet gets a placeholder.
-  Widget _buildPrivate(BuildContext context, PrimaryLanes l) {
-    final String? me = widget.userId.value;
-    final List<MemberProcessing> ms = <MemberProcessing>[
-      ...l.members.where((MemberProcessing m) => m.userId == me),
-      ...l.members.where((MemberProcessing m) => m.userId != me),
-    ];
-    final DateTime start = _anchor, end = periodEndOf(_period, start);
-    return Scaffold(
-      appBar: AppBar(title: const Text('Driving report')),
-      body: SafeArea(
-        child: ValueListenableBuilder<UnitSystem>(
-          valueListenable: UnitPreferenceService.units,
-          builder: (BuildContext context, UnitSystem units, _) => RefreshIndicator(
-            onRefresh: () async {
-              await _loadLanes();
-            },
-            child: ListView(
-              key: const Key('driving-private-list'),
-              physics: const AlwaysScrollableScrollPhysics(),
-              padding: const EdgeInsets.all(AppSpace.gutter),
-              children: <Widget>[
-                DsSegmentedTabs(
-                  labels: const <String>['Week', 'Month'],
-                  selected: _period == 'month' ? 1 : 0,
-                  onChanged: (int i) {
-                    final String p = i == 1 ? 'month' : 'week';
-                    setState(() {
-                      _period = p;
-                      _anchor = periodStartOf(p, _now);
-                      _report = null;
-                    });
-                    _load();
-                  },
-                ),
-                const SizedBox(height: AppSpace.md),
-                Text(periodTitle(_period, start, now: _now), style: AppType.secondary),
-                const SizedBox(height: AppSpace.md),
-                for (final MemberProcessing m in ms)
-                  Padding(padding: const EdgeInsets.only(bottom: AppSpace.md), child: _privateMemberCard(context, m, l, units, start, end)),
-                const ProcessingNote(
-                  noteKey: Key('driving-private-note'),
-                  icon: Icons.info_outline,
-                  text: 'Totals across the circle, the per-day chart and the recent-trip list need the server and are not shown here. '
-                      'Each member\'s own figures are shown above, from the server or from their phone.',
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _privateMemberCard(BuildContext context, MemberProcessing m, PrimaryLanes l, UnitSystem units, DateTime from, DateTime to) {
-    final String name = m.userId == widget.userId.value ? 'You' : l.nameOf(m.userId);
-    if (m.origin == ProcessingOrigin.phone) {
-      final bool mine = m.userId == widget.userId.value;
-      void openMine() => Navigator.of(context).push<void>(MaterialPageRoute<void>(builder: (_) => const MyProcessingScreen()));
-      return PhoneDrivingCard(
-          name: name, member: m, from: from, to: to, units: units, now: _now,
-          onUseServer: mine ? openMine : null, onComputeOnPhone: mine ? openMine : null);
-    }
-    MemberReport? r;
-    for (final MemberReport x in _report?.members ?? const <MemberReport>[]) {
-      if (x.userId == m.userId) r = x;
-    }
-    if (r == null) {
-      return Container(
-        key: Key('driving-server-missing-${m.userId}'),
-        padding: const EdgeInsets.all(AppSpace.lg),
-        decoration: BoxDecoration(color: BrandTheme.of(context).sheet, borderRadius: BorderRadius.circular(AppRadius.lg)),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[
-          Row(children: <Widget>[Expanded(child: Text(name, style: AppType.headline)), const LaneChip(server: true)]),
-          const SizedBox(height: AppSpace.sm),
-          Text(_loading ? 'Loading from the server...' : (_error != null ? 'The server could not be reached.' : 'The server has no drives for $name in this period.'),
-              style: AppType.secondary),
-        ]),
-      );
-    }
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[
-      const Padding(padding: EdgeInsets.only(bottom: AppSpace.xs), child: LaneChip(server: true)),
-      MemberDrivingCard(
-        report: r,
-        member: _memberFor(r.userId, r.name),
-        displayName: name,
-        units: units,
-        onTap: () => _openMember(_memberFor(r!.userId, r.name)),
-      ),
-    ]);
-  }
 
   Widget _buildScreen(BuildContext context) {
     return Scaffold(
@@ -409,7 +394,7 @@ class _State extends State<FamilyDrivingReportScreen> {
           builder: (BuildContext context, UnitSystem units, _) {
             return Column(children: <Widget>[
               Expanded(child: RefreshIndicator(
-              onRefresh: _load,
+              onRefresh: () => PrivateRuntime.primaryPrivate.value ? _loadLanes() : _load(),
               child: Center(
                 child: ConstrainedBox(
                   constraints: BoxConstraints(
@@ -537,10 +522,10 @@ class _State extends State<FamilyDrivingReportScreen> {
                 ),
               ),
               )),
-              if (_report != null && _report!.members.length > 1)
+              if (_viewReport != null && _viewReport!.members.length > 1)
                 DrivingMemberDock(
                   members: <Member>[
-                    for (final MemberReport m in _report!.members)
+                    for (final MemberReport m in _viewReport!.members)
                       _memberFor(m.userId, m.name),
                   ],
                   onTap: _openMember,
@@ -549,6 +534,20 @@ class _State extends State<FamilyDrivingReportScreen> {
           },
         ),
       ),
+    );
+  }
+
+  Widget _phoneCard(MemberProcessing mp, String name, bool mine, UnitSystem units) {
+    void openMine() => Navigator.of(context).push<void>(MaterialPageRoute<void>(builder: (_) => const MyProcessingScreen()));
+    return PhoneDrivingCard(
+      name: name,
+      member: mp,
+      from: _anchor,
+      to: periodEndOf(_period, _anchor),
+      units: units,
+      now: _now,
+      onUseServer: mine ? openMine : null,
+      onComputeOnPhone: mine ? openMine : null,
     );
   }
 
@@ -561,10 +560,10 @@ class _State extends State<FamilyDrivingReportScreen> {
   }
 
   List<Widget> _content(BuildContext context, UnitSystem units) {
-    final TripReport? r = _report;
+    final TripReport? r = _viewReport;
     if (r == null) {
       if (_loading) return const <Widget>[DrivingReportSkeleton()];
-      final TripsException e = _error!;
+      final TripsException e = _error ?? const TripsException(TripsFailure.other, 'Please try again in a moment.');
       return <Widget>[
         const SizedBox(height: AppSpace.xl),
         if (e.kind == TripsFailure.offline)
@@ -574,7 +573,7 @@ class _State extends State<FamilyDrivingReportScreen> {
             message:
                 'The driving report needs a connection to the server. '
                 'Pull down or try again once you are back online.',
-            onRetry: _load,
+            onRetry: _reload,
           )
         else
           DsErrorState(
@@ -582,6 +581,13 @@ class _State extends State<FamilyDrivingReportScreen> {
             message: e.message,
             onRetry: _load,
           ),
+        // People who keep their data on their phone do not need the server.
+        if (_private)
+          for (final MemberProcessing mp in _phoneMembers)
+            Padding(
+              padding: const EdgeInsets.only(top: AppSpace.md),
+              child: _phoneCard(mp, mp.userId == widget.userId.value ? 'You' : _lanes!.nameOf(mp.userId), mp.userId == widget.userId.value, units),
+            ),
       ];
     }
     final String phrase = periodPhraseFor(_period, _anchor, _now);
@@ -601,13 +607,38 @@ class _State extends State<FamilyDrivingReportScreen> {
     }
     final bool noPhone = r.totals.events.phoneUse == null;
     final bool sharingPaused = widget.sharing?.value == false;
-    Widget card(MemberReport m) => MemberDrivingCard(
-      report: m,
-      member: _memberFor(m.userId, m.name),
-      displayName: _nameOf(m),
-      units: units,
-      onTap: () => _openMember(_memberFor(m.userId, m.name)),
-    );
+    final bool priv = _private;
+    final bool anyPhoneFigures = priv &&
+        _phoneMembers.any((MemberProcessing m) => m.placeholder == null && r.members.any((MemberReport x) => x.userId == m.userId));
+    Widget card(MemberReport m) {
+      final MemberProcessing? mp = priv ? _lanes!.memberById(m.userId) : null;
+      if (mp != null && mp.origin == ProcessingOrigin.phone) {
+        return _phoneCard(mp, _nameOf(m), m.userId == me, units);
+      }
+      final Widget c = MemberDrivingCard(
+        report: m,
+        member: _memberFor(m.userId, m.name),
+        displayName: _nameOf(m),
+        units: units,
+        onTap: () => _openMember(_memberFor(m.userId, m.name)),
+      );
+      if (!priv) return c;
+      return Column(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[
+        const Padding(padding: EdgeInsets.only(bottom: AppSpace.xs), child: LaneChip(server: true)),
+        c,
+      ]);
+    }
+
+    // Phone-only members whose phone has not shared anything yet.
+    final List<Widget> waiting = <Widget>[
+      if (priv)
+        for (final MemberProcessing mp in _phoneMembers)
+          if (mp.placeholder != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: AppSpace.md),
+              child: _phoneCard(mp, mp.userId == me ? 'You' : _lanes!.nameOf(mp.userId), mp.userId == me, units),
+            ),
+    ];
 
     final List<RecentTrip> shown = _day == null
         ? r.recentTrips
@@ -622,14 +653,17 @@ class _State extends State<FamilyDrivingReportScreen> {
     }
 
     return <Widget>[
-      if (_error != null)
+      if (_error != null || _cachedAt != null)
         Padding(
           padding: const EdgeInsets.only(bottom: AppSpace.md),
           child: DsOfflineBanner(
-            message: _error!.kind == TripsFailure.offline
-                ? 'You are offline. Showing the last report.'
-                : 'Could not refresh. Showing the last report.',
-            onRetry: _load,
+            key: const Key('driving-offline-banner'),
+            message: _cachedAt != null
+                ? 'You are offline. Showing the report saved ${sinceText(_cachedAt!, _now)}.'
+                : (_error!.kind == TripsFailure.offline
+                    ? 'You are offline. Showing the last report.'
+                    : 'Could not refresh. Showing the last report.'),
+            onRetry: _reload,
           ),
         ),
       if (_loading)
@@ -691,6 +725,10 @@ class _State extends State<FamilyDrivingReportScreen> {
               'Drives appear automatically when someone is moving faster '
               'than walking.',
         ),
+        if (waiting.isNotEmpty) ...<Widget>[
+          const SizedBox(height: AppSpace.lg),
+          ...waiting,
+        ],
         if (idle.isNotEmpty) ...<Widget>[
           const SizedBox(height: AppSpace.lg),
           NoDrivesGroup(
@@ -718,6 +756,7 @@ class _State extends State<FamilyDrivingReportScreen> {
             padding: const EdgeInsets.only(bottom: AppSpace.md),
             child: card(m),
           ),
+        ...waiting,
         if (idle.isNotEmpty)
           NoDrivesGroup(
             names: idle.map(_nameOf).toList(),
@@ -775,6 +814,16 @@ class _State extends State<FamilyDrivingReportScreen> {
             ),
           const SizedBox(height: AppSpace.sm),
         ],
+        if (anyPhoneFigures)
+          const Padding(
+            padding: EdgeInsets.only(top: AppSpace.md),
+            child: ProcessingNote(
+              noteKey: Key('driving-private-note'),
+              icon: Icons.info_outline,
+              text: 'People who keep their data on their phone are counted from the figures their phone shares. '
+                  'Place names and route maps for those drives stay on their phone.',
+            ),
+          ),
         if (r.gpsOnly)
           const Padding(
             padding: EdgeInsets.only(top: AppSpace.md),

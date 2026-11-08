@@ -123,3 +123,38 @@ class PrivateFeatureGate extends StatelessWidget {
     );
   }
 }
+
+/// Shown when a Private circle's per-person processing choices could not be
+/// read just now (offline, keys still loading). Never claims the feature does
+/// not exist: it says what happened and offers a retry.
+class LanesUnavailable extends StatelessWidget {
+  const LanesUnavailable({super.key, required this.title, this.onRetry});
+
+  final String title;
+  final VoidCallback? onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            const Icon(Icons.cloud_off_outlined, size: 40),
+            const SizedBox(height: 12),
+            Text(title, key: const ValueKey<String>('lanes-unavailable-title'), textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+            const SizedBox(height: 8),
+            Text('Check your connection and try again. Your data is not affected.',
+                textAlign: TextAlign.center, style: Theme.of(context).textTheme.bodyMedium),
+            if (onRetry != null) ...<Widget>[
+              const SizedBox(height: 16),
+              FilledButton.icon(onPressed: onRetry, icon: const Icon(Icons.refresh), label: const Text('Try again')),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
