@@ -10,10 +10,13 @@ import WatchKit
 final class PhoneLink: NSObject, ObservableObject, WCSessionDelegate {
     @Published var snapshot: WSnapshot? = nil
     @Published var reachable: Bool = false
-    /// Alerts that arrived by transferUserInfo since the last snapshot (memory only).
-    @Published var lastAlerts: [WAlert] = []
 
     private let storeKey = "orbitly.snapshot.json"
+    private let sessionKey = "orbitly.session"
+
+    /// Commands waiting for the phone's answer (it arrives as `lastCommand` in
+    /// the next snapshot). Main thread only.
+    private var pending: [String: (Bool, String) -> Void] = [:]
 
     override init() {
         super.init()
@@ -29,11 +32,8 @@ final class PhoneLink: NSObject, ObservableObject, WCSessionDelegate {
 
     // MARK: Receiving
 
-    private let sessionKey = "orbitly.session"
-
     private func wipe() {
         snapshot = nil
-        lastAlerts = []
         UserDefaults.standard.removeObject(forKey: storeKey)
     }
 
@@ -42,23 +42,29 @@ final class PhoneLink: NSObject, ObservableObject, WCSessionDelegate {
     private func apply(context: [String: Any]) {
         DispatchQueue.main.async {
             let defaults = UserDefaults.standard
-            let known = defaults.string(forKey: self.sessionKey)
-            let sid = context["session"] as? String
             if context["cleared"] as? Bool == true {
                 self.wipe()
                 defaults.removeObject(forKey: self.sessionKey)
             }
             // Another sign-in than the one the stored data belongs to: drop it.
-            if let sid = sid, sid != defaults.string(forKey: self.sessionKey) {
-                if known != nil || self.snapshot != nil { self.wipe() }
+            if let sid = context["session"] as? String, sid != defaults.string(forKey: self.sessionKey) {
+                self.wipe()
                 defaults.set(sid, forKey: self.sessionKey)
             }
             guard let json = context["snapshot"] as? String,
                   let decoded = WSnapshot.decode(json: json) else { return }
-            if let current = defaults.string(forKey: self.sessionKey),
-               !decoded.sessionId.isEmpty, decoded.sessionId != current { return }
+            if !decoded.signedIn {
+                // The phone is signed out: forget everything.
+                self.wipe()
+                defaults.removeObject(forKey: self.sessionKey)
+                return
+            }
             defaults.set(json, forKey: self.storeKey)
             self.snapshot = decoded
+            if let last = decoded.lastCommand {
+                let text = last.message.isEmpty ? (last.ok ? "Done." : "The iPhone could not do it.") : last.message
+                self.finish(last.id, last.ok, text)
+            }
         }
     }
 
@@ -86,39 +92,55 @@ final class PhoneLink: NSObject, ObservableObject, WCSessionDelegate {
         apply(context: applicationContext)
     }
 
-    func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any] = [:]) {
-        guard let json = userInfo["alert"] as? String,
-              let data = json.data(using: .utf8),
-              let alert = try? JSONDecoder().decode(WAlert.self, from: data) else { return }
-        DispatchQueue.main.async {
-            var next = self.lastAlerts.filter { $0.id != alert.id }
-            next.insert(alert, at: 0)
-            self.lastAlerts = Array(next.prefix(10))
-            WKInterfaceDevice.current().play(.notification)
+    // MARK: Sending
+
+    private func finish(_ id: String, _ ok: Bool, _ message: String) {
+        if let completion = pending.removeValue(forKey: id) {
+            completion(ok, message)
         }
     }
 
-    // MARK: Sending
-
-    /// Sends one command to the iPhone and reports plain words back.
-    func send(_ payload: [String: Any], completion: @escaping (Bool, String) -> Void) {
+    /// Sends one command ({id, cmd, at, arg}) to the iPhone. `completion` runs
+    /// with the phone's own answer from the next snapshot, or with a plain
+    /// failure text; it never reports success the phone did not confirm.
+    func command(_ cmd: String, arg: String? = nil, completion: @escaping (Bool, String) -> Void) {
         let session = WCSession.default
         guard WCSession.isSupported(), session.activationState == .activated, session.isReachable else {
             completion(false, "iPhone not reachable. Bring it closer and try again.")
             return
         }
-        session.sendMessage(payload, replyHandler: { reply in
-            let ok = reply["ok"] as? Bool ?? false
-            let message = reply["message"] as? String ?? ""
-            DispatchQueue.main.async { completion(ok, message) }
+        let id = UUID().uuidString
+        var object: [String: Any] = [
+            "id": id,
+            "cmd": cmd,
+            "at": Int64(Date().timeIntervalSince1970 * 1000.0),
+        ]
+        if let a = arg { object["arg"] = a }
+        guard let data = try? JSONSerialization.data(withJSONObject: object),
+              let text = String(data: data, encoding: .utf8) else {
+            completion(false, "Could not prepare the request.")
+            return
+        }
+        pending[id] = completion
+        session.sendMessage(["json": text], replyHandler: { reply in
+            let accepted = reply["ok"] as? Bool ?? false
+            if !accepted {
+                DispatchQueue.main.async {
+                    self.finish(id, false, "The iPhone did not take it. Open Orbitly on it and try again.")
+                }
+            }
         }, errorHandler: { _ in
             DispatchQueue.main.async {
-                completion(false, "The iPhone did not answer. Open Orbitly on it and try again.")
+                self.finish(id, false, "The iPhone did not answer. Open Orbitly on it and try again.")
             }
         })
+        DispatchQueue.main.asyncAfter(deadline: .now() + 20) {
+            self.finish(id, false, "No confirmation from the iPhone yet. Check Orbitly there.")
+        }
     }
 
+    /// Asks the phone for a fresh snapshot; nothing waits for the answer.
     func refresh() {
-        send(["cmd": "refresh"]) { _, _ in }
+        command("refresh") { _, _ in }
     }
 }

@@ -8,6 +8,8 @@ export type Health = 'ok' | 'warn' | 'bad' | 'unknown'
 export interface Finding {
   level: Health
   text: string
+  /** Plain-words next step for the admin or the member. */
+  hint?: string
 }
 
 const HOUR = 3_600_000
@@ -19,22 +21,22 @@ export function deviceFindings(d: FleetDevice, now: number, activityAt?: string 
   // uploads never touch devices.last_seen on older servers, so a working phone must not look dead.
   const times = [d.last_seen, activityAt].map((t) => (t ? new Date(t).getTime() : NaN)).filter((n) => !Number.isNaN(n))
   const seen = times.length ? Math.max(...times) : NaN
-  if (Number.isNaN(seen)) out.push({ level: 'bad', text: 'Has never reported' })
-  else if (now - seen > 24 * HOUR) out.push({ level: 'bad', text: 'Not seen for over a day' })
-  else if (now - seen > 4 * HOUR) out.push({ level: 'warn', text: 'Quiet for several hours' })
+  if (Number.isNaN(seen)) out.push({ level: 'bad', text: 'Has never reported', hint: 'Ask them to open the app once while online.' })
+  else if (now - seen > 24 * HOUR) out.push({ level: 'bad', text: 'Not seen for over a day', hint: 'Phone may be off, offline or signed out. Ask them to open Orbitly.' })
+  else if (now - seen > 4 * HOUR) out.push({ level: 'warn', text: 'Quiet for several hours', hint: 'Usually the phone is locked or asleep. Check again later.' })
 
-  if (d.loc_permission === 'denied') out.push({ level: 'bad', text: 'Location permission denied' })
-  else if (d.loc_permission === 'while_in_use') out.push({ level: 'warn', text: 'Location only while the app is open' })
-  if (d.notif_permission === 'denied') out.push({ level: 'warn', text: 'Notifications blocked' })
-  if (d.battery_opt === 'restricted') out.push({ level: 'bad', text: 'Battery restricted: background work is blocked' })
-  else if (d.battery_opt === 'optimized') out.push({ level: 'warn', text: 'Battery optimisation may pause tracking' })
-  if (d.bg_service === false) out.push({ level: 'warn', text: 'Background service not running' })
-  if (d.outbox_pending != null && d.outbox_pending >= 50) out.push({ level: 'warn', text: `${d.outbox_pending} points waiting to upload` })
-  if (!d.push_registered) out.push({ level: 'warn', text: 'No push channel registered' })
+  if (d.loc_permission === 'denied') out.push({ level: 'bad', text: 'Location permission denied', hint: 'In phone Settings, give Orbitly location access set to Always.' })
+  else if (d.loc_permission === 'while_in_use') out.push({ level: 'warn', text: 'Location only while the app is open', hint: 'In phone Settings, change Orbitly location to Always.' })
+  if (d.notif_permission === 'denied') out.push({ level: 'warn', text: 'Notifications blocked', hint: 'Allow notifications for Orbitly in phone Settings so alerts arrive.' })
+  if (d.battery_opt === 'restricted') out.push({ level: 'bad', text: 'Battery restricted: background work is blocked', hint: 'Set Orbitly battery use to Unrestricted in Android app settings.' })
+  else if (d.battery_opt === 'optimized') out.push({ level: 'warn', text: 'Battery optimisation may pause tracking', hint: 'Set Orbitly battery use to Unrestricted in Android app settings.' })
+  if (d.bg_service === false) out.push({ level: 'warn', text: 'Background service not running', hint: 'Open the app once; allow it to run in the background.' })
+  if (d.outbox_pending != null && d.outbox_pending >= 50) out.push({ level: 'warn', text: `${d.outbox_pending} points waiting to upload`, hint: 'The phone is offline or the server is unreachable; they upload when it reconnects.' })
+  if (!d.push_registered) out.push({ level: 'warn', text: 'No push channel registered', hint: 'Open the app and allow notifications; on Android install a UnifiedPush app such as ntfy.' })
   else if (d.last_push_fail_at) {
     const fail = new Date(d.last_push_fail_at).getTime()
     const ok = d.last_push_ok_at ? new Date(d.last_push_ok_at).getTime() : 0
-    if (fail > ok) out.push({ level: 'warn', text: 'Last push attempt failed' })
+    if (fail > ok) out.push({ level: 'warn', text: 'Last push attempt failed', hint: 'Check System health and the phone push setup.' })
   }
   const rank = { bad: 0, warn: 1, unknown: 2, ok: 3 } as const
   return out.sort((a, b) => rank[a.level] - rank[b.level])

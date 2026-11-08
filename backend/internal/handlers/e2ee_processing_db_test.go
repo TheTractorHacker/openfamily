@@ -1470,9 +1470,20 @@ func TestInvitePreviewShowsOnlyThePrivacySetup(t *testing.T) {
 	}
 	var m map[string]any
 	_ = json.Unmarshal(rec.Body.Bytes(), &m)
-	if m["private"] != true || m["server_assist"] != true || m["member_opt_out"] != "allowed" || m["default_for_new"] != "server" || m["legacy"] != false || len(m) != 5 {
+	if m["private"] != true || m["server_assist"] != true || m["member_opt_out"] != "allowed" || m["default_for_new"] != "server" || m["legacy"] != false || m["auto_apply"] != false || len(m) != 6 {
 		t.Fatalf("preview: %v", m)
 	}
+	// Section 23: with the admin's auto-apply on, the preview says new members are put on the server by default.
+	e.sql(`UPDATE server_profile SET member_default_lane = 'server', member_auto_apply = TRUE WHERE id = 1`)
+	t.Cleanup(func() { e.sql(`UPDATE server_profile SET member_default_lane = NULL, member_auto_apply = NULL WHERE id = 1`) })
+	rec = httptest.NewRecorder()
+	e.rt.ServeHTTP(rec, httptest.NewRequest("GET", "/invites/"+code+"/preview", nil))
+	var m2 map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &m2)
+	if m2["auto_apply"] != true {
+		t.Fatalf("preview with auto-apply: %v", m2)
+	}
+	e.sql(`UPDATE server_profile SET member_default_lane = NULL, member_auto_apply = NULL WHERE id = 1`)
 	body := rec.Body.String()
 	for _, leak := range []string{e.circle, e.ids["A"], "Fam"} {
 		if strings.Contains(body, leak) {
@@ -1657,7 +1668,7 @@ func TestInvitePreviewAndStateCarryLegacy(t *testing.T) {
 	e.rt.ServeHTTP(rec, httptest.NewRequest("GET", "/invites/"+code+"/preview", nil))
 	var m map[string]any
 	_ = json.Unmarshal(rec.Body.Bytes(), &m)
-	if rec.Code != 200 || m["legacy"] != true || m["private"] != true || m["server_assist"] != false || len(m) != 5 {
+	if rec.Code != 200 || m["legacy"] != true || m["private"] != true || m["server_assist"] != false || len(m) != 6 {
 		t.Fatalf("legacy preview: %d %v", rec.Code, m)
 	}
 	st := e.mustCode("A", "GET", "/circles/"+e.circle+"/e2ee/processing", nil, 200)

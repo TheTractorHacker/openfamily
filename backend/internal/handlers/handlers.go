@@ -135,6 +135,10 @@ type Server struct {
 	// source runs). Shown read-only in the admin panel.
 	BuildVersion string
 
+	// QueryMethod enables the HTTP QUERY method on the few read endpoints that
+	// accept a body (QUERY_METHOD=1). Off by default; POST always works.
+	QueryMethod bool
+
 	// BackupStaleHours is how old the newest successful backup may be before the
 	// health page warns (config: BACKUP_STALE_HOURS, default 36).
 	BackupStaleHours int

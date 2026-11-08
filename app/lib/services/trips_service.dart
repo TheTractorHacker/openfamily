@@ -2,6 +2,7 @@ import 'dart:async';
 
 import '../models/trip.dart';
 import 'api_client.dart';
+import 'offline/offline_cache.dart';
 
 /// Why a trips request failed, so screens can pick the right message.
 enum TripsFailure { forbidden, notFound, offline, other }
@@ -96,8 +97,15 @@ class TripsService implements TripsApi {
     required DateTime to,
   }) async {
     try {
-      final Map<String, dynamic> body =
-          _map(await ApiClient.getTrips(userId: userId, from: from, to: to));
+      // Trips already seen stay readable when the server is down.
+      final Map<String, dynamic> body = (await OfflineCache.instance.fetch<Map<String, dynamic>>(
+        'trips/$userId/${from.toUtc().toIso8601String()}/${to.toUtc().toIso8601String()}',
+        () async => _map(await ApiClient.getTrips(userId: userId, from: from, to: to)),
+        encode: (Map<String, dynamic> v) => v,
+        decode: (Object? j) => _map(j),
+        group: 'trips',
+      ))
+          .value;
       final Object? rows = body['trips'];
       if (rows is! List) return const <Trip>[];
       return rows.whereType<Map<String, dynamic>>().map(Trip.fromJson).toList();
@@ -109,7 +117,16 @@ class TripsService implements TripsApi {
   @override
   Future<TripDetail> getTrip(String id) async {
     try {
-      return TripDetail.fromJson(_map(await ApiClient.getTrip(id)));
+      final Map<String, dynamic> body = (await OfflineCache.instance.fetch<Map<String, dynamic>>(
+        'trip/$id',
+        () async => _map(await ApiClient.getTrip(id)),
+        encode: (Map<String, dynamic> v) => v,
+        decode: (Object? j) => _map(j),
+        group: 'trip-detail',
+        maxInGroup: 15,
+      ))
+          .value;
+      return TripDetail.fromJson(body);
     } catch (e) {
       throw mapTripsError(e);
     }
@@ -123,8 +140,9 @@ class TripsService implements TripsApi {
     double? speedThresholdMps,
   }) async {
     try {
-      return TripSummary.fromResponse(
-        _map(
+      final Map<String, dynamic> body = (await OfflineCache.instance.fetch<Map<String, dynamic>>(
+        'trips-summary/$userId/$period/${date?.toUtc().toIso8601String() ?? 'now'}/${speedThresholdMps ?? ''}',
+        () async => _map(
           await ApiClient.getTripsSummary(
             userId: userId,
             period: period,
@@ -132,7 +150,12 @@ class TripsService implements TripsApi {
             speedThresholdMps: speedThresholdMps,
           ),
         ),
-      );
+        encode: (Map<String, dynamic> v) => v,
+        decode: (Object? j) => _map(j),
+        group: 'trips-summary',
+      ))
+          .value;
+      return TripSummary.fromResponse(body);
     } catch (e) {
       throw mapTripsError(e);
     }

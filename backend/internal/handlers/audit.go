@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/TheTractorHacker/openfamily/backend/internal/middleware"
@@ -120,12 +121,33 @@ func (s *Server) ListAudit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Optional paging (additive; the default is still the newest 100):
+	// ?limit=1-200 and ?before=<created_at of the last row seen>.
+	limit := 100
+	if v := r.URL.Query().Get("limit"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > 200 {
+			writeError(w, http.StatusBadRequest, "limit must be 1-200")
+			return
+		}
+		limit = n
+	}
+	var before any
+	if v := r.URL.Query().Get("before"); v != "" {
+		t, err := time.Parse(time.RFC3339Nano, v)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "before must be an RFC 3339 time")
+			return
+		}
+		before = t
+	}
 	rows, err := s.Pool.Query(r.Context(), `
 		SELECT id, user_id, family_id, action, detail, ip_address, created_at
 		FROM audit_log
-		WHERE family_id = $1 OR (family_id IS NULL AND user_id = $2)
+		WHERE (family_id = $1 OR (family_id IS NULL AND user_id = $2))
+		  AND ($4::timestamptz IS NULL OR created_at < $4)
 		ORDER BY created_at DESC
-		LIMIT 100`, familyID, claims.UserID)
+		LIMIT $3`, familyID, claims.UserID, limit, before)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list audit log")
 		return
@@ -144,6 +166,9 @@ func (s *Server) ListAudit(w http.ResponseWriter, r *http.Request) {
 	if rows.Err() != nil {
 		writeError(w, http.StatusInternalServerError, "failed to read audit log")
 		return
+	}
+	if len(entries) == limit {
+		w.Header().Set("X-Next-Cursor", entries[len(entries)-1].CreatedAt.UTC().Format(time.RFC3339Nano))
 	}
 	writeJSON(w, http.StatusOK, entries)
 }

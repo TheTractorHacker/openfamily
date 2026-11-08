@@ -12,6 +12,90 @@ the phones afterwards.
 
 ## Unreleased
 
+Works with apps 0.20 and newer; nothing here needs an app update.
+
+- **Faster on mobile data.** The server now compresses its answers, the app
+  reuses its connection to the server instead of reconnecting for every
+  request, and unchanged lists come back as a tiny "not modified" answer.
+- **Smaller updates.** The people list and saved places can be fetched as
+  "only what changed", with a compact view for the map and watch. One start-up
+  request (`/app/bootstrap`) replaces five.
+- **Lighter history.** A day's trail can be thinned on the server to as many
+  points as the map can draw; the audit log can be paged.
+- **Steadier connection.** Reads retry a couple of times with a short random
+  pause when the network blips; writes are never repeated automatically.
+- **Optional HTTP QUERY method** for multi-window history reads, off by default
+  (`QUERY_METHOD=1`); the app falls back to POST by itself. Details and the
+  Cloudflare check are in [API wire efficiency](developers/api-efficiency.md).
+- Database: places gain an `updated_at` (migration 000360).
+
+- **Orbitly keeps working when the server is down.** The app remembers the last people, positions
+  (with their real age), places, circles, chat and notifications and shows them at once, with a
+  small bar: "Server unreachable. Showing last known. Will sync when it is back." (and Try again).
+  Chat messages, check-ins, Help alerts and SOS written meanwhile are saved on the phone and sent in
+  order, once, when the server is back. An SOS that cannot be delivered says "SOS not sent yet", keeps
+  trying and offers to text your emergency contacts from your own messages app. New movement of other
+  people still needs a server. See "When the server is down".
+- Fixes: a long outage no longer discards the queued location points or queued Private circle
+  messages and check-ins; the app opens within 4 seconds on a dead network and never signs you out
+  because of a network error; Diagnostics counts every waiting update.
+- Server: SOS, Help alerts and check-ins accept an optional `client_id` so a replay after a lost
+  answer is stored once (database migration 340).
+
+## v0.24.2 (unreleased)
+
+- **Private circles keep sending when the phone is locked.** The key that
+  protects your keys on the phone no longer needs the screen to be unlocked
+  (it is still stored in the phone's security chip and can not be copied out).
+  Phones update automatically the first time you open the app after updating.
+  Before this, a phone in a pocket could stop sending to a Private circle.
+  See the threat-model note in [End-to-end encryption](design/E2EE.md).
+- **Driving tab in Private circles** works for members who use the server, and
+  members who keep data on their phone get "Use the server" or "Compute reports
+  on this phone" instead of a dead end.
+- **Simpler settings.** Settings are grouped (Account, Sharing & privacy,
+  Notifications, Driving & safety, Server & data, Phone health, Appearance,
+  About) with a search box. Each row has one short line; tap the small (i) for
+  the details. Encryption keys, Server processing, Active sessions (This device,
+  Older sessions, Sign out other sessions) and Diagnostics were tidied up.
+- Wording: "circle" instead of "family" where it means friends too.
+- Server: `POST /auth/sessions/current` tells an app which session is its own.
+
+- **Members are on the server by default; they opt out by hand.** On a server set to **Home**, a member of a circle
+  that has server processing on no longer has to find "Use the server": the next time they open the app, their own
+  phone signs it for them (same signature as a tap, visible in the circle's key log). They see "Your circle uses the
+  server so maps, history and driving reports work. Tap to keep your data on your phone." and one tap on **Keep on my
+  phone** switches it off and deletes what the server holds of theirs. If they ever chose, nothing is changed again.
+- Not applied automatically: circles that **require** server processing (they keep their consent card), child
+  accounts, members on an old app (they get it after updating), and servers set to **Cloud** or not chosen (the app
+  asks instead).
+- Admin: the member default (server or phone, auto-apply on or off; API
+  `/api/admin/settings/member-defaults`) and a list of **members not yet on the server** with a message to send
+  (API `/api/admin/members-not-on-server`). Circle admins see the same list on the circle's processing screen.
+- Joining: the invite preview says "This circle uses the server by default; you can opt out."
+- The server can read the data of everyone on it, as before; this changes who presses the button, not what the server
+  can read.
+
+- **Better Documents page.** A topic tree you can collapse, an "On this page"
+  list that follows you as you read, breadcrumbs, previous and next links,
+  search with highlighted matches and recent searches (press `/`), notes and
+  warnings in colour, code you can copy, pictures you can enlarge, and a layout
+  that works on a phone and prints cleanly.
+- **New guides.** [Quick start (5 minutes)](quick-start.md),
+  [Concepts](concepts.md) (Normal, Private and server processing, with a
+  picture), [Troubleshooting](troubleshooting/index.md), [FAQ](faq.md) and a
+  [Glossary](glossary.md). The privacy and chat pages now say the same thing as
+  the app.
+
+- **Orbitly on Wear OS watches.** A watch app for Wear OS 3 and newer (Galaxy
+  Watch 4 and later, Pixel Watch and others) shows your people, sends "I'm OK",
+  SOS (press and hold, 5 second cancel), pause sharing and quick replies, and
+  offers a tile and a watch face complication. The phone stays the only place with
+  your sign-in and Private-circle keys; Settings, Watch shows the connection.
+  Older Tizen Galaxy Watches are not supported. The release gets an extra
+  `orbitly-wear-<version>.apk` (the phone app keeps its own `orbitly-<version>.apk`).
+  See [Orbitly on your watch](user/watch.md).
+
 - **Apple Watch app (watchOS 9 or newer).** See your circle on your wrist (name, where, how long
   ago, battery), a distance and direction arrow, SOS with press-and-hold and a cancellable
   countdown, I'm OK, pause or resume sharing, quick replies and alerts. Your iPhone keeps your

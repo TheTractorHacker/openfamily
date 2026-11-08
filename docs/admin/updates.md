@@ -31,6 +31,13 @@ Family members update the app via Obtainium or the store. The server keeps
 working for the last five minor versions, so nobody has to update on the same
 day. See [API compatibility](../api-compat.md).
 
+**Watch app.** Each release can also carry `orbitly-wear-<version>.apk` (and an
+`.aab`), the Wear OS watch app, built by a separate workflow (`wear.yml`) and
+attached to the same release once the phone build has created it. The watch app
+needs nothing on your server; it only talks to the phone it is paired with. Update
+it with the phone app, see [Orbitly on your watch](../user/watch.md). The server's
+APK download never serves the watch file.
+
 ## Something went wrong
 
 `upgrade.sh` prints how to restore the pre-upgrade backup. See

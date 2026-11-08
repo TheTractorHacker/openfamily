@@ -1,8 +1,11 @@
 // A small, dependency-free Markdown parser for the built-in documentation.
 // It produces a plain tree (never HTML strings), so rendering with React cannot
 // inject markup: raw HTML in a document is shown as text. Supported: headings,
-// paragraphs, bullet/numbered lists (nested by indent), block quotes, fenced
-// code, tables, rules, and inline code, bold, italic, links and images.
+// paragraphs, bullet/numbered lists (nested by indent, task lists), block quotes,
+// callouts (a quote starting with **Note**, **Tip**, **Warning**, **Important**
+// or GitHub's [!NOTE]), fenced code, tables (with column alignment), rules,
+// figures (an image alone in its paragraph) and inline code, bold, italic,
+// strikethrough, links and images.
 
 export type Inline =
   | { t: 'text'; v: string }
@@ -10,15 +13,26 @@ export type Inline =
   | { t: 'strong'; c: Inline[] }
   | { t: 'em'; c: Inline[] }
   | { t: 'link'; href: string; c: Inline[] }
-  | { t: 'img'; src: string; alt: string }
+  | { t: 'del'; c: Inline[] }
+  | { t: 'img'; src: string; alt: string; title?: string }
+
+export type CalloutKind = 'note' | 'tip' | 'warning' | 'important'
+export type Align = 'left' | 'center' | 'right' | null
+export interface ListItem {
+  c: Block[]
+  /** Set for task-list items ("- [ ] x" / "- [x] x"). */
+  task?: 'open' | 'done'
+}
 
 export type Block =
   | { t: 'h'; level: number; id: string; c: Inline[] }
   | { t: 'p'; c: Inline[] }
   | { t: 'quote'; c: Block[] }
   | { t: 'code'; lang: string; v: string }
-  | { t: 'list'; ordered: boolean; items: Block[][] }
-  | { t: 'table'; head: Inline[][]; rows: Inline[][][] }
+  | { t: 'callout'; kind: CalloutKind; c: Block[] }
+  | { t: 'figure'; src: string; alt: string; caption: string }
+  | { t: 'list'; ordered: boolean; start: number; items: ListItem[] }
+  | { t: 'table'; head: Inline[][]; rows: Inline[][][]; align: Align[] }
   | { t: 'hr' }
 
 /** GitHub-style heading slug. Keep in step with scripts/docs-lib.mjs. */
@@ -54,7 +68,7 @@ export function safeHref(href: string): string | null {
   return h
 }
 
-const INLINE = /(`+)([\s\S]*?[^`])\1(?!`)|!\[([^\]]*)\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)|\[((?:[^\[\]]|\[[^\]]*\])*)\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)|\*\*([\s\S]+?)\*\*|(?<![\w*])\*([^*\s][^*]*?)\*(?![\w*])|(?<![\w_])_([^_\s][^_]*?)_(?![\w_])/g
+const INLINE = /(`+)([\s\S]*?[^`])\1(?!`)|!\[([^\]]*)\]\(\s*<?([^)\s>]+)>?(?:\s+"([^"]*)")?\s*\)|\[((?:[^\[\]]|\[[^\]]*\])*)\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)|\*\*([\s\S]+?)\*\*|~~([^~]+?)~~|<(https?:\/\/[^\s<>]+)>|(?<![\w*])\*([^*\s][^*]*?)\*(?![\w*])|(?<![\w_])_([^_\s][^_]*?)_(?![\w_])/g
 
 export function parseInline(src: string): Inline[] {
   const out: Inline[] = []
@@ -66,13 +80,15 @@ export function parseInline(src: string): Inline[] {
     push(src.slice(last, m.index))
     last = (m.index ?? 0) + m[0].length
     if (m[2] !== undefined) out.push({ t: 'code', v: m[2].trim() })
-    else if (m[4] !== undefined) out.push({ t: 'img', alt: m[3], src: m[4] })
-    else if (m[6] !== undefined) {
-      const href = safeHref(m[6])
-      if (href === null) push(m[5])
-      else out.push({ t: 'link', href, c: parseInline(m[5]) })
-    } else if (m[7] !== undefined) out.push({ t: 'strong', c: parseInline(m[7]) })
-    else out.push({ t: 'em', c: parseInline((m[8] ?? m[9]) as string) })
+    else if (m[4] !== undefined) out.push({ t: 'img', alt: m[3], src: m[4], title: m[5] || undefined })
+    else if (m[7] !== undefined) {
+      const href = safeHref(m[7])
+      if (href === null) push(m[6])
+      else out.push({ t: 'link', href, c: parseInline(m[6]) })
+    } else if (m[8] !== undefined) out.push({ t: 'strong', c: parseInline(m[8]) })
+    else if (m[9] !== undefined) out.push({ t: 'del', c: parseInline(m[9]) })
+    else if (m[10] !== undefined) out.push({ t: 'link', href: m[10], c: [{ t: 'text', v: m[10] }] })
+    else out.push({ t: 'em', c: parseInline((m[11] ?? m[12]) as string) })
   }
   push(src.slice(last))
   return out
@@ -86,11 +102,52 @@ const splitRow = (l: string) =>
     .replace(/^\||\|$/g, '')
     .split(/(?<!\\)\|/)
     .map((c) => c.trim().replace(/\\\|/g, '|'))
+const alignOf = (cell: string): Align => {
+  const c = cell.trim()
+  if (/^:-+:$/.test(c)) return 'center'
+  if (/^-+:$/.test(c)) return 'right'
+  if (/^:-+$/.test(c)) return 'left'
+  return null
+}
 
 export function parseMarkdown(src: string): Block[] {
   const lines = src.replace(/\r\n?/g, '\n').split('\n')
   const used = new Map<string, number>()
   return parseBlocks(lines, used)
+}
+
+const CALLOUT_WORDS: Record<string, CalloutKind> = {
+  note: 'note',
+  info: 'note',
+  tip: 'tip',
+  hint: 'tip',
+  warning: 'warning',
+  caution: 'warning',
+  important: 'important',
+}
+
+/** A block quote that opens with a keyword becomes a callout; otherwise null. */
+export function asCallout(blocks: Block[]): Block | null {
+  const first = blocks[0]
+  if (!first || first.t !== 'p' || !first.c.length) return null
+  const lead = first.c[0]
+  let kind: CalloutKind | undefined
+  let rest: Inline[] = []
+  if (lead.t === 'strong') {
+    kind = CALLOUT_WORDS[plainOf(lead.c).trim().replace(/[:.]$/, '').toLowerCase()]
+    rest = first.c.slice(1)
+    if (rest[0]?.t === 'text') rest = [{ t: 'text', v: rest[0].v.replace(/^\s*:\s*/, '') }, ...rest.slice(1)]
+  } else if (lead.t === 'text') {
+    const m = /^\[!(NOTE|TIP|WARNING|IMPORTANT|CAUTION)\]\s*/i.exec(lead.v)
+    if (m) {
+      kind = CALLOUT_WORDS[m[1].toLowerCase()]
+      rest = [{ t: 'text', v: lead.v.slice(m[0].length) }, ...first.c.slice(1)]
+    }
+  }
+  if (!kind) return null
+  const tidy = rest.filter((i) => !(i.t === 'text' && !i.v.trim()))
+  const body: Block[] = tidy.length ? [{ t: 'p', c: rest }, ...blocks.slice(1)] : blocks.slice(1)
+  return { t: 'callout', kind, c: body }
 }
 
 function parseBlocks(lines: string[], used: Map<string, number>): Block[] {
@@ -130,26 +187,36 @@ function parseBlocks(lines: string[], used: Map<string, number>): Block[] {
     if (/^\s*>/.test(line)) {
       const buf: string[] = []
       while (i < lines.length && /^\s*>/.test(lines[i])) buf.push(lines[i++].replace(/^\s*> ?/, ''))
-      out.push({ t: 'quote', c: parseBlocks(buf, used) })
+      const inner = parseBlocks(buf, used)
+      out.push(asCallout(inner) ?? { t: 'quote', c: inner })
       continue
     }
     if (line.includes('|') && i + 1 < lines.length && /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/.test(lines[i + 1])) {
       const head = splitRow(line).map(parseInline)
+      const align = splitRow(lines[i + 1]).map(alignOf)
       i += 2
       const rows: Inline[][][] = []
       while (i < lines.length && lines[i].includes('|') && lines[i].trim()) rows.push(splitRow(lines[i++]).map(parseInline))
-      out.push({ t: 'table', head, rows })
+      out.push({ t: 'table', head, rows, align })
       continue
     }
     const lm = listMark(line)
     if (lm) {
       const base = lm[1].length
       const ordered = /\d/.test(lm[2])
-      const items: Block[][] = []
+      const start = ordered ? parseInt(lm[2], 10) : 1
+      const items: ListItem[] = []
       while (i < lines.length) {
         const m = listMark(lines[i])
         if (!m || m[1].length !== base) break
-        const body: string[] = [m[3]]
+        let first = m[3]
+        let task: ListItem['task']
+        const tm = /^\[([ xX])\]\s+(.*)$/.exec(first)
+        if (tm) {
+          task = tm[1] === ' ' ? 'open' : 'done'
+          first = tm[2]
+        }
+        const body: string[] = [first]
         i++
         while (i < lines.length) {
           const l = lines[i]
@@ -172,9 +239,9 @@ function parseBlocks(lines: string[], used: Map<string, number>): Block[] {
             i++
           } else break
         }
-        items.push(parseBlocks(body, used))
+        items.push({ c: parseBlocks(body, used), ...(task ? { task } : {}) })
       }
-      out.push({ t: 'list', ordered, items })
+      out.push({ t: 'list', ordered, start, items })
       continue
     }
     const buf: string[] = []
@@ -190,11 +257,25 @@ function parseBlocks(lines: string[], used: Map<string, number>): Block[] {
     if (!buf.length) {
       buf.push(lines[i++])
     }
-    out.push({ t: 'p', c: parseInline(buf.join(' ')) })
+    const c = parseInline(buf.join(' '))
+    const only = c.length === 1 ? c[0] : null
+    if (only && only.t === 'img') out.push({ t: 'figure', src: only.src, alt: only.alt, caption: only.title || only.alt })
+    else out.push({ t: 'p', c })
   }
   return out
 }
 
 export function headingsOf(blocks: Block[]): { level: number; id: string; text: string }[] {
   return blocks.flatMap((b) => (b.t === 'h' ? [{ level: b.level, id: b.id, text: plainOf(b.c) }] : []))
+}
+
+/** "On this page": the second and third level headings, in order. */
+export function tocOf(blocks: Block[]): { level: 2 | 3; id: string; text: string }[] {
+  return headingsOf(blocks).filter((h): h is { level: 2 | 3; id: string; text: string } => h.level === 2 || h.level === 3)
+}
+
+/** The page title: the first level-1 heading, or null. */
+export function titleOfBlocks(blocks: Block[]): string | null {
+  const h = headingsOf(blocks).find((x) => x.level === 1)
+  return h ? h.text : null
 }

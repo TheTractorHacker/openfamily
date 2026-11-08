@@ -1,7 +1,9 @@
-# Family chat
+# Chat
 
 Per-circle text chat. Every circle member can read and post; nobody else can
-(a non-member gets 404, the same as an unknown circle).
+(a non-member gets 404, the same as an unknown circle). This page describes the
+readable (Normal circle) chat; in a Private circle chat is end-to-end encrypted,
+see [Encrypted chat](design/E2EE_CHAT.md).
 
 ## API
 
@@ -32,7 +34,7 @@ in <circle>".
 
 ## App
 
-The Circle tab has a Family chat row (and the tab icon a badge) showing the
+The Circle tab has a Chat row (and the tab icon a badge) showing the
 unread count. The chat screen shows the message list, loads older pages on
 scroll, and has a composer that refuses empty or over-long text.
 

@@ -82,7 +82,7 @@ export function UsersPage() {
         <div>
           <h1 className="wb-page-title">Users</h1>
           <p className="wb-page-subtitle">
-            Create accounts and manage family membership and roles.
+            Create accounts and manage group membership and roles.
           </p>
         </div>
         <Button
@@ -187,7 +187,7 @@ function CreateUserCard({
       <div className="wb-section-heading">
         <div>
           <h2>Create user</h2>
-          <p>Accounts can be assigned to a family immediately, bypassing invite codes.</p>
+          <p>Accounts can be assigned to a group immediately, bypassing invite codes.</p>
         </div>
       </div>
       <form className="wb-form-grid" onSubmit={submit}>
@@ -233,9 +233,9 @@ function CreateUserCard({
           </select>
         </label>
         <label className="wb-field">
-          <span className="wb-label">Family</span>
+          <span className="wb-label">Group</span>
           <select className="wb-select" value={familyId} onChange={(e) => setFamilyId(e.target.value)}>
-            <option value="">No family yet</option>
+            <option value="">No group yet</option>
             {families.map((family) => (
               <option key={family.id} value={family.id}>
                 {family.name}
@@ -328,7 +328,7 @@ function UserRow({
           value={familyId}
           onChange={(e) => setFamilyId(e.target.value)}
         >
-          <option value="">No family</option>
+          <option value="">No group</option>
           {families.map((family) => (
             <option key={family.id} value={family.id}>
               {family.name}

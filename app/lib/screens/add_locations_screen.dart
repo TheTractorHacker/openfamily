@@ -314,7 +314,7 @@ class _AddLocationsScreenState extends State<AddLocationsScreen> {
       children: [
         const DsHeading(
           'Add places to your map',
-          subtitle: 'Places are shared with all family members, so everyone '
+          subtitle: 'Places are shared with all circle members, so everyone '
               'gets arrival and departure alerts.',
         ),
         DsRowGroup(

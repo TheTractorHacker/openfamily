@@ -49,6 +49,9 @@ export function loadMe(force = false): Promise<Me> {
 if (typeof window !== 'undefined') {
   subscribeAuth(() => {
     if (!getAccessToken()) invalidate()
+    // Sign-in or sign-out in this tab: every mounted consumer re-fetches. Without
+    // this the shell stayed on "Loading your account…" after a login with no reload.
+    notify()
   })
   window.addEventListener('storage', (e) => {
     if (e.key === 'wb_access_token' || e.key === 'wb_refresh_token') invalidate()
@@ -106,7 +109,11 @@ export function useMe(): UseMeResult {
         if (!cancelled) setLoading(false)
       })
       .catch((e) => {
-        if (cancelled || !getAccessToken()) return
+        if (cancelled) return
+        if (!getAccessToken()) {
+          setLoading(false)
+          return
+        }
         setError(e instanceof Error ? e.message : 'Could not load your account')
         setLoading(false)
       })

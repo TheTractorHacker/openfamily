@@ -1,9 +1,10 @@
+import 'dart:async';
 import 'api_client.dart';
 import 'background_location_service.dart';
 import 'biometric_service.dart';
 import 'place_service.dart';
+import 'watch/watch_bridge.dart';
 import 'widget_snapshot.dart';
-import 'watch/watch_bridge_ios.dart';
 import 'token_storage.dart';
 
 /// Thrown when the backend requires a TOTP code (2FA) to complete login.
@@ -119,8 +120,8 @@ class AuthService {
     PlaceService.invalidateCache();
     // No family names may linger on the home-screen widget after sign-out.
     await HomeWidgetService.clear();
-    // Nor on a paired Apple Watch.
-    await WatchBridgeIos.instance.clear();
+    // Nor on a paired watch.
+    await WatchBridge.instance.signedOut();
   }
 
   static Future<void> _loginAndPersist({
@@ -145,8 +146,8 @@ class AuthService {
       access: tokens['access_token'] as String,
       refresh: tokens['refresh_token'] as String,
     );
-    // A watch wiped at sign-out may receive family data again.
-    await WatchBridgeIos.instance.signedIn();
+    // A new session may feed a paired watch again (a sign-out clear is final until now).
+    unawaited(WatchBridge.instance.signedIn());
     // "Keep me signed in on this device": remember the password in the
     // Keystore for the silent re-login fallback. Never with a TOTP code (the
     // saved login could not complete it) and never at the cost of the login.

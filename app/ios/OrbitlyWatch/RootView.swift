@@ -10,17 +10,15 @@ struct RootView: View {
             List {
                 StatusBanner()
                 if let snap = link.snapshot {
-                    if let circle = snap.activeCircle {
-                        Section(header: Text(circle.name)) {
-                            if circle.members.isEmpty {
-                                Text("No one to show yet.")
-                                    .font(.footnote)
-                                    .foregroundColor(.secondary)
-                            }
-                            ForEach(circle.members) { member in
-                                NavigationLink(destination: PersonDetailView(memberId: member.id)) {
-                                    MemberRow(member: member, snapshot: snap)
-                                }
+                    Section(header: Text(snap.scope.name)) {
+                        if snap.members.isEmpty {
+                            Text("No one to show yet.")
+                                .font(.footnote)
+                                .foregroundColor(.secondary)
+                        }
+                        ForEach(snap.members) { member in
+                            NavigationLink(destination: PersonDetailView(memberId: member.id)) {
+                                MemberRow(member: member, snapshot: snap)
                             }
                         }
                     }
@@ -29,11 +27,9 @@ struct RootView: View {
                             Label("SOS", systemImage: "exclamationmark.triangle.fill")
                                 .foregroundColor(Brand.sosRed)
                         }
-                        CommandButton(title: "I'm OK", systemImage: "checkmark.circle.fill",
-                                      payload: ["cmd": "checkin"])
+                        CommandButton(title: "I'm OK", systemImage: "checkmark.circle.fill", cmd: "checkin")
                         if snap.isPaused {
-                            CommandButton(title: "Resume sharing", systemImage: "location.fill",
-                                          payload: ["cmd": "resume"])
+                            CommandButton(title: "Resume sharing", systemImage: "location.fill", cmd: "resume")
                         } else {
                             NavigationLink(destination: PauseView()) {
                                 Label("Pause sharing", systemImage: "location.slash.fill")
@@ -45,8 +41,8 @@ struct RootView: View {
                             HStack {
                                 Label("Quick replies", systemImage: "bubble.left.fill")
                                 Spacer()
-                                if snap.unreadTotal > 0 {
-                                    UnreadBadge(count: snap.unreadTotal)
+                                if snap.unread > 0 {
+                                    UnreadBadge(count: snap.unread)
                                 }
                             }
                         }
@@ -125,7 +121,7 @@ struct MemberRow: View {
         HStack(spacing: 8) {
             Avatar(member: member)
             VStack(alignment: .leading, spacing: 2) {
-                Text(member.me ? "\(member.name) (you)" : member.name)
+                Text(member.you ? "\(member.name) (you)" : member.name)
                     .font(.headline)
                     .lineLimit(1)
                 TimelineView(.everyMinute) { context in
@@ -139,27 +135,29 @@ struct MemberRow: View {
             if let b = batteryText(member) {
                 Text(b)
                     .font(.caption2)
-                    .foregroundColor((member.battery ?? 100) <= 20 ? Brand.warn : .secondary)
+                    .foregroundColor((member.battery < 0 ? 100 : member.battery) <= 20 ? Brand.warn : .secondary)
             }
         }
     }
 }
 
-/// A button that sends one command to the iPhone and shows the answer.
+/// A button that sends one command to the iPhone and shows the iPhone's answer.
 struct CommandButton: View {
     let title: String
     let systemImage: String
-    let payload: [String: Any]
+    let cmd: String
+    let arg: String?
 
     @EnvironmentObject var link: PhoneLink
     @State private var busy = false
     @State private var message: String? = nil
     @State private var succeeded = true
 
-    init(title: String, systemImage: String, payload: [String: Any]) {
+    init(title: String, systemImage: String, cmd: String, arg: String? = nil) {
         self.title = title
         self.systemImage = systemImage
-        self.payload = payload
+        self.cmd = cmd
+        self.arg = arg
     }
 
     var body: some View {
@@ -182,7 +180,7 @@ struct CommandButton: View {
     private func run() {
         busy = true
         message = nil
-        link.send(payload) { ok, text in
+        link.command(cmd, arg: arg) { ok, text in
             busy = false
             succeeded = ok
             message = text.isEmpty ? nil : text
@@ -194,62 +192,48 @@ struct CommandButton: View {
 struct PauseView: View {
     var body: some View {
         List {
-            CommandButton(title: "For 1 hour", systemImage: "clock",
-                          payload: ["cmd": "pause", "minutes": 60])
-            CommandButton(title: "For 4 hours", systemImage: "clock",
-                          payload: ["cmd": "pause", "minutes": 240])
-            CommandButton(title: "For 24 hours", systemImage: "clock",
-                          payload: ["cmd": "pause", "minutes": 1440])
+            CommandButton(title: "For 15 minutes", systemImage: "clock", cmd: "pause", arg: "15")
+            CommandButton(title: "For 1 hour", systemImage: "clock", cmd: "pause", arg: "60")
+            CommandButton(title: "For 4 hours", systemImage: "clock", cmd: "pause", arg: "240")
         }
         .navigationTitle("Pause sharing")
     }
 }
 
-/// Fixed phrases only: nothing is typed on the watch.
+/// Fixed phrases only: the watch sends an id, the iPhone owns the words
+/// (same ids as kWatchReplies in watch_snapshot.dart).
 struct RepliesView: View {
     @EnvironmentObject var link: PhoneLink
 
-    private let fallback = ["On my way", "OK", "Running late", "Call me", "Yes", "No"]
+    private let phrases: [(id: String, text: String)] = [
+        ("ok", "I'm OK"),
+        ("omw", "On my way"),
+        ("late", "Running late"),
+        ("call", "Please call me"),
+        ("thanks", "Thanks"),
+    ]
 
     var body: some View {
-        let circle = link.snapshot?.activeCircle
-        let phrases = (link.snapshot?.quickReplies.isEmpty ?? true) ? fallback : (link.snapshot?.quickReplies ?? fallback)
         List {
-            if let c = circle {
-                Text("To \(c.name)")
+            if let scope = link.snapshot?.scope.name {
+                Text("To \(scope == "Everyone" ? "your family" : scope)")
                     .font(.footnote)
                     .foregroundColor(.secondary)
-                ForEach(phrases, id: \.self) { phrase in
-                    CommandButton(title: phrase, systemImage: "paperplane.fill",
-                                  payload: ["cmd": "reply", "circleId": c.id, "text": phrase])
-                }
-            } else {
-                Text("Open Orbitly on your iPhone first.")
-                    .font(.footnote)
-                    .foregroundColor(.secondary)
+            }
+            ForEach(phrases, id: \.id) { phrase in
+                CommandButton(title: phrase.text, systemImage: "paperplane.fill",
+                              cmd: "reply", arg: phrase.id)
             }
         }
         .navigationTitle("Replies")
-        .onAppear {
-            if let c = circle, c.unread > 0 {
-                link.send(["cmd": "markRead", "circleId": c.id]) { _, _ in }
-            }
-        }
     }
 }
 
 struct AlertsView: View {
     @EnvironmentObject var link: PhoneLink
 
-    private var alerts: [WAlert] {
-        var all = link.snapshot?.alerts ?? []
-        for extra in link.lastAlerts where !all.contains(where: { $0.id == extra.id }) {
-            all.insert(extra, at: 0)
-        }
-        return all
-    }
-
     var body: some View {
+        let alerts = link.snapshot?.alerts ?? []
         List {
             if alerts.isEmpty {
                 Text("No alerts.")
@@ -261,12 +245,15 @@ struct AlertsView: View {
                     Text(alert.title)
                         .font(.headline)
                         .foregroundColor(alert.kind == "sos" && alert.active ? Brand.sosRed : .primary)
-                    if !alert.body.isEmpty {
-                        Text(alert.body).font(.footnote)
+                    if !alert.note.isEmpty {
+                        Text(alert.note).font(.footnote)
                     }
                     Text(agoText(alert.date))
                         .font(.caption2)
                         .foregroundColor(.secondary)
+                    if alert.active {
+                        CommandButton(title: "Got it", systemImage: "checkmark", cmd: "ack", arg: alert.id)
+                    }
                 }
             }
         }

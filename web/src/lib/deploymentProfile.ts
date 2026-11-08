@@ -80,7 +80,7 @@ export function setupSteps(s: DeploymentState | null): SetupStep[] {
     },
     {
       key: 'apps',
-      title: 'Install the apps and invite family',
+      title: 'Install the apps and invite your people',
       done: !!s && (s.circles_with_server ?? 0) > 0,
       detail: 'Download the app, create a circle and share the invite code.',
     },

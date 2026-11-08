@@ -170,14 +170,22 @@ class _EncryptionCircleScreenState extends State<EncryptionCircleScreen> {
         children: <Widget>[
           for (final E2eeAlarm a in _laneAlarms)
             Padding(padding: const EdgeInsets.only(bottom: AppSpace.md), child: AlarmBanner(key: Key('lane-alarm-${a.circleId}'), alarm: a)),
-          Text(st.isPrivate ? 'Private circle, key epoch ${st.epoch}' : 'Normal circle (not end-to-end encrypted)', style: AppType.headline),
-          const SizedBox(height: AppSpace.sm),
+          Row(children: <Widget>[
+            Expanded(child: Text(st.isPrivate ? 'Private circle' : 'Normal circle', style: AppType.headline)),
+            if (st.isPrivate)
+              InfoHint(
+                title: 'Private circle',
+                body: (widget.circle.e2eeServerMember
+                        ? 'The circle key is held by members\' phones AND by your Orbitly server (old trusted-server mode): the server can read this circle. An admin can upgrade it under Server processing.'
+                        : 'The circle key is held only by members\' phones. The server cannot read what is sealed for phones only. Members who allow server processing under "Server processing" can be read by the server.') +
+                    '\n\nAdvanced: key epoch ${st.epoch}.',
+              ),
+          ]),
+          const SizedBox(height: AppSpace.xs),
           Text(
             st.isPrivate
-                ? (widget.circle.e2eeServerMember
-                    ? 'The circle key is held by members\' phones AND by your Orbitly server (old trusted-server mode): the server can read this circle. An admin can upgrade it under Server processing.'
-                    : 'The circle key is held only by members\' phones. The server cannot read what is sealed for phones only. Members who allow server processing under "Server processing" can be read by the server.')
-                : 'Turn on "Private circle" in the circle\'s settings (admins only) to set up end-to-end keys.',
+                ? (widget.circle.e2eeServerMember ? 'Old mode: the server can read this circle.' : 'Only members can read locations here.')
+                : 'Not encrypted. Admins can turn on "Private circle".',
             style: AppType.secondary,
           ),
           if (_showTrustPrompt) ...<Widget>[
@@ -247,7 +255,7 @@ class _EncryptionCircleScreenState extends State<EncryptionCircleScreen> {
               DsListRow(
                 leading: DsListRow.iconTile(context, Icons.devices_other),
                 title: 'Approve a viewer or bridge',
-                subtitle: 'Read-only web viewer or Dawarich bridge',
+                subtitle: 'Web viewer or Dawarich bridge',
                 chevron: true,
                 onTap: _busy
                     ? null
@@ -261,9 +269,8 @@ class _EncryptionCircleScreenState extends State<EncryptionCircleScreen> {
                 key: const Key('processing-row'),
                 leading: DsListRow.iconTile(context, Icons.dns_outlined),
                 title: 'Server processing',
-                subtitle: widget.circle.e2eeServerMember
-                    ? 'Old trusted-server mode: the Orbitly server CAN read this circle'
-                    : 'Where your data is processed. Includes "Don\'t send my data to the server"',
+                subtitle: widget.circle.e2eeServerMember ? 'Old mode: the server can read it' : 'Server or phone only',
+                info: 'Where your data is processed. Includes "Don\'t send my data to the server".',
                 chevron: true,
                 onTap: _busy
                     ? null
@@ -281,8 +288,11 @@ class _EncryptionCircleScreenState extends State<EncryptionCircleScreen> {
                 leading: DsListRow.iconTile(context, Icons.person_outline),
                 title: m.userId == _me ? '${m.name} (you)' : m.name,
                 subtitle: m.devices.isEmpty
-                    ? 'No encryption key registered yet'
-                    : '${m.devices.length} key${m.devices.length == 1 ? '' : 's'}${m.devices.any((DeviceKey d) => d.approved == false) ? ' - waiting for approval' : ''}',
+                    ? 'No key yet'
+                    : m.devices.any((DeviceKey d) => d.approved == false)
+                        ? 'New phone to approve'
+                        : ((_trust[m.userId]?.level ?? TrustLevel.unseen) == TrustLevel.verified ? 'Verified' : 'Ready'),
+                info: m.devices.isEmpty ? null : 'Advanced: ${m.devices.length} key${m.devices.length == 1 ? '' : 's'} registered for ${m.name}.',
                 trailing: m.userId == _me ? null : VerifiedBadge(level: _trust[m.userId]?.level ?? TrustLevel.unseen),
                 chevron: m.userId != _me && m.devices.isNotEmpty,
                 onTap: (m.userId == _me || m.devices.isEmpty)

@@ -29,6 +29,8 @@ import { UnitsDefaultCard } from './UnitsDefaultCard'
 import { DeploymentProfileCard, ServerSetupCard } from './ServerSetupCard'
 import { DomainSettingsCard } from './DomainSettingsCard'
 import { MapStyleCard } from './MapStyleCard'
+import { MemberDefaultsCard, SessionSecurityCard } from './SecurityCards'
+import { SettingsNav, SettingsSection, useSettingsNav } from './SettingsNav'
 import './pages.css'
 import './SettingsPage.css'
 
@@ -313,6 +315,8 @@ export function SettingsPage({ email, onLogout }: SettingsPageProps) {
   const hasAvatar = Boolean(profile?.has_avatar && avatarUrl)
   const avatarControlsDisabled = !profile || mutation !== null
   const nameUnchanged = Boolean(profile && nameDraft.trim() === profile.name)
+  const colRef = React.useRef<HTMLDivElement>(null)
+  const nav = useSettingsNav(colRef)
   const serverUrl = typeof window !== 'undefined' ? window.location.origin : '—'
 
   return (
@@ -326,38 +330,56 @@ export function SettingsPage({ email, onLogout }: SettingsPageProps) {
         </div>
       </div>
 
+      <SettingsNav nav={nav} />
+
       {isPlatformAdmin && <ServerSetupCard />}
 
       <div className="wb-settings-grid">
-        <div className="wb-settings-col">
-          <Card>
-            <h3 className="wb-settings-title">Appearance</h3>
-            <p className="wb-settings-section-help">
-              System follows this device. Light is Ice. Dark is Night.
-            </p>
-            <ThemeToggle />
-          </Card>
-
-          {/* Domain status is a read-only mirror of the deployment's
-              SITE_ADDRESS plus live DNS/TLS checks. Always shown for platform
-              admins — including before a domain exists, with the setup guide. */}
-          {isPlatformAdmin && <DomainSettingsCard />}
-
-          {/* Twilio SMS is a server-wide setting: platform admins only. The
-              apps never expose it to regular users either. */}
-          {isPlatformAdmin && <TwilioSettingsCard />}
-          {isPlatformAdmin && <ThemeAccentCard />}
-          {isPlatformAdmin && <UnitsDefaultCard />}
-          {isPlatformAdmin && <DeploymentProfileCard />}
-          {isPlatformAdmin && <MapStyleCard />}
-          {isPlatformAdmin && <DawarichSettingsCard />}
-          <IntegrationsCard />
-
-          {/* Self-update lives here too: it restarts the server the panel is
-              served from, so only platform admins see the card. */}
-          {isPlatformAdmin && <ServerVersionCard />}
-          {isPlatformAdmin && <AppVersionsCard />}
-          <AboutCard />
+        <div className="wb-settings-col" ref={colRef}>
+          <SettingsSection id="general" title="General" admin={isPlatformAdmin}>
+            {isPlatformAdmin && <DomainSettingsCard />}
+            {isPlatformAdmin && <UnitsDefaultCard />}
+            {isPlatformAdmin && <MapStyleCard />}
+          </SettingsSection>
+          <SettingsSection id="privacy" title="Privacy & processing" admin={isPlatformAdmin}>
+            {isPlatformAdmin && <DeploymentProfileCard />}
+            {isPlatformAdmin && <MemberDefaultsCard />}
+          </SettingsSection>
+          <SettingsSection id="security" title="Security" admin={isPlatformAdmin}>
+            {isPlatformAdmin && <SessionSecurityCard />}
+          </SettingsSection>
+          <SettingsSection id="notifications" title="Notifications" admin={isPlatformAdmin}>
+            {isPlatformAdmin && <TwilioSettingsCard />}
+          </SettingsSection>
+          <SettingsSection id="data" title="Data & retention" admin={isPlatformAdmin}>
+            {isPlatformAdmin && (
+              <Card>
+                <h3 className="wb-settings-title">Backups</h3>
+                <p className="wb-settings-section-help">
+                  Backup schedule, folder and the “Back up now” button live on the <a href="#/system">System health</a> page.
+                </p>
+              </Card>
+            )}
+          </SettingsSection>
+          <SettingsSection id="integrations" title="Integrations" admin={true}>
+            {isPlatformAdmin && <DawarichSettingsCard />}
+            <IntegrationsCard />
+          </SettingsSection>
+          <SettingsSection id="appearance" title="Appearance" admin={true}>
+            <Card>
+              <h3 className="wb-settings-title">Appearance</h3>
+              <p className="wb-settings-section-help">
+                System follows this device. Light is Ice. Dark is Night.
+              </p>
+              <ThemeToggle />
+            </Card>
+            {isPlatformAdmin && <ThemeAccentCard />}
+          </SettingsSection>
+          <SettingsSection id="updates" title="Updates & about" admin={true}>
+            {isPlatformAdmin && <ServerVersionCard />}
+            {isPlatformAdmin && <AppVersionsCard />}
+            <AboutCard />
+          </SettingsSection>
         </div>
 
         <Card>

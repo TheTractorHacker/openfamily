@@ -22,6 +22,14 @@ void main() {
     expect(note(t), contains('unless you confirm it'));
   });
 
+  testWidgets('server default with auto-apply: new members are told it is the default and that they can opt out', (t) async {
+    await pumpJoin(t, (_) async => const InvitePreview(isPrivate: true, serverAssist: true, required: false, defaultServer: true, autoApply: true));
+    expect(note(t), contains('This circle uses the server by default; you can opt out'));
+    expect(note(t), contains('Keep on my phone'));
+    expect(InvitePreview.tryParse(<String, dynamic>{'private': true, 'server_assist': true, 'member_opt_out': 'allowed', 'default_for_new': 'server', 'auto_apply': true})!.autoApply, isTrue);
+    expect(InvitePreview.tryParse(<String, dynamic>{'private': true, 'server_assist': true, 'member_opt_out': 'allowed', 'default_for_new': 'server'})!.autoApply, isFalse);
+  });
+
   testWidgets('required: the disclosure says consent is needed to take part', (t) async {
     await pumpJoin(t, (_) async => const InvitePreview(isPrivate: true, serverAssist: true, required: true, defaultServer: false));
     expect(note(t), contains('Server processing: required'));

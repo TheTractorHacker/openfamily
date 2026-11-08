@@ -7,7 +7,12 @@ import 'package:flutter/foundation.dart'
 import 'package:http/http.dart' as http;
 
 import '../models/user_profile.dart';
+import 'api_wire.dart';
 import 'app_compat.dart';
+import 'device_service.dart';
+import 'offline/offline_cache.dart';
+import 'offline/offline_errors.dart';
+import 'offline/server_reachability.dart';
 import 'perf/perf_monitor.dart';
 import 'server_config.dart';
 import 'session_diary.dart';
@@ -50,6 +55,18 @@ class SessionExpiredException implements Exception {
   String toString() => 'SessionExpiredException: $message';
 }
 
+/// Wraps a per-call (test or zone) client so the shared-client code path can
+/// close it after use without ever closing the long-lived shared one.
+class _NonClosingClient extends http.BaseClient {
+  _NonClosingClient(this._inner);
+  final http.Client _inner;
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) => _inner.send(request);
+  void closeInner() => _inner.close();
+  @override
+  void close() {}
+}
+
 /// Top-level so it can run on a worker isolate.
 dynamic _decodeJsonBytes(Uint8List bytes) => jsonDecode(utf8.decode(bytes));
 
@@ -63,6 +80,9 @@ class ApiClient {
   ApiClient._();
 
   static const Duration _timeout = Duration(seconds: 15);
+
+  /// Budget for raw-byte uploads (avatars, chat photos, sealed blobs).
+  static const Duration _uploadTimeout = Duration(seconds: 60);
 
   /// Maximum number of bytes accepted by the profile-avatar endpoint.
   ///
@@ -217,11 +237,13 @@ class ApiClient {
     String? pushToken,
     String? unifiedpushEndpoint,
     String? appVersion,
+    String? installId,
   }) async {
     final Map<String, dynamic> body = <String, dynamic>{
       'platform': platform,
       'name': name,
     };
+    if (installId != null && installId.isNotEmpty) body['install_id'] = installId;
     if (pushToken != null) body['push_token'] = pushToken;
     if (unifiedpushEndpoint != null) {
       body['unifiedpush_endpoint'] = unifiedpushEndpoint;
@@ -289,11 +311,12 @@ class ApiClient {
   }
 
   /// GET /healthz → throws when the server is unreachable or not OK.
-  static Future<void> healthz() async {
+  static Future<void> healthz({Duration timeout = const Duration(seconds: 5)}) async {
     final http.Response response = await _rawSend(
       'GET',
       _uri('/healthz'),
       auth: false,
+      timeout: timeout,
     );
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw ApiException(response.statusCode, 'Server is not reachable.');
@@ -308,6 +331,9 @@ class ApiClient {
     } on ApiException catch (e) {
       if (e.status == 404) return;
       rethrow;
+    } finally {
+      _epoch++;
+      ApiWire.cache.clear();
     }
   }
 
@@ -402,8 +428,18 @@ class ApiClient {
   /// [getProfileAvatar], rather than as a URL embedded in profile or member
   /// data. This keeps the image behind the authenticated API request.
   static Future<UserProfile> getProfile() async {
-    final dynamic data = await _send('GET', _uri('/api/profile'));
-    return UserProfile.fromJson(data as Map<String, dynamic>);
+    try {
+      final dynamic data = await _send('GET', _uri('/api/profile'));
+      unawaited(OfflineCache.instance.write('profile', data));
+      return UserProfile.fromJson(data as Map<String, dynamic>);
+    } catch (e) {
+      // Server unreachable: the last profile this phone saw. Chat, circles and trips ask for it
+      // only to learn "who am I", which must not need the network.
+      if (!isOfflineError(e)) rethrow;
+      final CacheEntry? c = await OfflineCache.instance.read('profile');
+      if (c == null || c.data is! Map) rethrow;
+      return UserProfile.fromJson(Map<String, dynamic>.from(c.data! as Map));
+    }
   }
 
   /// GET /api/profile/avatar → private avatar image bytes, or null when none is
@@ -520,8 +556,86 @@ class ApiClient {
   // Generic verbs (for later pieces)
   // ---------------------------------------------------------------------------
 
-  static Future<dynamic> get(String path, {Map<String, String>? query}) {
-    return _send('GET', _uri(path, query: query));
+  /// GET with the wire-efficiency layer: simultaneous identical GETs share one
+  /// request, a validated response is re-used on 304, transient failures are
+  /// retried with jitter (GET is idempotent), and [cancel] lets a disposed
+  /// screen stop waiting.
+  static Future<dynamic> get(
+    String path, {
+    Map<String, String>? query,
+    ApiCancelToken? cancel,
+  }) {
+    final Future<dynamic> f = _send('GET', _uri(path, query: query));
+    return cancel == null ? f : cancel.guard(f);
+  }
+
+  /// A read whose parameters belong in a body (bulk id lists, several time
+  /// windows). Tries the HTTP QUERY method where the server, the proxy and the
+  /// network allow it and otherwise POSTs the same body to the same path, which
+  /// the server accepts for both. The result of the probe is remembered per
+  /// server and re-checked daily (see [QueryCapability]). Both verbs are reads
+  /// on the server, so falling back never changes what happens.
+  static Future<dynamic> query(String path, {Object? body, ApiCancelToken? cancel}) {
+    final Future<dynamic> f = _queryWithFallback(path, body);
+    return cancel == null ? f : cancel.guard(f);
+  }
+
+  static Future<dynamic> _queryWithFallback(String path, Object? body) async {
+    final String server = ServerConfig.instance.apiBaseUrl;
+    final QueryCapability cap = ApiWire.queryCapability;
+    if (await cap.shouldTryQuery(server)) {
+      bool fellBack = false;
+      try {
+        final http.Response r = await _sendResponse(
+          'QUERY',
+          _uri(path),
+          body: body,
+          contentType: 'application/json',
+        );
+        if (r.statusCode >= 200 && r.statusCode < 300) {
+          await cap.recordQueryWorked(server);
+          return _decodeMaybeOffThread(r);
+        }
+        fellBack = ApiWire.queryUnsupportedStatus(r.statusCode) || r.statusCode >= 500;
+        if (!fellBack) return _decodeMaybeOffThread(r); // a real answer (403, 404, ...)
+      } on ApiException {
+        fellBack = true; // network / proxy dropped the unknown verb
+      }
+      if (fellBack) {
+        final dynamic data = await _send('POST', _uri(path), body: body);
+        await cap.recordFellBack(server); // only reached when POST worked
+        return data;
+      }
+    }
+    return _send('POST', _uri(path), body: body);
+  }
+
+  /// `GET /app/bootstrap`: circles, people with positions, unread counts,
+  /// compatibility and the server's wire features in one round trip.
+  /// Returns null when the server is older than the feature (404), so the
+  /// caller falls back to the individual requests. Also tells the QUERY
+  /// capability whether the server has QUERY enabled.
+  static Future<Map<String, dynamic>?> bootstrap({
+    bool fullMembers = false,
+    ApiCancelToken? cancel,
+  }) async {
+    try {
+      final dynamic d = await get(
+        '/app/bootstrap',
+        query: fullMembers ? const <String, String>{'view': 'full'} : null,
+        cancel: cancel,
+      );
+      if (d is! Map<String, dynamic>) return null;
+      final dynamic wire = d['wire'];
+      if (wire is Map && wire['query'] is bool) {
+        ApiWire.queryCapability
+            .noteServerFlag(ServerConfig.instance.apiBaseUrl, wire['query'] as bool);
+      }
+      return d;
+    } on ApiException catch (e) {
+      if (e.status == 404 || e.status == 405) return null;
+      rethrow;
+    }
   }
 
   static Future<dynamic> post(String path, {Object? body}) {
@@ -557,6 +671,15 @@ class ApiClient {
     Object? body,
     bool auth = true,
   }) async {
+    if (method == 'GET' && auth) {
+      // Simultaneous identical GETs (two widgets asking for the members at
+      // once) become one request. The key carries the session epoch so a
+      // request from a previous login is never shared with the next one.
+      return ApiWire.coalescer.run<dynamic>(
+        '$_epoch|$uri',
+        () => _sendGet(uri),
+      );
+    }
     final http.Response response = await _sendResponse(
       method,
       uri,
@@ -566,7 +689,66 @@ class ApiClient {
       contentType: 'application/json',
       auth: auth,
     );
-    return _decodeMaybeOffThread(response);
+    try {
+      return await _decodeMaybeOffThread(response);
+    } on FormatException {
+      // A 2xx whose body is cut off or not JSON (a half-dead connection, a captive portal page):
+      // no usable answer, same as being offline. Never an uncaught crash in a screen.
+      throw const ApiException(0, 'The server sent an unreadable answer. Please try again.');
+    }
+  }
+
+  /// Incremented whenever a session starts or ends.
+  static int _epoch = 0;
+
+  /// An authenticated GET: conditional (If-None-Match -> 304), retried with
+  /// jitter on transient failures. Only GET is retried: it is idempotent.
+  static Future<dynamic> _sendGet(Uri uri) async {
+    final String cacheKey = '$_epoch|$uri';
+    // A ?since= cursor changes on every call, so its URL never repeats: do not
+    // spend cache slots on it (the delta already is the saving).
+    final bool cacheable = !uri.queryParameters.containsKey('since');
+    // Nothing to retry against when no server is configured.
+    final int maxRetries =
+        ServerConfig.instance.apiBaseUrl.isEmpty ? 0 : ApiWire.maxGetRetries;
+    for (int attempt = 0;; attempt++) {
+      final CachedResponse? cached = cacheable ? ApiWire.cache.get(cacheKey) : null;
+      try {
+        final http.Response r = await _sendResponse(
+          'GET',
+          uri,
+          contentType: 'application/json',
+          extraHeaders: cached == null
+              ? null
+              : <String, String>{'If-None-Match': cached.etag},
+        );
+        if (r.statusCode == 304 && cached != null) {
+          return _decodeMaybeOffThread(ApiWire.fromCache(cached, r.headers));
+        }
+        if (r.statusCode == 200 && cacheable) {
+          final String? etag = r.headers['etag'];
+          if (etag != null && etag.isNotEmpty) {
+            ApiWire.cache.put(
+              cacheKey,
+              CachedResponse(etag, r.bodyBytes, r.headers['content-type'] ?? 'application/json'),
+            );
+          } else if (cached != null) {
+            ApiWire.cache.remove(cacheKey);
+          }
+        }
+        if (isTransientStatus(r.statusCode) && attempt < maxRetries) {
+          await Future<void>.delayed(retryDelay(attempt, ApiWire.random));
+          continue;
+        }
+        return _decodeMaybeOffThread(r);
+      } on ApiException catch (e) {
+        if (isTransientStatus(e.status) && attempt < maxRetries) {
+          await Future<void>.delayed(retryDelay(attempt, ApiWire.random));
+          continue;
+        }
+        rethrow;
+      }
+    }
   }
 
   /// Sends a request whose response is not necessarily JSON, transparently
@@ -582,6 +764,7 @@ class ApiClient {
     String? contentType,
     String? accept,
     bool auth = true,
+    Map<String, String>? extraHeaders,
   }) async {
     final http.Response response = await _rawSend(
       method,
@@ -591,6 +774,7 @@ class ApiClient {
       contentType: contentType,
       accept: accept,
       auth: auth,
+      extraHeaders: extraHeaders,
     );
 
     if (response.statusCode == 401 && auth) {
@@ -613,6 +797,7 @@ class ApiClient {
           contentType: contentType,
           accept: accept,
           auth: auth,
+          extraHeaders: extraHeaders,
         );
         if (retry.statusCode == 401) {
           // The refresh just succeeded, so the session is alive: a 401 right
@@ -642,6 +827,8 @@ class ApiClient {
     String? contentType,
     String? accept,
     bool auth = true,
+    Map<String, String>? extraHeaders,
+    Duration? timeout,
   }) async {
     if (ServerConfig.instance.apiBaseUrl.isEmpty) {
       throw const ApiException(
@@ -659,12 +846,18 @@ class ApiClient {
     } else if (body != null) {
       headers['Content-Type'] = 'application/json';
     }
+    if (extraHeaders != null) headers.addAll(extraHeaders);
     // Announce the app version so the server can tell an old app apart and
     // answer with X-OpenFamily-Compat (docs/api-compat.md).
     if (AppCompat.version.isNotEmpty) {
       headers['X-App-Version'] = AppCompat.version;
       headers['X-App-Platform'] = _platformName();
     }
+    // Lets the server replace this install's previous sign-in instead of
+    // stacking a new session on every login.
+    try {
+      headers['X-Install-Id'] = await DeviceService.installId();
+    } catch (_) {}
     if (auth) {
       final String? token = await TokenStorage.readAccessToken();
       if (token != null) {
@@ -682,11 +875,19 @@ class ApiClient {
     final Stopwatch sw = Stopwatch()..start();
     int status = 0;
     try {
-      final http.Response r = await _dispatch(method, uri, headers, encoded);
+      // Uploads get a longer budget than reads: a photo on a weak mobile link
+      // needs more than 15 s, a list read that is not back in 15 s is stuck.
+      final Duration limit = timeout ?? (bytes != null ? _uploadTimeout : _timeout);
+      final http.Response r = await _dispatch(method, uri, headers, encoded, limit);
       status = r.statusCode;
       AppCompat.observeHeaders(r.headers);
       if (status == 426) AppCompat.observeUpgradeRequired();
+      ServerReachability.instance.noteResponse(status);
       return r;
+    } on ApiException catch (e) {
+      // status 0 = nothing came back (offline, refused, timed out).
+      if (e.status == 0) ServerReachability.instance.noteFailure();
+      rethrow;
     } finally {
       PerfMonitor.instance.recordHttp(method, uri.path, sw.elapsedMilliseconds, status);
     }
@@ -701,35 +902,54 @@ class ApiClient {
     };
   }
 
+  static http.Client? _shared;
+
+  /// One long-lived client so TCP/TLS connections are reused (keep-alive, and
+  /// HTTP/2 where the platform stack offers it). The top-level `http.get`
+  /// helpers build and close a client per call, which costs a new TLS
+  /// handshake for every request on a mobile network. Under a test's
+  /// `http.runWithClient` the zone's fake client is used instead.
+  static http.Client _client() {
+    final http.Client zone = http.Client();
+    final String type = zone.runtimeType.toString();
+    const Set<String> real = <String>{'IOClient', 'BrowserClient', 'CupertinoClient', 'CronetClient'};
+    if (!real.contains(type)) return _NonClosingClient(zone);
+    zone.close();
+    return _shared ??= http.Client();
+  }
+
   static Future<http.Response> _dispatch(
     String method,
     Uri uri,
     Map<String, String> headers,
     Object? encoded,
+    Duration timeout,
   ) async {
+    final http.Client c = _client();
     try {
       switch (method) {
         case 'GET':
-          return await http.get(uri, headers: headers).timeout(_timeout);
+          return await c.get(uri, headers: headers).timeout(timeout);
         case 'POST':
-          return await http
-              .post(uri, headers: headers, body: encoded)
-              .timeout(_timeout);
+          return await c.post(uri, headers: headers, body: encoded).timeout(timeout);
         case 'PATCH':
-          return await http
-              .patch(uri, headers: headers, body: encoded)
-              .timeout(_timeout);
+          return await c.patch(uri, headers: headers, body: encoded).timeout(timeout);
         case 'PUT':
-          return await http
-              .put(uri, headers: headers, body: encoded)
-              .timeout(_timeout);
+          return await c.put(uri, headers: headers, body: encoded).timeout(timeout);
         case 'DELETE':
-          return await http
-              .delete(uri, headers: headers, body: encoded)
-              .timeout(_timeout);
+          return await c.delete(uri, headers: headers, body: encoded).timeout(timeout);
+        case 'QUERY':
+          // package:http has no helper for custom methods; send a raw Request.
+          final http.Request req = http.Request('QUERY', uri)..headers.addAll(headers);
+          if (encoded is String) {
+            req.body = encoded;
+          } else if (encoded is List<int>) {
+            req.bodyBytes = encoded;
+          }
+          return await http.Response.fromStream(await c.send(req).timeout(timeout))
+              .timeout(timeout);
         default:
-          throw ArgumentError.value(
-              method, 'method', 'Unsupported HTTP method');
+          throw ArgumentError.value(method, 'method', 'Unsupported HTTP method');
       }
     } on TimeoutException {
       throw const ApiException(0, 'The request timed out. Please try again.');
@@ -738,6 +958,18 @@ class ApiClient {
         0,
         'Could not reach the server. Check your connection.',
       );
+    } on ArgumentError {
+      rethrow;
+    } catch (e) {
+      // Anything else the transport throws (a TLS handshake failure, a
+      // connection reset that was not wrapped, an HTTP parse error) means
+      // "no usable answer", never a crash and never a sign-out.
+      throw const ApiException(
+        0,
+        'Could not reach the server. Check your connection.',
+      );
+    } finally {
+      if (c is _NonClosingClient) c.closeInner();
     }
   }
 
@@ -875,6 +1107,8 @@ class ApiClient {
   static void _notifySessionExpired() {
     if (_sessionExpiredFired) return;
     _sessionExpiredFired = true;
+    _epoch++;
+    ApiWire.cache.clear();
     onSessionExpired?.call();
   }
 
@@ -882,6 +1116,8 @@ class ApiClient {
   /// so a later expiry fires [onSessionExpired] again.
   static void markSessionActive() {
     _sessionExpiredFired = false;
+    _epoch++;
+    ApiWire.cache.clear();
   }
 
   /// The startup session check used by the app's session gate.
@@ -1093,6 +1329,18 @@ class ApiClient {
   static Future<List<dynamic>> listSessions() async {
     final dynamic data = await _send('GET', _uri('/auth/sessions'));
     return data as List<dynamic>;
+  }
+
+  /// POST /auth/sessions/current: the id of the session this phone is using (null when the server is older or unsure).
+  static Future<String?> currentSessionId() async {
+    try {
+      final String? refresh = await TokenStorage.readRefreshToken();
+      if (refresh == null || refresh.isEmpty) return null;
+      final dynamic data = await _send('POST', _uri('/auth/sessions/current'), body: <String, dynamic>{'refresh_token': refresh});
+      return data is Map<String, dynamic> ? data['id'] as String? : null;
+    } catch (_) {
+      return null;
+    }
   }
 
   /// DELETE /auth/sessions/{id}.

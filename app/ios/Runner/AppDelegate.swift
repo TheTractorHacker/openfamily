@@ -1,6 +1,7 @@
 import Flutter
 import UIKit
 import UserNotifications
+import os
 import background_locator_2
 
 @main
@@ -50,6 +51,26 @@ import background_locator_2
         if call.method == "register" {
           UIApplication.shared.registerForRemoteNotifications()
           result(nil)
+        } else {
+          result(FlutterMethodNotImplemented)
+        }
+      }
+    }
+
+    // Physical memory for the device tier (UNVERIFIED: not compiled in CI
+    // here). iOS memory warnings already reach Dart as didHaveMemoryPressure.
+    if let registrar = self.registrar(forPlugin: "OpenFamilyDevice") {
+      let device = FlutterMethodChannel(
+        name: "app.openfamily/device",
+        binaryMessenger: registrar.messenger()
+      )
+      device.setMethodCallHandler { call, result in
+        if call.method == "memoryInfo" {
+          result([
+            "totalBytes": Int(ProcessInfo.processInfo.physicalMemory),
+            "availableBytes": Int(os_proc_available_memory()),
+            "isLowRamDevice": false,
+          ])
         } else {
           result(FlutterMethodNotImplemented)
         }

@@ -32,9 +32,15 @@ func (s *Server) RegisterDevice(w http.ResponseWriter, r *http.Request) {
 		UnifiedPushEndpoint string `json:"unifiedpush_endpoint,omitempty"`
 		PushTransport       string `json:"push_transport,omitempty"`
 		AppVersion          string `json:"app_version,omitempty"`
+		InstallID           string `json:"install_id,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	req.InstallID = strings.TrimSpace(req.InstallID)
+	if !validInstallID(req.InstallID) {
+		writeError(w, http.StatusBadRequest, "invalid install_id")
 		return
 	}
 	if req.Platform != "ios" && req.Platform != "android" && req.Platform != "web" {
@@ -65,19 +71,59 @@ func (s *Server) RegisterDevice(w http.ResponseWriter, r *http.Request) {
 		Name       string `json:"name"`
 		AppVersion string `json:"app_version"`
 	}
+	keyHash := middleware.EncodeIngestKeyHash(middleware.HashDeviceIngestKey(ingestKey))
+
+	// Reuse the caller's existing row for the same install (install_id) or
+	// the same push registration (token / UnifiedPush endpoint) instead of
+	// stacking a new device on every login or reinstall. A reused row gets a
+	// fresh ingest key (the plaintext is only ever returned here) and comes
+	// back out of "hidden".
+	var existingID string
 	err = s.Pool.QueryRow(r.Context(), `
-		INSERT INTO devices (user_id, platform, name, push_token, unifiedpush_endpoint, app_version, ingest_key_hash, ingest_key_expires_at, push_transport)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-		RETURNING id, user_id, platform, name, app_version`,
-		claims.UserID, req.Platform, req.Name, req.PushToken, req.UnifiedPushEndpoint, req.AppVersion,
-		middleware.EncodeIngestKeyHash(middleware.HashDeviceIngestKey(ingestKey)),
-		newIngestKeyExpiry(), req.PushTransport,
-	).Scan(&device.ID, &device.UserID, &device.Platform, &device.Name, &device.AppVersion)
+		SELECT id::text FROM devices
+		WHERE user_id = $1 AND platform = $2
+		  AND (($3 <> '' AND install_id = $3)
+		    OR ($4 <> '' AND push_token = $4)
+		    OR ($5 <> '' AND unifiedpush_endpoint = $5))
+		ORDER BY (install_id = $3 AND $3 <> '') DESC, last_seen DESC NULLS LAST, created_at DESC
+		LIMIT 1`,
+		claims.UserID, req.Platform, req.InstallID, req.PushToken, req.UnifiedPushEndpoint).Scan(&existingID)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusInternalServerError, "failed to register device")
+		return
+	}
+	status := http.StatusCreated
+	if existingID != "" {
+		status = http.StatusOK
+		err = s.Pool.QueryRow(r.Context(), `
+			UPDATE devices SET
+			  name = COALESCE(NULLIF($3, ''), name),
+			  push_token = COALESCE(NULLIF($4, ''), push_token),
+			  unifiedpush_endpoint = COALESCE(NULLIF($5, ''), unifiedpush_endpoint),
+			  push_transport = CASE WHEN $6 <> '' THEN $6 ELSE push_transport END,
+			  app_version = COALESCE(NULLIF($7, ''), app_version),
+			  install_id = CASE WHEN $8 <> '' THEN $8 ELSE install_id END,
+			  ingest_key_hash = $9, ingest_key_expires_at = $10,
+			  hidden_at = NULL, last_seen = now()
+			WHERE id = $1 AND user_id = $2
+			RETURNING id, user_id, platform, COALESCE(name,''), COALESCE(app_version,'')`,
+			existingID, claims.UserID, req.Name, req.PushToken, req.UnifiedPushEndpoint, req.PushTransport,
+			req.AppVersion, req.InstallID, keyHash, newIngestKeyExpiry(),
+		).Scan(&device.ID, &device.UserID, &device.Platform, &device.Name, &device.AppVersion)
+	} else {
+		err = s.Pool.QueryRow(r.Context(), `
+			INSERT INTO devices (user_id, platform, name, push_token, unifiedpush_endpoint, app_version, ingest_key_hash, ingest_key_expires_at, push_transport, install_id)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+			RETURNING id, user_id, platform, name, app_version`,
+			claims.UserID, req.Platform, req.Name, req.PushToken, req.UnifiedPushEndpoint, req.AppVersion,
+			keyHash, newIngestKeyExpiry(), req.PushTransport, req.InstallID,
+		).Scan(&device.ID, &device.UserID, &device.Platform, &device.Name, &device.AppVersion)
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to register device")
 		return
 	}
-	writeJSON(w, http.StatusCreated, struct {
+	writeJSON(w, status, struct {
 		ID         string `json:"id"`
 		UserID     string `json:"user_id"`
 		Platform   string `json:"platform"`
@@ -357,4 +403,23 @@ func derefOrEmpty(s *string) string {
 		return ""
 	}
 	return *s
+}
+
+// validInstallID accepts an empty id (older apps) or 8-64 chars of
+// letters, digits and dashes (the app sends a random UUID).
+func validInstallID(v string) bool {
+	if v == "" {
+		return true
+	}
+	if len(v) < 8 || len(v) > 64 {
+		return false
+	}
+	for _, ch := range v {
+		switch {
+		case ch >= '0' && ch <= '9', ch >= 'a' && ch <= 'z', ch >= 'A' && ch <= 'Z', ch == '-':
+		default:
+			return false
+		}
+	}
+	return true
 }

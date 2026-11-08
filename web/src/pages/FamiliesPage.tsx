@@ -206,7 +206,7 @@ function AllFamiliesPage() {
       setCreating(false)
       await families.refetch()
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to create family')
+      setError(e instanceof Error ? e.message : 'Failed to create group')
     } finally {
       setBusy(false)
     }
@@ -224,7 +224,7 @@ function AllFamiliesPage() {
     return (
       <div className="wb-page">
         <ErrorState
-          title="Couldn’t load families"
+          title="Couldn’t load groups"
           description={families.error.message}
           onRetry={families.refetch}
         />
@@ -238,9 +238,9 @@ function AllFamiliesPage() {
     <div className="wb-page">
       <div className="wb-page-header">
         <div>
-          <h1 className="wb-page-title">Families</h1>
+          <h1 className="wb-page-title">Groups</h1>
           <p className="wb-page-subtitle">
-            {list.length} {list.length === 1 ? 'family' : 'families'} on this server.
+            {list.length} {list.length === 1 ? 'group' : 'groups'} on this server.
           </p>
         </div>
         <div className="wb-row">
@@ -248,7 +248,7 @@ function AllFamiliesPage() {
             Refresh
           </Button>
           <Button size="sm" onClick={() => setCreating((c) => !c)}>
-            New family
+            New group
           </Button>
         </div>
       </div>
@@ -258,7 +258,7 @@ function AllFamiliesPage() {
           <div className="wb-row">
             <input
               className="wb-input"
-              placeholder="Family name"
+              placeholder="Group name"
               value={newName}
               autoFocus
               onChange={(e) => setNewName(e.target.value)}
@@ -280,12 +280,12 @@ function AllFamiliesPage() {
       {list.length === 0 ? (
         <Card>
           <EmptyState
-            title="No families yet"
-            description="Create a family, then generate an invite code so people can join it."
+            title="No groups yet"
+            description="Create a group, then generate an invite code so people can join it."
             icon={<FamiliesIcon />}
             action={
               <Button size="sm" onClick={() => setCreating(true)}>
-                New family
+                New group
               </Button>
             }
           />
@@ -391,7 +391,7 @@ function FamilyRow({
   }
 
   const doDelete = async () => {
-    if (!window.confirm(`Delete family “${family.name}”? Its members will become unassigned.`)) return
+    if (!window.confirm(`Delete group “${family.name}”? Its members will become unassigned.`)) return
     setBusy(true)
     setActionError(null)
     try {
@@ -519,7 +519,7 @@ function FamilyRow({
           ) : (members.data?.length ?? 0) === 0 ? (
             <EmptyState
               title="No members yet"
-              description="Generate an invite code above so someone can join this family."
+              description="Generate an invite code above so someone can join this group."
             />
           ) : (
             <div className="wb-table-wrap">
@@ -532,7 +532,7 @@ function FamilyRow({
                     <th>Battery</th>
                     <th>Speed</th>
                     <th>Accuracy</th>
-                    <th>Move to family</th>
+                    <th>Move to group</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -598,7 +598,7 @@ function MoveMember({
   const [error, setError] = React.useState<string | null>(null)
 
   if (families.length === 0) {
-    return <span className="wb-muted">No other families</span>
+    return <span className="wb-muted">No other groups</span>
   }
 
   const doMove = async () => {
@@ -622,7 +622,7 @@ function MoveMember({
         className="wb-select wb-move-select"
         value={target}
         onChange={(e) => setTarget(e.target.value)}
-        aria-label={`Move ${member.name} to family`}
+        aria-label={`Move ${member.name} to group`}
       >
         <option value="">Choose…</option>
         {families.map((f) => (
@@ -657,8 +657,8 @@ function FamiliesSkeleton() {
     <div className="wb-page">
       <div className="wb-page-header">
         <div>
-          <h1 className="wb-page-title">Families</h1>
-          <p className="wb-page-subtitle">Families using this Orbitly server.</p>
+          <h1 className="wb-page-title">Groups</h1>
+          <p className="wb-page-subtitle">Groups using this Orbitly server.</p>
         </div>
       </div>
       <div className="wb-stack">
@@ -702,7 +702,7 @@ function MyCirclePage() {
   if (family.error?.status === 404) {
     return (
       <div className="wb-page">
-        <PageHeader title="Families" subtitle="Create a new circle or join one with an invite code." />
+        <PageHeader title="Groups" subtitle="Create a new circle or join one with an invite code." />
         <CreateOrJoinCard
           onDone={() => {
             family.refetch()
@@ -716,7 +716,7 @@ function MyCirclePage() {
   if (family.error) {
     return (
       <div className="wb-page">
-        <ErrorState title="Couldn’t load your family" description={family.error.message} onRetry={family.refetch} />
+        <ErrorState title="Couldn’t load your group" description={family.error.message} onRetry={family.refetch} />
       </div>
     )
   }
@@ -848,14 +848,14 @@ function MyFamilyMembers({
   }
 
   const doLeave = async () => {
-    if (!window.confirm('Leave this family? You will stop sharing location with them. You can join another family with an invite code, or create a new one.')) return
+    if (!window.confirm('Leave this group? You will stop sharing location with them. You can join another group with an invite code, or create a new one.')) return
     setBusy(true)
     setError(null)
     try {
       await leaveMyFamily()
       onChanged()
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not leave the family.')
+      setError(e instanceof Error ? e.message : 'Could not leave the group.')
     } finally {
       setBusy(false)
     }
@@ -1032,7 +1032,7 @@ function CreateOrJoinCard({ onDone }: { onDone: () => void }) {
       await createMyFamily(trimmed)
       onDone()
     } catch (e) {
-      setCreateError(e instanceof Error ? e.message : 'Failed to create family')
+      setCreateError(e instanceof Error ? e.message : 'Failed to create group')
     } finally {
       setBusy(null)
     }
@@ -1063,7 +1063,7 @@ function CreateOrJoinCard({ onDone }: { onDone: () => void }) {
         <div className="wb-row">
           <input
             className="wb-input"
-            placeholder="Family name"
+            placeholder="Group name"
             value={name}
             autoFocus
             onChange={(e) => setName(e.target.value)}

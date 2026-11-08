@@ -30,6 +30,11 @@ type Claims struct {
 	// copied from refresh token to refresh token, so it survives rotation but
 	// can never be acquired without a challenge. Absent on older tokens.
 	AMR string `json:"amr,omitempty"`
+	// SessionID is the refresh-session family the access token was minted
+	// from (the id the admin Sessions list and revoke endpoints use). It lets
+	// the server tell "this very sign-in" from the user's other ones. Absent on
+	// older tokens.
+	SessionID string `json:"sid,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -57,6 +62,12 @@ func (m *TokenManager) IssueAccess(userID, familyID string, tokenVersion int) (s
 // IssueAccessAMR is IssueAccess for a session with authentication method amr.
 func (m *TokenManager) IssueAccessAMR(userID, familyID string, tokenVersion int, amr string) (string, error) {
 	return m.issueWithID(userID, familyID, tokenVersion, AccessToken, m.accessTTL, "", amr)
+}
+
+// IssueAccessSession is IssueAccessAMR for a token that also names its
+// refresh-session family.
+func (m *TokenManager) IssueAccessSession(userID, familyID string, tokenVersion int, amr, sessionID string) (string, error) {
+	return m.issueFull(userID, familyID, tokenVersion, AccessToken, m.accessTTL, "", amr, sessionID)
 }
 
 // AccessTTL returns the configured access-token lifetime, for reporting the
@@ -92,8 +103,13 @@ func (m *TokenManager) issue(userID, familyID string, tokenVersion int, typ Toke
 }
 
 func (m *TokenManager) issueWithID(userID, familyID string, tokenVersion int, typ TokenType, ttl time.Duration, jti, amr string) (string, error) {
+	return m.issueFull(userID, familyID, tokenVersion, typ, ttl, jti, amr, "")
+}
+
+func (m *TokenManager) issueFull(userID, familyID string, tokenVersion int, typ TokenType, ttl time.Duration, jti, amr, sessionID string) (string, error) {
 	now := time.Now()
 	claims := Claims{
+		SessionID:    sessionID,
 		UserID:       userID,
 		FamilyID:     familyID,
 		TokenType:    typ,

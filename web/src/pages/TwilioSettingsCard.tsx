@@ -202,7 +202,7 @@ export function TwilioSettingsCard() {
         </Badge>
       </div>
       <p className="wb-settings-section-help">
-        Text SOS alerts to people who are not in your family and do not have the app.
+        Text SOS alerts to people who are not in your circles and do not have the app.
       </p>
 
       {loadError && (

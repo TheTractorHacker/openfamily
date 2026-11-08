@@ -3,6 +3,8 @@ import 'dart:async';
 import '../models/circle.dart';
 import 'api_client.dart';
 import 'app_compat.dart';
+import 'offline/offline_cache.dart';
+import 'offline/offline_errors.dart';
 
 export 'api_client.dart' show SessionExpiredException;
 
@@ -93,8 +95,18 @@ class ApiCircleService implements CircleService {
 
   @override
   Future<List<Circle>> listCircles() => _wrap(() async {
-        final List<Circle> list =
-            _rows(await ApiClient.get('/circles')).map(Circle.fromJson).toList();
+        // Offline: the circle list this phone last saw, so the switcher and the map scope work.
+        dynamic raw;
+        try {
+          raw = await ApiClient.get('/circles');
+          unawaited(OfflineCache.instance.write('circles', raw));
+        } catch (e) {
+          if (!isOfflineError(e)) rethrow;
+          final CacheEntry? c = await OfflineCache.instance.read('circles');
+          if (c == null) rethrow;
+          raw = c.data;
+        }
+        final List<Circle> list = _rows(raw).map(Circle.fromJson).toList();
         AppCompat.noteCircles(list.map((Circle c) => c.needsNewerApp));
         return list;
       });

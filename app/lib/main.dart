@@ -4,11 +4,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'screens/login_screen.dart';
+import 'services/e2ee/e2ee_vault.dart';
 import 'screens/app_shell.dart';
 import 'screens/join_circle_screen.dart';
 import 'screens/server_config_screen.dart';
 import 'screens/sign_up_screen.dart';
 import 'screens/diagnostics_screen.dart';
+import 'services/watch/watch_bridge.dart';
 import 'services/diagnostics/diagnostics_reporter.dart';
 import 'screens/weekly_summary_screen.dart';
 import 'screens/welcome_screen.dart';
@@ -24,15 +26,19 @@ import 'services/deep_link_service.dart';
 import 'services/direct_push_service.dart' show onOpenRoute;
 import 'services/invite_link.dart';
 import 'services/pending_invite.dart';
+import 'services/perf/memory_pressure.dart';
 import 'services/perf/perf_monitor.dart';
+import 'services/perf/perf_profile.dart';
+import 'services/member_avatar_cache.dart';
+import 'services/e2ee/private_runtime.dart';
 import 'services/push_service.dart';
 import 'services/server_config.dart';
+import 'services/offline/offline_sync.dart';
 import 'services/session_gate.dart';
 import 'services/map_style_preference.dart';
 import 'services/theme_preference.dart';
 import 'services/tile_config.dart';
 import 'services/token_storage.dart';
-import 'services/watch/watch_bridge_ios.dart';
 import 'theme/app_theme.dart';
 import 'widgets/biometric_app_lock.dart';
 import 'widgets/dot_grid.dart';
@@ -66,12 +72,26 @@ Future<void> main() async {
       MapStylePreferenceService.load(),
       ServerConfig.instance.load(),
       AppCompat.init(),
+      // Reads the phone's RAM (one small platform call, in parallel with the
+      // stored settings) so caches are sized before the first screen builds.
+      PerfProfile.init(),
     ]),
   );
   UnitsSync.install();
-  // Apple Watch link (iPhone only; a no-op everywhere else).
-  unawaited(WatchBridgeIos.instance.start());
+  MemoryPressureGuard.instance
+    ..install()
+    ..addTrimmer(trimReloadableMemory);
+  // Companion watch bridge: does nothing without a paired Wear OS watch.
+  unawaited(WatchBridge.instance.start());
   runApp(const OpenFamilyApp());
+}
+
+/// What to free when the system is short of memory. Everything here reloads
+/// lazily; unsaved points are written out first, never dropped.
+void trimReloadableMemory(bool severe) {
+  final PrivateRuntime? rt = PrivateRuntime.existing;
+  if (rt != null) unawaited(rt.flushStores().catchError((Object _) {}));
+  if (severe) MemberAvatarCache.instance.trimBytes();
 }
 
 /// Root widget for the Orbitly app.
@@ -230,8 +250,12 @@ class _SessionGateState extends State<_SessionGate> {
       'gate',
       () => Future.wait<Object?>(<Future<Object?>>[
         _housekeeping(),
-        TileConfig.instance.refresh().then<Object?>((_) => null),
-        ApiClient.checkSession(),
+        TileConfig.instance.refresh().timeout(const Duration(seconds: 4), onTimeout: () {}).then<Object?>((_) => null),
+        checkSessionWithin(
+          ApiClient.checkSession(),
+          const Duration(seconds: 4),
+          hasRefreshToken: () async => (await TokenStorage.readRefreshToken()) != null,
+        ),
       ]),
     );
     final SessionGateResult session = results[2] as SessionGateResult;
@@ -244,6 +268,8 @@ class _SessionGateState extends State<_SessionGate> {
       case SessionGateResult.unreachable:
         unawaited(UnitsSync.pull());
         unawaited(DiagnosticsAutoReport.maybeReport());
+        // Local-first: probe the server politely and send queued updates when it is back.
+        OfflineSync.start();
         // Unreachable (offline/5xx): keep the session and open the map; the
         // individual API calls surface connectivity errors on their own.
         return _GateResult.hasSession;
@@ -272,6 +298,9 @@ class _SessionGateState extends State<_SessionGate> {
       // A secure-storage hiccup should not prevent the app from starting; a
       // later launch or logout will retry this idempotent cleanup.
     }
+
+    // Re-wrap keys stored by older versions so they work with the screen locked. Foreground only, never throws.
+    unawaited(SecureVault().migrateLegacy().catchError((Object _) => VaultMigration.failedKept));
 
     if (!ServerConfig.instance.isConfigured) return null;
 

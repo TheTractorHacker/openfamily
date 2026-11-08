@@ -17,12 +17,15 @@ import 'chat_service.dart';
 import 'inbox_service.dart';
 import 'member_avatar_cache.dart';
 import 'member_mapper.dart';
+import 'offline/offline_cache.dart';
+import 'offline/offline_errors.dart';
 import 'perf/perf_monitor.dart';
 import 'place_service.dart';
 import 'server_config.dart';
 import 'token_storage.dart';
+import 'watch/watch_bridge.dart';
 import 'widget_snapshot.dart';
-import 'watch/watch_bridge_ios.dart';
+import 'perf/perf_profile.dart';
 
 /// The caller's family summary from `GET /family`.
 class FamilyInfo {
@@ -111,7 +114,7 @@ class FamilyService {
     _coalesceTimer = null;
     PerfMonitor.instance.recordWsUiUpdate();
     HomeWidgetService.update(_members);
-    WatchBridgeIos.instance.onRoster(_members, userId: _userId, circleId: _circleId);
+    WatchBridge.instance.onMembers(_members, selfId: _userId);
     onMembersChanged?.call(_members);
   }
 
@@ -125,7 +128,7 @@ class FamilyService {
     }
     PerfMonitor.instance.recordWsUiUpdate();
     HomeWidgetService.update(_members);
-    WatchBridgeIos.instance.onRoster(_members, userId: _userId, circleId: _circleId);
+    WatchBridge.instance.onMembers(_members, selfId: _userId);
     onMembersChanged?.call(_members);
     _coalesceTimer = Timer(uiCoalesceWindow, _onCoalesceWindowEnd);
   }
@@ -136,6 +139,7 @@ class FamilyService {
     _coalescePending = false;
     PerfMonitor.instance.recordWsUiUpdate();
     HomeWidgetService.update(_members);
+    WatchBridge.instance.onMembers(_members, selfId: _userId);
     onMembersChanged?.call(_members);
     _coalesceTimer = Timer(uiCoalesceWindow, _onCoalesceWindowEnd);
   }
@@ -150,6 +154,34 @@ class FamilyService {
 
   List<Member> _members = <Member>[];
   List<Place> _places = <Place>[];
+
+  // Local-first roster (docs/design/OFFLINE_RESILIENCE.md): the raw rows of the last answer, kept
+  // current from live frames and written (encrypted) at most every 30 seconds.
+  Map<String, Map<String, dynamic>> _rawRoster = <String, Map<String, dynamic>>{};
+  String? _rosterKey;
+  bool _servedFromCache = false;
+  DateTime? _cachedSince;
+  Timer? _rosterWriteTimer;
+
+  /// True while the people shown come from the phone's memory, not from the server.
+  bool get servedFromCache => _servedFromCache;
+
+  /// When the cached roster was last refreshed from the server (null when live).
+  DateTime? get cachedSince => _servedFromCache ? _cachedSince : null;
+
+  void _noteLiveLocation(Map<String, dynamic> frame, String id) {
+    final Map<String, dynamic>? row = _rawRoster[id];
+    if (row == null || _rosterKey == null) return;
+    for (final String k in const <String>['lat', 'lon', 'ts', 'accuracy_meters', 'battery_pct', 'speed_mps', 'heading_deg', 'motion_state', 'last_seen_at']) {
+      if (frame.containsKey(k)) row[k] = frame[k];
+    }
+    _rosterWriteTimer ??= Timer(const Duration(seconds: 30), () {
+      _rosterWriteTimer = null;
+      final String? key = _rosterKey;
+      if (key == null || _disposed) return;
+      unawaited(OfflineCache.instance.write(key, _rawRoster.values.toList()));
+    });
+  }
   String? _userId;
 
   /// Cadence of the app-level WebSocket ping and of the inbound-activity
@@ -226,6 +258,8 @@ class FamilyService {
     _circleId = circleId;
     final int gen = ++_scopeGeneration;
     _members = <Member>[];
+    _rawRoster = <String, Map<String, dynamic>>{};
+    _rosterKey = null;
     _emitNow();
     _sendSubscribe();
     try {
@@ -268,8 +302,17 @@ class FamilyService {
 
   /// `GET /family` → the caller's family summary (name, role, user id).
   Future<FamilyInfo> fetchFamily() async {
-    final dynamic data = await ApiClient.get('/family');
-    final Map<String, dynamic> map = data as Map<String, dynamic>;
+    dynamic data;
+    try {
+      data = await ApiClient.get('/family');
+      unawaited(OfflineCache.instance.write('family', data));
+    } catch (e) {
+      if (!isOfflineError(e)) rethrow;
+      final CacheEntry? c = await OfflineCache.instance.read('family');
+      if (c == null) rethrow;
+      data = c.data;
+    }
+    final Map<String, dynamic> map = Map<String, dynamic>.from(data as Map);
     return FamilyInfo(
       name: map['name'] as String? ?? 'Family',
       role: map['role'] as String? ?? 'member',
@@ -288,14 +331,39 @@ class FamilyService {
     // Places are independent of the roster: request them side by side (the
     // place list is cached briefly, so most calls cost no request at all).
     final Future<void> placesLoad = _refreshPlaces();
-    final dynamic data = await ApiClient.get(
-      scope == null
-          ? '/family/members'
-          : '/family/members?circle_id=${Uri.encodeQueryComponent(scope)}',
-    );
-    final List<dynamic> list = data as List<dynamic>;
+    final String cacheKey = 'roster/${scope ?? 'legacy'}';
+    List<dynamic> list;
+    try {
+      final dynamic data = await ApiClient.get(
+        scope == null
+            ? '/family/members'
+            : '/family/members?circle_id=${Uri.encodeQueryComponent(scope)}',
+      );
+      list = data as List<dynamic>;
+      _servedFromCache = false;
+      _rawRoster = <String, Map<String, dynamic>>{
+        for (final dynamic e in list)
+          if (e is Map<String, dynamic> && (e['id'] ?? e['user_id']) is String) (e['id'] ?? e['user_id']) as String: e,
+      };
+      _rosterKey = cacheKey;
+      unawaited(OfflineCache.instance.write(cacheKey, list));
+    } catch (e) {
+      // Server unreachable: show the last roster this phone saw, with the time of each
+      // position, so people are never blank because the server is down.
+      if (!isOfflineError(e)) rethrow;
+      final CacheEntry? c = await OfflineCache.instance.read(cacheKey);
+      if (c == null || c.data is! List) rethrow;
+      list = c.data as List<dynamic>;
+      _servedFromCache = true;
+      _cachedSince = c.savedAt;
+      _rosterKey = cacheKey;
+      _rawRoster = <String, Map<String, dynamic>>{
+        for (final dynamic e in list)
+          if (e is Map && (e['id'] ?? e['user_id']) is String) (e['id'] ?? e['user_id']) as String: Map<String, dynamic>.from(e),
+      };
+    }
     final List<Member> mapped = list
-        .map((dynamic e) => memberFromJson(e as Map<String, dynamic>))
+        .map((dynamic e) => memberFromJson(Map<String, dynamic>.from(e as Map)))
         .toList();
     await placesLoad;
     if (gen != _scopeGeneration) return _members; // superseded by a newer scope
@@ -346,7 +414,7 @@ class FamilyService {
   /// status even though no `location` frame arrives for them.
   void _startStalenessTimer() {
     _stalenessTimer?.cancel();
-    _stalenessTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+    _stalenessTimer = Timer.periodic(PerfProfile.current.stalenessTick, (_) {
       if (_disposed || _members.isEmpty) return;
       final List<Member> refreshed = _members.map(refreshStaleness).toList();
       var changed = false;
@@ -518,6 +586,12 @@ class FamilyService {
             .map((dynamic e) => memberFromJson(e as Map<String, dynamic>))
             .toList();
         _replaceMembers(mapped);
+        _servedFromCache = false;
+        _rawRoster = <String, Map<String, dynamic>>{
+          for (final dynamic e in list)
+            if (e is Map && (e['id'] ?? e['user_id']) is String) (e['id'] ?? e['user_id']) as String: Map<String, dynamic>.from(e),
+        };
+        _rosterKey ??= 'roster/${_circleId ?? 'legacy'}';
         // Backoff is reset by [_stableTimer] once the connection holds.
         _emitNow();
         return true;
@@ -573,6 +647,8 @@ class FamilyService {
       memberFromLocationUpdate(_members[index], map),
       _places,
     );
+    _servedFromCache = false; // a live frame means the server is talking again
+    _noteLiveLocation(map, id);
     _emitCoalesced();
     return true;
   }
@@ -774,6 +850,8 @@ class FamilyService {
     _stalenessTimer = null;
     _coalesceTimer?.cancel();
     _coalesceTimer = null;
+    _rosterWriteTimer?.cancel();
+    _rosterWriteTimer = null;
     _teardownSocket();
     MemberAvatarCache.instance.clear();
   }

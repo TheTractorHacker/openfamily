@@ -147,3 +147,22 @@
 .wb-input.wb-error-input:focus { box-shadow: 0 0 0 3px rgba(229, 57, 53, 0.25); }
 .wb-help { font-size: var(--font-xs); color: var(--text-faint); }
 .wb-error-text { font-size: var(--font-xs); color: var(--sos-red); }
+/* ---- Overflow guards (narrow screens) ---- */
+.wb-page { min-width: 0; overflow-wrap: break-word; }
+.wb-page > *, .wb-settings-grid > *, .wb-settings-col > *, .wb-stack > * { min-width: 0; }
+.wb-card { min-width: 0; overflow-wrap: anywhere; }
+.wb-card:has(> table), .wb-card:has(> .wb-table) { overflow-x: auto; }
+.wb-table-wrap { overflow-x: auto; max-width: 100%; }
+.wb-card > table, .wb-card table.wb-table { max-width: 100%; }
+.wb-page img, .wb-page svg { max-width: 100%; }
+.wb-page pre, .wb-page code { overflow-wrap: anywhere; }
+.wb-page pre { max-width: 100%; overflow-x: auto; }
+@media (max-width: 600px) {
+  .wb-page-header { align-items: stretch; }
+  .wb-page-actions { flex-wrap: wrap; }
+}
+.wb-user-table-wrap { overflow-x: auto; max-width: 100%; }
+.wb-settings-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+@media (max-width: 900px) { .wb-settings-grid { grid-template-columns: minmax(0, 1fr); } }
+.wb-info-body { max-width: min(280px, calc(100vw - 80px)); }
+@media (max-width: 600px) { .wb-info { position: static; } .wb-info-body { left: var(--space-4); right: var(--space-4); width: auto; max-width: none; } }

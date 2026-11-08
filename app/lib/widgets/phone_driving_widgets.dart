@@ -77,16 +77,21 @@ DateTime periodStartForKind(String period, DateTime now) =>
     period == 'day' ? DateTime(now.year, now.month, now.day) : periodStartOf(period, now);
 
 class PhoneDrivingCard extends StatelessWidget {
-  const PhoneDrivingCard({super.key, required this.name, required this.member, required this.from, required this.to, required this.units, this.now});
+  const PhoneDrivingCard({super.key, required this.name, required this.member, required this.from, required this.to, required this.units, this.now, this.onUseServer, this.onComputeOnPhone});
   final String name;
   final MemberProcessing member;
   final DateTime from, to;
   final UnitSystem units;
   final DateTime? now;
 
+  /// Set only on the person's own card.
+  final VoidCallback? onUseServer, onComputeOnPhone;
+
   @override
   Widget build(BuildContext context) {
-    if (member.placeholder != null) return WaitingForPhoneCard(name: name);
+    if (member.placeholder != null) {
+      return WaitingForPhoneCard(name: name, onUseServer: onUseServer, onComputeOnPhone: onComputeOnPhone);
+    }
     final ColorScheme cs = Theme.of(context).colorScheme;
     final PhoneDrivingStats? s = phoneDrivingStats(member, from, to);
     return Container(
@@ -121,7 +126,7 @@ class PhoneDrivingCard extends StatelessWidget {
         const SizedBox(height: AppSpace.sm),
         ComputedOnPhoneNote(name: name, updatedAt: member.updatedAt, now: now),
         Text(
-          'Place names, route maps and the daily chart need the server, so they are not shown for members who keep data on their phone.',
+          'Place names, route maps and the daily chart need the server.',
           key: const Key('phone-driving-limits'),
           style: AppType.secondary.copyWith(color: cs.onSurfaceVariant),
         ),

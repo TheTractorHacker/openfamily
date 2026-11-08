@@ -1,4 +1,7 @@
+import 'dart:math';
+
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'api_client.dart';
 import 'app_compat.dart';
@@ -42,8 +45,26 @@ class DeviceService {
     }
   }
 
+  static const String _installIdPref = 'install_id';
+
+  /// A random id for THIS app install. Unlike the device id it is not erased
+  /// on sign-out or a rejected refresh, so signing in again re-attaches to the
+  /// same server-side device row instead of stacking a new one every time.
+  static Future<String> installId() async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    final String? cur = prefs.getString(_installIdPref);
+    if (cur != null && cur.length >= 8) return cur;
+    final Random r = Random.secure();
+    String hex(int n) =>
+        List<String>.generate(n, (_) => r.nextInt(16).toRadixString(16)).join();
+    final String id = '${hex(8)}-${hex(4)}-4${hex(3)}-a${hex(3)}-${hex(12)}';
+    await prefs.setString(_installIdPref, id);
+    return id;
+  }
+
   static Future<String> _register() async {
     final Map<String, dynamic> device = await ApiClient.registerDevice(
+      installId: await installId(),
       platform: _platform(),
       name: _deviceName(),
       appVersion: AppCompat.version.isNotEmpty ? AppCompat.version : _appVersion,

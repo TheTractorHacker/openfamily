@@ -535,9 +535,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                     Icons.shield_outlined,
                                   ),
                                   title: _roleLabel(profile.role),
-                                  subtitle: 'Family role',
+                                  subtitle: 'Role',
                                   semanticLabel:
-                                      'Family role: ${_roleLabel(profile.role)}',
+                                      'Role: ${_roleLabel(profile.role)}',
                                 ),
                               ],
                             ),

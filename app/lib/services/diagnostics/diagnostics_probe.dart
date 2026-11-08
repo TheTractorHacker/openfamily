@@ -12,7 +12,7 @@ import '../e2ee/e2ee_app.dart';
 import '../e2ee/e2ee_vault.dart';
 import '../e2ee/private_runtime.dart';
 import '../e2ee/private_store.dart';
-import '../location_outbox.dart';
+import '../offline/offline_sync.dart';
 import '../location_sharing_service.dart';
 import '../server_config.dart';
 import '../token_storage.dart';
@@ -184,7 +184,7 @@ class DiagnosticsProbe {
     final List<ConnectivityResult>? net = await _try(() => Connectivity().checkConnectivity());
     final bool? online = net == null ? null : !(net.isEmpty || net.every((ConnectivityResult r) => r == ConnectivityResult.none));
     final ServerView sv = light ? const ServerView(state: ServerState.unknown) : online == false ? const ServerView(state: ServerState.unreachable) : await server();
-    final int? outbox = await _try(() => LocationOutbox.size());
+    final int? outbox = await _try(() => OfflineSync.pendingCount());
     final bool? bg = _android ? await _try(() => BackgroundLocationService.isRunning()) : null;
     final String? deviceId = await _try(() => TokenStorage.readDeviceId());
 

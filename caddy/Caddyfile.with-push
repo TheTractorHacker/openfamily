@@ -29,13 +29,13 @@
 		}
 	}
 	handle {
-		encode gzip
+		encode zstd gzip
 		reverse_proxy api:8080
 	}
 }
 
 {$PUSH_ADDRESS} {
 	import security_headers
-	encode gzip
+	encode zstd gzip
 	reverse_proxy ntfy:80
 }

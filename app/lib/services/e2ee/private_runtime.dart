@@ -34,6 +34,7 @@ import 'private_places.dart';
 import '../chat/chat_engine.dart';
 import '../chat/chat_store.dart';
 import '../chat_service.dart' show ChatEvents;
+import '../perf/perf_profile.dart';
 
 /// SharedPreferences-backed [ChannelKv]. The queue, cursors, sequence numbers,
 /// dedupe windows and the on-device history live here. Everything stored is
@@ -353,6 +354,8 @@ class PrivateRuntime {
     Random? rng,
     this.opener = const InlineOpenRunner(),
     Duration? historyWriteBehind = const Duration(seconds: 4),
+    int? maxHistoryPoints,
+    int? catchUpPageSize,
   })  : channel = channel ?? const HttpChannelApi(),
         _rng = rng ?? Random.secure() {
     final ServiceChannelKeys ck = ServiceChannelKeys(service);
@@ -376,8 +379,9 @@ class PrivateRuntime {
         return ChatEvents.viewingCircleId == c;
       }
       ..onChange = ChatEvents.handleEngineChange;
-    sync = ChannelSync(api: this.channel, receiver: receiver, kv: kv);
-    history = PrivateHistory(kv: kv, now: clock.now, writeBehind: historyWriteBehind);
+    sync = ChannelSync(api: this.channel, receiver: receiver, kv: kv, pageLimit: catchUpPageSize ?? PerfProfile.current.catchUpPageSize);
+    history = PrivateHistory(
+        kv: kv, now: clock.now, writeBehind: historyWriteBehind, maxPointsPerMember: maxHistoryPoints ?? PerfProfile.current.maxHistoryPoints);
     lastPositions = LastPositionBook(vault: service.vault);
     chunker = HistoryChunker(kv: kv, now: clock.now);
   }
@@ -406,6 +410,9 @@ class PrivateRuntime {
 
   static PrivateRuntime? override;
   static PrivateRuntime? _instance;
+
+  /// The runtime if one was already created (never creates one).
+  static PrivateRuntime? get existing => override ?? _instance;
   static PrivateRuntime get instance => override ??
       (_instance ??= PrivateRuntime(
           service: E2eeApp.service, api: const ApiE2eeApi(), kv: const PrefsChannelKv(), opener: WorkerOpenRunner()));
@@ -1098,6 +1105,31 @@ class PrivateRuntime {
     }
   }
 
+  /// Bumped when this phone signed the server lane on its own (section 23), so the notice card appears.
+  static final ValueNotifier<int> autoApplied = ValueNotifier<int>(0);
+
+  /// "Members are on the server by default": for every Private circle where the admin's setting says so, this
+  /// member's OWN phone signs the server lane once (never over an earlier choice). Offline or an older server: nothing happens.
+  Future<void> _autoApplyAll(Set<String> privs) async {
+    if (privs.isEmpty) return;
+    bool auto = false;
+    try {
+      auto = (await api.serverProfile()).autoApply;
+    } catch (_) {}
+    if (!auto) return;
+    await _declareCaps(); // the server only accepts a lane pref from a phone that declared it can read the server line
+    for (final String id in privs) {
+      try {
+        if (await lanesService.autoApplyIfDue(id, autoApply: true) == AutoApplyOutcome.applied) {
+          autoApplied.value++;
+          unawaited(lanesService.maintain(id).catchError((Object _) => lanesService.refresh(id)));
+        }
+      } catch (_) {
+        // offline or an older server: tried again at the next open
+      }
+    }
+  }
+
   Future<void> _retryOptOuts() async {
     try {
       for (final String c in await privateCircles()) {
@@ -1135,6 +1167,9 @@ class PrivateRuntime {
       } catch (_) {
         // offline or an older server: the last verified lane facts stay in force
       }
+    }
+    await _autoApplyAll(privs);
+    for (final String id in privs) {
       try {
         await catchUp(id);
       } catch (_) {

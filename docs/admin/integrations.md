@@ -1,5 +1,7 @@
 # Integrations: Home Assistant and Dawarich
 
+Connect Orbitly to Home Assistant (who is home, arrival automations) or Dawarich (a location history service you run) using a token you control.
+
 ## Home Assistant
 
 Show who is home, trigger automations when someone arrives, or light a lamp

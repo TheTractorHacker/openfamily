@@ -42,8 +42,6 @@ struct SosView: View {
                         .font(.caption2)
                         .foregroundColor(.secondary)
                         .multilineTextAlignment(.center)
-                    CommandButton(title: "I'm safe", systemImage: "checkmark.shield.fill",
-                                  payload: ["cmd": "sosResolve"])
                 case .failed(let message):
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.largeTitle)
@@ -96,7 +94,7 @@ struct SosView: View {
 
     private func send() {
         phase = .sending
-        link.send(["cmd": "sos"]) { ok, message in
+        link.command("sos") { ok, message in
             if ok {
                 WKInterfaceDevice.current().play(.success)
                 phase = .sent(message)

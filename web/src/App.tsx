@@ -111,7 +111,9 @@ export default function App() {
               </div>
             }
           >
-            {renderPage(route, email, logout, isPlatformAdmin, adminMfaRequired)}
+            <div key={route} className="wb-route">
+              {renderPage(route, email, logout, isPlatformAdmin, adminMfaRequired)}
+            </div>
           </React.Suspense>
         )}
       </main>

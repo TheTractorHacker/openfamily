@@ -464,22 +464,22 @@ func TestParseRepo(t *testing.T) {
 func TestCacheFresh(t *testing.T) {
 	dir := t.TempDir()
 	dest := filepath.Join(dir, cachedName)
-	if cacheFresh(dir, dest, 1) {
+	if cacheFresh(dir, metaName, dest, 1) {
 		t.Fatal("missing file should not be fresh")
 	}
 	if err := os.WriteFile(dest, []byte("apk"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if cacheFresh(dir, dest, 1) {
+	if cacheFresh(dir, metaName, dest, 1) {
 		t.Fatal("missing meta should not be fresh")
 	}
-	if err := writeMeta(dir, cacheMeta{AssetID: 1}); err != nil {
+	if err := writeMeta(dir, metaName, cacheMeta{AssetID: 1}); err != nil {
 		t.Fatal(err)
 	}
-	if !cacheFresh(dir, dest, 1) {
+	if !cacheFresh(dir, metaName, dest, 1) {
 		t.Fatal("matching asset should be fresh")
 	}
-	if cacheFresh(dir, dest, 2) {
+	if cacheFresh(dir, metaName, dest, 2) {
 		t.Fatal("different asset should not be fresh")
 	}
 }
@@ -502,5 +502,97 @@ func TestPickAPKAssetAcceptsBothBrandNames(t *testing.T) {
 		if err != nil || got.Name != name {
 			t.Fatalf("%s: got %v err %v", name, got.Name, err)
 		}
+	}
+}
+
+func TestPickAPKAssetPrefersCombinedThenArm64(t *testing.T) {
+	got, err := pickAPKAsset([]asset{
+		{Name: "orbitly-1.0.0-armeabi-v7a.apk", ID: 1},
+		{Name: "orbitly-1.0.0-arm64-v8a.apk", ID: 2},
+		{Name: "orbitly-1.0.0.apk", ID: 3},
+	})
+	if err != nil || got.ID != 3 {
+		t.Fatalf("combined APK should win, got %+v %v", got, err)
+	}
+	got, err = pickAPKAsset([]asset{
+		{Name: "orbitly-1.0.0-x86_64.apk", ID: 1},
+		{Name: "orbitly-1.0.0-armeabi-v7a.apk", ID: 2},
+		{Name: "orbitly-1.0.0-arm64-v8a.apk", ID: 3},
+	})
+	if err != nil || got.ID != 3 {
+		t.Fatalf("arm64 should win without a combined APK, got %+v %v", got, err)
+	}
+}
+
+func TestOverviewAndSyncIPA(t *testing.T) {
+	const sum = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	var srvURL string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/acme/openfamily/releases":
+			_ = json.NewEncoder(w).Encode([]release{
+				{TagName: "v0.2.0", PublishedAt: time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC), Assets: []asset{
+					{ID: 1, Name: "orbitly-0.2.0.apk", Size: 10, URL: srvURL + "/a/apk"},
+					{ID: 2, Name: "orbitly-0.2.0.aab", Size: 11, URL: srvURL + "/a/aab"},
+					{ID: 3, Name: "orbitly-0.2.0-unsigned.ipa", Size: 12, URL: srvURL + "/a/ipa"},
+					{ID: 4, Name: "SHA256SUMS.txt", Size: 100, URL: srvURL + "/a/sums"},
+					{ID: 5, Name: "orbitly-0.2.0-unsigned.ipa.sha256", Size: 80, URL: srvURL + "/a/ipasum"},
+				}},
+				{TagName: "v0.1.0", PublishedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), Assets: []asset{
+					{ID: 9, Name: "orbitly-0.1.0.apk", Size: 9}}},
+				{TagName: "apk-45", Assets: []asset{{ID: 45, Name: "x.apk"}}},
+			})
+		case "/a/sums":
+			_, _ = w.Write([]byte(sum + "  orbitly-0.2.0.apk\n" + sum + "  orbitly-0.2.0.aab\n"))
+		case "/a/ipasum":
+			_, _ = w.Write([]byte(sum + "  orbitly-0.2.0-unsigned.ipa\n"))
+		case "/a/ipa":
+			_, _ = w.Write([]byte("IPA-BYTES"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	srvURL = srv.URL
+	opts := Options{Repo: "acme/openfamily", API: srv.URL, Client: srv.Client(), DestDir: t.TempDir()}
+
+	ov, err := ListOverview(context.Background(), opts, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ov.Latest.TagName != "v0.2.0" || len(ov.Assets) != 3 || len(ov.Older) != 1 || ov.Older[0].TagName != "v0.1.0" {
+		t.Fatalf("overview: %+v", ov)
+	}
+	for _, a := range ov.Assets {
+		if a.SHA256 != sum {
+			t.Fatalf("missing checksum for %s", a.Name)
+		}
+	}
+	p, err := SyncIPA(context.Background(), opts)
+	if err != nil || filepath.Base(p) != "openfamily-release.ipa" {
+		t.Fatalf("sync ipa: %v %v", p, err)
+	}
+	if b, _ := os.ReadFile(p); string(b) != "IPA-BYTES" {
+		t.Fatalf("content %q", b)
+	}
+	// The APK cache sidecar is separate from the IPA one.
+	if _, err := os.Stat(filepath.Join(opts.DestDir, ".ipa-release.json")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPickAPKAssetSkipsWatchApp(t *testing.T) {
+	// The Wear OS APK is attached to the same release and must never win, whatever the order.
+	for _, order := range [][]asset{
+		{{Name: "orbitly-wear-0.25.0.apk", ID: 1}, {Name: "orbitly-0.25.0.apk", ID: 2}},
+		{{Name: "orbitly-0.25.0.apk", ID: 2}, {Name: "orbitly-wear-0.25.0.apk", ID: 1}},
+	} {
+		got, err := pickAPKAsset(order)
+		if err != nil || got.ID != 2 {
+			t.Fatalf("got %+v, %v; want the phone APK (ID 2)", got, err)
+		}
+	}
+	if _, err := pickAPKAsset([]asset{{Name: "orbitly-wear-0.25.0.apk"}}); err == nil {
+		t.Fatal("a release with only the watch APK must count as having no phone APK")
 	}
 }

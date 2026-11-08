@@ -6,11 +6,7 @@ struct PersonDetailView: View {
     @EnvironmentObject var link: PhoneLink
 
     private var member: WMember? {
-        guard let snap = link.snapshot else { return nil }
-        for circle in snap.circles {
-            if let m = circle.members.first(where: { $0.id == memberId }) { return m }
-        }
-        return nil
+        return link.snapshot?.members.first(where: { $0.id == memberId })
     }
 
     var body: some View {
@@ -26,10 +22,11 @@ struct PersonDetailView: View {
                             .font(.subheadline)
                             .multilineTextAlignment(.center)
                     }
-                    if let place = m.place, m.atPlace {
-                        Text(place).font(.footnote).foregroundColor(.secondary)
+                    if !m.place.isEmpty {
+                        Text(m.place).font(.footnote).foregroundColor(.secondary)
                     }
-                    if let address = m.address, !address.isEmpty {
+                    if !m.address.isEmpty {
+                        let address = m.address
                         Text(address)
                             .font(.footnote)
                             .foregroundColor(.secondary)
@@ -45,9 +42,9 @@ struct PersonDetailView: View {
                     if let b = batteryText(m) {
                         Text("Battery \(b)")
                             .font(.caption2)
-                            .foregroundColor((m.battery ?? 100) <= 20 ? Brand.warn : .secondary)
+                            .foregroundColor((m.battery < 0 ? 100 : m.battery) <= 20 ? Brand.warn : .secondary)
                     }
-                    if !m.me, m.distanceM != nil, m.bearingDeg != nil {
+                    if directionTo(m, in: snap) != nil {
                         NavigationLink(destination: DirectionView(memberId: m.id)) {
                             Label("Distance and direction", systemImage: "location.north.fill")
                         }
@@ -82,16 +79,13 @@ struct DirectionView: View {
     @EnvironmentObject var link: PhoneLink
 
     private var member: WMember? {
-        guard let snap = link.snapshot else { return nil }
-        for circle in snap.circles {
-            if let m = circle.members.first(where: { $0.id == memberId }) { return m }
-        }
-        return nil
+        return link.snapshot?.members.first(where: { $0.id == memberId })
     }
 
     var body: some View {
-        if let m = member, let dist = m.distanceM, let bearing = m.bearingDeg {
-            let units = link.snapshot?.units ?? "imperial"
+        if let m = member, let snap = link.snapshot, let dir = directionTo(m, in: snap) {
+            let dist = dir.meters
+            let bearing = dir.bearing
             VStack(spacing: 4) {
                 ZStack {
                     Circle()
@@ -109,7 +103,7 @@ struct DirectionView: View {
                 }
                 .frame(width: 116, height: 116)
                 .accessibilityHidden(true)
-                Text(distanceText(dist, units: units))
+                Text(distanceText(dist))
                     .font(.title3.bold())
                 Text("\(m.name) is \(compassWord(bearing))")
                     .font(.footnote)

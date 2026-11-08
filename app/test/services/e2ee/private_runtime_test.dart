@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:openfamily/models/circle.dart';
@@ -69,6 +70,37 @@ void main() {
         'device_id': 'x', 'ts': (at ?? clock.t).toIso8601String(), 'lat': lat, 'lon': lon,
         'accuracy_meters': acc, 'speed_mps': 1.0, 'battery_pct': 77, 'motion_state': '', 'source': 'foreground',
       };
+
+  group('sending with the screen locked', () {
+    test('keys usable while locked: a fix is sealed and queued immediately, nothing is parked', () async {
+      // The new wrapping key has no "unlocked device" condition, so the vault reads exactly as when unlocked.
+      expect(await a.runtime.routeFix(loc(52.52, 13.4)), isFalse);
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(await a.runtime.queue.length(), 1);
+      expect(a.kv.data['parked/v1'], isNull);
+    });
+
+    test('an old key that is locked parks the fix (never plaintext) and the next unlock seals it', () async {
+      // Device whose vault throws while "locked", like an un-migrated pre-0.24.2 Android key.
+      final _LockableVault lv = _LockableVault(a.vault);
+      final MemoryKv kv = MemoryKv();
+      final E2eeService svc = E2eeService(
+          api: e2eeServer.client(uA), vault: lv, trust: TrustStore(MemoryTrustKv()), userIdProvider: () async => uA);
+      final PrivateRuntime rt = PrivateRuntime(
+          service: svc, api: e2eeServer.client(uA), kv: kv, clock: clock, channel: channel,
+          directory: StateSenderDirectory(e2eeServer.client(uA)));
+      await rt.setCircles(<Circle>[circleOf(priv, isPrivate: true)]);
+      lv.locked = true;
+      await rt.routeFix(loc(52.52, 13.4));
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(await rt.queue.length(), 0);
+      expect(kv.data['parked/v1'], isNotNull);
+      expect(kv.data['parked/v1'], isNot(contains('queue')));
+      lv.locked = false;
+      expect(await rt.drainParked(), 1);
+      expect(await rt.queue.length(), 1);
+    });
+  });
 
   group('uplink rule for users in several circles', () {
     test('mode from circle modes', () {
@@ -228,4 +260,25 @@ void main() {
     expect(placeEventText('Bob', 'School', true), 'Bob arrived at School');
     expect(placeEventText('Bob', 'School', false), 'Bob left School');
   });
+}
+
+/// Vault that refuses to read while "locked" (the old unlocked-device-only key).
+class _LockableVault implements E2eeVault {
+  _LockableVault(this.inner);
+  final E2eeVault inner;
+  bool locked = false;
+  @override
+  Future<Uint8List?> read(String name) async {
+    if (locked) throw const VaultLockedException();
+    return inner.read(name);
+  }
+
+  @override
+  Future<void> write(String name, Uint8List value) => inner.write(name, value);
+  @override
+  Future<void> delete(String name) => inner.delete(name);
+  @override
+  Future<List<String>> names() => inner.names();
+  @override
+  Future<KeystoreStatus> status() => inner.status();
 }

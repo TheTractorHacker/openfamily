@@ -40,7 +40,7 @@ const List<_Pref> _members = <_Pref>[
   _Pref('safety_incidents', Icons.warning_amber_rounded, 'Safety incidents',
       'Crashes and other incidents near your circle'),
   _Pref('weekly_summary', Icons.insights_outlined, 'Weekly driving summary',
-      'Sunday evening: your family\'s drives, distance and hard braking'),
+      'Sunday evening: your circle\'s drives, distance and hard braking'),
   _Pref('severe_weather', Icons.thunderstorm_outlined, 'Severe weather alerts',
       'Severe weather in your area'),
   _Pref('phone_silent', Icons.phonelink_erase_outlined, 'Silent phone alerts',
@@ -140,7 +140,7 @@ class _NotificationSettingsScreenState
                   const Padding(
                     padding: EdgeInsets.all(16),
                     child: Text(
-                      'SOS and help alerts from your family always come '
+                      'SOS and help alerts from your circle always come '
                       'through, whatever you choose here. Low battery, '
                       'drives, safety incidents and weather are saved now and '
                       'apply as the server starts sending them.',

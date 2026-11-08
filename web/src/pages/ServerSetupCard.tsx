@@ -265,7 +265,7 @@ export function ServerSetupCard() {
         <h3 className="wb-settings-title">Server setup</h3>
       </div>
       <p className="wb-settings-section-help">
-        Three short steps so this server can keep maps, history and driving reports for your family. Everyone still
+        Three short steps so this server can keep maps, history and driving reports for your people. Everyone still
         chooses for themselves in the app whether the server may use their location.
       </p>
       <ol className="wb-ss-steps">

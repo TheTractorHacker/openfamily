@@ -141,7 +141,7 @@ class _AlertsHistoryScreenState extends State<AlertsHistoryScreen> {
             DsEmptyState(
               icon: Icons.notifications_none,
               title: 'No alerts yet',
-              message: 'Check-ins, help requests and SOS from your family '
+              message: 'Check-ins, help requests and SOS from your circle '
                   'will be listed here.',
             ),
           ],

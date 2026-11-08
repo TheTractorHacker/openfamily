@@ -14,19 +14,19 @@ class CreateOrJoinCircleScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DsPage(
-      title: 'Your family',
+      title: 'Your circle',
       showBack: false,
       step: 3,
       children: <Widget>[
         const DsHeading(
-          'Create or join a family',
+          'Create or join a circle',
           subtitle:
-              'A family is the group of people you share your location with.',
+              'A circle is the group of people you share your location with.',
         ),
         DsOptionCard(
           icon: Icons.add,
-          title: 'Create a new family',
-          subtitle: 'Start a new family to share locations.',
+          title: 'Create a new circle',
+          subtitle: 'Start a new circle to share locations.',
           onTap: () => Navigator.of(context).push(
             MaterialPageRoute<void>(
               builder: (_) => const CreateCircleScreen(),
@@ -36,8 +36,8 @@ class CreateOrJoinCircleScreen extends StatelessWidget {
         const SizedBox(height: AppSpace.md),
         DsOptionCard(
           icon: Icons.group_add_outlined,
-          title: 'Join a family',
-          subtitle: 'Enter an invite code from a family member.',
+          title: 'Join a circle',
+          subtitle: 'Enter an invite code from a circle member.',
           onTap: () => Navigator.of(context).push(
             MaterialPageRoute<void>(
               builder: (_) => JoinCircleScreen(

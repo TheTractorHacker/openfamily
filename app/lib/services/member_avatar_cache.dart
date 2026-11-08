@@ -88,6 +88,10 @@ class MemberAvatarCache {
     );
   }
 
+  /// Drops the cached encoded photos (they are fetched again on demand) without
+  /// invalidating requests in flight. Used under memory pressure.
+  void trimBytes() => _images.clear();
+
   /// Clears private image bytes when leaving the authenticated family map.
   void clear() {
     // An old request must not repopulate the cache after a logout / account

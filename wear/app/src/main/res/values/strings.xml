@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Orbitly</string>
+    <string name="tile_label">Circle</string>
+    <string name="complication_label">Nearest person</string>
+</resources>

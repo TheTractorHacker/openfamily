@@ -18,9 +18,11 @@ delivery, clock skew against the server, background service, and for Private cir
 the Keystore key opens. "Copy diagnostic report" produces a redacted text (no
 coordinates, tokens or account details; a unit test enforces it).
 
-By design the Android Keystore wrapping key only works while the phone is unlocked, so
-Private-circle fixes taken while locked are held on the phone and sealed after unlock. The
-Diagnostics screen reports this as information, not a fault.
+Since 0.24.2 the Android Keystore wrapping key works while the phone is locked (iOS: after the
+first unlock since boot), so Private-circle fixes are sealed and sent from a locked phone like any
+other. Only a key that an older version created and that has not been re-wrapped yet (needs one
+unlock with the app opened) makes fixes wait; Diagnostics then shows a warning, otherwise
+"Keys available while locked". See docs/design/E2EE.md for the threat-model change.
 
 The **Self-test** screen exercises what can be automated: Keystore round trip, vault
 write/read, channel crypto round trip with tamper detection, uploading one real fix and

@@ -32,6 +32,7 @@ DB_URL="postgres://postgres:$DB_PASS@127.0.0.1:$DB_PORT/openfamily?sslmode=disab
 
 cleanup() {
   rc=$?
+  touch "$WORK/ctl/done" 2>/dev/null || true; [ -n "${CTL_PID:-}" ] && kill "$CTL_PID" 2>/dev/null || true
   if [ -s "$WORK/api.log.keep" ] || [ $rc -ne 0 ]; then docker logs "$API" >"$WORK/api.log" 2>&1 || true; fi
   [ "${E2E_KEEP:-0}" = 1 ] || docker rm -f "$API" "$DB" >/dev/null 2>&1 || true
   rm -rf "$ROOT/backend/cmd/_e2eprobe"
@@ -91,16 +92,38 @@ if [ "${E2E_REUSED:-0}" = 1 ]; then # in-memory rate limits: a restart gives a c
   docker restart "$API" >/dev/null
   for _ in $(seq 1 60); do curl -fsS "http://127.0.0.1:$API_PORT/healthz" >/dev/null 2>&1 && break; sleep 1; done
 fi
+# Control channel for scenarios that must stop and start the server container mid-test
+# (test/e2e_real_server/offline_e2e_test.dart): the test writes "stop" or "start" to /ctl/request and
+# waits for /ctl/ack. A background loop here does the docker call.
+mkdir -p "$WORK/ctl"; rm -f "$WORK/ctl/request" "$WORK/ctl/ack"
+(
+  while [ ! -f "$WORK/ctl/done" ]; do
+    if [ -f "$WORK/ctl/request" ]; then
+      cmd="$(cat "$WORK/ctl/request")"; rm -f "$WORK/ctl/request"
+      case "$cmd" in
+        stop) docker stop -t 2 "$API" >/dev/null 2>&1 ;;
+        start)
+          docker start "$API" >/dev/null 2>&1
+          for _ in $(seq 1 90); do curl -fsS "http://127.0.0.1:$API_PORT/healthz" >/dev/null 2>&1 && break; sleep 1; done ;;
+      esac
+      echo ok >"$WORK/ctl/ack"
+    fi
+    sleep 0.2
+  done
+) &
+CTL_PID=$!
 echo "== running the Dart tests"
 set +e
 docker run --rm --network host --name "of-e2e-flutter-$RUN" \
   -v "$ROOT:/work" -v "$CACHE/pub:/root/.pub-cache" -w /work/app \
+  -v "$WORK/ctl:/ctl" -e E2E_CTL_DIR=/ctl \
   -e E2E_REQUIRE_SIDECAR="${E2E_REQUIRE_SIDECAR:-0}" -e E2E_BASE_URL="http://127.0.0.1:$API_PORT" -e E2E_INGEST_TOKEN="$INGEST_TOKEN" \
   -e E2E_BRIDGE_BIN=/e2e-bin/e2ee-bridge -e E2E_PROBE_BIN=/e2e-bin/e2eprobe -e E2E_DATABASE_URL="$DB_URL" \
   -v "$WORK/bin:/e2e-bin:ro" \
   "$FLUTTER_IMG" sh -c 'git config --global --add safe.directory "*" >/dev/null 2>&1; flutter pub get >/dev/null 2>&1 && flutter test "$@"' sh "${@:-test/e2e_real_server/}"
 rc=$?
 set -e
+touch "$WORK/ctl/done"; wait "$CTL_PID" 2>/dev/null || true
 # Audit: the server log must not contain any coordinate the test marks as private.
 docker logs "$API" >"$WORK/api.log" 2>&1 || true
 if [ -f "$WORK/api.log" ] && grep -E '41\.31[45]' "$WORK/api.log" >/dev/null 2>&1; then

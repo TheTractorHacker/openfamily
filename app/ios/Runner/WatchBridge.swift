@@ -2,16 +2,18 @@ import Flutter
 import Foundation
 import WatchConnectivity
 
-/// iPhone end of the Apple Watch link (docs/design/WATCH_APPS_APPLE.md).
+/// iPhone end of the Apple Watch link (docs/design/WATCH_APPS.md, Apple Watch).
 ///
-/// Dart (app/lib/services/watch/watch_bridge_ios.dart) builds a compact,
-/// already-decrypted snapshot and hands it over on the `app.openfamily/watch`
-/// channel; this class forwards it with WatchConnectivity and passes the
-/// watch's commands (SOS, check-in, pause, quick reply) back to Dart. The
-/// phone stays the only holder of tokens and keys.
+/// Same MethodChannel contract as the Wear OS plugin (WatchBridgePlugin.kt), so
+/// ONE Dart bridge (app/lib/services/watch/watch_bridge.dart) drives both:
+///   publish(json) -> bool   latest snapshot via updateApplicationContext
+///   clear()       -> bool   wipe for the watch; true only once it was handed over
+///   allowPublish()          sign-in / switch on: sending is allowed again
+///   status()      -> map    {available, nodes, names}; nodes is 1 with a watch app
+/// and calls back into Dart: command(json), peerChanged().
 ///
 /// Safe without a watch: on an iPad `WCSession.isSupported()` is false, with no
-/// paired watch every call answers "not paired" and nothing is sent.
+/// paired watch every call answers "not available" and nothing is sent.
 final class WatchBridge: NSObject, WCSessionDelegate {
   static let shared = WatchBridge()
 
@@ -20,7 +22,7 @@ final class WatchBridge: NSObject, WCSessionDelegate {
 
   // Sign-out must reach the watch even when it is out of reach at that moment.
   // Two persisted facts, deliberately separate:
-  //  - blocked: no family data may be sent (after clear, until signedIn/resume);
+  //  - blocked: no family data may be sent (after clear, until allowPublish);
   //  - clearUndelivered: the wipe has not reached the watch yet. A new sign-in
   //    does NOT reset it; it is cleared only after a context carrying the wipe
   //    or a snapshot of the NEW session was accepted by WatchConnectivity.
@@ -79,15 +81,10 @@ final class WatchBridge: NSObject, WCSessionDelegate {
 
   private func statusMap() -> [String: Any] {
     guard let s = session else {
-      return ["supported": false, "paired": false, "installed": false, "reachable": false]
+      return ["available": false, "nodes": 0, "names": [String]()]
     }
-    return [
-      "supported": true,
-      "paired": s.isPaired,
-      "installed": s.isWatchAppInstalled,
-      "reachable": s.isReachable,
-      "activated": s.activationState == .activated,
-    ]
+    let there = s.isPaired && s.isWatchAppInstalled
+    return ["available": true, "nodes": there ? 1 : 0, "names": [String]()]
   }
 
   private func usable() -> WCSession? {
@@ -101,53 +98,49 @@ final class WatchBridge: NSObject, WCSessionDelegate {
     switch call.method {
     case "status":
       result(statusMap())
-    case "snapshot":
-      if blocked || sessionId == nil {
+    case "publish":
+      if blocked {
         // Signed out or switched off: never send family data.
         deliverClearIfPending()
-      } else if let s = usable(), let json = call.arguments as? String, let sid = sessionId {
+        result(false)
+        return
+      }
+      // First publish of a session that has no identity yet (restored login).
+      if sessionId == nil { sessionId = UUID().uuidString }
+      if let s = usable(), let json = call.arguments as? String, let sid = sessionId {
         // Latest value wins; delivered when the watch next wakes. No polling.
         do {
           try s.updateApplicationContext(
             ["snapshot": json, "session": sid, "sentAt": Date().timeIntervalSince1970])
-          // The new session id makes the watch drop any older user's data.
+          // The session id makes the watch drop any older user's data.
           clearUndelivered = false
+          result(true)
+          return
         } catch {}
       }
-      result(nil)
-    case "alert":
-      if !blocked, let s = usable(), let json = call.arguments as? String {
-        s.transferUserInfo(["alert": json])
-      }
-      result(nil)
+      result(false)
     case "clear":
       blocked = true
       clearUndelivered = true
-      let keep = (call.arguments as? [String: Any])?["keepSession"] as? Bool ?? false
-      if !keep { sessionId = nil }
+      sessionId = nil
       deliverClearIfPending()
-      result(nil)
-    case "signedIn":
-      // A real sign-in: new session id. Any undelivered wipe is sent FIRST.
-      if let id = call.arguments as? String, !id.isEmpty {
-        sessionId = id
-        blocked = false
-        deliverClearIfPending()
-      }
-      result(nil)
-    case "resume":
-      // The setting was switched back on (same session): sending is allowed again.
-      if sessionId != nil { blocked = false }
+      // True only when the wipe was handed to WatchConnectivity.
+      result(!clearUndelivered)
+    case "allowPublish":
+      // Signing in (or switching on): a NEW identity, so a previous user's data
+      // on the watch is dropped. An undelivered wipe is sent FIRST, with it.
+      sessionId = UUID().uuidString
+      blocked = false
+      deliverClearIfPending()
       result(nil)
     default:
       result(FlutterMethodNotImplemented)
     }
   }
 
-  private func notifyStatusChanged() {
-    let status = statusMap()
+  private func notifyPeerChanged() {
     DispatchQueue.main.async { [weak self] in
-      self?.channel?.invokeMethod("statusChanged", arguments: status)
+      self?.channel?.invokeMethod("peerChanged", arguments: nil)
     }
   }
 
@@ -159,7 +152,7 @@ final class WatchBridge: NSObject, WCSessionDelegate {
     error: Error?
   ) {
     deliverClearIfPending()
-    notifyStatusChanged()
+    notifyPeerChanged()
   }
 
   func sessionDidBecomeInactive(_ session: WCSession) {}
@@ -171,12 +164,12 @@ final class WatchBridge: NSObject, WCSessionDelegate {
 
   func sessionWatchStateDidChange(_ session: WCSession) {
     deliverClearIfPending()
-    notifyStatusChanged()
+    notifyPeerChanged()
   }
 
   func sessionReachabilityDidChange(_ session: WCSession) {
     deliverClearIfPending()
-    notifyStatusChanged()
+    notifyPeerChanged()
   }
 
   func session(
@@ -184,21 +177,20 @@ final class WatchBridge: NSObject, WCSessionDelegate {
     didReceiveMessage message: [String: Any],
     replyHandler: @escaping ([String: Any]) -> Void
   ) {
-    let notReady: [String: Any] = [
-      "ok": false,
-      "message": "Open Orbitly on the iPhone and try again.",
-    ]
+    // The watch sends {"json": "<command>"}. The result of the command comes back
+    // in the next snapshot (`lastCommand`); this reply only says "the phone has it".
+    guard let json = message["json"] as? String else {
+      replyHandler(["ok": false])
+      return
+    }
     DispatchQueue.main.async { [weak self] in
       guard let ch = self?.channel else {
-        replyHandler(notReady)
+        replyHandler(["ok": false])
         return
       }
-      ch.invokeMethod("command", arguments: message) { response in
-        if let map = response as? [String: Any] {
-          replyHandler(map)
-        } else {
-          replyHandler(notReady)
-        }
+      ch.invokeMethod("command", arguments: json) { response in
+        // nil = Dart handled it; FlutterError or "not implemented" = it did not.
+        replyHandler(["ok": response == nil])
       }
     }
   }

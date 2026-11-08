@@ -2,6 +2,7 @@ import React from 'react'
 import { ApiError, downloadApk, getApkStatus } from '../lib/api'
 import type { ApkReleaseInfo, ApkStatus } from '../lib/types'
 import { Badge, Button, Card, Mono } from '../components/primitives'
+import { BuildsOverview } from './BuildsOverview'
 import './pages.css'
 import './BuildsPage.css'
 
@@ -71,8 +72,8 @@ export function BuildsPage() {
     <div className="wb-page">
       <div className="wb-page-header wb-builds-page-header">
         <div>
-          <h1 className="wb-page-title">Android builds</h1>
-          <p className="wb-page-subtitle">Download and install the latest Orbitly release.</p>
+          <h1 className="wb-page-title">Builds</h1>
+          <p className="wb-page-subtitle">Download the latest Orbitly release for Android and iPhone.</p>
         </div>
         <Button variant="secondary" size="sm" loading={loading} onClick={() => void loadRelease()}>
           Refresh release
@@ -164,6 +165,8 @@ export function BuildsPage() {
           <p className="wb-build-info-foot">Android may warn that the file came from outside the Play Store.</p>
         </Card>
       </div>
+
+      <BuildsOverview />
     </div>
   )
 }

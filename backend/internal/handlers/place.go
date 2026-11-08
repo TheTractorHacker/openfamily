@@ -32,6 +32,8 @@ type placeOut struct {
 	// family-wide. CircleName is the circle's name for display.
 	CircleID   *string `json:"circle_id"`
 	CircleName *string `json:"circle_name"`
+	// UpdatedAt drives ?since= deltas; not part of the legacy response.
+	UpdatedAt time.Time `json:"-"`
 }
 
 // placeVisibleSQL is a SQL predicate true when the place row aliased `alias` is
@@ -148,7 +150,7 @@ type queryRower interface {
 }
 
 // nullableUUID returns nil when id is empty so PostgreSQL receives NULL
-// instead of ''. places.id is UUID, and '' is invalid input for that type —
+// instead of ”. places.id is UUID, and ” is invalid input for that type —
 // which is what made CreatePlace fail with "failed to check place overlap"
 // even when the family had no other places.
 func nullableUUID(id string) any {
@@ -164,7 +166,7 @@ func nullableUUID(id string) any {
 // of their radii, computed with ST_DWithin on geography (meters).
 //
 // excludeID is the place being updated (empty on create). Empty is sent as
-// NULL so the UUID comparison does not try to cast ''.
+// NULL so the UUID comparison does not try to cast ”.
 //
 // viewerID limits the check to places that user can see, so a conflict never
 // reveals a circle-scoped place they are not in. Empty (platform admin) checks
@@ -206,7 +208,7 @@ func (s *Server) ListPlaces(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := s.Pool.Query(r.Context(), `
 		SELECT p.id, p.family_id, p.name, p.type, ST_Y(p.geom), ST_X(p.geom), p.radius_meters, p.address, p.created_at,
-		       p.circle_id, c.name
+		       p.circle_id, c.name, p.updated_at
 		FROM places p LEFT JOIN circles c ON c.id = p.circle_id
 		WHERE p.family_id = $1 AND `+placeVisibleSQL("p", "$2")+`
 		ORDER BY p.created_at`, familyID, claims.UserID)
@@ -219,7 +221,7 @@ func (s *Server) ListPlaces(w http.ResponseWriter, r *http.Request) {
 	places := []placeOut{}
 	for rows.Next() {
 		var p placeOut
-		if err := rows.Scan(&p.ID, &p.FamilyID, &p.Name, &p.Type, &p.Lat, &p.Lon, &p.RadiusMeters, &p.Address, &p.CreatedAt, &p.CircleID, &p.CircleName); err != nil {
+		if err := rows.Scan(&p.ID, &p.FamilyID, &p.Name, &p.Type, &p.Lat, &p.Lon, &p.RadiusMeters, &p.Address, &p.CreatedAt, &p.CircleID, &p.CircleName, &p.UpdatedAt); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to scan place")
 			return
 		}
@@ -229,7 +231,15 @@ func (s *Server) ListPlaces(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to read places")
 		return
 	}
-	writeJSON(w, http.StatusOK, places)
+	drows := make([]deltaRow, 0, len(places))
+	for _, p := range places {
+		cid := ""
+		if p.CircleID != nil {
+			cid = *p.CircleID
+		}
+		drows = append(drows, deltaRow{ID: p.ID, Layout: cid, Changed: p.UpdatedAt, V: p})
+	}
+	writeDeltaList(w, r, drows, places, nil)
 }
 
 // adminPlaceOut reuses the placeOut shape and adds the owning family's name for

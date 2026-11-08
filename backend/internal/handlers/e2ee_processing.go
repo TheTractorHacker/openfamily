@@ -1245,7 +1245,9 @@ func (s *Server) InvitePreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, http.StatusOK, map[string]any{"private": private, "server_assist": assist, "member_opt_out": optOut, "default_for_new": def, "legacy": legacy})
+	writeJSON(w, http.StatusOK, map[string]any{"private": private, "server_assist": assist, "member_opt_out": optOut, "default_for_new": def, "legacy": legacy,
+		// Section 23: the admin's member default. Advice only; the joiner's own phone signs.
+		"auto_apply": assist && s.memberDefaults(r.Context()).AutoApply})
 }
 
 

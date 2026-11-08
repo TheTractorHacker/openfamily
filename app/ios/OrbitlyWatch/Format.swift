@@ -21,15 +21,8 @@ func agoText(_ date: Date, now: Date = Date()) -> String {
     return "\(h / 24) d ago"
 }
 
-func speedText(_ mps: Double, units: String) -> String {
-    if units == "metric" {
-        return "\(Int((mps * 3.6).rounded())) km/h"
-    }
-    return "\(Int((mps * 2.23694).rounded())) mph"
-}
-
-func distanceText(_ meters: Double, units: String) -> String {
-    if units == "metric" {
+func distanceText(_ meters: Double) -> String {
+    if Locale.current.usesMetricSystem {
         if meters < 1000 {
             return "\(Int((meters / 10).rounded()) * 10) m"
         }
@@ -42,6 +35,35 @@ func distanceText(_ meters: Double, units: String) -> String {
     return String(format: "%.1f mi", meters / 1609.344)
 }
 
+/// Great-circle distance in meters.
+func distanceMeters(_ lat1: Double, _ lon1: Double, _ lat2: Double, _ lon2: Double) -> Double {
+    let r = 6371000.0
+    let p1 = lat1 * Double.pi / 180
+    let p2 = lat2 * Double.pi / 180
+    let dp = (lat2 - lat1) * Double.pi / 180
+    let dl = (lon2 - lon1) * Double.pi / 180
+    let a = sin(dp / 2) * sin(dp / 2) + cos(p1) * cos(p2) * sin(dl / 2) * sin(dl / 2)
+    return 2 * r * asin(min(1, sqrt(a)))
+}
+
+/// Initial bearing in degrees clockwise from north.
+func bearingDegrees(_ lat1: Double, _ lon1: Double, _ lat2: Double, _ lon2: Double) -> Double {
+    let p1 = lat1 * Double.pi / 180
+    let p2 = lat2 * Double.pi / 180
+    let dl = (lon2 - lon1) * Double.pi / 180
+    let y = sin(dl) * cos(p2)
+    let x = cos(p1) * sin(p2) - sin(p1) * cos(p2) * cos(dl)
+    let deg = atan2(y, x) * 180 / Double.pi
+    return (deg + 360).truncatingRemainder(dividingBy: 360)
+}
+
+/// Distance and bearing from the signed-in person to `m`, when both are known.
+func directionTo(_ m: WMember, in snapshot: WSnapshot) -> (meters: Double, bearing: Double)? {
+    guard !m.you, let o = snapshot.origin, let olat = o.lat, let olon = o.lon,
+          let lat = m.lat, let lon = m.lon else { return nil }
+    return (distanceMeters(olat, olon, lat, lon), bearingDegrees(olat, olon, lat, lon))
+}
+
 /// "north", "north-east", ...
 func compassWord(_ degrees: Double) -> String {
     let names = ["north", "north-east", "east", "south-east", "south", "south-west", "west", "north-west"]
@@ -50,34 +72,21 @@ func compassWord(_ degrees: Double) -> String {
     return names[index]
 }
 
-/// The one-line status of a person: "At Home", "Driving 42 mph", "2 min ago".
+/// The one-line status of a person. The phone writes `line` ("At Home",
+/// "Driving 42 mph") in its own units; a person standing still with no saved place
+/// shows how old the position is instead of an address.
 func statusLine(_ m: WMember, snapshot: WSnapshot, now: Date = Date()) -> String {
-    if m.me && snapshot.isPaused { return "Sharing paused" }
-    if !m.hasPosition { return "No location yet" }
-    if m.stopped {
-        if let d = m.fixDate { return "Updates stopped, \(agoText(d, now: now))" }
-        return "Updates stopped"
-    }
-    switch m.state {
-    case "driving":
-        if let s = m.speedMps { return "Driving \(speedText(s, units: snapshot.units))" }
-        return "Driving"
-    case "bike": return "Cycling"
-    case "boat": return "On a boat"
-    case "plane": return "Flying"
-    default: break
-    }
-    if let p = m.place, m.atPlace { return "At \(p)" }
-    if m.state == "home" { return "At Home" }
-    if m.state == "work" { return "At Work" }
-    if m.state == "gym" { return "At the Gym" }
+    if m.you && snapshot.isPaused { return "Sharing paused" }
+    if m.state == "none" { return "No location yet" }
+    if m.state == "still" && m.place.isEmpty, let d = m.fixDate { return agoText(d, now: now) }
+    if !m.line.isEmpty { return m.line }
     if let d = m.fixDate { return agoText(d, now: now) }
     return "Location shared"
 }
 
 func batteryText(_ m: WMember) -> String? {
-    guard let b = m.battery else { return nil }
-    return "\(b)%"
+    if m.battery < 0 { return nil }
+    return "\(m.battery)%"
 }
 
 func colorFromARGB(_ argb: UInt32) -> Color {

@@ -259,7 +259,7 @@ export interface FamilyPlace {
   radius_meters?: number | null
   address: string
   created_at: string
-  /** Circle the place is shared with; null/absent = whole family. */
+  /** Circle the place is shared with; null/absent = whole group. */
   circle_id?: string | null
   circle_name?: string | null
 }
@@ -311,6 +311,7 @@ export interface AdminSession {
   created_at: string
   last_used_at: string
   expires_at: string
+  current?: boolean
 }
 
 export type ActivityKind =
@@ -471,6 +472,7 @@ export interface FleetMember {
 export interface FleetResponse {
   server_time: string
   members: FleetMember[]
+  hidden_devices?: number
 }
 
 // ---- Backups card (platform admin) ----

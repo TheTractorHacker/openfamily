@@ -1,14 +1,16 @@
 # Invite people and join a circle
 
+How a circle admin invites family or friends with a code or link, and how they join from the app.
+
 ## Inviting (circle admins)
 
 1. Open the circle and tap **Invite**.
 2. Tap **Create invite code**. Share the code or the link by message.
 
-![Invite your family](../images/app/invite.png)
+![Invite your people](../images/app/invite.png)
 
 Codes expire and can be revoked. A server admin can also see and revoke open
-invites on the admin web **Families** page. Never post an invite code in a
+invites on the admin web **Groups** page. Never post an invite code in a
 public place.
 
 ## Joining

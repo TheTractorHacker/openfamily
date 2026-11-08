@@ -455,3 +455,21 @@
   .wb-update-ref-arrow { display: none; }
   .wb-update-footer .wb-settings-form-actions { flex-wrap: wrap; }
 }
+
+/* Section navigation + info popovers */
+.wb-settings-nav { display: flex; flex-direction: column; gap: var(--space-3); margin-bottom: var(--space-4); }
+.wb-settings-search { max-width: 360px; }
+.wb-settings-jump { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.wb-settings-chip { height: 30px; padding: 0 var(--space-3); border-radius: 999px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; font-size: var(--font-sm); cursor: pointer; transition: background .12s ease, transform .12s ease; }
+.wb-settings-chip:hover { background: var(--surface-hover); }
+.wb-settings-chip:active { transform: scale(.97); }
+.wb-settings-chip:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ring); }
+.wb-settings-chip.is-on { background: var(--accent); color: var(--on-accent); border-color: transparent; font-weight: 600; }
+.wb-settings-sec { display: flex; flex-direction: column; gap: var(--space-4); scroll-margin-top: var(--space-4); }
+.wb-settings-sec-title { margin: var(--space-3) 0 0; font-size: var(--font-lg); font-weight: 600; }
+.wb-settings-sec[hidden], .wb-settings-sec > [hidden] { display: none; }
+.wb-info { display: inline-block; position: relative; vertical-align: middle; margin-left: 6px; }
+.wb-info > summary { list-style: none; cursor: pointer; width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--border-strong); font-size: 11px; font-style: italic; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; color: var(--text-muted); }
+.wb-info > summary::-webkit-details-marker { display: none; }
+.wb-info > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.wb-info-body { position: absolute; z-index: 10; left: 0; top: 24px; width: min(280px, 70vw); padding: var(--space-3); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-xs); box-shadow: var(--shadow-sm); font-size: var(--font-xs); font-weight: 400; color: var(--text); text-transform: none; letter-spacing: 0; }

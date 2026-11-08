@@ -1,34 +1,23 @@
 # Apple Watch app (companion model)
 
 Status: **written without a Mac. No Swift, Xcode project change, plist or workflow in this
-feature has been compiled, run in a simulator or tried on a watch.** The Dart side is tested
-on Linux. Read [What the first CI run must prove](#what-the-first-ci-run-must-prove) before
-trusting any line here. This page is the Apple half of the watch design; the Wear OS half is
-`WATCH_APPS.md` (the merge of the two branches should fold this into that page as an
-"Apple Watch" section).
+feature has been compiled, run in a simulator or tried on a watch.** The shared Dart side is
+tested on Linux (`watch_bridge_test.dart`). Read [What the first CI run must prove](#what-the-first-ci-run-must-prove)
+before trusting any line here.
 
-## Decision: companion model
-
-The iPhone app stays the **only holder of the sign-in session, tokens and end-to-end keys**.
-The watch is a screen and a remote control:
-
-- The phone builds a small, already-decrypted **snapshot** and pushes it.
-- The watch sends back **commands**. The phone runs them with its own credentials and keys.
-- Nothing on the watch can call the server and nothing secret is stored there.
-
-Why not standalone: a standalone watch would need its own tokens and its own copy of the
-Private-circle keys. That doubles the key-handling surface for a feature people use at a glance.
+This page is the Apple half of [WATCH_APPS.md](WATCH_APPS.md), which owns the decision, the
+security model, the snapshot JSON and the command table for **both** watches. This page only
+covers what is specific to Apple.
 
 ## Pieces
 
 | Piece | File | Role |
 |---|---|---|
 | Watch app (SwiftUI, watchOS 9+) | `app/ios/OrbitlyWatch/*.swift` | UI, last snapshot in UserDefaults |
-| Phone native bridge | `app/ios/Runner/WatchBridge.swift` | WCSession delegate, channel `app.openfamily/watch` |
-| Phone Dart bridge | `app/lib/services/watch/watch_bridge_ios.dart` | throttled pushes, runs commands |
-| Snapshot model | `app/lib/services/watch/watch_snapshot.dart` | JSON shape, distance and direction |
-| Phone actions | `app/lib/services/watch/watch_actions.dart` | SOS, check-in, pause, reply on the real services |
-| Settings screen | `app/lib/screens/watch_apple_screen.dart` | status and the on/off switch |
+| iPhone native bridge | `app/ios/Runner/WatchBridge.swift` | WCSession delegate, channel `app.openfamily/watch` |
+| Dart bridge (shared with Wear OS) | `app/lib/services/watch/watch_bridge.dart` | throttle, commands, sign-out debt |
+| Snapshot model (shared) | `app/lib/services/watch/watch_snapshot.dart` | JSON contract, single source of truth |
+| Settings screen (shared) | `app/lib/screens/watch_settings_screen.dart` | one "Watch" row, wording follows the platform |
 | Xcode target | `app/ios/Runner.xcodeproj` (ids `AB1C0DE0...`) | target `OrbitlyWatch`, embedded in the iPhone app |
 | Kill switch | `scripts/ios-watch-target.py` | removes the target from the project |
 
@@ -36,70 +25,27 @@ Private-circle keys. That doubles the key-handling surface for a feature people 
 
 | Direction | API | Used for |
 |---|---|---|
-| phone to watch | `updateApplicationContext(["snapshot": json])` | the latest snapshot; newer replaces older, no queue |
-| phone to watch | `transferUserInfo(["alert": json])` | one alert that must not be lost (the Dart method exists in the channel; nothing in the app calls it yet, alerts currently ride in the snapshot) |
-| watch to phone | `sendMessage(["cmd": ...], replyHandler)` | every command; needs the phone to be reachable; the answer is `{ok, message}` |
-| phone to watch | `updateApplicationContext(["cleared": true])` | sign-out or switch off: the watch deletes its copy |
+| phone to watch | `updateApplicationContext(["snapshot": json, "session": id])` | the latest snapshot; newer replaces older, no queue |
+| phone to watch | `updateApplicationContext(["cleared": true, "session": id?])` | sign-out or switch off: the watch deletes its copy |
+| watch to phone | `sendMessage(["json": command], replyHandler)` | every command; needs the phone reachable. The reply only means "taken"; the result is `lastCommand` in the next snapshot |
 
-There is no polling and no timer on either side. The phone pushes when the family roster
-changes, at most once per 15 seconds, and only when a watch with the app is paired. The extras
-(circle names, unread counts, recent alerts, pause state) are fetched at most once a minute.
+No polling and no timer on either side. The watch waits at most 20 seconds for the phone's
+answer and then says "No confirmation from the iPhone". Nothing is queued, so a stale SOS can
+never fire later.
 
-## Snapshot (version 1)
+## Sign-out and switch-off are a debt
 
-Defined in `watch_snapshot.dart`; the Wear OS app uses the same JSON.
+The shared Dart bridge keeps its pending flag. The native side adds two persisted facts of its own:
+`blocked` (no data may be sent: set by `clear`, lifted by `allowPublish`) and `clearUndelivered`
+(the wipe has not yet been accepted by WatchConnectivity). A new sign-in does **not** reset
+`clearUndelivered`: `allowPublish` creates a new session id and sends the wipe first (and with the new
+id). Every context carries the session id; the watch drops what it stored for any other session, a
+`cleared` context, or a snapshot with `signedIn: false`. `clear` answers `true` to Dart only once the wipe was handed over.
 
-```
-{ "v":1, "ts":<ms>, "units":"imperial|metric",
-  "me":{"id","name","sharing":bool,"pausedUntil":<ms>|null},
-  "circles":[{"id","name","unread":int,"active":bool,"members":[
-     {"id","name","initials","color":<ARGB>,"me":bool,
-      "state":"still|driving|bike|boat|plane|home|work|gym|star",
-      "speedMps":num|null,"place":str|null,"atPlace":bool,"address":str|null,
-      "fixTs":<ms>|null,"battery":0-100|null,"stopped":bool,"hasPosition":bool,
-      "distanceM":num|null,"bearingDeg":num|null}]}],
-  "alerts":[{"id","kind","title","body","ts","active"}],
-  "quickReplies":[str] }
-```
-
-- Only the **active circle** carries members (the app holds one roster at a time). The other
-  circles appear with name and unread count.
-- At most 24 members and 8 alerts. Decoding on the watch is forgiving: a missing field takes a
-  default, so a newer or older phone app never crashes the watch app.
-- **No coordinates** are sent. The phone computes distance and compass bearing from your own
-  position to theirs. The watch cannot place anyone on a map; "Open on iPhone" is Handoff.
-
-## Commands
-
-All are sent by `sendMessage`; the phone answers `{ok, message}` and the watch shows the message.
-
-| `cmd` | Phone does | Notes |
-|---|---|---|
-| `sos` | `POST /alerts/sos` with the phone's position, stores the alert id so the phone's SOS screen shows it, starts the position burst | press and hold, then a 5 second countdown with Cancel, on the watch |
-| `sosResolve` | `POST /alerts/{id}/resolve` | "I'm safe" |
-| `checkin` | `POST /checkins` to the other members of the active circle with note "I'm OK" | |
-| `pause` / `resume` | `PUT` / `DELETE /sharing/pause` (15 minutes to 24 hours) | |
-| `reply` | `ChatService.send` | **only the fixed phrases** in `kWatchQuickReplies`; anything else is refused. The phone seals it itself if the circle is Private |
-| `markRead` | `ChatService.markRead` | |
-| `refresh` | pushes a fresh snapshot | |
-
-Honesty rules: **SOS is never queued.** If the phone is not reachable the watch says
-"SOS NOT sent" and "call emergency services"; a stale SOS firing later would be dangerous.
-The same text says that emergency services are not contacted by Orbitly.
-
-## Privacy
-
-- Tokens, refresh tokens, circle keys and the server URL never leave the phone.
-- Private circles: the phone decrypts as usual and the **readable** names, places and
-  addresses are sent to the watch over WatchConnectivity, which is the encrypted
-  phone-to-watch link of the same Apple ID. They do not touch the server, a push provider or the
-  internet on the way. The watch stores the last snapshot in its own UserDefaults (watch
-  storage); it is wiped on sign-out, on switching the setting off, and when the app is deleted.
-  A person who must not have their Private location on a wrist cannot opt out per person yet;
-  the single switch in Settings, Watch turns the whole thing off.
-- The watch app has its own privacy manifest (`OrbitlyWatch/PrivacyInfo.xcprivacy`): no
-  collection, UserDefaults reason CA92.1.
-- Handoff carries only a member id (activity `app.openfamily.watch.person`).
+Known gap on the Wear OS side (not changed here): its `allowPublish` clears the native pending flag
+without first making sure an undelivered delete reached the watch. A new snapshot replaces the item, so
+the old data is overwritten once the watch is reachable, but until then the watch can still show the old
+user's data. The same session-id idea would close it.
 
 ## Watch UI
 

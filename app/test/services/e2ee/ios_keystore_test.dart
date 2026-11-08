@@ -25,6 +25,11 @@ class FakeNativeKeystore {
   bool userAuth = false;
   bool keyPresent = true;
   String? decryptError; // PlatformException code to throw
+  bool legacy = false; // an old Android key exists
+  String? legacyError; // 'locked' | 'invalidated'
+  bool legacyDeleted = false;
+  /// What the legacy key decrypts: a different transform so tests prove which key was used.
+  static int legacyMask = 0x33;
   final List<String> calls = <String>[];
   final List<bool> secure = <bool>[];
 
@@ -37,8 +42,16 @@ class FakeNativeKeystore {
         if (decryptError != null) throw PlatformException(code: decryptError!);
         if (!keyPresent) throw PlatformException(code: 'invalidated');
         return Uint8List.fromList((c.arguments as Uint8List).map((int b) => b ^ 0x5a).toList());
+      case 'decryptLegacy':
+        if (legacyError != null) throw PlatformException(code: legacyError!);
+        return Uint8List.fromList((c.arguments as Uint8List).map((int b) => b ^ legacyMask).toList());
+      case 'deleteLegacy':
+        legacy = false;
+        legacyDeleted = true;
+        return null;
       case 'status':
         return <String, dynamic>{
+          'legacyKey': legacy,
           'level': level,
           'unlockedDeviceRequired': userAuth,
           'userAuthRequired': userAuth,
@@ -120,17 +133,17 @@ void main() {
       f.keyPresent = false;
       await expectLater(ch.decrypt(Uint8List.fromList(<int>[1, 2])), throwsA(isA<VaultInvalidatedException>()));
       f.keyPresent = true;
-      for (final String code in <String>['auth', 'locked']) {
-        f.decryptError = code;
-        await expectLater(
-            ch.decrypt(Uint8List.fromList(<int>[1, 2])),
-            throwsA(isA<PlatformException>().having((PlatformException e) => e.code, 'code', code)));
-      }
+      f.decryptError = 'auth';
+      await expectLater(
+          ch.decrypt(Uint8List.fromList(<int>[1, 2])),
+          throwsA(isA<PlatformException>().having((PlatformException e) => e.code, 'code', 'auth')));
+      f.decryptError = 'locked'; // before first unlock / strict mode: not a loss, never regenerate
+      await expectLater(ch.decrypt(Uint8List.fromList(<int>[1, 2])), throwsA(isA<VaultLockedException>()));
     });
   });
 
   group('SecureVault with the native key channel', () {
-    test('wraps with the channel, stores flag byte 1, round-trips, lists only vault names', () async {
+    test('wraps with the channel, stores flag byte 2, round-trips, lists only vault names', () async {
       FlutterSecureStorage.setMockInitialValues(<String, String>{});
       final FakeNativeKeystore f = FakeNativeKeystore();
       mock(f.handle);
@@ -140,7 +153,7 @@ void main() {
       await v.write('seed', secret);
       final String raw = (await storage.read(key: 'seed'))!;
       final Uint8List stored = base64.decode(raw);
-      expect(stored[0], 1);
+      expect(stored[0], 2);
       expect(stored.sublist(1), isNot(equals(secret)), reason: 'plaintext must not hit disk');
       expect(await v.read('seed'), secret);
       expect(await v.names(), <String>['seed']);
@@ -175,6 +188,95 @@ void main() {
       expect(m['accessibility'], 'first_unlock_this_device');
       expect(m['synchronizable'], 'false');
       expect(m['accountName'], 'openfamily_e2ee');
+    });
+  });
+
+  group('Locked-phone migration (Android v1 -> v2 key)', () {
+    // A blob as written by 0.24.1: flag 1, wrapped by the old key.
+    String legacyBlob(List<int> plain) =>
+        base64.encode(<int>[1, ...plain.map((int b) => b ^ FakeNativeKeystore.legacyMask)]);
+
+    SecureVault vault(FlutterSecureStorage s) =>
+        SecureVault(storage: s, channel: const KeystoreChannel(channel: _chan));
+
+    test('re-wraps every old blob under the new key, verifies, then removes the old key', () async {
+      FlutterSecureStorage.setMockInitialValues(<String, String>{
+        'seed': legacyBlob(<int>[1, 2, 3]),
+        'circle': legacyBlob(<int>[9, 9]),
+      });
+      final FakeNativeKeystore f = FakeNativeKeystore()..legacy = true;
+      mock(f.handle);
+      const FlutterSecureStorage storage = FlutterSecureStorage();
+      final SecureVault v = vault(storage);
+      // Before migrating the old blobs are still readable (through the legacy key).
+      expect(await v.read('seed'), <int>[1, 2, 3]);
+      expect(await v.migrateLegacy(), VaultMigration.done);
+      expect(base64.decode((await storage.read(key: 'seed'))!)[0], 2);
+      expect(base64.decode((await storage.read(key: 'circle'))!)[0], 2);
+      expect(await v.read('seed'), <int>[1, 2, 3]);
+      expect(await v.read('circle'), <int>[9, 9]);
+      expect(f.legacyDeleted, isTrue);
+      expect(await v.migrateLegacy(), VaultMigration.notNeeded);
+    });
+
+    test('while the phone is locked nothing changes, the old key stays, and a later run succeeds', () async {
+      final String blob = legacyBlob(<int>[7, 7, 7]);
+      FlutterSecureStorage.setMockInitialValues(<String, String>{'seed': blob});
+      final FakeNativeKeystore f = FakeNativeKeystore()
+        ..legacy = true
+        ..legacyError = 'locked';
+      mock(f.handle);
+      const FlutterSecureStorage storage = FlutterSecureStorage();
+      final SecureVault v = vault(storage);
+      expect(await v.migrateLegacy(), VaultMigration.waitingForUnlock);
+      expect(await storage.read(key: 'seed'), blob);
+      expect(f.legacyDeleted, isFalse);
+      await expectLater(v.read('seed'), throwsA(isA<VaultLockedException>()));
+      f.legacyError = null; // the user unlocked the phone
+      expect(await v.migrateLegacy(), VaultMigration.done);
+      expect(await v.read('seed'), <int>[7, 7, 7]);
+    });
+
+    test('an invalidated old key keeps the blobs untouched and never regenerates anything', () async {
+      final String blob = legacyBlob(<int>[5]);
+      FlutterSecureStorage.setMockInitialValues(<String, String>{'seed': blob});
+      final FakeNativeKeystore f = FakeNativeKeystore()
+        ..legacy = true
+        ..legacyError = 'invalidated';
+      mock(f.handle);
+      const FlutterSecureStorage storage = FlutterSecureStorage();
+      final SecureVault v = vault(storage);
+      expect(await v.migrateLegacy(), VaultMigration.failedKept);
+      expect(await storage.read(key: 'seed'), blob);
+      expect(f.legacyDeleted, isFalse);
+      expect(f.calls, isNot(contains('recreateKey')));
+      await expectLater(v.read('seed'), throwsA(isA<VaultInvalidatedException>()));
+    });
+
+    test('new installs write v2 straight away and report keys usable while locked', () async {
+      FlutterSecureStorage.setMockInitialValues(<String, String>{});
+      final FakeNativeKeystore f = FakeNativeKeystore(level: 'tee');
+      mock(f.handle);
+      final SecureVault v = vault(const FlutterSecureStorage());
+      await v.write('seed', Uint8List.fromList(<int>[4, 5]));
+      expect((await v.status()).usableWhileLocked, isTrue);
+      expect(await v.migrateLegacy(), VaultMigration.notNeeded);
+    });
+
+    test('strict mode (user auth) is NOT usable while locked', () async {
+      final FakeNativeKeystore f = FakeNativeKeystore(level: 'tee')..userAuth = true;
+      mock(f.handle);
+      expect((await const KeystoreChannel(channel: _chan).status()).usableWhileLocked, isFalse);
+    });
+
+    test('with the phone locked the key still decrypts and encrypts (vault read/write keep working)', () async {
+      // The new key has no "unlocked device" condition: the fake models a locked phone by failing only legacy use.
+      FlutterSecureStorage.setMockInitialValues(<String, String>{});
+      final FakeNativeKeystore f = FakeNativeKeystore(level: 'strongbox')..legacyError = 'locked';
+      mock(f.handle);
+      final SecureVault v = vault(const FlutterSecureStorage());
+      await v.write('seed', Uint8List.fromList(<int>[1]));
+      expect(await v.read('seed'), <int>[1]);
     });
   });
 

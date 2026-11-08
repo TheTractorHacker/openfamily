@@ -1,6 +1,6 @@
 # Encrypted chat (design and status)
 
-Family chat in a Private circle is sealed on the sender's phone and opened on the
+Chat in a Private circle is sealed on the sender's phone and opened on the
 members' phones. The server relays ciphertext only. Chat is never processed by
 the server: it is sealed under the phone key line (`CK`) only, never wrapped to
 the server device, never read by the sidecar, even when a member's processing
