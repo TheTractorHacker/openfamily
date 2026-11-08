@@ -74,12 +74,16 @@ class _MyProcessingScreenState extends State<MyProcessingScreen> {
             : ListView(
                 padding: const EdgeInsets.all(AppSpace.xl),
                 children: <Widget>[
-                  const Text(
-                      'In each Private circle you decide whether the Orbitly server may process your data. '
-                      'Choose "Phone only" ("Don\'t send my data to the server") and your phone does the work; end-to-end '
-                      'encryption between phones continues. The server operator can still see that you are a member and when '
-                      'your phone connects.',
-                      style: AppType.secondary),
+                  Row(children: <Widget>[
+                    const Expanded(child: Text('Choose, for each Private circle, who works on your data.', style: AppType.secondary)),
+                    InfoHint(
+                      title: 'Where my data is processed',
+                      body: 'In each Private circle you decide whether the Orbitly server may process your data. '
+                          'Choose "Phone only" ("Don\'t send my data to the server") and your phone does the work; end-to-end '
+                          'encryption between phones continues. The server operator can still see that you are a member and when '
+                          'your phone connects.',
+                    ),
+                  ]),
                   const SizedBox(height: AppSpace.md),
                   if (_error != null) Text(_error!, key: const Key('my-proc-error'), style: AppType.secondary),
                   if (_rows.isEmpty && _error == null)
@@ -112,10 +116,10 @@ class _MyProcessingScreenState extends State<MyProcessingScreen> {
 
   String _subtitle(ProcessingSnapshot? s) {
     if (s == null) return 'Could not check this circle';
-    if (s.legacy) return 'Old trusted-server mode: the server can read this circle while every member allowed it';
-    if (!s.assistOn) return 'Server processing is off. Your phone does the work.';
+    if (s.legacy) return 'Old mode: the server can read it';
+    if (!s.assistOn) return 'Phone only';
     final ProcessingMember? me = s.me;
     if (me?.serverAssisted ?? false) return 'The server processes your data';
-    return s.required ? 'Consent needed: this circle requires server processing' : 'Phone only';
+    return s.required ? 'Needs your OK for the server' : 'Phone only';
   }
 }

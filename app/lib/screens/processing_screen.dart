@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../models/circle.dart';
 import '../services/api_client.dart';
@@ -234,7 +235,7 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
                 key: const Key('proc-open-policy'),
                 leading: DsListRow.iconTile(context, Icons.admin_panel_settings_outlined),
                 title: s.iAmAdmin ? 'Server processing for this circle' : 'How this circle is set up',
-                subtitle: _policyLine(s) + (s.iAmAdmin ? '' : ' Set by the circle admin.'),
+                subtitle: _policyLine(s),
                 chevron: true,
                 onTap: () async {
                   await Navigator.of(context).push<void>(MaterialPageRoute<void>(
@@ -258,11 +259,36 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
                   leading: DsListRow.iconTile(context, Icons.person_outline),
                   title: m.isMe ? '${m.name} (you)' : m.name,
                   subtitle: s.legacy
-                      ? (m.isChild ? 'Child account. Old mode: the server may read it if everyone allowed it' : 'Old mode: the server may read this circle if everyone allowed it')
+                      ? 'Old mode: the server may read it'
                       : m.serverAssisted
                           ? 'Allowed server processing'
-                          : (s.assistOn && !m.verified ? 'No choice made yet, phone only' : 'Keeps data on their phone'),
-                  trailing: s.legacy ? null : LaneChip(server: m.serverAssisted),
+                          : (s.assistOn && !m.verified ? 'Not chosen yet' : 'Keeps data on their phone'),
+                  info: s.legacy
+                      ? (m.isChild ? 'Child account. Old mode: the server may read it if everyone allowed it.' : 'Old mode: the server may read this circle if everyone allowed it.')
+                      : (s.assistOn && !m.verified && !m.serverAssisted
+                          ? '${m.name} has not chosen yet. Until they do, their data stays on their phone and is not sent to the server for processing.'
+                          : null),
+                  trailing: s.legacy
+                      ? null
+                      : (s.assistOn && !m.verified && !m.serverAssisted
+                          ? Wrap(spacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: <Widget>[
+                              const NotChosenChip(),
+                              if (s.iAmAdmin && !m.isMe)
+                                IconButton(
+                                  key: Key('remind-${m.userId}'),
+                                  tooltip: 'Copy a reminder for ${m.name}',
+                                  constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+                                  icon: const Icon(Icons.notifications_active_outlined),
+                                  onPressed: () async {
+                                    await Clipboard.setData(ClipboardData(
+                                        text: 'Hi ${m.name}, please open Orbitly > Settings > Where my data is processed and choose how our circle "${widget.circle.name}" should handle your data.'));
+                                    if (context.mounted) {
+                                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Reminder copied. Paste it in a message.')));
+                                    }
+                                  },
+                                ),
+                            ])
+                          : LaneChip(server: m.serverAssisted)),
                 ),
             ]),
             if (s.viewers.isNotEmpty && !s.legacy) ...<Widget>[
@@ -305,10 +331,15 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
               ],
             ],
             const SizedBox(height: AppSpace.xl),
-            const ProcessingNote(
-                noteKey: Key('proc-footnote'),
-                icon: Icons.info_outline,
-                text: '${ProcessingCopy.operatorCanRead} ${ProcessingCopy.metadata} ${ProcessingCopy.multiCircle}'),
+            DsRowGroup(children: <Widget>[
+              DsListRow(
+                key: const Key('proc-footnote'),
+                leading: DsListRow.iconTile(context, Icons.info_outline),
+                title: 'What the server can still see',
+                subtitle: 'Tap (i) to read more',
+                info: '${ProcessingCopy.operatorCanRead} ${ProcessingCopy.metadata} ${ProcessingCopy.multiCircle}',
+              ),
+            ]),
           ],
         ],
       ),
@@ -316,23 +347,23 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
   }
 
   String _policyLine(ProcessingSnapshot s) {
-    if (s.legacy) return 'Old trusted-server mode. An admin can upgrade it.';
-    if (!s.assistOn) return 'Off. Everyone\'s phone does the processing.';
+    if (s.legacy) return 'Old mode. An admin can upgrade it.';
+    if (!s.assistOn) return 'Off: phones do the work';
     return s.required
-        ? 'On, and required: members must allow it or leave.'
-        : 'On. Each member chooses for their own data (${s.serverCount} of ${s.members.length} use the server).';
+        ? 'On, and required'
+        : 'On: ${s.serverCount} of ${s.members.length} use the server';
   }
 
   Widget _statusCard(ProcessingSnapshot s) {
     final (IconData icon, Color color, String title, String sub) = s.legacy
         ? (Icons.dns_outlined, AppColors.sosRed, ProcessingCopy.legacyStatusTitle, ProcessingCopy.legacyStatusBody)
         : !s.assistOn
-        ? (Icons.smartphone, AppColors.statusGreen, 'Phones only', 'The server cannot read this circle. Phones do the processing.')
+        ? (Icons.smartphone, AppColors.sky, 'Phones only', 'The server cannot read this circle.')
         : (
             Icons.dns_outlined,
-            AppColors.statusOrange,
+            AppColors.accentInk,
             'Server-assisted (${s.serverCount} of ${s.members.length} members)',
-            'The server can read the data of members who allowed it. The others keep their data on their phone.'
+            'Others keep their data on their phone.'
           );
     final bool dark = Theme.of(context).brightness == Brightness.dark;
     final Color fg = dark ? Color.lerp(color, Colors.white, 0.45)! : Color.lerp(color, Colors.black, 0.35)!;

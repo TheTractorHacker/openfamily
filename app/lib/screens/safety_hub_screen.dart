@@ -50,7 +50,7 @@ class SafetyHubScreen extends StatelessWidget {
                   icon: Icons.warning_amber_rounded,
                   style: DsPillStyle.danger,
                   onPressed: () => _push(context, const SosScreen()),
-                  semanticLabel: 'Send an SOS to your family',
+                  semanticLabel: 'Send an SOS to your circle',
                 ),
               ],
             ),

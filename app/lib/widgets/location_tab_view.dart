@@ -747,7 +747,7 @@ class _LocationTabViewState extends State<LocationTabView> {
                     icon: Icons.warning_amber_rounded,
                     danger: true,
                     onPressed: widget.onSos,
-                    semanticLabel: 'Send an SOS to your family',
+                    semanticLabel: 'Send an SOS to your circle',
                   ),
                 ],
               ),

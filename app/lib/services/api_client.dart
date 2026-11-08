@@ -1323,6 +1323,18 @@ class ApiClient {
     return data as List<dynamic>;
   }
 
+  /// POST /auth/sessions/current: the id of the session this phone is using (null when the server is older or unsure).
+  static Future<String?> currentSessionId() async {
+    try {
+      final String? refresh = await TokenStorage.readRefreshToken();
+      if (refresh == null || refresh.isEmpty) return null;
+      final dynamic data = await _send('POST', _uri('/auth/sessions/current'), body: <String, dynamic>{'refresh_token': refresh});
+      return data is Map<String, dynamic> ? data['id'] as String? : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// DELETE /auth/sessions/{id}.
   static Future<void> revokeSession(String id) async {
     await _send('DELETE', _uri('/auth/sessions/${Uri.encodeComponent(id)}'));

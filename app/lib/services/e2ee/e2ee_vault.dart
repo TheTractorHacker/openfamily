@@ -14,10 +14,19 @@ class KeystoreStatus {
     required this.level,
     this.unlockedDeviceRequired = false,
     this.userAuthRequired = false,
+    this.legacyKey = false,
   });
   final KeystoreLevel level;
+
+  /// True only for the opt-in strict mode (or an old v1 key): the key refuses to work while the phone is locked.
   final bool unlockedDeviceRequired;
   final bool userAuthRequired;
+
+  /// Android: the pre-0.24.2 wrapping key (unlocked-device-only) still exists, so some blobs may need re-wrapping.
+  final bool legacyKey;
+
+  /// True when the keys can be used by the background service with the screen locked.
+  bool get usableWhileLocked => level != KeystoreLevel.unavailable && !unlockedDeviceRequired && !userAuthRequired;
 
   String get label {
     switch (level) {
@@ -46,6 +55,17 @@ class VaultInvalidatedException implements Exception {
   @override
   String toString() => 'VaultInvalidatedException: the device key store was invalidated';
 }
+
+/// The key exists but cannot be used right now (the old Keystore key only works while the phone is unlocked).
+/// NOT a loss: never regenerate anything because of this, try again later.
+class VaultLockedException implements Exception {
+  const VaultLockedException();
+  @override
+  String toString() => 'VaultLockedException: the key is not usable while the phone is locked';
+}
+
+/// Outcome of [SecureVault.migrateLegacy].
+enum VaultMigration { notNeeded, done, waitingForUnlock, failedKept }
 
 /// Storage for the secrets of this phone (identity seed, circle keys).
 abstract class E2eeVault {
@@ -129,9 +149,26 @@ class KeystoreChannel {
       return r;
     } on PlatformException catch (e) {
       if (e.code == 'invalidated') throw const VaultInvalidatedException();
+      if (e.code == 'locked') throw const VaultLockedException();
       rethrow;
     }
   }
+
+  /// Decrypts a blob written under the pre-0.24.2 Android key. Throws [VaultLockedException] while the phone is locked.
+  Future<Uint8List> decryptLegacy(Uint8List blob) async {
+    try {
+      final Uint8List? r = await _ch.invokeMethod<Uint8List>('decryptLegacy', blob);
+      if (r == null) throw PlatformException(code: 'null');
+      return r;
+    } on PlatformException catch (e) {
+      if (e.code == 'invalidated') throw const VaultInvalidatedException();
+      if (e.code == 'locked') throw const VaultLockedException();
+      rethrow;
+    }
+  }
+
+  /// Removes the legacy key. Call only after every blob was re-wrapped and read back.
+  Future<void> deleteLegacy() => _ch.invokeMethod<void>('deleteLegacy');
 
   Future<KeystoreStatus> status() async {
     try {
@@ -149,6 +186,7 @@ class KeystoreChannel {
         },
         unlockedDeviceRequired: m['unlockedDeviceRequired'] == true,
         userAuthRequired: m['userAuthRequired'] == true,
+        legacyKey: m['legacyKey'] == true,
       );
     } on MissingPluginException {
       return const KeystoreStatus(level: KeystoreLevel.unavailable);
@@ -204,11 +242,12 @@ class SecureVault implements E2eeVault {
     if (raw == null) return null;
     final Uint8List stored = base64.decode(raw);
     if (stored.isEmpty) return null;
-    // First byte: 1 = Keystore-wrapped, 0 = plain (fallback platforms).
-    if (stored[0] == 1) {
-      return _channel.decrypt(Uint8List.sublistView(stored, 1));
-    }
-    return Uint8List.sublistView(stored, 1);
+    // First byte: 2 = wrapped with the current key (usable with the phone locked), 1 = wrapped by an older app
+    // version (Android: the unlocked-device-only key, until migrateLegacy re-wraps it), 0 = plain (fallback platforms).
+    final Uint8List body = Uint8List.sublistView(stored, 1);
+    if (stored[0] == 1 && (await _channel.status()).legacyKey) return _channel.decryptLegacy(body);
+    if (stored[0] == 1 || stored[0] == 2) return _channel.decrypt(body);
+    return body;
   }
 
   @override
@@ -220,7 +259,51 @@ class SecureVault implements E2eeVault {
       // storage plugin still encrypts at rest; the UI reports "not available".
     }
     await _storage.write(
-        key: name, value: base64.encode(<int>[native ? 1 : 0, ...body]));
+        key: name, value: base64.encode(<int>[native ? 2 : 0, ...body]));
+  }
+
+  /// Re-wraps every blob that an older version wrapped with the unlocked-device-only Android key under the current
+  /// key, so sealing works with the screen locked. Safe by construction: each blob is written, read back and compared
+  /// before the next one; nothing is deleted on any doubt; the old key is removed only when no old blob remains.
+  /// Never touches identity material in any other way, never creates a new identity. Run it in the foreground
+  /// (the old key cannot be used while locked: [VaultMigration.waitingForUnlock], try again later).
+  Future<VaultMigration> migrateLegacy() async {
+    final KeystoreStatus st = await _channel.status();
+    if (!st.legacyKey) return VaultMigration.notNeeded;
+    try {
+      final Map<String, String> all = await _storage.readAll();
+      for (final MapEntry<String, String> e in all.entries) {
+        final Uint8List stored = base64.decode(e.value);
+        if (stored.isEmpty || stored[0] != 1) continue;
+        final Uint8List plain = await _channel.decryptLegacy(Uint8List.sublistView(stored, 1));
+        final Uint8List wrapped = await _channel.encrypt(plain);
+        await _storage.write(key: e.key, value: base64.encode(<int>[2, ...wrapped]));
+        // Read back through the normal path; restore the old blob if it does not match.
+        bool same = false;
+        try {
+          final Uint8List? back = await read(e.key);
+          same = back != null && listEquals(back, plain);
+        } catch (_) {}
+        if (!same) {
+          await _storage.write(key: e.key, value: e.value);
+          return VaultMigration.failedKept;
+        }
+      }
+      final Map<String, String> after = await _storage.readAll();
+      final bool anyOld = after.values.any((String v) {
+        final Uint8List b = base64.decode(v);
+        return b.isNotEmpty && b[0] == 1;
+      });
+      if (anyOld) return VaultMigration.failedKept;
+      await _channel.deleteLegacy();
+      return VaultMigration.done;
+    } on VaultLockedException {
+      return VaultMigration.waitingForUnlock;
+    } catch (_) {
+      // Invalidated legacy key or a platform error: keep every blob exactly as it was. The normal read path
+      // reports the invalidation and the app asks for the recovery phrase; nothing is regenerated here.
+      return VaultMigration.failedKept;
+    }
   }
 
   @override

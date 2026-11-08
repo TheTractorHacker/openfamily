@@ -42,6 +42,25 @@ Works with apps 0.20 and newer; nothing here needs an app update.
 - Server: SOS, Help alerts and check-ins accept an optional `client_id` so a replay after a lost
   answer is stored once (database migration 340).
 
+## v0.24.2 (unreleased)
+
+- **Private circles keep sending when the phone is locked.** The key that
+  protects your keys on the phone no longer needs the screen to be unlocked
+  (it is still stored in the phone's security chip and can not be copied out).
+  Phones update automatically the first time you open the app after updating.
+  Before this, a phone in a pocket could stop sending to a Private circle.
+  See the threat-model note in [End-to-end encryption](design/E2EE.md).
+- **Driving tab in Private circles** works for members who use the server, and
+  members who keep data on their phone get "Use the server" or "Compute reports
+  on this phone" instead of a dead end.
+- **Simpler settings.** Settings are grouped (Account, Sharing & privacy,
+  Notifications, Driving & safety, Server & data, Phone health, Appearance,
+  About) with a search box. Each row has one short line; tap the small (i) for
+  the details. Encryption keys, Server processing, Active sessions (This device,
+  Older sessions, Sign out other sessions) and Diagnostics were tidied up.
+- Wording: "circle" instead of "family" where it means friends too.
+- Server: `POST /auth/sessions/current` tells an app which session is its own.
+
 ## v0.24.1 (2026-11-08)
 
 - Build fix: the v0.24.0 release files were not produced because of a file-name
