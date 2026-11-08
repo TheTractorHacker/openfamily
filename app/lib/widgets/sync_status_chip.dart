@@ -2,13 +2,14 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
-import '../services/offline/offline_sync.dart';
 import '../services/offline/server_reachability.dart';
+import '../utils/member_status.dart' show formatClock;
 
-/// The small, unobtrusive "is the server there" chip.
+/// The small, unobtrusive "is the server there" pill on the map.
 ///
-/// - Server unreachable: "Server unreachable. Showing last known. Will sync when
-///   it is back." with a "Try again" button (and how many updates wait).
+/// - Server unreachable: "Offline · last synced 9:02". The same state is an item
+///   of the attention center, with the full sentence and "Try again".
+/// - Login ran out: "Signed out" (the attention center offers "Sign in").
 /// - Updates being sent: "Syncing…".
 /// - Back and everything sent: "Up to date" for a few seconds, then it hides.
 /// - Normal operation: nothing at all.
@@ -18,7 +19,6 @@ class SyncStatusChip extends StatefulWidget {
     this.reachability,
     this.upToDateFor = const Duration(seconds: 3),
     this.alwaysShow = false,
-    this.flush,
   });
 
   /// Defaults to [ServerReachability.instance].
@@ -29,9 +29,6 @@ class SyncStatusChip extends StatefulWidget {
 
   /// Diagnostics shows the state permanently.
   final bool alwaysShow;
-
-  /// What "Try again" sends besides the probe. Defaults to [OfflineSync.flushAll].
-  final Future<void> Function()? flush;
 
   @override
   State<SyncStatusChip> createState() => _SyncStatusChipState();
@@ -85,58 +82,57 @@ class _SyncStatusChipState extends State<SyncStatusChip> {
         final ColorScheme cs = Theme.of(context).colorScheme;
         final bool signedOut = s == SyncState.signedOut;
         final bool down = s == SyncState.unreachable || signedOut;
-        final String waiting = n > 0 ? ' $n update${n == 1 ? '' : 's'} waiting.' : '';
+        final DateTime? last = _r.lastOkAt;
+        final String synced = last == null ? '' : 'last synced ${formatClock(last.toLocal())}';
+        // Short on the map; the attention icon holds the full sentence and the "Try again" button.
         final String text = switch (s) {
-          SyncState.unreachable => 'Server unreachable. Showing last known. Will sync when it is back.$waiting',
-          SyncState.signedOut => 'Please sign in again. The server is fine; this phone\'s login ran out.${n > 0 ? ' $n update${n == 1 ? '' : 's'} will be sent after you sign in.' : ''}',
-          SyncState.syncing => 'Syncing…${n > 0 ? ' $n update${n == 1 ? '' : 's'}' : ''}',
+          SyncState.unreachable => synced.isEmpty ? 'Offline' : 'Offline · $synced',
+          SyncState.signedOut => 'Signed out',
+          SyncState.syncing => 'Syncing…${n > 0 ? ' $n' : ''}',
           SyncState.upToDate => 'Up to date',
         };
-        return Align(
-          alignment: Alignment.topCenter,
-          child: Semantics(
-            liveRegion: true,
-            child: Container(
-              key: const Key('sync-status-chip'),
-              margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(
-                color: down ? cs.errorContainer : cs.surfaceContainerHigh,
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: <Widget>[
-                  Icon(
-                    signedOut ? Icons.lock_outline : down ? Icons.cloud_off : (s == SyncState.syncing ? Icons.sync : Icons.cloud_done_outlined),
-                    size: 16,
-                    color: down ? cs.onErrorContainer : cs.onSurfaceVariant,
-                  ),
-                  const SizedBox(width: 8),
-                  Flexible(
-                    child: Text(
-                      text,
-                      style: TextStyle(fontSize: 12, color: down ? cs.onErrorContainer : cs.onSurfaceVariant),
+        final String spoken = switch (s) {
+          SyncState.unreachable => "Offline: can't reach your server. Showing what this phone last knew${synced.isEmpty ? '' : ', $synced'}."
+              '${n > 0 ? ' $n update${n == 1 ? '' : 's'} waiting.' : ''} Details are behind the attention icon.',
+          SyncState.signedOut => 'Signed out. Please sign in again. Details are behind the attention icon.',
+          SyncState.syncing => 'Syncing${n > 0 ? ' $n update${n == 1 ? '' : 's'}' : ''}',
+          SyncState.upToDate => 'Up to date',
+        };
+        // Information only: map gestures pass through it.
+        return IgnorePointer(
+          child: Align(
+            alignment: Alignment.topCenter,
+            child: Semantics(
+              liveRegion: true,
+              label: spoken,
+              excludeSemantics: true,
+              child: Container(
+                key: const Key('sync-status-chip'),
+                margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: down ? cs.errorContainer : cs.surfaceContainerHigh,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    Icon(
+                      signedOut ? Icons.lock_outline : down ? Icons.cloud_off : (s == SyncState.syncing ? Icons.sync : Icons.cloud_done_outlined),
+                      size: 14,
+                      color: down ? cs.onErrorContainer : cs.onSurfaceVariant,
                     ),
-                  ),
-                  if (s == SyncState.unreachable) ...<Widget>[
-                    const SizedBox(width: 8),
-                    InkWell(
-                      key: const Key('sync-try-again'),
-                      onTap: () {
-                        unawaited(_r.probeNow());
-                        unawaited((widget.flush ?? OfflineSync.flushAll)());
-                      },
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
-                        child: Text(
-                          'Try again',
-                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: cs.onErrorContainer),
-                        ),
+                    const SizedBox(width: 6),
+                    Flexible(
+                      child: Text(
+                        text,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: down ? cs.onErrorContainer : cs.onSurfaceVariant),
                       ),
                     ),
                   ],
-                ],
+                ),
               ),
             ),
           ),

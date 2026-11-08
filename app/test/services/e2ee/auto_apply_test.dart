@@ -97,6 +97,31 @@ void main() {
     expect(await bob.lanes.autoApplyIfDue(priv, autoApply: true), AutoApplyOutcome.hasChoice);
   });
 
+  test('after "Set this phone up again" the server choice signed by the old key no longer counts; it is found for a one-tap re-offer', () async {
+    await policyOn();
+    await bob.lanes.setLane(priv, E2ee.lineServer, confirmServerFingerprintHex: (await bob.lanes.refresh(priv)).serverKey!.fingerprint);
+    expect((await bob.lanes.refresh(priv, force: true)).status, LaneStatus.serverAssisted);
+    expect(await bob.lanes.serverChoiceLostToNewKey(priv), isNull, reason: 'the choice still counts');
+    final String oldDevice = (await bob.service.identity())!.deviceId;
+    // The same person, the phone set up again: a reset revokes every older key of the account.
+    final Dev bob2 = Dev(server, channel, uB, clock);
+    await bob2.service.registerThisDevice(reset: true);
+    await bob2.runtime.setCircles(<Circle>[circleOf(priv)]);
+    expect((await bob2.lanes.refresh(priv, force: true)).status, LaneStatus.phoneOnly, reason: 'the pref was signed by a revoked key');
+    expect((await bob2.lanes.serverChoiceLostToNewKey(priv))?.oldDeviceId, oldDevice);
+    // Auto-apply never re-signs over a choice in the log, so without the re-offer the person would stay off the server.
+    expect(await bob2.lanes.autoApplyIfDue(priv, autoApply: true), AutoApplyOutcome.hasChoice);
+  });
+
+  test('a phone choice, or no choice at all, is not reported as lost', () async {
+    await policyOn();
+    expect(await carol.lanes.serverChoiceLostToNewKey(priv), isNull);
+    await bob.lanes.setLane(priv, E2ee.linePhone);
+    final Dev bob2 = Dev(server, channel, uB, clock);
+    await bob2.service.registerThisDevice(reset: true);
+    expect(await bob2.lanes.serverChoiceLostToNewKey(priv), isNull);
+  });
+
   test('required_server circles and child accounts are not auto-signed', () async {
     await policyOn(optOut: E2ee.optOutRequiredServer);
     expect(await bob.lanes.autoApplyIfDue(priv, autoApply: true), AutoApplyOutcome.consentRequired);

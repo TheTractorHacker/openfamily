@@ -121,7 +121,7 @@ void main() {
 
   group('status chip', () {
     Future<void> show(WidgetTester t, ServerReachability r) => t.pumpWidget(MaterialApp(
-          home: Scaffold(body: SyncStatusChip(reachability: r, flush: () async {})),
+          home: Scaffold(body: SyncStatusChip(reachability: r)),
         ));
 
     testWidgets('hidden in normal operation', (WidgetTester t) async {
@@ -131,16 +131,18 @@ void main() {
       r.dispose();
     });
 
-    testWidgets('unreachable: plain words, count of waiting updates and a Try again button', (WidgetTester t) async {
+    testWidgets('unreachable: a small, non-blocking "Offline" pill with the full sentence for screen readers', (WidgetTester t) async {
       final ServerReachability r = make(<bool>[false, true]);
       r.setPending(3);
       await show(t, r);
       r.noteFailure();
       await t.pump(const Duration(seconds: 3));
-      expect(find.textContaining('Server unreachable. Showing last known. Will sync when it is back.'), findsOneWidget);
-      expect(find.textContaining('3 updates waiting'), findsOneWidget);
-      await t.tap(find.byKey(const Key('sync-try-again')));
-      await t.pump();
+      expect(find.text('Offline'), findsOneWidget, reason: 'no "last synced" before the server ever answered');
+      expect(find.bySemanticsLabel(RegExp("can't reach your server.*3 updates waiting")), findsOneWidget);
+      expect(find.ancestor(of: find.byKey(const Key('sync-status-chip')), matching: find.byType(IgnorePointer)), findsWidgets,
+          reason: 'map gestures pass through it');
+      // "Try again" lives in the attention center now; the probe recovers the same way.
+      await r.probeNow();
       await t.pump();
       expect(r.unreachable, isFalse);
       expect(find.textContaining('Syncing'), findsOneWidget);
@@ -149,6 +151,16 @@ void main() {
       expect(find.text('Up to date'), findsOneWidget);
       await t.pump(const Duration(seconds: 4));
       expect(find.byKey(const Key('sync-status-chip')), findsNothing, reason: 'it hides itself again');
+      r.dispose();
+    });
+
+    testWidgets('unreachable after a good answer shows when it last synced', (WidgetTester t) async {
+      final ServerReachability r = make(<bool>[false]);
+      r.noteResponse(200);
+      await show(t, r);
+      r.noteFailure();
+      await t.pump(const Duration(seconds: 3));
+      expect(find.textContaining('Offline · last synced'), findsOneWidget);
       r.dispose();
     });
   });

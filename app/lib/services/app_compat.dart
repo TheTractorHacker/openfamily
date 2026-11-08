@@ -107,6 +107,9 @@ class AppCompat {
   /// Circles the server says this app cannot open (see [noteCircles]).
   static final ValueNotifier<int> circlesNeedingUpdate = ValueNotifier<int>(0);
 
+  /// Names of those circles (the attention center says which ones).
+  static final ValueNotifier<List<String>> circleNamesNeedingUpdate = ValueNotifier<List<String>>(const <String>[]);
+
   /// Reads the compat headers of any API response (lower-cased names).
   static void observeHeaders(Map<String, String> headers) {
     final String? raw = headers['x-openfamily-compat'];
@@ -140,8 +143,9 @@ class AppCompat {
       compareVersions(_version, minAppVersion) == -1;
 
   /// Records how many of the user's circles need a newer app.
-  static void noteCircles(Iterable<bool> needsNewer) {
+  static void noteCircles(Iterable<bool> needsNewer, {List<String>? names}) {
     final int n = needsNewer.where((bool b) => b).length;
+    if (names != null && !listEquals(circleNamesNeedingUpdate.value, names)) circleNamesNeedingUpdate.value = names;
     if (circlesNeedingUpdate.value != n) circlesNeedingUpdate.value = n;
   }
 
@@ -155,5 +159,6 @@ class AppCompat {
     state.value = const CompatState();
     dismissed.value = false;
     circlesNeedingUpdate.value = 0;
+    circleNamesNeedingUpdate.value = const <String>[];
   }
 }

@@ -138,7 +138,8 @@ class ApiCircleService implements CircleService {
           raw = c.data;
         }
         final List<Circle> list = _rows(raw).map(Circle.fromJson).toList();
-        AppCompat.noteCircles(list.map((Circle c) => c.needsNewerApp));
+        AppCompat.noteCircles(list.map((Circle c) => c.needsNewerApp),
+            names: <String>[for (final Circle c in list) if (c.needsNewerApp) c.name]);
         return list;
       });
 
