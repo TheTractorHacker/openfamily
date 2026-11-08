@@ -105,7 +105,7 @@ default) and, for history, for your location-retention setting; it deletes it
 when the circle is switched back to normal. The operator can no longer read
 positions of Private circles, but still sees metadata: who is in which circle,
 when (to the minute) a phone is online and how often and how much it uploads,
-and client IP addresses. Chat messages are not end-to-end encrypted yet.
+and client IP addresses. Chat in a Private circle is end-to-end encrypted too (messages, edits, deletes and photos); in a Normal circle chat is stored readable on the server.
 Trips, driving reports and the weekly summary are not available for Private
 circles, and the server-side admin map and the server's own Dawarich export
 cannot see them. Instead you can approve **read-only viewers** yourself:

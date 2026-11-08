@@ -2,6 +2,8 @@
 
 Where the Google Play listing stands and what is still needed before Orbitly can go public on Google Play.
 
+The step-by-step guide for the 1.0 submission (signing choice, declarations, videos) is [Google Play submission guide](release/GOOGLE_PLAY.md).
+
 ## Current status
 
 The English listing is saved in Play Console as **Orbitly**, with an icon,
