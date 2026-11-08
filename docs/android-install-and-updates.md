@@ -29,6 +29,30 @@ version it downloads and installs over the old one; your data and login stay.
 Android may show an "Update" confirmation: tap it. You can also open Obtainium
 and pull to refresh. Never uninstall to update.
 
+### Sign-in and encryption keys survive updates
+
+Installing a new version over the old one keeps you signed in and keeps this
+phone's encryption key. The app never deletes a key on its own: if the key
+store has a hiccup after an update or a restart, the app says the key "can't
+be read" and offers **Try again**; nothing is lost while you wait. It only
+signs you out when the server says the session is no longer valid, never
+because the phone could not read its storage.
+
+If it happens anyway:
+
+1. Tap **Try again**, or restart the phone and open the app again.
+2. Open **Settings, Diagnostics** and copy the report: the
+   "Sign-in and key storage" section says what failed (no secrets in it).
+   Send it to your server operator.
+3. Only if the key stays unreadable, use **Set this phone up again**. The old
+   key is put aside on the phone, not deleted, and **Encryption keys** offers
+   to bring it back if it becomes readable later.
+
+Prepare once, so a lost key is never a problem: write down your **recovery
+phrase** (Encryption keys, Recovery phrase), and make sure each Private
+circle has a **second admin** who can approve a new phone. Uninstalling the
+app deletes its keys; never uninstall to update.
+
 ## Release file names
 
 Releases from the Orbitly rename on are called `orbitly-<version>.apk`; older

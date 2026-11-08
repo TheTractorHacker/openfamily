@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:bip39/bip39.dart' as bip39;
 
+import '../storage_event_log.dart';
 import 'e2ee_api.dart';
 import 'e2ee_crypto.dart';
 import 'e2ee_models.dart';
@@ -183,6 +184,8 @@ class E2eeService {
       rethrow;
     } on VaultLockedException {
       rethrow;
+    } on VaultUnreadableException catch (e) {
+      throw LocalKeyException(LocalKeyProblem.unreadable, cause: e.toString());
     } catch (e) {
       throw LocalKeyException(LocalKeyProblem.unreadable, cause: e.runtimeType.toString());
     }
@@ -222,7 +225,9 @@ class E2eeService {
     // An empty answer is not "another account": never wipe on it.
     if (uid.isEmpty && seed != null) throw const LocalKeyException(LocalKeyProblem.unreadable, cause: 'empty user id');
     if (seed != null && ownerId != null && ownerId != uid) {
-      // A different account signed in on this phone: its identity is not ours.
+      // A different account signed in on this phone: its identity is not ours. It is put aside (archived, still
+      // wrapped by the Keystore key), never destroyed, so signing back in to that account can restore it.
+      StorageEventLog.instance.record('identity_archived', store: 'vault', detail: 'reason=other account');
       await _wipeIdentity();
       seed = null;
     }
@@ -234,9 +239,16 @@ class E2eeService {
       } on FormatException {
         throw const LocalKeyException(LocalKeyProblem.unreadable, cause: 'FormatException');
       }
+      // A seed without its device id is a partial read (or a half-finished write), never "no key": generating a
+      // new identity here would overwrite the real seed. Report it; the stored seed stays as it is.
+      if (deviceId == null) {
+        StorageEventLog.instance.record('identity_partial', store: 'vault', detail: 'seed without device id');
+        throw const LocalKeyException(LocalKeyProblem.unreadable, cause: 'device id missing');
+      }
     }
     if (seed == null || deviceId == null) {
       if (!create) return null;
+      StorageEventLog.instance.record('identity_created', store: 'vault');
       seed = E2ee.randomBytes(32);
       deviceId = E2ee.newUuid();
       await vault.write(_seedName, seed);
@@ -250,16 +262,74 @@ class E2eeService {
     return _cached = LocalIdentity._(uid, deviceId, es, xs, ed, x, await E2ee.fingerprint(ed, x));
   }
 
+  /// Removes this phone's keys from the live vault. Key material is archived
+  /// (kept aside, still wrapped by the Keystore key) rather than destroyed, so a
+  /// mistaken "Set this phone up again" can be undone with [restoreArchivedIdentity].
   Future<void> _wipeIdentity() async {
     _cached = null;
-    for (final String n in await vault.names()) {
-      await vault.delete(n);
+    final List<String> names = await vault.names();
+    final E2eeVault inner = vault.inner;
+    if (inner is VaultArchive) {
+      TickVault.tick++;
+      await (inner as VaultArchive).archiveNames(names);
+      TickVault.tick++;
+    } else {
+      for (final String n in names) {
+        await vault.delete(n);
+      }
     }
+    StorageEventLog.instance.record('identity_wiped', store: 'vault', detail: 'names=${names.length} archived=${inner is VaultArchive}');
   }
 
   /// Forgets this phone's keys locally (sign out / "erase keys"). Does not touch
   /// the server; revoke the key first if you want peers to stop wrapping to it.
+  /// Key material is archived on this phone, not destroyed.
   Future<void> eraseLocalKeys() => _wipeIdentity();
+
+  /// The newest archived identity of the signed-in account that still opens,
+  /// or null. Only offered while this phone has no live identity.
+  Future<VaultArchiveSet?> restorableIdentity() async {
+    final E2eeVault inner = vault.inner;
+    if (inner is! VaultArchive) return null;
+    final VaultArchive a = inner as VaultArchive;
+    if ((await vault.read(_seedName)) != null) return null;
+    final String uid = await userIdProvider();
+    if (uid.isEmpty) return null;
+    for (final VaultArchiveSet set in await a.archives()) {
+      if (!set.names.contains(_seedName) || !set.names.contains(_deviceName)) continue;
+      try {
+        final Uint8List? owner = await a.readArchived(set.id, _userName);
+        final Uint8List? seed = await a.readArchived(set.id, _seedName);
+        if (seed == null || seed.length != 32) continue;
+        if (owner != null && utf8.decode(owner) != uid) continue;
+        return set;
+      } catch (_) {
+        // This set does not open (an invalidated Keystore key): try an older one.
+      }
+    }
+    return null;
+  }
+
+  /// Puts an archived identity (and the circle keys archived with it) back.
+  /// Refuses while a live identity exists. Returns how many names came back.
+  Future<int> restoreArchivedIdentity(VaultArchiveSet set) async {
+    final E2eeVault inner = vault.inner;
+    if (inner is! VaultArchive) return 0;
+    if ((await vault.read(_seedName)) != null) {
+      throw StateError('This phone already has a key; it is not replaced.');
+    }
+    int n = 0;
+    for (final String name in set.names) {
+      final Uint8List? v = await (inner as VaultArchive).readArchived(set.id, name);
+      if (v == null) continue;
+      if ((await vault.read(name)) != null) continue; // never overwrite a live value
+      await vault.write(name, v);
+      n++;
+    }
+    _cached = null;
+    StorageEventLog.instance.record('identity_restored', store: 'vault', detail: 'names=$n');
+    return n;
+  }
 
   // ---------------------------------------------------------- registration
 

@@ -17,6 +17,7 @@ import 'perf/perf_monitor.dart';
 import 'server_config.dart';
 import 'session_diary.dart';
 import 'session_gate.dart';
+import 'storage_event_log.dart';
 import 'refresh_lease.dart';
 import 'token_storage.dart';
 
@@ -1022,6 +1023,9 @@ class ApiClient {
     }
   }
 
+  /// How often this process skipped a refresh because the token stores could not be read.
+  static int _skippedForStorage = 0;
+
   static Future<_RefreshResult> _performRefreshLocked() async {
     final SessionDiary diary = SessionDiary.instance;
     try {
@@ -1029,6 +1033,15 @@ class ApiClient {
       // the session is declared dead: a stale token being rejected must not
       // sign the user out while a newer valid one exists.
       final List<String> candidates = await TokenStorage.refreshCandidates();
+      if (candidates.isEmpty && TokenStorage.lastReadErrors.isNotEmpty && _skippedForStorage < 3) {
+        // The token stores could not be read (a Keystore hiccup), so nothing was learned about the session:
+        // never sign out on a storage error. The next request tries again. Bounded per process, so a store
+        // that stays broken while nothing else holds a session still ends at the sign-in screen.
+        _skippedForStorage++;
+        StorageEventLog.instance.record('refresh_skipped', store: 'tokens', detail: 'stores unreadable n=$_skippedForStorage');
+        diary.record('refresh', 'skipped: stores unreadable');
+        return _RefreshResult.transient;
+      }
       final Set<String> tried = <String>{};
       bool rechecked = false;
       for (int i = 0; i < candidates.length; i++) {
@@ -1051,12 +1064,12 @@ class ApiClient {
           );
           return _RefreshResult.ok;
         }
-        // Only a definitive rejection counts against a token. A deploy
-        // restarts the server (502/503 from the proxy), and 429/5xx are
-        // equally temporary.
-        if (response.statusCode == 400 ||
-            response.statusCode == 401 ||
-            response.statusCode == 403) {
+        // Only the server's definitive "invalid refresh token" (401) counts
+        // against a token. A deploy restarts the server (502/503 from the
+        // proxy), 429/5xx are equally temporary, and a 400/403 comes from a
+        // proxy, a captive portal or a malformed request - none of them says
+        // the session is dead (the server answers 401 for every bad token).
+        if (response.statusCode == 401) {
           TokenStorage.markRejected(refreshToken);
           if (i == candidates.length - 1 && !rechecked) {
             // "Invalid refresh": before giving up, look once more - another isolate may have stored a newer
@@ -1219,7 +1232,7 @@ class ApiClient {
           refresh: data['refresh_token'] as String,
         );
       }
-      if (response.statusCode == 401 || response.statusCode == 403) {
+      if (response.statusCode == 401) {
         return const SessionGateRefreshOutcome.rejected();
       }
       return const SessionGateRefreshOutcome.unreachable();

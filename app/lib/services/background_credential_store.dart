@@ -26,6 +26,7 @@ class BackgroundCredentialStore {
   static const FlutterSecureStorage _storage = FlutterSecureStorage(
     aOptions: AndroidOptions(
       encryptedSharedPreferences: true,
+      resetOnError: false,
       sharedPreferencesName: 'openfamily_bg_credentials',
       preferencesKeyPrefix: 'bg_',
     ),

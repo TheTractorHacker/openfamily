@@ -53,6 +53,9 @@ class _EncryptionKeysScreenState extends State<EncryptionKeysScreen> {
   List<E2eeAlarm> _alarms = <E2eeAlarm>[];
   KeystoreStatus? _store;
 
+  /// A key this phone had before (archived by "Set this phone up again" or an account switch) that still opens.
+  VaultArchiveSet? _restorable;
+
   @override
   void initState() {
     super.initState();
@@ -136,8 +139,15 @@ class _EncryptionKeysScreenState extends State<EncryptionKeysScreen> {
         ];
       }
       final KeystoreStatus store = await _svc.vault.status();
+      VaultArchiveSet? restorable;
+      if (id == null) {
+        try {
+          restorable = await _svc.restorableIdentity();
+        } catch (_) {}
+      }
       if (!mounted) return;
       setState(() {
+        _restorable = restorable;
         _id = id;
         _myRecord = rec;
         _rows = rows;
@@ -204,6 +214,22 @@ class _EncryptionKeysScreenState extends State<EncryptionKeysScreen> {
       if (!mounted) return;
       setState(() => _busy = false);
       await Navigator.of(context).push<void>(MaterialPageRoute<void>(builder: (_) => LinkDeviceScreen(service: _svc)));
+      await _load();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(errorText(e))));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _restorePrevious() async {
+    final VaultArchiveSet? set = _restorable;
+    if (set == null) return;
+    setState(() => _busy = true);
+    try {
+      await _svc.restoreArchivedIdentity(set);
       await _load();
     } catch (e) {
       if (mounted) {
@@ -352,6 +378,11 @@ class _EncryptionKeysScreenState extends State<EncryptionKeysScreen> {
           const Text("This phone's encryption key can't be read", key: Key('keys-repair-title'), style: AppType.headline),
           const SizedBox(height: AppSpace.sm),
           Text(_error ?? ''),
+          const SizedBox(height: AppSpace.sm),
+          const Text(
+              'Right after an app update or a restart this can be temporary: tap Try again first, or restart the phone. '
+              'Nothing is deleted while you wait.',
+              style: AppType.secondary),
           const SizedBox(height: AppSpace.lg),
           DsPillButton(label: 'Try again', icon: Icons.refresh, onPressed: _busy ? null : _load),
           const SizedBox(height: AppSpace.sm),
@@ -368,7 +399,8 @@ class _EncryptionKeysScreenState extends State<EncryptionKeysScreen> {
     final bool ok = await showDsConfirm(
       context,
       title: 'Set this phone up again?',
-      message: 'The key stored on this phone cannot be read, so it is removed from this phone. Nothing is deleted on the '
+      message: 'The key stored on this phone cannot be read, so it is put aside on this phone (kept, not deleted, so it '
+          'can be brought back if it becomes readable again). Nothing is deleted on the '
           'server. Next, restore with your recovery phrase or link this phone from your other phone, so it gets your '
           'circles back. If neither is possible, create new keys: the other members will see that your key changed, and '
           'an admin shares the circle keys with this phone again.',
@@ -396,6 +428,15 @@ class _EncryptionKeysScreenState extends State<EncryptionKeysScreen> {
             const Text('Create the keys on this phone and register their public halves with the server. '
                 'If your account already has keys, you will be asked to link this phone from your other phone or restore with your recovery phrase.'),
             const SizedBox(height: AppSpace.lg),
+            if (id == null && _restorable != null) ...<Widget>[
+              DsPillButton(
+                key: const Key('keys-restore-previous'),
+                label: 'Bring back the key this phone had before',
+                icon: Icons.settings_backup_restore,
+                onPressed: _busy ? null : _restorePrevious,
+              ),
+              const SizedBox(height: AppSpace.sm),
+            ],
             DsPillButton(label: 'Create keys on this phone', icon: Icons.key, onPressed: _busy ? null : _setup),
             const SizedBox(height: AppSpace.sm),
             DsPillButton(
