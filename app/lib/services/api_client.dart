@@ -1197,7 +1197,13 @@ class ApiClient {
       // compute() runs inline on web, where isolates do not exist.
       return compute<Uint8List, dynamic>(_decodeJsonBytes, bytes);
     }
-    return _decode(response);
+    try {
+      return _decode(response);
+    } on FormatException {
+      // A 2xx whose body is cut off or not JSON (a half-dead connection, a captive portal page):
+      // no usable answer, same as being offline. Never an uncaught crash in a screen.
+      throw const ApiException(0, 'The server sent an unreadable answer. Please try again.');
+    }
   }
 
   /// Decodes a response body, throwing [ApiException] on non-2xx statuses.
