@@ -34,8 +34,10 @@ and pull to refresh. Never uninstall to update.
 Releases from the Orbitly rename on are called `orbitly-<version>.apk`; older
 ones are `orbitly-<version>.apk`. The app and package id are the same, so an
 installed app simply updates. If you set an APK name filter in Obtainium, use
-`orbitly` (or clear it). The server's `/app.apk` and the admin Builds page take
-the first `.apk` of the latest release, whatever its name.
+`^orbitly-[0-9]` (or clear it). A release also carries `orbitly-wear-<version>.apk`,
+the [Wear OS watch app](user/watch.md); that file is not for phones, so do not use
+a plain `orbitly` filter. The server's `/app.apk` and the admin Builds page take
+the first `.apk` of the latest release that is not an `orbitly-wear-` file.
 
 ## Private repo
 
@@ -52,5 +54,5 @@ apksigner verify --print-certs orbitly-<version>.apk
 
 The `SHA-256 digest` of the certificate must equal the one from your keystore
 (`docs/android-release.md`). Also check the file against `SHA256SUMS.txt` from
-the release (`sha256sum -c SHA256SUMS.txt`). If the fingerprint ever differs,
+the release (`sha256sum -c SHA256SUMS.txt`); the watch app has `SHA256SUMS-wear.txt`. If the fingerprint ever differs,
 do not install. Android itself refuses an update signed with a different key.

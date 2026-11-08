@@ -580,3 +580,19 @@ func TestOverviewAndSyncIPA(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestPickAPKAssetSkipsWatchApp(t *testing.T) {
+	// The Wear OS APK is attached to the same release and must never win, whatever the order.
+	for _, order := range [][]asset{
+		{{Name: "orbitly-wear-0.25.0.apk", ID: 1}, {Name: "orbitly-0.25.0.apk", ID: 2}},
+		{{Name: "orbitly-0.25.0.apk", ID: 2}, {Name: "orbitly-wear-0.25.0.apk", ID: 1}},
+	} {
+		got, err := pickAPKAsset(order)
+		if err != nil || got.ID != 2 {
+			t.Fatalf("got %+v, %v; want the phone APK (ID 2)", got, err)
+		}
+	}
+	if _, err := pickAPKAsset([]asset{{Name: "orbitly-wear-0.25.0.apk"}}); err == nil {
+		t.Fatal("a release with only the watch APK must count as having no phone APK")
+	}
+}

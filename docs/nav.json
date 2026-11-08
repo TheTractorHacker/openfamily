@@ -32,7 +32,8 @@
         "user/sharing-links.md",
         "user/members-and-devices.md",
         "user/battery-and-permissions.md",
-        "user/when-the-server-is-down.md"
+        "user/when-the-server-is-down.md",
+        "user/watch.md"
       ],
       "icon": "users"
     },

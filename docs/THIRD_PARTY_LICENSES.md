@@ -22,6 +22,24 @@ text (MIT / BSD-style / Apache-2.0 / MPL-2.0).
 | driving_native | `app/packages/driving_native` | AGPL-3.0 (this project) | First-party plugin. |
 | Original OpenFamily | whole project | AGPL-3.0 | Continues https://github.com/wheresfrank/openfamily; see NOTICE. |
 
+## Watch bridge and Wear OS app (Gradle, `app/android/app/build.gradle.kts`, `wear/app/build.gradle.kts`)
+
+Android libraries resolved by Gradle; licenses read from each artifact's POM.
+`scripts/license-check.sh` does not parse Gradle files, so this table is kept by
+hand. The Wear OS app (`wear/`) is first-party AGPL-3.0 code.
+
+| Component | Used by | License | Notes |
+|---|---|---|---|
+| com.google.android.gms:play-services-wearable 19.0.0 | phone app, Wear OS app | Android Software Development Kit License | Google Play services client library for the Wearable Data Layer. Proprietary terms, not open source, same category as the Play services location library the phone app already uses. At run time it needs Google Play services; without them the watch bridge does nothing. |
+| androidx.wear.compose (compose-material, compose-foundation, compose-navigation) 1.7.1 | Wear OS app | Apache-2.0 | |
+| androidx.wear.tiles 1.6.2, androidx.wear.protolayout 1.4.2 | Wear OS app | Apache-2.0 | |
+| androidx.wear.watchface:watchface-complications-data-source-ktx 1.3.0 | Wear OS app | Apache-2.0 | |
+| androidx.wear:wear 1.4.0, androidx.wear:wear-remote-interactions 1.2.0 | Wear OS app | Apache-2.0 | |
+| androidx.compose (BOM 2026.09.00), androidx.activity:activity-compose, androidx.lifecycle, androidx.core:core-ktx | Wear OS app | Apache-2.0 | |
+| org.jetbrains.kotlinx:kotlinx-coroutines-play-services 1.10.2 | Wear OS app | Apache-2.0 | |
+| junit:junit 4.13.2 | Wear OS unit tests only | EPL-1.0 | Not shipped. |
+| org.json:json 20250517 | Wear OS unit tests only | Public Domain | Not shipped. |
+
 ## Backend (Go modules, `backend/go.mod`)
 
 | Module | Version | License |

@@ -87,6 +87,15 @@ Works with apps 0.20 and newer; nothing here needs an app update.
   [Glossary](glossary.md). The privacy and chat pages now say the same thing as
   the app.
 
+- **Orbitly on Wear OS watches.** A watch app for Wear OS 3 and newer (Galaxy
+  Watch 4 and later, Pixel Watch and others) shows your people, sends "I'm OK",
+  SOS (press and hold, 5 second cancel), pause sharing and quick replies, and
+  offers a tile and a watch face complication. The phone stays the only place with
+  your sign-in and Private-circle keys; Settings, Watch shows the connection.
+  Older Tizen Galaxy Watches are not supported. The release gets an extra
+  `orbitly-wear-<version>.apk` (the phone app keeps its own `orbitly-<version>.apk`).
+  See [Orbitly on your watch](user/watch.md).
+
 ## v0.24.1 (2026-11-08)
 
 - Build fix: the v0.24.0 release files were not produced because of a file-name

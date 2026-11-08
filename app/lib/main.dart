@@ -10,6 +10,7 @@ import 'screens/join_circle_screen.dart';
 import 'screens/server_config_screen.dart';
 import 'screens/sign_up_screen.dart';
 import 'screens/diagnostics_screen.dart';
+import 'services/watch/watch_bridge.dart';
 import 'services/diagnostics/diagnostics_reporter.dart';
 import 'screens/weekly_summary_screen.dart';
 import 'screens/welcome_screen.dart';
@@ -80,6 +81,8 @@ Future<void> main() async {
   MemoryPressureGuard.instance
     ..install()
     ..addTrimmer(trimReloadableMemory);
+  // Companion watch bridge: does nothing without a paired Wear OS watch.
+  unawaited(WatchBridge.instance.start());
   runApp(const OpenFamilyApp());
 }
 
