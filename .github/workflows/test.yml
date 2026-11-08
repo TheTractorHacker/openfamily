@@ -7,12 +7,68 @@ on:
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+# A newer push to the same PR or to main replaces the older run (the older
+# result is no longer interesting and the macOS queue is slow). Manual runs and
+# anything else are never cancelled.
+concurrency:
+  group: test-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.ref == 'refs/heads/main' }}
+
 jobs:
+  # Decides which jobs are needed from the files this PR or push changed. When
+  # the diff cannot be computed (first push, force push, manual run) everything
+  # runs. Skipped jobs count as passed for branch protection. Workflow changes
+  # run everything.
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      backend: ${{ steps.f.outputs.backend }}
+      flutter: ${{ steps.f.outputs.flutter }}
+      docs: ${{ steps.f.outputs.docs }}
+      ios: ${{ steps.f.outputs.ios }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 1
+      - name: Changed areas
+        id: f
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -uo pipefail
+          base=""
+          if [ "$EVENT" = pull_request ]; then base="$BASE_SHA"; fi
+          if [ "$EVENT" = push ] && [ -n "$BEFORE_SHA" ] && [ "${BEFORE_SHA#0000000}" = "$BEFORE_SHA" ]; then base="$BEFORE_SHA"; fi
+          files=""
+          if [ -n "$base" ] && git fetch --no-tags --depth=1 origin "$base" 2>/dev/null; then
+            files="$(git diff --name-only "$base" HEAD)" || files=""
+          fi
+          if [ -z "$files" ]; then
+            echo "no usable diff: running everything"
+            for k in backend flutter docs ios; do echo "$k=true" >> "$GITHUB_OUTPUT"; done
+            exit 0
+          fi
+          echo "$files"
+          has() { printf '%s\n' "$files" | grep -Eq "$1" && echo true || echo false; }
+          wf='^\.github/workflows/test\.yml$'
+          echo "backend=$(has "^backend/|^docker|^compose|$wf")" >> "$GITHUB_OUTPUT"
+          echo "flutter=$(has "^app/|^wear/|$wf")" >> "$GITHUB_OUTPUT"
+          echo "docs=$(has "^docs/|^web/|^README|^scripts/|^backend/web/|^assets/|^mkdocs|$wf")" >> "$GITHUB_OUTPUT"
+          echo "ios=$(has "^app/ios/|^app/pubspec\.(yaml|lock)$|^scripts/ios-watch-target\.py$|$wf")" >> "$GITHUB_OUTPUT"
+          cat "$GITHUB_OUTPUT"
+
   backend:
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    timeout-minutes: 30
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -36,12 +92,19 @@ jobs:
     env:
       TEST_DATABASE_URL: postgres://postgres:t@localhost:5432/t?sslmode=disable
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: '1.27.3'
+          cache-dependency-path: backend/go.sum # module + build cache restored by setup-go
       - name: Migrate test database
         run: go run ./cmd/migrate
+      # -p 1 stays: the packages share ONE database, so two test binaries at
+      # once would clobber each other's rows. -count=1 stays: DB tests must
+      # really run, not replay a cached result. Compile work is cached by
+      # setup-go; the run itself is dominated by the DB.
       - name: Test
         run: go test -p 1 -count=1 ./...
 
@@ -50,12 +113,19 @@ jobs:
   # in the server (backend/web/docs) is up to date. Also runs the admin web
   # unit tests (Markdown renderer, docs search, app-versions helpers).
   docs:
+    needs: changes
+    if: needs.changes.outputs.docs == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
       - name: Docs links, images and embedded copy
         run: scripts/docs-check.sh
       - name: Rebrand guard (no stray user-visible old product name)
@@ -66,13 +136,22 @@ jobs:
           npm ci
           npm test
 
-  flutter:
+  # Analyze once, tests in 3 shards (flutter test splits the test FILES across
+  # shards; --concurrency uses every core of the runner). The aggregate job
+  # below is still called "flutter", so a required check of that name keeps
+  # working.
+  flutter-analyze:
+    needs: changes
+    if: needs.changes.outputs.flutter == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: app
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 1
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
           channel: stable
@@ -81,9 +160,46 @@ jobs:
       - name: Dependencies
         run: flutter pub get
       - name: Analyze
-        run: flutter analyze --no-fatal-infos
-      - name: Test
-        run: flutter test
+        run: flutter analyze --no-fatal-infos --no-pub
+
+  flutter-test:
+    needs: changes
+    if: needs.changes.outputs.flutter == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 1
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          channel: stable
+          flutter-version: '3.47.0'
+          cache: true
+      - name: Dependencies
+        run: flutter pub get
+      - name: Test (shard ${{ matrix.shard }} of 3)
+        run: flutter test --no-pub --concurrency "$(nproc)" --shard-index $(( ${{ matrix.shard }} - 1 )) --total-shards 3
+
+  flutter:
+    needs: [changes, flutter-analyze, flutter-test]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: All Flutter checks passed (or were skipped as not needed)
+        env:
+          RESULTS: ${{ needs.changes.result }} ${{ needs.flutter-analyze.result }} ${{ needs.flutter-test.result }}
+        run: |
+          echo "$RESULTS"
+          case "$RESULTS" in *failure*|*cancelled*) exit 1 ;; esac
 
   # iOS parity gate. Runs the app on an iOS Simulator in CI — no Apple
   # Developer account and no signing (simulator builds need none). Keeps the
@@ -91,12 +207,17 @@ jobs:
   # (Info.plist keys, plugin registration, Swift compile errors, CocoaPods
   # integration for the vendored background_locator_2) fail at review time.
   ios:
+    needs: changes
+    if: needs.changes.outputs.ios == 'true'
     runs-on: macos-15
+    timeout-minutes: 45
     defaults:
       run:
         working-directory: app
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 1
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
           channel: stable
@@ -162,6 +283,8 @@ jobs:
   # If the watch target breaks the iPhone build, remove it with
   # `python3 scripts/ios-watch-target.py disable` (docs/design/WATCH_APPS_APPLE.md).
   watchos:
+    needs: changes
+    if: needs.changes.outputs.ios == 'true'
     runs-on: macos-15
     continue-on-error: true
     timeout-minutes: 40
@@ -169,7 +292,9 @@ jobs:
       run:
         working-directory: app
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 1
       - name: Xcode project consistency (every object id defined)
         working-directory: .
         run: python3 scripts/ios-watch-target.py check
