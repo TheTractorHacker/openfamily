@@ -197,13 +197,39 @@ func parseRepo(repo string) (owner, name string, err error) {
 	return parts[0], parts[1], nil
 }
 
+// pickAPKAsset chooses the APK that /app.apk and the admin download serve.
+// A release may carry several .apk files (a combined build plus per-ABI
+// builds, see docs/developers/performance-low-memory.md). The server cannot
+// know which phone will download, so it prefers, in order: the combined APK
+// (no ABI in its name; runs on 32-bit and 64-bit ARM), then arm64-v8a, then
+// armeabi-v7a, then any other .apk. Ties keep the order GitHub lists them.
 func pickAPKAsset(assets []asset) (asset, error) {
+	best, bestRank := asset{}, 99
 	for _, a := range assets {
-		if strings.EqualFold(filepath.Ext(a.Name), ".apk") {
-			return a, nil
+		if !strings.EqualFold(filepath.Ext(a.Name), ".apk") {
+			continue
+		}
+		if r := apkRank(a.Name); r < bestRank {
+			best, bestRank = a, r
 		}
 	}
-	return asset{}, ErrNotFound
+	if bestRank == 99 {
+		return asset{}, ErrNotFound
+	}
+	return best, nil
+}
+
+func apkRank(name string) int {
+	n := strings.ToLower(name)
+	switch {
+	case strings.Contains(n, "arm64-v8a"):
+		return 1
+	case strings.Contains(n, "armeabi-v7a"):
+		return 2
+	case strings.Contains(n, "x86"):
+		return 3
+	}
+	return 0
 }
 
 func cacheFresh(dir, dest string, assetID int64) bool {

@@ -1116,11 +1116,15 @@ class ChannelReceiver {
 /// Pulls ciphertext after a stored cursor (catch-up on app open, after a push
 /// wake-up or a socket reconnect) and runs it through a [ChannelReceiver].
 class ChannelSync {
-  ChannelSync({required this.api, required this.receiver, required this.kv});
+  ChannelSync({required this.api, required this.receiver, required this.kv, this.pageLimit = 200});
 
   final ChannelApi api;
   final ChannelReceiver receiver;
   final ChannelKv kv;
+
+  /// Items asked for per page. Smaller pages keep the peak memory of a big catch-up low
+  /// (a lite phone asks for 50); the cap of `10000` items per call is the same.
+  final int pageLimit;
 
   String _cur(String circleId) => 'cursor/$circleId';
 
@@ -1135,7 +1139,7 @@ class ChannelSync {
       {FutureOr<void> Function(ReceivedItem)? onItem,
       FutureOr<void> Function(List<ReceivedItem>)? onBatch,
       List<String>? purposes,
-      int maxPages = 50}) async {
+      int? maxPages}) async {
     assert(onItem != null || onBatch != null);
     int accepted = 0;
     final Map<ItemRejection, int> rejected = <ItemRejection, int>{};
@@ -1168,8 +1172,9 @@ class ChannelSync {
       await handle(retry, retrying: true);
     }
     int after = await cursor(circleId);
-    for (int page = 0; page < maxPages; page++) {
-      final Page p = await api.pull(circleId, after, purposes: purposes);
+    final int pages = maxPages ?? ((10000 + pageLimit - 1) ~/ pageLimit);
+    for (int page = 0; page < pages; page++) {
+      final Page p = await api.pull(circleId, after, purposes: purposes, limit: pageLimit);
       await handle(p.items, retrying: false);
       if (p.nextCursor > after) {
         after = p.nextCursor;

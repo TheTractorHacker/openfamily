@@ -22,6 +22,7 @@ import 'place_service.dart';
 import 'server_config.dart';
 import 'token_storage.dart';
 import 'widget_snapshot.dart';
+import 'perf/perf_profile.dart';
 
 /// The caller's family summary from `GET /family`.
 class FamilyInfo {
@@ -343,7 +344,7 @@ class FamilyService {
   /// status even though no `location` frame arrives for them.
   void _startStalenessTimer() {
     _stalenessTimer?.cancel();
-    _stalenessTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+    _stalenessTimer = Timer.periodic(PerfProfile.current.stalenessTick, (_) {
       if (_disposed || _members.isEmpty) return;
       final List<Member> refreshed = _members.map(refreshStaleness).toList();
       var changed = false;
