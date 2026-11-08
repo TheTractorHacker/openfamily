@@ -22,6 +22,15 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<!-- Export compliance: the app uses encryption beyond Apple's operating system
+	     (end-to-end encryption for Private circles with the Dart 'cryptography'
+	     package, standard algorithms). That is NOT automatically exempt, so we
+	     declare it honestly: true. App Store Connect then asks for the export
+	     compliance answers once per build (see docs/release/APP_STORE.md,
+	     "Export compliance"). Owner/legal: confirm, and if the conclusion is that
+	     nothing here is non-exempt, change this to false. -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<true/>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>
@@ -41,9 +50,9 @@
 	</array>
 	<!-- Location permissions (used by the background-location phase). -->
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>Orbitly tracks your location in the background so the people in your circles can see where you are.</string>
+	<string>Orbitly shares your location with the people in your circles, also while the app is closed, so they can see where you are and get arrival alerts and your SOS position. Only the members of your circles see it, and you can pause or stop sharing at any time in Orbitly.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Orbitly uses your location to show your position on the map.</string>
+	<string>Orbitly uses your location to show you on the map and, when you turn sharing on, to tell the people in your circles where you are.</string>
 	<!-- Motion & fitness (Core Motion) — requested only on supported devices. -->
 	<key>NSMotionUsageDescription</key>
 	<string>Orbitly uses motion &amp; fitness to detect when you're driving, biking, or walking.</string>
@@ -51,7 +60,7 @@
 	<key>NSCameraUsageDescription</key>
 	<string>Orbitly uses the camera to take a photo to send in circle chat.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Orbitly lets you choose a profile photo from your photo library.</string>
+	<string>Orbitly lets you choose a profile photo, or a photo to send in your circle chat, from your photo library.</string>
 	<!-- Face ID is used only when the user enables biometric app unlock. -->
 	<key>NSFaceIDUsageDescription</key>
 	<string>Orbitly uses Face ID to unlock your private location map.</string>

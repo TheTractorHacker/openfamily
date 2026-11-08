@@ -48,3 +48,6 @@ app/android/release.jks
 # scripts/dev/apk-fast.sh output
 /.local-apks/
 /app/android/.kotlin/
+
+# Store listing images and the upload bundle built by scripts/store-assets.sh
+dist/

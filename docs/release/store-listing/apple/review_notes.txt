@@ -1,0 +1,49 @@
+ORBITLY REVIEW NOTES
+
+Orbitly is a location-sharing app for a private circle of family and friends. It is
+client software for a self-hosted server, so it needs a server address to be used.
+We run a dedicated DEMO SERVER for review with made-up people and locations only
+(see docs/release/DEMO_SERVER.md for how it is built).
+
+1. Open the app. On the first screen, enter the server address:
+   DEMO_SERVER_URL_PLACEHOLDER   (HTTPS)
+2. Sign in:
+   Email:    DEMO_ACCOUNT_EMAIL_PLACEHOLDER
+   Password: DEMO_ACCOUNT_PASSWORD_PLACEHOLDER
+   (No two-step sign-in is enabled on this account.)
+3. You land in the circle "The Rivera Family" with four demo members. You can see the map,
+   places, chat, the weekly driving report and the SOS screen (SOS in the demo only
+   notifies the demo circle; no real contact or emergency service is called).
+
+BACKGROUND LOCATION (UIBackgroundModes: location)
+The app shares the user's own location with their own circle, including while the app
+is not in the foreground; that is its core function (the family map stays current).
+It is requested only after the user turns on "Share my location" and chooses "Always".
+It can be paused or turned off in the app at any time. iOS shows the blue location
+indicator. No location is used for advertising, analytics or sold to anyone; there is no
+third-party SDK.
+
+PUSH NOTIFICATIONS
+Used for circle alerts (arrival at a place, SOS, check-in) and a silent "refresh
+location" request from circle admins. Payloads never contain coordinates.
+
+ACCOUNT DELETION (guideline 5.1.1(v))
+In the app: Settings > Delete my account (confirm with password). It deletes the
+account and its data on the server.
+
+USER-GENERATED CONTENT (guideline 1.2)
+Chat exists only between members of one private circle, who are invited by a circle
+admin (people already known to each other). Circle admins can delete any message and
+remove any member; the server administrator can suspend accounts. Contact:
+SUPPORT_EMAIL_PLACEHOLDER.
+
+ENCRYPTION
+Apart from HTTPS, Private circles use standard end-to-end encryption between users.
+See the export compliance answers in App Store Connect.
+
+APPLE WATCH
+The Apple Watch app is a companion; it reads data from the paired iPhone and has no
+separate sign-in.
+
+Not a Sign in with Apple app: accounts exist only on the user's own server, no third-party
+login is offered.

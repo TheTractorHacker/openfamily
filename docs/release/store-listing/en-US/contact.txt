@@ -1,0 +1,5 @@
+Email: info@foleyit.com
+Website: https://foleyit.com
+Phone: (optional, leave blank)
+Privacy policy URL: PRIVACY_POLICY_URL_PLACEHOLDER   (must be a public page, no login: https://<your demo or marketing domain>/privacy ; every Orbitly server also serves /privacy)
+Account deletion URL: https://foleyit.com/delete-account.html   (already saved in Play Console; keep it live)

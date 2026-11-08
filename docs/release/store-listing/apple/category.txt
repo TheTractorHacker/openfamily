@@ -1,0 +1,3 @@
+Primary: Lifestyle
+Secondary (optional): Utilities
+Do not choose Kids or Family-category labels: see APP_STORE.md, age rating.

@@ -1,0 +1,1 @@
+PRIVACY_POLICY_URL_PLACEHOLDER  (required, public, no login: https://<your domain>/privacy; every Orbitly server serves /privacy)

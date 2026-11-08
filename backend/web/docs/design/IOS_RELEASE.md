@@ -145,10 +145,10 @@ Read in full. Changes made are marked **fixed**; the rest were checked and left.
   listed plugins have iOS implementations except `android_intent_plus` (guarded),
   `unifiedpush` (guarded), `google_api_availability` (guarded) and `driving_native` (Android
   only plugin, skipped by Flutter on iOS).
-* Not decided for the owner: `ITSAppUsesNonExemptEncryption`. The app uses encryption beyond
-  HTTPS (end-to-end encrypted circles), which may need an export-compliance declaration or an
-  annual report. It is deliberately **not** set in `Info.plist`; App Store Connect will ask on
-  each upload until you answer it. Take legal advice if unsure.
+* `ITSAppUsesNonExemptEncryption`: now set to `true` in `Info.plist` (the app uses end-to-end
+  encryption beyond HTTPS, which is not automatically exempt). App Store Connect therefore asks
+  the export-compliance questions for each build. The analysis and the "confirm with a lawyer"
+  advice are in [App Store submission guide](../release/APP_STORE.md#export-compliance).
 * Open risk: `Info.plist` has no `UIApplicationSceneManifest`, so the app uses the classic
   `AppDelegate` lifecycle although `SceneDelegate.swift` exists. If a future Flutter migration
   adds the scene manifest, move the two link callbacks (`open url`, `continue userActivity`) to

@@ -86,6 +86,22 @@
       "icon": "code"
     },
     {
+      "id": "release",
+      "title": "Release and stores",
+      "description": "Getting Orbitly 1.0 into Google Play and the App Store: checklists, listings, privacy answers and legal drafts.",
+      "items": [
+        "release/V1_READINESS.md",
+        "release/GOOGLE_PLAY.md",
+        "release/APP_STORE.md",
+        "release/STORE_ASSETS.md",
+        "legal/PRIVACY_POLICY.md",
+        "legal/TERMS.md",
+        "google-play-release.md",
+        "android-release.md"
+      ],
+      "icon": "rocket"
+    },
+    {
       "id": "troubleshooting",
       "title": "Troubleshooting",
       "icon": "wrench",

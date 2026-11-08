@@ -1,0 +1,23 @@
+Orbitly is a private way for family and friends to see where each other are, get arrival alerts and send an SOS, with the data on a server your own circle controls. There is no Orbitly cloud, no ads, no analytics and no selling of data.
+
+IMPORTANT: Orbitly needs an Orbitly server. Someone in your circle (or you) runs one, usually on a small home server or a rented one, and gives you its address and an invite. The app cannot be used without one. Setup guide: see the link on this page. To try the app first, use the demo server named in the "App access" notes.
+
+WHAT YOU CAN DO
+- Live map of your circle: see where each person is, how fast they are moving and their battery level.
+- Places and alerts: get a notification when someone arrives at or leaves home, school or work.
+- SOS and "I'm OK": one tap tells your whole circle where you are. Orbitly does not call emergency services; call your local emergency number first in an emergency.
+- Check-ins: tell your circle "I got here safe" with a note.
+- Circle chat with photos.
+- Driving reports: weekly trips and safe-driving summary. Optional crash detection asks "Are you OK?" and alerts your circle if you do not answer.
+- Wear OS watch app: see your people, send "I'm OK" or SOS from your wrist (needs the phone).
+
+PRIVACY BY DESIGN
+- Your data lives on the server of your own circle, not with the app developer.
+- Private circles are end-to-end encrypted: locations, places, alerts and chat are locked on your phone and opened only on your circle's phones.
+- You choose what to share, can pause sharing at any time, and can download or delete your data in the app.
+- Connections use HTTPS only.
+
+LOCATION IN THE BACKGROUND
+To keep your circle's map up to date, Orbitly uses your location while the app is closed, but only after you turn on sharing and allow "all the time" location. Android shows a permanent notification while it does. You can stop at any time from the app or in Android settings.
+
+Open source. Made for families who want to keep each other safe without handing their lives to a company.

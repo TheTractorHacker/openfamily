@@ -298,6 +298,10 @@ func main() {
 	r.Get("/integrations/ha/v1/places", srv.HAPlaces)
 	r.Get("/integrations/ha/v1/events", srv.HAEvents)
 	// Public invite landing page: static, no database access, no secrets.
+	// Public privacy policy and terms (docs/legal/, embedded): store reviewers and
+	// new members read them without an account. Static, no database access.
+	r.Get("/privacy", srv.LegalPrivacy)
+	r.Get("/terms", srv.LegalTerms)
 	r.Get("/join/{code}", srv.JoinLanding)
 	// What an invite holder may know about the circle's privacy setup before joining
 	// (public, per-IP rate limited, generic 404).

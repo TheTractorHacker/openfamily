@@ -1,0 +1,23 @@
+Orbitly is a private way for family and friends to see where each other are, get arrival alerts and send an SOS. Your data lives on a server your own circle controls. There is no Orbitly cloud, no advertising, no analytics and no tracking.
+
+IMPORTANT: Orbitly needs an Orbitly server. Someone in your circle (or you) runs one and gives you its address and an invite. To try the app first, the review notes name a demo server.
+
+WHAT YOU CAN DO
+- Live map: see where each person in your circle is, how they are moving and their battery level.
+- Places and alerts: get a notification when someone arrives at or leaves home, school or work.
+- SOS and "I'm OK": one tap tells your whole circle where you are. Orbitly does not call emergency services. In an emergency call your local emergency number first.
+- Check-ins: let your circle know you arrived safely.
+- Circle chat with photos.
+- Weekly trips and driving report, computed from location.
+- Apple Watch app: see your people, send "I'm OK" or SOS and send quick replies from your wrist (needs the iPhone).
+
+PRIVACY BY DESIGN
+- Your information is stored on the server of your own circle, not with the app developer.
+- Private circles are end-to-end encrypted: locations, places, alerts and chat are locked on your iPhone and opened only on your circle's phones.
+- You decide what to share, can pause sharing at any time, and can download or delete your data inside the app.
+- Connections use HTTPS only.
+
+LOCATION IN THE BACKGROUND
+To keep your circle's map current while the app is closed, Orbitly uses your location in the background, only after you turn on sharing and choose "Always". iOS shows a blue indicator while it does. You can change this at any time in Settings.
+
+Open source software for families who want to keep each other safe without handing their lives to a company.
