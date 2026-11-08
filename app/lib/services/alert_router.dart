@@ -40,6 +40,12 @@ class AlertRouter with WidgetsBindingObserver {
     _shown.clear();
   }
 
+  /// Like [show], but first asks the phone's own memory of what was acknowledged (it survives restarts).
+  Future<bool> showIfOpen(AlertSummary s) async {
+    if (await AckedAlerts.has(s.id)) return false;
+    return show(s);
+  }
+
   void _onFrame(Map<String, dynamic> f) {
     final String? self = AlertEvents.selfUserId;
     if (self == null || f['user_id'] == self) return;
@@ -53,14 +59,16 @@ class AlertRouter with WidgetsBindingObserver {
       'note': f['note'],
       'created_at': at is String ? at : DateTime.now().toIso8601String(),
     });
-    show(s);
+    unawaited(showIfOpen(s));
   }
 
-  /// Pushes the recipient screen once per alert id.
+  /// Pushes the recipient screen once per alert id. An alert this person already acknowledged never opens again
+  /// (see [showIfOpen] for the paths that cannot know that synchronously).
   bool show(AlertSummary s) {
-    if (s.id.isEmpty || !_shown.add(s.id)) return false;
+    if (s.id.isEmpty || s.acknowledgedAt != null || _shown.contains(s.id)) return false;
     final NavigatorState? nav = navigatorKey.currentState;
-    if (nav == null) return false;
+    if (nav == null) return false; // not remembered: it can still be shown once the app has a screen
+    _shown.add(s.id);
     nav.push(MaterialPageRoute<void>(
       builder: (_) => AlertReceivedScreen(alert: s, service: service),
     ));
@@ -73,7 +81,7 @@ class AlertRouter with WidgetsBindingObserver {
     if (id.isEmpty) return checkActive();
     try {
       final AlertDetail d = await service.detail(id);
-      if (!show(d.summary)) return;
+      if (!await showIfOpen(d.summary)) return;
     } catch (_) {
       await checkActive();
     }
@@ -97,7 +105,9 @@ class AlertRouter with WidgetsBindingObserver {
         if (a.isActive &&
             a.userId != self &&
             a.createdAt.isAfter(cutoff) &&
-            !_shown.contains(a.id)) {
+            a.acknowledgedAt == null &&
+            !_shown.contains(a.id) &&
+            !await AckedAlerts.has(a.id)) {
           show(a);
           break;
         }

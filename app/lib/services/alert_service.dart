@@ -3,6 +3,7 @@ import 'dart:ui' show PlatformDispatcher;
 
 import 'package:android_intent_plus/android_intent.dart';
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/alert.dart';
 import 'api_client.dart';
@@ -22,11 +23,47 @@ class AlertService {
   /// Idempotent: repeating it returns the original acknowledgement time.
   Future<DateTime?> acknowledge(String id) async {
     final Map<String, dynamic> r = await ApiClient.ackAlert(id);
+    // Remembered on this phone for good: the pop-up for this alert never comes back, even after a restart,
+    // even if the list call fails or the alert is still open for others.
+    await AckedAlerts.add(id);
     final Object? at = r['acknowledged_at'];
     return at is String ? DateTime.tryParse(at)?.toLocal() : null;
   }
 
   Future<void> revokeShare(String id) => ApiClient.revokeAlertShare(id);
+}
+
+/// The alerts this phone's owner already acknowledged (kept across restarts, newest 200).
+class AckedAlerts {
+  AckedAlerts._();
+  static const String _key = 'acked_alert_ids_v1';
+  static Set<String>? _mem;
+
+  static Future<Set<String>> all() async {
+    final Set<String>? m = _mem;
+    if (m != null) return m;
+    try {
+      final SharedPreferences p = await SharedPreferences.getInstance();
+      return _mem = (p.getStringList(_key) ?? const <String>[]).toSet();
+    } catch (_) {
+      return _mem = <String>{};
+    }
+  }
+
+  static Future<bool> has(String id) async => (await all()).contains(id);
+
+  static Future<void> add(String id) async {
+    final Set<String> s = await all();
+    if (!s.add(id)) return;
+    try {
+      final SharedPreferences p = await SharedPreferences.getInstance();
+      final List<String> l = s.toList();
+      await p.setStringList(_key, l.length > 200 ? l.sublist(l.length - 200) : l);
+    } catch (_) {}
+  }
+
+  @visibleForTesting
+  static void resetMemory() => _mem = null;
 }
 
 /// Friendly text for a failed alert call. Never blames the user for a
