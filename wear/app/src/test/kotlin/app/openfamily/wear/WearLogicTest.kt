@@ -220,3 +220,24 @@ class CommandsTest {
         assertEquals(setOf("ok", "omw", "late", "call", "thanks"), ids.toSet())
     }
 }
+
+class SessionGateTest {
+    @Test fun otherSessionWipesStoredData() {
+        assertTrue(app.openfamily.wear.logic.SessionGate.mustWipe("old", "new"))
+    }
+
+    @Test fun sameOrUnknownSessionKeepsData() {
+        val g = app.openfamily.wear.logic.SessionGate
+        assertFalse(g.mustWipe("a", "a"))
+        assertFalse(g.mustWipe(null, "a")) // nothing stored yet
+        assertFalse(g.mustWipe("a", null)) // phone without session support
+        assertFalse(g.mustWipe(null, null))
+    }
+
+    @Test fun rememberedSessionOnlyChangesWhenAnnounced() {
+        val g = app.openfamily.wear.logic.SessionGate
+        assertEquals("b", g.next("a", "b"))
+        assertEquals("a", g.next("a", null))
+        assertNull(g.next(null, null))
+    }
+}

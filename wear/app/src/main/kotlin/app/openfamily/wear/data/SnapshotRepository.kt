@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.wear.tiles.TileService
 import androidx.wear.watchface.complications.datasource.ComplicationDataSourceUpdateRequester
 import android.content.ComponentName
+import app.openfamily.wear.logic.SessionGate
 import app.openfamily.wear.tile.CircleTileService
 import app.openfamily.wear.tile.NearestComplicationService
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -18,6 +19,7 @@ import kotlinx.coroutines.flow.asStateFlow
 object SnapshotRepository {
     private const val PREFS = "orbitly_snapshot"
     private const val KEY = "json"
+    private const val KEY_SESSION = "session"
 
     private val _snapshot = MutableStateFlow<Snapshot?>(null)
     val snapshot: StateFlow<Snapshot?> = _snapshot.asStateFlow()
@@ -33,9 +35,17 @@ object SnapshotRepository {
     }
 
     /** Called by the Data Layer service and by the activity's initial read. */
-    fun accept(context: Context, json: String) {
+    fun accept(context: Context, json: String, session: String? = null) {
         val parsed = Snapshot.parse(json) ?: return
         val app = context.applicationContext
+        val prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        // Another login than the stored data's: it is the previous user's, drop it first.
+        if (SessionGate.mustWipe(prefs.getString(KEY_SESSION, null), session)) {
+            prefs.edit().remove(KEY).apply()
+            _snapshot.value = null
+            _external.value = null
+        }
+        SessionGate.next(prefs.getString(KEY_SESSION, null), session)?.let { prefs.edit().putString(KEY_SESSION, it).apply() }
         // A signed-out phone sends an empty snapshot: forget everything on this watch too.
         if (!parsed.signedIn) {
             app.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().remove(KEY).apply()
@@ -49,7 +59,7 @@ object SnapshotRepository {
 
     fun clear(context: Context) {
         val app = context.applicationContext
-        app.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().remove(KEY).apply()
+        app.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().remove(KEY).remove(KEY_SESSION).apply()
         _snapshot.value = null
         refreshSurfaces(app)
     }

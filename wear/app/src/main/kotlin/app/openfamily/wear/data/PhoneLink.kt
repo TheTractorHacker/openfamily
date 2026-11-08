@@ -21,7 +21,8 @@ class PhoneLink(context: Context) {
                 for (item in items) {
                     if (item.uri.path == Commands.SNAPSHOT_PATH) {
                         found = true
-                        DataMapItem.fromDataItem(item).dataMap.getString("json")?.let { SnapshotRepository.accept(app, it) }
+                        val map = DataMapItem.fromDataItem(item).dataMap
+                        map.getString("json")?.let { SnapshotRepository.accept(app, it, map.getString("session")) }
                     }
                 }
             } finally {

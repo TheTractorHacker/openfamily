@@ -42,7 +42,7 @@ class WatchListenerService : WearableListenerService() {
 
     /** A sign-out clear that could not reach the watch earlier is delivered as soon as one connects. */
     private fun payClearDebt() {
-        if (WatchBridgePlugin.clearPending(this)) WatchBridgePlugin.deleteSnapshot(this) {}
+        if (WatchBridgePlugin.clearPending(this)) WatchBridgePlugin.payClearDebt(this, announce = !WatchBridgePlugin.appRunning()) {}
     }
 
     override fun onPeerDisconnected(peer: Node) {

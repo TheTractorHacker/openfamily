@@ -258,6 +258,7 @@ class ServiceWatchContextSource implements WatchContextSource {
                 id: a.id,
                 kind: switch (a.kind) { AlertKind.sos => 'sos', AlertKind.help => 'help', _ => 'check_in' },
                 from: a.senderName,
+                fromId: a.userId,
                 at: a.createdAt,
                 note: a.note,
               ),
@@ -423,8 +424,11 @@ class WatchBridge {
   Future<void> signedIn() async {
     if (!_supported) return;
     _signedIn = true;
-    if (_clearPending) await _setPending(false);
+    // Native first: it starts a NEW session and tries to deliver any undelivered wipe
+    // (the previous user's data on the watch is dropped by the session change). Only then
+    // does the Dart gate open.
     await _transport.allowPublish();
+    if (_clearPending) await _setPending(false);
     if (_started) await publish(force: true);
   }
 
@@ -438,8 +442,8 @@ class WatchBridge {
       await _setPending(true);
       await _deliverClear();
     } else {
-      if (_clearPending) await _setPending(false);
       await _transport.allowPublish();
+      if (_clearPending) await _setPending(false);
       await publish(force: true);
     }
   }
