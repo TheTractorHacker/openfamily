@@ -204,12 +204,9 @@ class _MapScreenState extends State<MapScreen>
   /// the point currently shown in the visible middle).
   LatLng _aboveSheet(LatLng target, double zoom, {bool undo = false}) {
     if (!mounted) return target;
-    final Size size = MediaQuery.sizeOf(context);
+    final Size size = _bodySize();
     // Two-pane (tablet) layouts have no sheet over the map.
-    if (size.width >= 720 ||
-        (size.width > size.height * 1.2 && size.width >= 560)) {
-      return target;
-    }
+    if (LocationTabView.isTwoPaneSize(size)) return target;
     final double textScale =
         MediaQuery.textScalerOf(context).scale(1).clamp(1.0, 2.0);
     final double inset = (236 * textScale).clamp(0.0, size.height * 0.5);
@@ -821,14 +818,20 @@ class _MapScreenState extends State<MapScreen>
     _expandedClusters.retainAll(validIds);
   }
 
+  /// The size the layout switch looks at: this tab's own body. With the
+  /// navigation rail beside it that is narrower than the window.
+  Size _bodySize() {
+    final RenderObject? ro = context.findRenderObject();
+    return ro is RenderBox && ro.hasSize
+        ? ro.size
+        : MediaQuery.sizeOf(context);
+  }
+
   /// Height of the bottom sheet's resting peek over the map (0 on tablets).
   double _bottomInset() {
     if (!mounted) return 0;
-    final Size size = MediaQuery.sizeOf(context);
-    if (size.width >= 720 ||
-        (size.width > size.height * 1.2 && size.width >= 560)) {
-      return 0;
-    }
+    final Size size = _bodySize();
+    if (LocationTabView.isTwoPaneSize(size)) return 0;
     final double textScale =
         MediaQuery.textScalerOf(context).scale(1).clamp(1.0, 2.0);
     return (236 * textScale).clamp(0.0, size.height * 0.5);

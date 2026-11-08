@@ -516,8 +516,11 @@ class _LocationTabViewState extends State<LocationTabView> {
   /// Wide or landscape bodies show the map beside a fixed People / Places
   /// panel instead of a bottom sheet that would cover most of the map.
   static bool isTwoPane(BoxConstraints box) =>
-      box.maxWidth >= 720 ||
-      (box.maxWidth > box.maxHeight * 1.2 && box.maxWidth >= 560);
+      isTwoPaneSize(Size(box.maxWidth, box.maxHeight));
+
+  /// Same rule for a plain size (the map screen asks it for the camera offset).
+  static bool isTwoPaneSize(Size s) =>
+      s.width >= 720 || (s.width > s.height * 1.2 && s.width >= 560);
 
   final ScrollController _panelScroll = ScrollController();
 
