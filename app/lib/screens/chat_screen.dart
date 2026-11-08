@@ -795,7 +795,7 @@ class _Bubble extends StatelessWidget {
         child: Container(
         margin: const EdgeInsets.symmetric(vertical: 2),
         constraints:
-            BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.78),
+            BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.78),
         padding: const EdgeInsets.symmetric(
             horizontal: AppSpace.md, vertical: AppSpace.sm),
         decoration: BoxDecoration(

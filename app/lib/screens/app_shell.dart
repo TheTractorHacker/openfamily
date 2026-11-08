@@ -124,6 +124,12 @@ class _AppShellState extends State<AppShell> {
   /// means switching tabs no longer rebuilds all visited tabs, map included.
   final Map<AppTab, Widget> _bodies = <AppTab, Widget>{};
 
+  /// The banners plus tabs. It is moved (not rebuilt) between the phone layout
+  /// and the rail layout, so folding or unfolding the phone, rotating it or
+  /// resizing a multi-window pane never recreates the map, its camera, the
+  /// live connection or any tab's state.
+  final GlobalKey _stackKey = GlobalKey(debugLabel: 'shell-stack');
+
   @override
   void didUpdateWidget(AppShell old) {
     super.didUpdateWidget(old);
@@ -192,7 +198,9 @@ class _AppShellState extends State<AppShell> {
     );
     // The update banner sits above the tabs; when it shows it already covers
     // the status-bar inset, so the tabs below drop their top padding.
-    final Widget stack = Column(
+    final Widget stack = KeyedSubtree(
+      key: _stackKey,
+      child: Column(
       children: <Widget>[
         const UpdateBanner(),
         const DeliveryBanner(),
@@ -214,7 +222,7 @@ class _AppShellState extends State<AppShell> {
           ),
         ),
       ],
-    );
+    ));
     return PopScope(
       canPop: _tab == AppTab.location,
       onPopInvokedWithResult: (bool didPop, Object? _) {

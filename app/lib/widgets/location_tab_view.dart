@@ -164,6 +164,11 @@ class _LocationTabViewState extends State<LocationTabView> {
 
   final DraggableScrollableController _sheet = DraggableScrollableController();
 
+  /// The map is moved (not recreated) between the bottom-sheet layout and the
+  /// two-pane layout, so unfolding the phone keeps the camera, zoom and tiles.
+  final GlobalKey _mapKey = GlobalKey(debugLabel: 'location-map');
+  Widget get _map => KeyedSubtree(key: _mapKey, child: widget.map);
+
   // A solo circle has nothing to look at but the invite card, so the sheet
   // opens to half height once (never again, so the user's own dragging wins).
   bool _soloOpened = false;
@@ -464,7 +469,7 @@ class _LocationTabViewState extends State<LocationTabView> {
           final double peek = (minSize * textScale).clamp(minSize, math.max(minSize, 0.38));
           return Stack(
             children: <Widget>[
-              Positioned.fill(child: widget.map),
+              Positioned.fill(child: _map),
               _buildTop(context),
               _buildFloating(context, h, peek),
               _buildSpeedChip(context, h, peek),
@@ -525,7 +530,7 @@ class _LocationTabViewState extends State<LocationTabView> {
         Expanded(
           child: Stack(
             children: <Widget>[
-              Positioned.fill(child: widget.map),
+              Positioned.fill(child: _map),
               _buildTop(context),
               if (_selectedId == null)
                 Positioned(
