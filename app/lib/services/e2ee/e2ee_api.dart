@@ -27,6 +27,11 @@ abstract class E2eeApi {
   /// key that was registered before the capability existed.
   Future<void> putCaps(String deviceId, List<String> caps) async {}
 
+  /// POST .../e2ee/owner-approval: the circle's owner-approval rule (signed
+  /// key-log action 12). Older servers do not have it.
+  Future<void> setOwnerApproval(String circleId, Map<String, dynamic> body) async =>
+      throw UnsupportedError('owner approval is not available on this server');
+
   // Trusted-server mode. Defaults keep older fakes (and servers without the
   // mode) working: the mode simply reports as off.
   Future<ServerMemberState> serverMemberState(String circleId) async => ServerMemberState.off;
@@ -148,6 +153,10 @@ class ApiE2eeApi implements E2eeApi {
       ApiClient.post('/circles/$circleId/e2ee/approvals', body: body);
 
   @override
+  Future<void> setOwnerApproval(String circleId, Map<String, dynamic> body) =>
+      ApiClient.post('/circles/$circleId/e2ee/owner-approval', body: body);
+
+  @override
   Future<ServerMemberState> serverMemberState(String circleId) async => ServerMemberState.fromJson(
       (await ApiClient.get('/circles/$circleId/e2ee/server-member')) as Map<String, dynamic>);
 
@@ -221,7 +230,8 @@ class ApiE2eeApi implements E2eeApi {
 
   @override
   Future<({List<LogEntry> entries, LogHead head})> log(int after) async {
-    final Map<String, dynamic> r = (await ApiClient.get('/e2ee/log', query: <String, String>{'after': '$after'})) as Map<String, dynamic>;
+    // owner_approval=1: this app understands action 12 (older apps get it redacted).
+    final Map<String, dynamic> r = (await ApiClient.get('/e2ee/log', query: <String, String>{'after': '$after', 'owner_approval': '1'})) as Map<String, dynamic>;
     final Map<String, dynamic> h = r['head'] as Map<String, dynamic>;
     final String hash = (h['hash'] as String?) ?? '';
     return (

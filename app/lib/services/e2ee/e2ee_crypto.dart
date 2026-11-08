@@ -53,6 +53,9 @@ class E2ee {
   // Processing lanes (docs/design/PRIVACY_PROCESSING.md section 5.3).
   static const int actProcessingPref = 10;
   static const int actProcessingPolicy = 11;
+  // Owner approval (docs/design/E2EE.md "Owner approval"): the circle's
+  // "owner may approve their own replacement device" rule switched on/off.
+  static const int actOwnerApproval = 12;
 
   // Argon2id parameters for the optional recovery passphrase.
   static const int argon2MemKiB = 32 * 1024;
@@ -300,13 +303,22 @@ class E2ee {
       checkId(id);
     }
     final Bytes r = ref ?? Uint8List(32);
-    if (r.length != 32 || action < actRegister || action > actProcessingPolicy) {
+    if (r.length != 32 || action < actRegister || action > actOwnerApproval) {
       throw const E2eeFormatException('bad log action');
     }
     return cat(<Bytes>[
       _dom('OFE2EE1-LOGACT'), <int>[action], _ascii(userId), _ascii(actorId),
       _ascii(c), _ascii(s), u32(epoch), r,
     ]);
+  }
+
+  /// The `ref` of an owner-approval log entry (action 12):
+  /// SHA-256("OFE2EE4-OWNER-APPROVAL\0" || circle(36) || admin_user(36) || on(1)).
+  /// The signed log entry is the whole statement; a phone tries on and off.
+  static Future<Uint8List> ownerApprovalRef(String circleId, String adminUserId, bool on) {
+    checkId(circleId);
+    checkId(adminUserId);
+    return sha256(cat(<Bytes>[_dom('OFE2EE4-OWNER-APPROVAL'), _ascii(circleId), _ascii(adminUserId), <int>[on ? 1 : 0]]));
   }
 
   /// HKDF-SHA256(circle_key, salt = circle_id || epoch(4 BE),

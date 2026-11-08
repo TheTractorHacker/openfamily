@@ -14,10 +14,13 @@ import 'security_widgets.dart';
 /// Safety number with one person, the local "Verified" state and a key-change
 /// warning. Verification is stored only on this phone.
 class MemberSafetyScreen extends StatefulWidget {
-  const MemberSafetyScreen({super.key, required this.userId, required this.name, this.service});
+  const MemberSafetyScreen({super.key, required this.userId, required this.name, this.service, this.ownerApprovedDeviceIds = const <String>{}});
   final String userId;
   final String name;
   final E2eeService? service;
+
+  /// Keys the circle reports as approved by their owner without a second admin.
+  final Set<String> ownerApprovedDeviceIds;
 
   @override
   State<MemberSafetyScreen> createState() => _MemberSafetyScreenState();
@@ -27,6 +30,7 @@ class _MemberSafetyScreenState extends State<MemberSafetyScreen> {
   E2eeService get _svc => widget.service ?? E2eeApp.service;
   String? _number;
   List<DeviceKey> _theirs = <DeviceKey>[];
+  Set<String> _ownerApproved = <String>{};
   TrustAssessment? _trust;
   String? _error;
   bool _loading = true;
@@ -52,8 +56,10 @@ class _MemberSafetyScreenState extends State<MemberSafetyScreen> {
     });
     try {
       final r = await _svc.safetyWith(widget.userId);
+      final Set<String> owner = <String>{...widget.ownerApprovedDeviceIds, ...(await _svc.trust.ownerApprovedKeys()).keys};
       if (!mounted) return;
       setState(() {
+        _ownerApproved = owner;
         _number = r.number;
         _theirs = r.theirs;
         _trust = r.trust;
@@ -170,7 +176,9 @@ class _MemberSafetyScreenState extends State<MemberSafetyScreen> {
                         padding: const EdgeInsets.only(top: AppSpace.xs),
                         child: Text(
                           '${k.isRecovery ? 'Recovery phrase' : 'Device'}  ${k.short}  since ${formatDate(k.createdAt)}'
-                          '${k.isRoot ? '' : '  (added by another of their keys)'}',
+                          '${k.isRoot ? '' : '  (added by another of their keys)'}'
+                          '${_ownerApproved.contains(k.deviceId) ? '\nApproved by the owner without a second admin' : ''}',
+                          key: Key('key-${k.deviceId}'),
                           style: AppType.secondary,
                         ),
                       ),

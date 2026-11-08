@@ -13,8 +13,25 @@ renewed so a removed person's phone cannot read anything new.
 Ask them to sign in on the new phone. For a Private circle the new phone must
 be approved by one of their other devices, or recovered with their recovery key.
 Remove the old phone from **Settings, Security, Active sessions**.
+If they had neither (they chose **Set this phone up again**), a circle admin
+approves the new phone in **Encryption keys**, after comparing safety numbers.
 
 ![Security: sessions, password, two-step sign-in](../images/app/security.png)
+
+## Owner approval (when you are the only admin)
+
+If you created a Private circle, are its only admin and set your own phone up
+again, nobody else can approve it. The circle screen in **Encryption keys**
+then offers two ways out: make another member an admin (**Members**), or turn
+on **Owner approval** for that circle and tap **Approve as owner**. Both steps
+ask for your password (and your two-step code if you use one). Everyone in the
+circle is told, and your key is shown as "approved by the owner without a
+second admin".
+
+This trades a little security for recoverability: someone who steals your
+password (and two-step code) could do the same with a phone of their own. Keep
+it off unless you need it, keep your recovery phrase (restoring with it needs no
+approval), and make a second member an admin. Any admin can turn it off again.
 
 ## Lost or stolen phone
 

@@ -137,6 +137,9 @@ class _KeyLogScreenState extends State<KeyLogScreen> {
                 style: AppType.body.copyWith(fontWeight: FontWeight.w800, color: c.ok ? const Color(0xFF16A34A) : AppColors.sosRed),
               ),
             ),
+            // What the new entries mean (owner approvals, resets, new keys).
+            for (final E2eeAlarm a in _result!.alarms.where((E2eeAlarm a) => a.kind != AlarmKind.logProblem && a.seq != null))
+              Padding(padding: const EdgeInsets.only(top: AppSpace.md), child: AlarmBanner(alarm: a)),
           ],
           const DsSectionHeader('Compare with another member', padding: EdgeInsets.fromLTRB(0, AppSpace.xl, 0, AppSpace.xs)),
           const Text(

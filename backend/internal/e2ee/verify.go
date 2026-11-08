@@ -238,7 +238,7 @@ func (e LogEntry) verifyFull(prev []byte) LogCheck {
 	pub, err1 := b64(*e.ActorPub)
 	sig, err2 := b64(*e.Signature)
 	ref, err3 := hex.DecodeString(*e.Ref)
-	if errors.Join(err1, err2, err3) != nil || *e.Action < int(ActRegister) || *e.Action > int(ActProcessingPolicy) {
+	if errors.Join(err1, err2, err3) != nil || *e.Action < int(ActRegister) || *e.Action > int(ActOwnerApproval) {
 		return LogCheck{Problem: LogMalformed, Detail: fmt.Sprintf("entry %d is malformed", e.Seq)}
 	}
 	circle, subject, epoch := "", "", 0

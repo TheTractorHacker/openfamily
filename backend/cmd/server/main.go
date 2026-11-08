@@ -442,6 +442,7 @@ func main() {
 		r.Post("/circles/{id}/e2ee/epoch", srv.E2EEBumpEpoch)
 		r.Post("/circles/{id}/e2ee/disable", srv.E2EEDisable)
 		r.Post("/circles/{id}/e2ee/approvals", srv.E2EEApproveDevice)
+		r.Post("/circles/{id}/e2ee/owner-approval", srv.E2EESetOwnerApproval)
 		// Phase 2: the encrypted channel (ciphertext only).
 		r.Get("/circles/{id}/e2ee/items", srv.E2EEListItems)
 		r.Delete("/circles/{id}/e2ee/items", srv.E2EEEraseItems)

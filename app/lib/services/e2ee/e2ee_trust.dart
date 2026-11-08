@@ -131,6 +131,107 @@ class TrustStore {
   Future<void> expectInviter(String circleId, String fingerprintHex) =>
       kv.set('invite:$circleId', fingerprintHex);
   Future<String?> expectedInviter(String circleId) => kv.get('invite:$circleId');
+
+  // ---- owner approval (docs/design/E2EE.md "Owner approval")
+
+  /// The circle's owner-approval rule as this phone last verified it from the
+  /// signed key log, or null when it never saw an entry.
+  Future<OwnerPolicy?> ownerPolicy(String circleId) async {
+    final String? raw = await kv.get('owner_policy:$circleId');
+    if (raw == null) return null;
+    try {
+      return OwnerPolicy.fromJson(jsonDecode(raw) as Map<String, dynamic>);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> setOwnerPolicy(String circleId, OwnerPolicy p) => kv.set('owner_policy:$circleId', jsonEncode(p.toJson()));
+
+  /// Keys this phone saw approved by their own owner under the rule (device id
+  /// -> circle id). Shown as "approved by the owner without a second admin".
+  Future<Map<String, String>> ownerApprovedKeys() async {
+    final String? raw = await kv.get('owner_approved');
+    if (raw == null) return <String, String>{};
+    try {
+      return (jsonDecode(raw) as Map<String, dynamic>).cast<String, String>();
+    } catch (_) {
+      return <String, String>{};
+    }
+  }
+
+  Future<void> markOwnerApproved(String deviceId, String circleId) async {
+    final Map<String, String> m = await ownerApprovedKeys();
+    m[deviceId] = circleId;
+    await kv.set('owner_approved', jsonEncode(m));
+  }
+}
+
+/// The owner-approval rule of one circle, from a verified log entry.
+class OwnerPolicy {
+  const OwnerPolicy({required this.on, required this.byUserId, required this.seq});
+  final bool on;
+  final String byUserId;
+  final int seq;
+
+  Map<String, dynamic> toJson() => <String, dynamic>{'on': on, 'by': byUserId, 'seq': seq};
+  factory OwnerPolicy.fromJson(Map<String, dynamic> j) =>
+      OwnerPolicy(on: j['on'] == true, byUserId: j['by'] as String, seq: (j['seq'] as num).toInt());
+}
+
+/// Who may do what in a circle, as the server reports it (roles are not signed).
+class CircleRoles {
+  const CircleRoles({this.creatorId, this.adminIds = const <String>{}});
+  final String? creatorId;
+  final Set<String> adminIds;
+}
+
+/// Reads an owner-approval log entry (action 12): the rule it sets, when it is
+/// well formed AND signed by someone allowed to set it. Turning it ON is valid
+/// only from the circle's creator who is also an admin; any admin may turn it
+/// OFF. Returns null for an entry that sets nothing valid. The entry's own
+/// signature is checked by [verifyLogSlice].
+Future<OwnerPolicy?> readOwnerPolicyEntry(LogEntry e, CircleRoles? roles) async {
+  if (e.redacted || e.action != E2ee.actOwnerApproval || e.circleId == null || e.userId == null || e.ref == null) return null;
+  if (roles == null || !roles.adminIds.contains(e.userId)) return null;
+  try {
+    if (E2ee.constEq(e.ref!, await E2ee.ownerApprovalRef(e.circleId!, e.userId!, true))) {
+      if (roles.creatorId == null || roles.creatorId != e.userId) return null;
+      return OwnerPolicy(on: true, byUserId: e.userId!, seq: e.seq);
+    }
+    if (E2ee.constEq(e.ref!, await E2ee.ownerApprovalRef(e.circleId!, e.userId!, false))) {
+      return OwnerPolicy(on: false, byUserId: e.userId!, seq: e.seq);
+    }
+  } catch (_) {}
+  return null;
+}
+
+enum ApprovalKind {
+  /// Approved by another person's admin key: the normal rule.
+  byOtherAdmin,
+
+  /// Approved by the key's own owner while that circle's owner-approval rule,
+  /// set by the same person as creator and admin, was on.
+  byOwnerWithoutSecondAdmin,
+
+  /// A self-approval that no verified rule allows: the server should never
+  /// have accepted it.
+  invalidSelfApproval,
+}
+
+/// Classifies an approval log entry (action 9). [subjectOwner] is the user the
+/// approved device belongs to; [policy] is the circle's owner-approval rule in
+/// effect just before this entry (from earlier verified entries).
+ApprovalKind classifyApproval(LogEntry e, {required String? subjectOwner, required OwnerPolicy? policy, required CircleRoles? roles}) {
+  if (subjectOwner == null || subjectOwner != e.userId) return ApprovalKind.byOtherAdmin;
+  final bool ok = policy != null &&
+      policy.on &&
+      policy.seq < e.seq &&
+      policy.byUserId == e.userId &&
+      roles != null &&
+      roles.creatorId == e.userId &&
+      roles.adminIds.contains(e.userId);
+  return ok ? ApprovalKind.byOwnerWithoutSecondAdmin : ApprovalKind.invalidSelfApproval;
 }
 
 // --------------------------------------------------------------------------
@@ -318,7 +419,24 @@ Future<LogCheck> verifyLogSlice({
 // --------------------------------------------------------------------------
 // Alarms
 
-enum AlarmKind { verifiedKeyChanged, keyChanged, userReset, epochByUnverified, logProblem, inviterMismatch, serverKeyIsCircleKey }
+enum AlarmKind {
+  verifiedKeyChanged,
+  keyChanged,
+  userReset,
+  epochByUnverified,
+  logProblem,
+  inviterMismatch,
+  serverKeyIsCircleKey,
+
+  /// The circle owner approved their own new key under the owner-approval rule.
+  ownerApproved,
+
+  /// The owner-approval rule of a circle was switched.
+  ownerApprovalPolicy,
+
+  /// Someone approved their own key and no verified rule allows it.
+  invalidSelfApproval,
+}
 
 class E2eeAlarm {
   const E2eeAlarm(this.kind, this.title, this.body, {this.userId, this.circleId, this.seq});
@@ -332,22 +450,85 @@ class E2eeAlarm {
       kind == AlarmKind.serverKeyIsCircleKey ||
       kind == AlarmKind.verifiedKeyChanged ||
       kind == AlarmKind.logProblem ||
-      kind == AlarmKind.inviterMismatch;
+      kind == AlarmKind.inviterMismatch ||
+      kind == AlarmKind.invalidSelfApproval;
 }
 
 /// Alarms from NEW visible log entries: a member resetting all their keys, and
 /// a circle epoch published by someone this phone never verified (a verified
 /// admin is the only comfortable source of a new key).
+///
+/// Owner approval: [circleRoles] (creator and admins per circle) and
+/// [deviceOwners] (device id -> user id) let it check self-approvals. A rule
+/// change and every owner approval become notices; a self-approval without a
+/// verified rule is a severe alarm. [policyFallback] fetches and verifies the
+/// circle's latest rule entry when this phone never saw one (it may have been
+/// redacted for an older app version).
 Future<List<E2eeAlarm>> alarmsFromLog({
   required List<LogEntry> events,
   required String selfUserId,
   required TrustStore trust,
   required Map<String, String> userNames,
   required Map<String, String> circleNames,
+  Map<String, CircleRoles> circleRoles = const <String, CircleRoles>{},
+  Map<String, String> deviceOwners = const <String, String>{},
+  Future<OwnerPolicy?> Function(String circleId)? policyFallback,
 }) async {
   final List<E2eeAlarm> out = <E2eeAlarm>[];
+  final Map<String, String> owners = Map<String, String>.of(deviceOwners);
   for (final LogEntry e in events) {
     final String who = userNames[e.userId] ?? 'A member';
+    if (e.subjectId != null && e.userId != null &&
+        (e.action == E2ee.actRegister || e.action == E2ee.actRotate || e.action == E2ee.actRecovery || e.action == E2ee.actReset)) {
+      owners[e.subjectId!] = e.userId!;
+    }
+    if (e.action == E2ee.actOwnerApproval && e.circleId != null) {
+      // Roles unknown (the circle state could not be loaded): nothing to check against yet.
+      if (circleRoles[e.circleId] == null) continue;
+      final String c = circleNames[e.circleId] ?? 'a circle';
+      final OwnerPolicy? p = await readOwnerPolicyEntry(e, circleRoles[e.circleId]);
+      if (p == null) {
+        out.add(E2eeAlarm(AlarmKind.invalidSelfApproval, 'Owner approval changed by someone not allowed to',
+            'The key log of $c has an owner-approval change by $who that this circle\'s roles do not allow. Phones will not accept owner approvals based on it.',
+            userId: e.userId, circleId: e.circleId, seq: e.seq));
+        continue;
+      }
+      await trust.setOwnerPolicy(e.circleId!, p);
+      if (e.userId != selfUserId) {
+        out.add(E2eeAlarm(AlarmKind.ownerApprovalPolicy, p.on ? 'Owner approval turned on in $c' : 'Owner approval turned off in $c',
+            p.on
+                ? '$who, who created $c, can now approve their own new phone without a second admin. You will be told when that happens.'
+                : 'A new phone of the owner of $c needs a second admin again.',
+            userId: e.userId, circleId: e.circleId, seq: e.seq));
+      }
+      continue;
+    }
+    if (e.action == E2ee.actApprove && e.circleId != null && e.subjectId != null) {
+      final String? owner = owners[e.subjectId];
+      if (owner != null && owner == e.userId && circleRoles[e.circleId] != null) {
+        OwnerPolicy? policy = await trust.ownerPolicy(e.circleId!);
+        if (policy == null && policyFallback != null) {
+          policy = await policyFallback(e.circleId!);
+          if (policy != null) await trust.setOwnerPolicy(e.circleId!, policy);
+        }
+        final String c = circleNames[e.circleId] ?? 'a circle';
+        switch (classifyApproval(e, subjectOwner: owner, policy: policy, roles: circleRoles[e.circleId])) {
+          case ApprovalKind.byOwnerWithoutSecondAdmin:
+            await trust.markOwnerApproved(e.subjectId!, e.circleId!);
+            if (e.userId != selfUserId) {
+              out.add(E2eeAlarm(AlarmKind.ownerApproved, '$who approved their own new phone',
+                  '$who set up a new phone and approved it in $c as the circle owner, without a second admin. If you did not expect this, compare your safety number with $who in person.',
+                  userId: e.userId, circleId: e.circleId, seq: e.seq));
+            }
+          case ApprovalKind.invalidSelfApproval:
+            out.add(E2eeAlarm(AlarmKind.invalidSelfApproval, '$who approved their own key without permission',
+                'The key log of $c shows $who approving their own key, but owner approval is not on for $c (or $who did not create it). Do not trust new messages from $who until you compare your safety number in person.',
+                userId: e.userId, circleId: e.circleId, seq: e.seq));
+          case ApprovalKind.byOtherAdmin:
+            break;
+        }
+      }
+    }
     if (e.action == E2ee.actReset && e.userId != selfUserId) {
       final bool ver = await trust.isVerified(e.userId!);
       out.add(E2eeAlarm(

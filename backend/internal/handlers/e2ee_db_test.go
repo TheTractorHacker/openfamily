@@ -88,6 +88,7 @@ func newE2EEEnv(t *testing.T) *circleEnv {
 	e.route("POST", "/circles/{id}/e2ee/epoch", e.srv.E2EEBumpEpoch)
 	e.route("POST", "/circles/{id}/e2ee/disable", e.srv.E2EEDisable)
 	e.route("POST", "/circles/{id}/e2ee/approvals", e.srv.E2EEApproveDevice)
+	e.route("POST", "/circles/{id}/e2ee/owner-approval", e.srv.E2EESetOwnerApproval)
 	e.route("GET", "/e2ee/log", e.srv.E2EELog)
 	return e
 }

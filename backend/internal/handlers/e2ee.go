@@ -65,6 +65,9 @@ type e2eeDeviceOut struct {
 	// Approved is set only where a circle is in context (circle state, pending
 	// queue): whether wraps may be issued to this device in that circle.
 	Approved *bool `json:"approved,omitempty"`
+	// OwnerApproved (circle state only) marks a device its owner approved
+	// under the circle's owner-approval rule, without a second admin.
+	OwnerApproved *bool `json:"owner_approved,omitempty"`
 }
 
 const e2eeDeviceCols = `d.device_id::text, d.user_id::text, d.kind, d.ed25519_pub, d.x25519_pub, d.fingerprint, d.signature,
@@ -689,8 +692,11 @@ func (s *Server) E2EECircleState(w http.ResponseWriter, r *http.Request) {
 	var epoch int
 	var rekey bool
 	var updated *time.Time
-	if err := s.Pool.QueryRow(ctx, `SELECT e2ee_mode, e2ee_epoch, e2ee_rekey_required, e2ee_updated_at FROM circles WHERE id = $1`,
-		m.CircleID).Scan(&mode, &epoch, &rekey, &updated); err != nil {
+	var createdBy *string
+	var ownerApproval bool
+	var ownerApprovalSeq *int64
+	if err := s.Pool.QueryRow(ctx, `SELECT e2ee_mode, e2ee_epoch, e2ee_rekey_required, e2ee_updated_at, created_by::text, owner_approval, owner_approval_seq FROM circles WHERE id = $1`,
+		m.CircleID).Scan(&mode, &epoch, &rekey, &updated, &createdBy, &ownerApproval, &ownerApprovalSeq); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load circle")
 		return
 	}
@@ -716,7 +722,8 @@ func (s *Server) E2EECircleState(w http.ResponseWriter, r *http.Request) {
 	}
 	rows.Close()
 	drows, err := s.Pool.Query(ctx, `
-		SELECT `+e2eeDeviceCols+`, `+e2eeApprovedExpr("$1")+`
+		SELECT `+e2eeDeviceCols+`, `+e2eeApprovedExpr("$1")+`,
+		       EXISTS (SELECT 1 FROM device_approvals a WHERE a.device_id = d.device_id AND a.circle_id = $1 AND a.self_approved)
 		FROM live_circle_members cm
 		JOIN device_keys d ON d.user_id = cm.user_id AND d.revoked_at IS NULL
 		WHERE cm.circle_id = $1 ORDER BY d.created_at`, m.CircleID)
@@ -726,13 +733,16 @@ func (s *Server) E2EECircleState(w http.ResponseWriter, r *http.Request) {
 	}
 	defer drows.Close()
 	for drows.Next() {
-		var approved bool
-		d, err := scanE2EEDevice(drows, &approved)
+		var approved, selfApproved bool
+		d, err := scanE2EEDevice(drows, &approved, &selfApproved)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to load members")
 			return
 		}
 		d.Approved = &approved
+		if selfApproved {
+			d.OwnerApproved = &selfApproved
+		}
 		if mo := byID[d.UserID]; mo != nil {
 			mo.Devices = append(mo.Devices, d)
 		}
@@ -763,6 +773,9 @@ func (s *Server) E2EECircleState(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"circle_id": m.CircleID, "mode": mode, "epoch": epoch, "rekey_required": rekey,
 		"updated_at": updated, "members": members, "epochs": epochs,
+		// Owner approval (e2ee_owner_approval.go). Phones trust the signed log
+		// entries, not these fields; they drive the screens.
+		"created_by": createdBy, "owner_approval": ownerApproval, "owner_approval_seq": ownerApprovalSeq,
 	})
 }
 
@@ -1154,12 +1167,16 @@ func (s *Server) E2EEDisable(w http.ResponseWriter, r *http.Request) {
 type approveReq struct {
 	DeviceID string `json:"device_id"`
 	signedAction
+	// Password / TOTPCode re-authenticate an owner approving their own device.
+	stepUpFields
 }
 
 // E2EEApproveDevice records a circle admin's approval of a replacement device
 // (one that is neither its user's first key nor cross-signed by an earlier key
 // of that user) for THIS circle. The admin signs the approval after comparing
-// the safety number out of band. The approver must be another user's admin key.
+// the safety number out of band. The approver must be another user's admin key,
+// except under the circle's owner-approval rule (e2ee_owner_approval.go): the
+// circle's creator may approve their own device after re-entering the password.
 func (s *Server) E2EEApproveDevice(w http.ResponseWriter, r *http.Request) {
 	uid, m, ok := s.requireCircleAdmin(w, r)
 	if !ok {
@@ -1191,8 +1208,8 @@ func (s *Server) E2EEApproveDevice(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "device not found in this circle")
 		return
 	}
-	if subjUser == uid {
-		writeError(w, http.StatusForbidden, "another circle admin must approve your own device")
+	self := subjUser == uid
+	if self && !s.checkSelfApproval(w, r, tx, uid, m.CircleID, req.stepUpFields) {
 		return
 	}
 	fpRaw, _ := hex.DecodeString(fp)
@@ -1201,8 +1218,8 @@ func (s *Server) E2EEApproveDevice(w http.ResponseWriter, r *http.Request) {
 	}
 	pub, _ := activeKeyPub(ctx, tx, uid, req.ActorDeviceID)
 	sig, _ := b64d(req.LogSignature, e2ee.SigLen)
-	if _, err := tx.Exec(ctx, `INSERT INTO device_approvals (device_id, circle_id, approver_user_id, approver_device_id, approver_pub, signature)
-		VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING`, req.DeviceID, m.CircleID, uid, req.ActorDeviceID, pub, sig); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO device_approvals (device_id, circle_id, approver_user_id, approver_device_id, approver_pub, signature, self_approved)
+		VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING`, req.DeviceID, m.CircleID, uid, req.ActorDeviceID, pub, sig, self); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to approve")
 		return
 	}
@@ -1210,8 +1227,14 @@ func (s *Server) E2EEApproveDevice(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to approve")
 		return
 	}
-	s.auditCircle(ctx, uid, m.CircleID, "e2ee.device_approved", "device "+req.DeviceID+" of user "+subjUser, clientIP(r))
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	if self {
+		s.auditCircle(ctx, uid, m.CircleID, "e2ee.device_self_approved", "owner approved own device "+req.DeviceID+" without a second admin", clientIP(r))
+		s.notifyCircleOthers(ctx, uid, m.CircleID, "New phone approved by the owner",
+			"The owner of %s approved their own new phone without a second admin. If you did not expect this, compare safety numbers with them.")
+	} else {
+		s.auditCircle(ctx, uid, m.CircleID, "e2ee.device_approved", "device "+req.DeviceID+" of user "+subjUser, clientIP(r))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "self_approved": self})
 }
 
 type wrapOut struct {
@@ -1372,6 +1395,10 @@ func (s *Server) E2EELog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	after, _ := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
+	// Owner-approval entries (action 12) are shown only to apps that say they
+	// understand them; older apps (and bridges) reject unknown action codes, so
+	// they get the entry redacted: the hash chain stays checkable.
+	ownerOK := r.URL.Query().Get("owner_approval") == "1"
 	if after < 0 {
 		after = 0
 	}
@@ -1430,6 +1457,9 @@ func (s *Server) E2EELog(w http.ResponseWriter, r *http.Request) {
 		// hash-chain fields are returned: no ids, circle, subject or epoch.
 		show := visible[user]
 		if show && circle != nil && !mine[*circle] {
+			show = false
+		}
+		if show && action == int(e2ee.ActOwnerApproval) && !ownerOK {
 			show = false
 		}
 		if show && action == int(e2ee.ActApprove) && subject != nil {

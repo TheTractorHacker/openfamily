@@ -26,6 +26,7 @@ class DeviceKey {
     this.approved,
     this.userName,
     this.caps = const <String>[],
+    this.ownerApproved = false,
   });
 
   final String deviceId;
@@ -53,6 +54,11 @@ class DeviceKey {
   /// Circle context only: false means "waiting for approval".
   final bool? approved;
   final String? userName;
+
+  /// Circle context only, as the server reports it: approved by its owner under
+  /// the circle's owner-approval rule, without a second admin. Phones confirm
+  /// it from the signed key log (see e2ee_trust.dart, owner approval).
+  final bool ownerApproved;
 
   /// Capabilities the app advertised at registration (e.g. `lanes2`). Self
   /// reported by that key's owner and relayed by the server: it gates whether
@@ -87,6 +93,7 @@ class DeviceKey {
             : null,
         revokedReason: j['revoked_reason'] as String?,
         approved: j['approved'] as bool?,
+        ownerApproved: j['owner_approved'] == true,
         userName: j['user_name'] as String?,
         caps: j['caps'] is List ? (j['caps'] as List<dynamic>).whereType<String>().toList() : const <String>[],
       );
@@ -151,8 +158,24 @@ class CircleE2eeState {
     required this.rekeyRequired,
     required this.members,
     this.epochs = const <EpochRecord>[],
+    this.createdBy,
+    this.ownerApproval = false,
+    this.ownerApprovalSeq,
   });
   final List<EpochRecord> epochs;
+
+  /// The user who created the circle (older servers: null).
+  final String? createdBy;
+
+  /// The circle's owner-approval rule is on (server view; the signed log entry
+  /// is what phones trust).
+  final bool ownerApproval;
+
+  /// Key-log seq of the latest owner-approval entry of this circle, if any.
+  final int? ownerApprovalSeq;
+
+  /// Live admins of the circle.
+  Iterable<String> get adminIds => members.where((CircleE2eeMember m) => m.role == 'admin').map((CircleE2eeMember m) => m.userId);
   final String circleId;
   final String mode;
   final int epoch;
@@ -178,6 +201,9 @@ class CircleE2eeState {
         mode: j['mode'] as String? ?? 'off',
         epoch: (j['epoch'] as num?)?.toInt() ?? 0,
         rekeyRequired: j['rekey_required'] == true,
+        createdBy: j['created_by'] as String?,
+        ownerApproval: j['owner_approval'] == true,
+        ownerApprovalSeq: (j['owner_approval_seq'] as num?)?.toInt(),
         epochs: ((j['epochs'] as List<dynamic>?) ?? <dynamic>[])
             .cast<Map<String, dynamic>>()
             .map(EpochRecord.fromJson)

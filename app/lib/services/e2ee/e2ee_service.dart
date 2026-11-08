@@ -1008,8 +1008,10 @@ class E2eeService {
       api.purgeServerCopies(circleId, wholeCircle: wholeCircle);
 
   /// Circle admin: approves a replacement key for THIS circle after comparing
-  /// its safety number out of band. Logged in the transparency log.
-  Future<void> approveDevice(String circleId, DeviceKey key) async {
+  /// its safety number out of band. Logged in the transparency log. An owner
+  /// approving their OWN key (owner-approval rule on) also sends [password]
+  /// (and [totpCode] when 2FA is on): the server re-authenticates them.
+  Future<void> approveDevice(String circleId, DeviceKey key, {String? password, String? totpCode}) async {
     final LocalIdentity me = await requireIdentity();
     final Uint8List msg = E2ee.logActionMessage(E2ee.actApprove, me.userId, me.deviceId,
         circleId: circleId, subjectId: key.deviceId, ref: E2ee.unhex(key.fingerprint));
@@ -1017,7 +1019,39 @@ class E2eeService {
       'device_id': key.deviceId,
       'actor_device_id': me.deviceId,
       'log_signature': E2ee.b64(await E2ee.sign(me.edSeed, msg)),
+      if (password != null) 'password': password,
+      if (totpCode != null && totpCode.isNotEmpty) 'totp_code': totpCode,
     });
+  }
+
+  /// Switches the circle's owner-approval rule (docs/design/E2EE.md "Owner
+  /// approval"). ON: circle creator only, with [password] (and [totpCode] when
+  /// 2FA is on). OFF: any circle admin. Signed by this phone (log action 12).
+  Future<void> setOwnerApproval(String circleId, bool on, {String? password, String? totpCode}) async {
+    final LocalIdentity me = await requireIdentity();
+    final Uint8List ref = await E2ee.ownerApprovalRef(circleId, me.userId, on);
+    final Uint8List msg = E2ee.logActionMessage(E2ee.actOwnerApproval, me.userId, me.deviceId, circleId: circleId, ref: ref);
+    await api.setOwnerApproval(circleId, <String, dynamic>{
+      'enabled': on,
+      'actor_device_id': me.deviceId,
+      'log_signature': E2ee.b64(await E2ee.sign(me.edSeed, msg)),
+      if (password != null) 'password': password,
+      if (totpCode != null && totpCode.isNotEmpty) 'totp_code': totpCode,
+    });
+  }
+
+  /// What this phone may do about its OWN key waiting for approval in a circle.
+  static OwnKeyApproval ownKeyApproval(CircleE2eeState st, String myUserId) {
+    final bool admin = st.adminIds.contains(myUserId);
+    final bool creator = st.createdBy != null && st.createdBy == myUserId;
+    final List<String> otherAdmins = <String>[
+      for (final CircleE2eeMember m in st.members)
+        if (m.role == 'admin' && m.userId != myUserId) m.name
+    ];
+    if (admin && creator && st.ownerApproval) return OwnKeyApproval(OwnKeyAction.approveAsOwner, otherAdmins);
+    if (otherAdmins.isNotEmpty) return OwnKeyApproval(OwnKeyAction.askOtherAdmin, otherAdmins);
+    if (admin && creator) return OwnKeyApproval(OwnKeyAction.soleAdminCanEnable, otherAdmins);
+    return OwnKeyApproval(admin ? OwnKeyAction.soleAdmin : OwnKeyAction.askOtherAdmin, otherAdmins);
   }
 
   Future<void> revokeKey(DeviceKey key) async {
@@ -1229,12 +1263,57 @@ class E2eeService {
     if (!check.ok) {
       return LogSync(check, <E2eeAlarm>[E2eeAlarm(AlarmKind.logProblem, 'Key log verification FAILED', check.detail)], r.head);
     }
+    // Owner approval: roles and device owners of the circles whose approvals or
+    // rule changes are in this slice (current roles, as the server reports them).
+    final Map<String, CircleRoles> roles = <String, CircleRoles>{};
+    final Map<String, String> owners = <String, String>{};
+    final Map<String, CircleE2eeState> states = <String, CircleE2eeState>{};
+    for (final LogEntry e in check.events) {
+      if ((e.action != E2ee.actApprove && e.action != E2ee.actOwnerApproval) || e.circleId == null || states.containsKey(e.circleId)) continue;
+      try {
+        final CircleE2eeState st = await api.circleState(e.circleId!);
+        states[e.circleId!] = st;
+        roles[e.circleId!] = CircleRoles(creatorId: st.createdBy, adminIds: st.adminIds.toSet());
+        for (final DeviceKey d in st.allDevices) {
+          owners[d.deviceId] = d.userId;
+        }
+      } catch (_) {}
+    }
     final List<E2eeAlarm> alarms = <E2eeAlarm>[
-      if (me != null) ...await alarmsFromLog(events: check.events, selfUserId: me.userId, trust: trust, userNames: userNames, circleNames: circleNames),
+      if (me != null)
+        ...await alarmsFromLog(
+            events: check.events,
+            selfUserId: me.userId,
+            trust: trust,
+            userNames: userNames,
+            circleNames: circleNames,
+            circleRoles: roles,
+            deviceOwners: owners,
+            policyFallback: (String c) => _latestOwnerPolicy(states[c], roles[c])),
       ...await laneAlarmList(),
     ];
     if (check.newHead != null && check.newHead!.seq > 0) await trust.pinHead(check.newHead!);
     return LogSync(check, alarms, check.newHead);
+  }
+
+  /// The circle's latest owner-approval entry, fetched by its seq and checked
+  /// (signature, entry hash, signer allowed). For a phone that never saw it,
+  /// for example because an older app version was served it redacted.
+  Future<OwnerPolicy?> _latestOwnerPolicy(CircleE2eeState? st, CircleRoles? roles) async {
+    final int? seq = st?.ownerApprovalSeq;
+    if (st == null || seq == null || seq < 1) return null;
+    try {
+      final r = await api.log(seq - 1);
+      for (final LogEntry e in r.entries) {
+        if (e.seq != seq || e.redacted || e.circleId != st.circleId) continue;
+        final Uint8List msg = E2ee.logActionMessage(e.action!, e.userId!, e.actorDeviceId!,
+            circleId: e.circleId, subjectId: e.subjectId, epoch: e.epoch ?? 0, ref: e.ref);
+        if (!await E2ee.verify(e.actorPub!, msg, e.signature!)) return null;
+        if (!E2ee.constEq(await E2ee.logEntryHash(e.prevHash, e.seq, msg, e.signature!), e.entryHash)) return null;
+        return readOwnerPolicyEntry(e, roles);
+      }
+    } catch (_) {}
+    return null;
   }
 
   /// Compares a head someone read out to me ("seq:hash") with my pinned chain:
@@ -1247,6 +1326,27 @@ class E2eeService {
     }
     return null;
   }
+}
+
+/// What to offer for this phone's own key that waits for approval in a circle.
+enum OwnKeyAction {
+  /// Owner approval is on and I created the circle: approve it myself.
+  approveAsOwner,
+
+  /// Another admin can approve it.
+  askOtherAdmin,
+
+  /// I am the only admin and the creator: make someone an admin or turn on owner approval.
+  soleAdminCanEnable,
+
+  /// I am the only admin but not the creator: make someone an admin.
+  soleAdmin,
+}
+
+class OwnKeyApproval {
+  const OwnKeyApproval(this.action, this.otherAdminNames);
+  final OwnKeyAction action;
+  final List<String> otherAdminNames;
 }
 
 class LinkApproval {

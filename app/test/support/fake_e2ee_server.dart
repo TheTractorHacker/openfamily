@@ -101,10 +101,19 @@ class FakeE2eeServer {
 }
 
 class FakeCircle {
-  FakeCircle(this.id, this.members, this.admin);
+  FakeCircle(this.id, this.members, this.admin) : creator = admin;
   final String id;
   final List<String> members;
   final String admin;
+
+  // ---- owner approval (docs/design/E2EE.md "Owner approval")
+  String? creator;
+  bool ownerApproval = false;
+  int? ownerApprovalSeq;
+  final Set<String> selfApprovals = <String>{};
+
+  /// The password the fake accepts for step-up.
+  static const String password = 'pw';
   String mode = 'off';
   int epoch = 0;
   bool rekey = false;
@@ -293,22 +302,23 @@ class FakeE2eeClient implements E2eeApi {
     if (!c.members.contains(uid)) throw StateError('404');
     return CircleE2eeState(
       circleId: circleId, mode: c.mode, epoch: c.epoch, rekeyRequired: c.rekey,
+      createdBy: c.creator, ownerApproval: c.ownerApproval, ownerApprovalSeq: c.ownerApprovalSeq,
       epochs: c.epochRecords.values.toList(),
       members: <CircleE2eeMember>[
         for (final String m in c.members)
           CircleE2eeMember(userId: m, name: s.names[m] ?? m, role: m == c.admin ? 'admin' : (s.childUsers.contains(m) ? 'child' : 'member'), devices: <DeviceKey>[
-            for (final DeviceKey d in s.activeOf(m)) _withApproval(d, s.approved(d, circleId), s.names[m])
+            for (final DeviceKey d in s.activeOf(m)) _withApproval(d, s.approved(d, circleId), s.names[m], owner: c.selfApprovals.contains(d.deviceId))
           ])
       ],
     );
   }
 
-  DeviceKey _withApproval(DeviceKey d, bool ok, String? name) => DeviceKey(
+  DeviceKey _withApproval(DeviceKey d, bool ok, String? name, {bool owner = false}) => DeviceKey(
         deviceId: d.deviceId, userId: d.userId, kind: d.kind, edPub: d.edPub, xPub: d.xPub,
         fingerprint: d.fingerprint, digits: d.digits, short: d.short, registeredByDeviceId: d.registeredByDeviceId,
         registeredByPub: d.registeredByPub, registrationAction: d.registrationAction,
         registrationSignature: d.registrationSignature, initial: d.initial, label: d.label,
-        createdAt: d.createdAt, approved: ok, userName: name, caps: d.caps);
+        createdAt: d.createdAt, approved: ok, userName: name, caps: d.caps, ownerApproved: owner);
 
   @override
   Future<List<WrapRecord>> myWraps(String circleId, String deviceId) async {
@@ -404,7 +414,11 @@ class FakeE2eeClient implements E2eeApi {
     final FakeCircle c = s.circles[circleId]!;
     if (c.admin != uid) throw StateError('403');
     final DeviceKey d = s.findActive(body['device_id'] as String)!;
-    if (d.userId == uid) throw StateError('403 self');
+    final bool self = d.userId == uid;
+    if (self && !(c.creator == uid && c.ownerApproval)) {
+      throw StateError("You're the only admin. Make another member an admin so they can approve this phone, or turn on owner approval for this circle.");
+    }
+    if (self && body['password'] != FakeCircle.password) throw StateError('400 password is incorrect');
     final DeviceKey a = s.findActive(body['actor_device_id'] as String)!;
     final Uint8List sig = E2ee.unb64(body['log_signature']);
     final Uint8List fp = E2ee.unhex(d.fingerprint);
@@ -413,6 +427,26 @@ class FakeE2eeClient implements E2eeApi {
     }
     await s.appendLog(E2ee.actApprove, uid, a.deviceId, a.edPub, circleId: circleId, subjectId: d.deviceId, ref: fp, sig: sig);
     c.approvals.add(d.deviceId);
+    if (self) c.selfApprovals.add(d.deviceId);
+  }
+
+  @override
+  Future<void> setOwnerApproval(String circleId, Map<String, dynamic> body) async {
+    final FakeCircle c = s.circles[circleId]!;
+    if (c.admin != uid) throw StateError('403');
+    final bool on = body['enabled'] as bool;
+    if (on && c.creator != uid) throw StateError('403 creator only');
+    if (on && body['password'] != FakeCircle.password) throw StateError('400 password is incorrect');
+    final DeviceKey a = s.findActive(body['actor_device_id'] as String)!;
+    if (a.userId != uid) throw StateError('400 actor');
+    final Uint8List ref = await E2ee.ownerApprovalRef(circleId, uid, on);
+    final Uint8List sig = E2ee.unb64(body['log_signature']);
+    if (!await E2ee.verify(a.edPub, E2ee.logActionMessage(E2ee.actOwnerApproval, uid, a.deviceId, circleId: circleId, ref: ref), sig)) {
+      throw StateError('bad policy signature');
+    }
+    await s.appendLog(E2ee.actOwnerApproval, uid, a.deviceId, a.edPub, circleId: circleId, ref: ref, sig: sig);
+    c.ownerApproval = on;
+    c.ownerApprovalSeq = s.log.length;
   }
 
   // ------------------------------------------------------ processing lanes

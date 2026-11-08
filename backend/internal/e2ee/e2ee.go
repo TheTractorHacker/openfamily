@@ -72,6 +72,7 @@ const (
 	domMsgKey       = "OFE2EE1-MSG-KEY\x00"
 	domMsgAAD       = "OFE2EE1-MSG-AAD\x00"
 	domUserDigest   = "OFE2EE1-USER\x00"
+	domOwnerApprove = "OFE2EE4-OWNER-APPROVAL\x00"
 	digitGroups     = 12
 	digitsPerGroup  = 5
 	fingerprintSize = sha256.Size
@@ -317,7 +318,12 @@ const (
 	// the log entry's ref is the SHA-256 of that statement.
 	ActProcessingPref   byte = 10 // a member's own lane choice (also the per-member server consent)
 	ActProcessingPolicy byte = 11 // circle admin: server assistance on/off, default, SK generation + commitment
-	zeroUUID                 = "00000000-0000-0000-0000-000000000000"
+	// ActOwnerApproval switches the circle's "owner may approve their own
+	// replacement device" policy (docs/design/E2EE.md "Owner approval"). The
+	// ref is OwnerApprovalRef(circle, user, on). Served only to apps that ask
+	// for it (GET /e2ee/log?owner_approval=1); older apps see it redacted.
+	ActOwnerApproval byte = 12
+	zeroUUID              = "00000000-0000-0000-0000-000000000000"
 )
 
 // LogActionMessage is signed by the ACTING device's Ed25519 key for every
@@ -345,7 +351,7 @@ func LogActionMessage(action byte, userID, actorDeviceID, circleID, subjectID st
 	if ref == nil {
 		ref = make([]byte, 32)
 	}
-	if len(ref) != 32 || action < ActRegister || action > ActProcessingPolicy {
+	if len(ref) != 32 || action < ActRegister || action > ActOwnerApproval {
 		return nil, ErrBadBlob
 	}
 	m := append([]byte(domLogAct), action)
@@ -369,6 +375,30 @@ func VerifyLogAction(actorEdPub []byte, action byte, userID, actorDeviceID, circ
 		return ErrBadSig
 	}
 	return nil
+}
+
+// OwnerApprovalRef is the 32-byte `ref` of an ActOwnerApproval log entry:
+//
+//	SHA-256("OFE2EE4-OWNER-APPROVAL\0" || circle(36) || admin_user(36) || on(1: 0 off, 1 on))
+//
+// The log entry (signed by the admin's key) is the whole statement: a phone
+// recomputes the ref for on and for off and learns which one was signed.
+func OwnerApprovalRef(circleID, adminUserID string, on bool) ([]byte, error) {
+	for _, id := range []string{circleID, adminUserID} {
+		if err := CheckID(id); err != nil {
+			return nil, err
+		}
+	}
+	b := byte(0)
+	if on {
+		b = 1
+	}
+	h := sha256.New()
+	h.Write([]byte(domOwnerApprove))
+	h.Write([]byte(circleID))
+	h.Write([]byte(adminUserID))
+	h.Write([]byte{b})
+	return h.Sum(nil), nil
 }
 
 // GenesisHash is the prev hash of log entry 1.

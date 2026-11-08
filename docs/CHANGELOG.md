@@ -12,8 +12,9 @@ the phones afterwards.
 
 ## Unreleased
 
-Nothing yet. The owner moves these notes under a version heading when a
-release is tagged.
+The owner moves these notes under a version heading when a release is tagged.
+
+- **Owner approval for a new phone in a Private circle.** A circle's creator who is its only admin can now approve their own replacement phone after "Set this phone up again", once they turn on **Owner approval** for that circle (off by default, needs the password; members are told each time and the key is marked "approved by the owner without a second admin"). It trades a little security for recoverability: keep your recovery phrase and add a second admin. The "Waiting for approval" card now says what to do and offers Approve as owner, Members or Turn on owner approval. Needs this app version and server; older apps keep working and see an ordinary approval.
 
 ## v0.26.2 (2026-11-08)
 
