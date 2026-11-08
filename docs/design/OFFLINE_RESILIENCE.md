@@ -1,8 +1,6 @@
 # Offline resilience: what Orbitly does when the server is down
 
-Status: the cache, the store-and-forward queues, the reachability probe and the status chip are **implemented and unit tested**;
-nothing here has been run on a real phone or a real flaky network (see section 9). The fallback relay (section 5b) is **not built**
-and the reasons are written down below.
+Status: the cache, the store-and-forward queues, the reachability probe and the status chip are **implemented and unit tested**; nothing here has been run on a real phone or a real flaky network (see section 9). The fallback relay (section 5b) is **not built** and the reasons are written down below.
 
 Owner request: *"If a server ever goes offline, the app is still functional, because no matter if it is end-to-end encryption or not,
 we want people to be able to see one another. We can have it stored locally on their phones, and once it is ready, it can push out to their server."*
