@@ -84,6 +84,7 @@ void main() {
       await t.tap(find.text('Older sessions (2)'));
       await t.pumpAndSettle();
       expect(find.byKey(const Key('session-c')), findsOneWidget);
+      await t.dragUntilVisible(find.text('Log out everywhere'), find.byType(ListView).first, const Offset(0, -300));
       expect(find.text('Sign out other sessions'), findsOneWidget);
       expect(find.text('Log out everywhere'), findsOneWidget);
       expect(t.takeException(), isNull);
@@ -122,7 +123,7 @@ void main() {
       await t.pumpWidget(_wrap(const SettingsScreen(), scale: 1.5));
       await t.pump(const Duration(milliseconds: 300));
       for (final String h in <String>['Account', 'Sharing & privacy', 'Notifications', 'Driving & safety', 'Server & data', 'Phone health', 'About']) {
-        expect(find.text(h), findsOneWidget, reason: h);
+        expect(find.text(h.toUpperCase()), findsOneWidget, reason: h);
       }
       expectShortSubtitles(t);
       expect(t.takeException(), isNull);
@@ -131,7 +132,7 @@ void main() {
       await t.pump();
       expect(find.text('Driving detection'), findsOneWidget);
       expect(find.text('Profile'), findsNothing);
-      expect(find.text('Account'), findsNothing);
+      expect(find.text('ACCOUNT'), findsNothing);
     });
   });
 }

@@ -97,19 +97,27 @@ void main() {
     await t.pump(const Duration(milliseconds: 100));
   }
 
+  Future<void> expandAdvanced(WidgetTester t) async {
+    await t.ensureVisible(find.byKey(const Key('keys-advanced')));
+    await t.tap(find.byKey(const Key('keys-advanced')));
+    await t.pump(const Duration(milliseconds: 400));
+  }
+
   group('Encryption keys screen', () {
     testWidgets('shows fingerprint, key storage level and the honest consistency note after Check server record: MATCH', (t) async {
       tall(t);
       await setup(t);
       await open(t);
       expect(find.text('Encryption keys'), findsOneWidget);
+      expect(find.text('Your keys are safe on this phone'), findsOneWidget);
+      await expandAdvanced(t);
       expect(find.byKey(const Key('keystore-level')), findsOneWidget);
       expect(find.textContaining('StrongBox'), findsOneWidget);
       final LocalIdentity id = (await t.runAsync<LocalIdentity?>(() => alice.identity()))!;
       expect(find.textContaining('Short form: ${id.short}'), findsOneWidget);
       expect(find.text('Copy fingerprint'), findsOneWidget);
 
-      await t.tap(find.text('Check server record'));
+      t.widget<DsPillButton>(find.widgetWithText(DsPillButton, 'Check my keys with the server')).onPressed!();
       await t.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 200)));
       await t.pump();
       expect(find.byKey(const Key('server-record-card')), findsOneWidget);
@@ -131,7 +139,8 @@ void main() {
             registeredByDeviceId: real.registeredByDeviceId, registeredByPub: real.registeredByPub,
             registrationAction: 1, registrationSignature: real.registrationSignature, initial: true, label: '', createdAt: real.createdAt);
       });
-      await t.tap(find.text('Check server record'));
+      await expandAdvanced(t);
+      t.widget<DsPillButton>(find.widgetWithText(DsPillButton, 'Check my keys with the server')).onPressed!();
       await t.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 200)));
       await t.pump();
       expect(textOfKey(t, 'server-record-verdict'), 'MISMATCH');
@@ -144,17 +153,17 @@ void main() {
       await setup(t, aliceRegistered: false);
       await open(t);
       expect(find.text('Create keys on this phone'), findsOneWidget);
-      expect(find.text('Check server record'), findsNothing);
+      expect(find.text('Check my keys with the server'), findsNothing);
     });
 
     testWidgets('circles show Normal by default (OFF) and Private after enabling', (t) async {
       tall(t);
       await setup(t);
       await open(t);
-      expect(find.textContaining('Normal - not end-to-end encrypted'), findsOneWidget);
+      expect(find.text('Normal circle'), findsWidgets);
       await t.runAsync(() => alice.enableCircle(circleId));
       await open(t);
-      expect(find.textContaining('Private - end-to-end key epoch 1'), findsOneWidget);
+      expect(find.text('Private'), findsWidgets);
     });
 
     testWidgets('a verified member whose key changed raises a loud banner', (t) async {
@@ -191,7 +200,7 @@ void main() {
   });
 
   group('Private circle toggle in circle settings', () {
-    Finder toggle() => find.widgetWithText(DsToggleRow, 'Private circle (end-to-end encrypted)');
+    Finder toggle() => find.widgetWithText(DsToggleRow, 'Private circle');
 
     Future<void> openDetail(WidgetTester t, String role) async {
       CircleService.instance = FakeCircles(me: role == 'admin' ? uA : uB);
@@ -209,7 +218,7 @@ void main() {
       await openDetail(t, 'admin');
       expect(toggle(), findsOneWidget);
       expect(t.widget<DsToggleRow>(toggle()).value, isFalse);
-      expect(find.textContaining('Turning it on encrypts locations'), findsOneWidget);
+      expect(t.widget<DsToggleRow>(toggle()).info, contains('Turning it on encrypts locations'));
       expect(server.circles[circleId]!.mode, 'off');
 
       await t.tap(toggle());

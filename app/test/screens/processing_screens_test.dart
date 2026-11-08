@@ -210,6 +210,8 @@ void main() {
       final FakeProcessingController c = FakeProcessingController(FakeProcessingController.snapshot(me: pB, admin: false), me: pB);
       await pumpScreen(t, ProcessingScreen(circle: memberCircle, controller: c));
       await t.ensureVisible(find.byKey(const Key('proc-footnote')));
+      await t.tap(find.descendant(of: find.byKey(const Key('proc-footnote')), matching: find.byKey(const Key('info-hint'))));
+      await t.pumpAndSettle();
       expect(txt('Anyone who runs or backs up this server can read the data of members who allow'), findsWidgets);
       expect(txt('when your phone connects'), findsOneWidget);
       expect(txt('also in a normal circle'), findsOneWidget);
@@ -404,7 +406,7 @@ void main() {
     testWidgets('the settings list says the same for a legacy circle', (t) async {
       final FakeProcessingController c = FakeProcessingController(FakeProcessingController.snapshot(me: pB, admin: false, legacy: true, assist: false), me: pB);
       await pumpScreen(t, MyProcessingScreen(controller: c, circles: _Circles()));
-      expect(find.textContaining('Old trusted-server mode'), findsOneWidget);
+      expect(find.textContaining('Old mode'), findsOneWidget);
       expect(find.text('Server processing is off. Your phone does the work.'), findsNothing);
     });
 
@@ -474,7 +476,11 @@ void main() {
       await pumpScreen(t, MyProcessingScreen(controller: c, circles: _Circles()));
       expect(find.byKey(const Key('my-proc-dddddddd-dddd-4ddd-8ddd-dddddddddddd')), findsOneWidget);
       expect(find.text('Family'), findsNothing, reason: 'the normal circle is not listed');
+      await t.tap(find.byKey(const Key('info-hint')).first);
+      await t.pumpAndSettle();
       expect(txt('Don\'t send my data to the server'), findsOneWidget);
+      Navigator.of(t.element(find.byType(Scaffold).first)).pop();
+      await t.pumpAndSettle();
       expect(find.text('Processed by server'), findsOneWidget);
     });
 
