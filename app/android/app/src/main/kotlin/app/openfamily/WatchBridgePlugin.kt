@@ -50,26 +50,32 @@ class WatchBridgePlugin private constructor(
         when (call.method) {
             "publish" -> {
                 val json = call.arguments as? String
-                // A clear that has not reached the watch yet blocks every publish until sign-in.
-                if (json == null || !available() || clearPending(context)) {
+                // Signed out / switched off: never send family data (until allowPublish).
+                if (json == null || !available() || isBlocked(context)) {
                     result.success(false)
                     return
                 }
-                val req = PutDataMapRequest.create(SNAPSHOT_PATH).apply {
-                    dataMap.putString("json", json)
-                }.asPutDataRequest().setUrgent()
-                Wearable.getDataClient(context).putDataItem(req)
+                // First publish of a login that has no identity yet (restored session).
+                val sid = session(context) ?: newSession(context)
+                putSnapshot(context, json, sid)
                     .addOnSuccessListener { result.success(true) }
                     .addOnFailureListener { result.success(false) }
             }
             "clear" -> {
-                // Not best effort: remember the debt first, pay it now if possible, otherwise
-                // when a watch connects (WatchListenerService), even with the app closed.
+                // Not best effort: block sending and remember the debt first, pay it now if
+                // possible, otherwise when a watch connects (WatchListenerService).
+                setBlocked(context, true)
                 setClearPending(context, true)
+                dropSession(context)
                 deleteSnapshot(context) { delivered -> result.success(delivered) }
             }
             "allowPublish" -> {
-                setClearPending(context, false)
+                // A NEW identity: a previous user's data on the watch is dropped because its
+                // session differs. An undelivered wipe is sent first (and announces the new
+                // session); the debt is only cleared once the delete reached a connected watch.
+                newSession(context)
+                setBlocked(context, false)
+                if (clearPending(context)) payClearDebt(context, announce = false) {}
                 result.success(null)
             }
             "status" -> {
@@ -113,13 +119,32 @@ class WatchBridgePlugin private constructor(
 
         private const val PREFS = "orbitly_watch"
         private const val KEY_PENDING = "clear_pending"
+        private const val KEY_BLOCKED = "blocked"
+        private const val KEY_SESSION = "session"
 
-        fun clearPending(c: Context): Boolean =
-            c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_PENDING, false)
+        private fun prefs(c: Context) = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
-        fun setClearPending(c: Context, v: Boolean) {
-            c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_PENDING, v).apply()
-        }
+        /** A wipe the watch has not confirmed yet. Survives restarts. */
+        fun clearPending(c: Context): Boolean = prefs(c).getBoolean(KEY_PENDING, false)
+        fun setClearPending(c: Context, v: Boolean) { prefs(c).edit().putBoolean(KEY_PENDING, v).apply() }
+
+        /** No family data may be sent (after clear, until allowPublish). */
+        fun isBlocked(c: Context): Boolean = prefs(c).getBoolean(KEY_BLOCKED, false)
+        fun setBlocked(c: Context, v: Boolean) { prefs(c).edit().putBoolean(KEY_BLOCKED, v).apply() }
+
+        /** Identity of the current login; every snapshot carries it and the watch drops other sessions. */
+        fun session(c: Context): String? = prefs(c).getString(KEY_SESSION, null)
+        fun newSession(c: Context): String =
+            java.util.UUID.randomUUID().toString().also { prefs(c).edit().putString(KEY_SESSION, it).apply() }
+        fun dropSession(c: Context) { prefs(c).edit().remove(KEY_SESSION).apply() }
+
+        fun putSnapshot(c: Context, json: String, sid: String) =
+            Wearable.getDataClient(c).putDataItem(
+                PutDataMapRequest.create(SNAPSHOT_PATH).apply {
+                    dataMap.putString("json", json)
+                    dataMap.putString("session", sid)
+                }.asPutDataRequest().setUrgent(),
+            )
 
         /**
          * Deletes the snapshot DataItem and reports whether the removal is confirmed:
@@ -149,6 +174,28 @@ class WatchBridgePlugin private constructor(
                 done(false)
             }
         }
+
+        /**
+         * Pays an outstanding wipe: delete the item and, when [announce] and the user has
+         * signed in again (not blocked), announce the new session with an EMPTY snapshot so a
+         * watch that missed the delete still drops the previous user's data. [announce] is
+         * false while the app runs: its real snapshot carries the new session itself and an
+         * empty one could overwrite it.
+         */
+        fun payClearDebt(c: Context, announce: Boolean, done: (Boolean) -> Unit) {
+            deleteSnapshot(c) { delivered ->
+                if (announce && delivered && !isBlocked(c)) {
+                    val sid = session(c) ?: newSession(c)
+                    try {
+                        putSnapshot(c, """{"v":1,"ts":${System.currentTimeMillis()},"signedIn":false}""", sid)
+                    } catch (_: Throwable) {
+                    }
+                }
+                done(delivered)
+            }
+        }
+
+        fun appRunning(): Boolean = current != null
 
         @Volatile
         private var current: WatchBridgePlugin? = null

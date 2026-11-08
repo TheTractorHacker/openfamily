@@ -13,6 +13,7 @@ class FakeTransport implements WatchTransport {
   int cleared = 0;
   bool clearDelivers = true;
   int allowed = 0;
+  bool? pendingAtAllow;
   bool failNext = false;
   Future<void> Function(String)? onCommand;
   void Function()? onPeer;
@@ -34,7 +35,11 @@ class FakeTransport implements WatchTransport {
   }
 
   @override
-  Future<void> allowPublish() async => allowed++;
+  Future<void> allowPublish() async {
+    allowed++;
+    // What the Dart gate looked like when native was asked for a new session.
+    pendingAtAllow = (await SharedPreferences.getInstance()).getBool(WatchBridge.clearPendingKey);
+  }
 
   @override
   Future<WatchLinkStatus> status() async => st;
@@ -291,6 +296,17 @@ void main() {
       expect(t.allowed, 1);
       expect(t.published.length, n + 1);
       expect(lastPublished()['signedIn'], true);
+    });
+
+    test('sign-in asks native for a new session while the Dart gate is still closed', () async {
+      await make();
+      t.clearDelivers = false;
+      await b.signedOut();
+      await b.signedIn();
+      await settle();
+      expect(t.allowed, 1);
+      expect(t.pendingAtAllow, true);
+      expect((await SharedPreferences.getInstance()).getBool(WatchBridge.clearPendingKey), false);
     });
 
     test('an in-flight snapshot cannot override a clear', () async {

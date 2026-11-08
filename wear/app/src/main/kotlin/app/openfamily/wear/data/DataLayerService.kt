@@ -20,8 +20,9 @@ class DataLayerService : WearableListenerService() {
                 if (e.dataItem.uri.path != Commands.SNAPSHOT_PATH) continue
                 when (e.type) {
                     DataEvent.TYPE_CHANGED -> {
-                        val json = DataMapItem.fromDataItem(e.dataItem).dataMap.getString("json")
-                        if (json != null) SnapshotRepository.accept(this, json)
+                        val map = DataMapItem.fromDataItem(e.dataItem).dataMap
+                        val json = map.getString("json")
+                        if (json != null) SnapshotRepository.accept(this, json, map.getString("session"))
                     }
                     DataEvent.TYPE_DELETED -> SnapshotRepository.clear(this)
                 }
