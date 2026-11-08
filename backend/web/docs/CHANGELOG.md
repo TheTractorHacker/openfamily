@@ -12,6 +12,34 @@ the phones afterwards.
 
 ## Unreleased
 
+Nothing yet. The owner moves these notes under a version heading when a
+release is tagged.
+
+## v0.26.0 (2026-11-08)
+
+Works with app versions 0.22 to 0.26. The server update is safe to apply first.
+
+- **The Driving dashboard is back.** The full dashboard (top speed, drives, distance, event
+  chips with trends, week and month views, daily chart, driver cards, recent drives with a map)
+  works for Normal and Private circles. In a Private circle, members on the server and phone-only
+  members appear in the same totals. Offline it shows the last saved report with its age.
+- **Real names.** The people list, map, chat, alerts, weekly summary and crash reports show the
+  person's name, with "(you)" for yourself, instead of a bare "You".
+- **The check-in pop-up stays dismissed** once you acknowledge it, also after restarting the app.
+- **Clear "please sign in again".** When a login really expired the app now says so, keeps queued
+  SOS, check-ins and messages, and no longer reports "can't reach the server". The app's screen and
+  background service take turns refreshing the login. Parked positions are sent whenever the phone
+  holds the circle key.
+- **Smooth on foldable phones.** Folding or unfolding no longer restarts the map and tabs. The
+  layout switches between a bottom bar and a side panel while keeping the map where it was.
+- **iPhone battery.** Background location now adapts: best accuracy while driving, saving modes
+  while walking, and a cell-tower-only mode with a 150 m wake boundary while resting.
+- **Watch smoothness and battery** (see below), plus faster list drawing and a startup profile on
+  Wear OS.
+- **Privacy wording fixes** in the app: the badge now says what the server can really read.
+- Store kit, legal pages (`/privacy`, `/terms`), faster build pipeline, and the performance and
+  privacy design documents are in the repository.
+
 - **Fewer surprise sign-outs.** One phone has several parts that refresh the sign-in together
   (the screen, the background location service, a retry). The server treated the third as token
   theft and signed the person out, which showed up as "Couldn't reach the server". For 10 seconds
