@@ -76,7 +76,10 @@
         "developers/apple-watch.md",
         "api-compat.md",
         "developers/api-efficiency.md",
-        "developers/performance-low-memory.md"
+        "developers/performance-low-memory.md",
+        "design/OPTIMIZATION_ARCHITECTURE.md",
+        "design/OPTIMIZATION_BACKLOG.md",
+        "design/RESEARCH_NOTES_PERFORMANCE.md"
       ],
       "icon": "code"
     },
