@@ -1,8 +1,8 @@
 # When the server is down
 
-Orbitly keeps working when your server cannot be reached (a restart, an update, a home
-internet outage, or your phone with no signal). The phone remembers what it last knew and
-keeps what you do until the server answers again.
+What Orbitly shows and keeps for you when your server cannot be reached, and what is sent once it is back.
+
+Orbitly keeps working when your server cannot be reached (a restart, an update, a home internet outage, or a phone with no signal). The phone remembers what it last knew and keeps what you do until the server answers again.
 
 A small bar at the top of the map tells you what is going on:
 
