@@ -325,6 +325,25 @@ class TrackingCadence {
     }
   }
 
+  /// The OS woke the tracker because the phone probably moved (iOS: exit of
+  /// the still-mode region, relaunch after termination). Forgets the idle
+  /// anchor, so the idle tier is only re-entered after a fresh
+  /// [CadenceConfig.idleAfter] of good fixes around a new spot. Never makes a
+  /// tier faster than the fixes justify (no fake speed, no walking claim).
+  void onWake(DateTime now) {
+    _anchorLat = null;
+    _anchorLon = null;
+    _stillSince = null;
+  }
+
+  /// Distance of ([lat], [lon]) from the idle anchor, or null without one.
+  double? distanceFromIdleAnchor(double lat, double lon) {
+    final double? aLat = _anchorLat;
+    final double? aLon = _anchorLon;
+    if (aLat == null || aLon == null || lat.isNaN || lon.isNaN) return null;
+    return distanceMeters(aLat, aLon, lat, lon);
+  }
+
   /// Great-circle distance in meters.
   static double distanceMeters(
       double lat1, double lon1, double lat2, double lon2) {

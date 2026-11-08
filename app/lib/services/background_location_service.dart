@@ -5,7 +5,6 @@ import 'dart:io' show Platform;
 import 'package:background_locator_2/background_locator.dart';
 import 'package:background_locator_2/location_dto.dart';
 import 'package:background_locator_2/settings/android_settings.dart';
-import 'package:background_locator_2/settings/ios_settings.dart';
 import 'package:background_locator_2/settings/locator_settings.dart';
 import 'package:battery_plus/battery_plus.dart';
 import 'package:geolocator/geolocator.dart'
@@ -14,6 +13,7 @@ import 'package:http/http.dart' as http;
 
 import 'background_credential_store.dart';
 import 'fix_quality.dart';
+import 'ios_location_profile.dart';
 import 'live_boost.dart';
 import 'tracking_cadence.dart';
 import 'direct_push_service.dart';
@@ -121,7 +121,8 @@ void _initCadence() {
 
 /// Pushes [profile] to the native location request if it changed (debounced
 /// by [ProfileApplier]). Prefers the in-place native update; falls back to a
-/// full re-registration on Android builds without it. Never throws.
+/// full re-registration on Android builds without it. iOS gets the same call
+/// with the mapped Core Location request ([iosRequestFor]). Never throws.
 Future<void> _applyProfile(CadenceProfile profile) async {
   try {
     final DateTime now = DateTime.now().toUtc();
@@ -133,6 +134,7 @@ Future<void> _applyProfile(CadenceProfile profile) async {
       intervalMs: ms <= 0 ? 1000 : ms,
       distanceFilter: next.distanceFilterM,
       highAccuracy: next.highAccuracy,
+      ios: iosRequestFor(next),
     );
     if (!ok && Platform.isAndroid) {
       await BackgroundLocationService._register(next);
@@ -200,6 +202,7 @@ Future<void> onLocationUpdate(LocationDto location) async {
     final DateTime now = DateTime.now().toUtc();
     await _refreshBatteryIfStale(now);
     await _refreshPersistedBoost(now);
+    if (!_iosGate(location, now)) return;
 
     final DateTime fixTs = DateTime.fromMillisecondsSinceEpoch(
       location.time.toInt(),
@@ -259,6 +262,30 @@ Future<void> onLocationUpdate(LocationDto location) async {
   } catch (_) {
     // Never throw from the background callback.
   }
+}
+
+/// iOS still-mode handling before the quality filter. Returns false when the
+/// fix must not be reported. A native reset (registration, relaunch, region
+/// exit) means the native request is no longer the one last applied, and the
+/// phone probably moved: forget both, then re-apply the current profile.
+bool _iosGate(LocationDto location, DateTime now) {
+  final bool stillActive = _applier.applied?.tier == CadenceTier.idle;
+  final bool reset = location.nativeReset;
+  if (reset) _applier.reset();
+  IosFixDecision decision = IosFixDecision.accept;
+  if (Platform.isIOS) {
+    decision = iosFixDecision(
+      stillRequestActive: stillActive,
+      nativeReset: reset,
+      accuracyM: location.accuracy,
+      distanceFromAnchorM:
+          _cadence.distanceFromIdleAnchor(location.latitude, location.longitude),
+    );
+  }
+  if (reset || decision == IosFixDecision.dropAndWake) _cadence.onWake(now);
+  if (decision == IosFixDecision.accept) return true;
+  unawaited(_applyProfile(_cadence.profile(now)));
+  return false;
 }
 
 PrivateRuntime? _privateRuntime;
@@ -515,6 +542,11 @@ class BackgroundLocationService {
   /// fresh. While stationary the native side further drops to a slow,
   /// low-power request profile (see ActivityTransitionsManager), and the
   /// native liveness alarm drives [onHeartbeatTick] as a safety net.
+  ///
+  /// iOS has no interval: it registers with the slow request and the cadence
+  /// maps every profile to a Core Location request (see
+  /// ios_location_profile.dart and docs/developers/ios-location.md); the
+  /// native plugin's 5 minute timer drives [onHeartbeatTick] there.
   static Future<void> start() async {
     _shouldRun = true;
     await BackgroundLocator.initialize();
@@ -565,12 +597,9 @@ class BackgroundLocationService {
                 'circle can see where you are.',
           ),
         ),
-        iosSettings: const IOSSettings(
-          accuracy: LocationAccuracy.HIGH,
-          distanceFilter: 50,
-          showsBackgroundLocationIndicator: true,
-          stopWithTerminate: false,
-        ),
+        // iOS registers with the slow request (nearest ten meters, 25 m);
+        // the cadence then moves it with updateLocationRequest.
+        iosSettings: iosRegistrationSettings(),
       );
     } catch (_) {
       // Never throw from start(): it is called fire-and-forget, and a failure

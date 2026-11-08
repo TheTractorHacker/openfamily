@@ -17,6 +17,10 @@ NS_ASSUME_NONNULL_BEGIN
 + (void)setCallbackHandle:(int64_t)handle key:(NSString *)key;
 + (void)saveDistanceFilter:(double) distance;
 + (double)getDistanceFilter;
++ (void)saveAccuracy:(long)accuracyKey;
++ (long)getAccuracy;
++ (void)setShowsBackgroundLocationIndicator:(BOOL)shows;
++ (BOOL)showsBackgroundLocationIndicator;
 + (void)setObservingRegion:(BOOL) observing;
 + (BOOL)isObservingRegion;
 + (void)setServiceRunning:(BOOL) running;

@@ -20,6 +20,12 @@ class LocationDto {
   /// delivery time.
   final String motionState;
 
+  /// True on the first fix after the native side changed the location
+  /// request on its own (iOS: registration, relaunch after termination, exit
+  /// of the still-mode wake region). The caller should forget which request
+  /// it last applied and treat the fix as possible movement.
+  final bool nativeReset;
+
   LocationDto._(
     this.latitude,
     this.longitude,
@@ -32,6 +38,7 @@ class LocationDto {
     this.isMocked,
     this.provider,
     this.motionState,
+    this.nativeReset,
   );
 
   factory LocationDto.fromJson(Map<dynamic, dynamic> json) {
@@ -49,6 +56,7 @@ class LocationDto {
       isLocationMocked,
       json[Keys.ARG_PROVIDER] ?? '',
       json[Keys.ARG_MOTION_STATE] ?? '',
+      json[Keys.ARG_NATIVE_RESET] == true,
     );
   }
 
@@ -65,11 +73,12 @@ class LocationDto {
       Keys.ARG_IS_MOCKED: this.isMocked,
       Keys.ARG_PROVIDER: this.provider,
       Keys.ARG_MOTION_STATE: this.motionState,
+      Keys.ARG_NATIVE_RESET: this.nativeReset,
     };
   }
 
   @override
   String toString() {
-    return 'LocationDto{latitude: $latitude, longitude: $longitude, accuracy: $accuracy, altitude: $altitude, speed: $speed, speedAccuracy: $speedAccuracy, heading: $heading, time: $time, isMocked: $isMocked, provider: $provider, motionState: $motionState}';
+    return 'LocationDto{latitude: $latitude, longitude: $longitude, accuracy: $accuracy, altitude: $altitude, speed: $speed, speedAccuracy: $speedAccuracy, heading: $heading, time: $time, isMocked: $isMocked, provider: $provider, motionState: $motionState, nativeReset: $nativeReset}';
   }
 }

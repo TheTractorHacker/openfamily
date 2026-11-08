@@ -48,6 +48,28 @@
     return [[NSUserDefaults standardUserDefaults] doubleForKey:kDistanceFilterKey];
 }
 
++ (void)saveAccuracy:(long)accuracyKey {
+    [[NSUserDefaults standardUserDefaults] setInteger:(NSInteger)accuracyKey forKey:kAccuracyKey];
+}
+
+/// Registration accuracy key (Util getAccuracy: scale); 2 (nearest ten
+/// meters) when the service was registered by an older build.
++ (long)getAccuracy {
+    id value = [[NSUserDefaults standardUserDefaults] objectForKey:kAccuracyKey];
+    if (value == nil) {
+        return 2;
+    }
+    return [value longValue];
+}
+
++ (void)setShowsBackgroundLocationIndicator:(BOOL)shows {
+    [[NSUserDefaults standardUserDefaults] setBool:shows forKey:kPrefShowsBackgroundLocationIndicator];
+}
+
++ (BOOL)showsBackgroundLocationIndicator {
+    return [[NSUserDefaults standardUserDefaults] boolForKey:kPrefShowsBackgroundLocationIndicator];
+}
+
 + (void)setObservingRegion:(BOOL)observing {
     [[NSUserDefaults standardUserDefaults] setBool:observing forKey:kPrefObservingRegion];
 }

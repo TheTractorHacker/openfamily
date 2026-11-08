@@ -90,10 +90,12 @@ Verified by reading the code, not by running it.
   (`BackgroundCredentialStore`), readable while the phone is locked after the first unlock.
   Before the first unlock after a reboot nothing can be read; location callbacks then skip
   silently.
-* **Location triggers.** Continuous updates while the process lives; significant-location-change
-  (about 500 m, cell-tower based) relaunches a killed app; a 50 m exit-region is armed when the
-  app terminates. Results are bursty, not a steady cadence. The `TrackingCadence` profiles
-  (1 s to 60 s intervals) are Android concepts: on iOS only `distanceFilter` applies.
+* **Location triggers.** Continuous updates while the process lives, with the request following
+  the `TrackingCadence` tier (iOS has no interval: accuracy and distance filter only; still
+  phones drop to cell-only accuracy plus a 150 m exit region, see
+  [iOS background location](../developers/ios-location.md)); significant-location-change
+  (about 500 m, cell-tower based) relaunches a killed app; a 150 m exit region is armed when the
+  app terminates. Results are bursty, not a steady cadence.
 * **No `workmanager`, no `BGTaskScheduler`.** Nothing in the app registers a BGTask, and
   `UIBackgroundModes` deliberately lists only `location` and `remote-notification`
   (no `fetch`, no `processing`, which would invite App Review questions without a feature
@@ -116,7 +118,10 @@ Read in full. Changes made are marked **fixed**; the rest were checked and left.
 * `NSLocationWhenInUseUsageDescription`, `NSLocationAlwaysAndWhenInUseUsageDescription`,
   `NSMotionUsageDescription`, `NSPhotoLibraryUsageDescription`, `NSFaceIDUsageDescription`:
   present. `NSMotionUsageDescription` is kept although no Core Motion permission is requested
-  today (kept for the future port; App Review does not reject an unused string).
+  today: the adaptive background tracking deliberately does not use `CMMotionActivityManager`
+  (no extra permission prompt; see [iOS background location](../developers/ios-location.md)),
+  but the app links Core Motion through `sensors_plus` (App Review does not reject an unused
+  string).
 * **fixed:** `NSCameraUsageDescription` was missing. Chat uses `ImageSource.camera`; without
   the string iOS terminates the app the moment the camera sheet opens.
 * **fixed:** `CFBundleURLTypes` for `openfamily://` was missing, so the landing-page button could
