@@ -1,0 +1,149 @@
+{
+  "categories": [
+    {
+      "id": "start",
+      "title": "Start here",
+      "description": "What Orbitly is and where to begin.",
+      "items": [
+        "user/getting-started.md",
+        "CHANGELOG.md",
+        "about/credits-and-license.md",
+        "quick-start.md",
+        "concepts.md",
+        "faq.md",
+        "glossary.md"
+      ],
+      "icon": "rocket"
+    },
+    {
+      "id": "family",
+      "title": "For your circle",
+      "description": "Using the app day to day, in plain words.",
+      "items": [
+        "user/create-a-circle.md",
+        "user/invite-and-join.md",
+        "user/locations-and-map.md",
+        "user/places.md",
+        "user/driving-reports.md",
+        "user/chat.md",
+        "user/privacy-modes.md",
+        "user/safety-and-check-ins.md",
+        "user/sharing-links.md",
+        "user/members-and-devices.md",
+        "user/battery-and-permissions.md",
+        "user/older-phones.md",
+        "user/when-the-server-is-down.md",
+        "user/watch.md",
+        "user/foldables-and-tablets.md"
+      ],
+      "icon": "users"
+    },
+    {
+      "id": "admin",
+      "title": "Running your server",
+      "description": "Install, update, back up and look after your own server.",
+      "items": [
+        "admin/install.md",
+        "admin/first-run.md",
+        "admin/https-and-domain.md",
+        "admin/updates.md",
+        "admin/backups.md",
+        "admin/notifications.md",
+        "admin/integrations.md",
+        "admin/deployment-profile.md",
+        "admin/app-versions.md",
+        "admin/troubleshooting.md",
+        "troubleshooting/no-locations.md",
+        "self-hosting.md",
+        "custom-domain.md",
+        "backup-restore.md",
+        "android-install-and-updates.md",
+        "server-setup.md",
+        "privacy-controls.md"
+      ],
+      "icon": "server"
+    },
+    {
+      "id": "developers",
+      "title": "For developers",
+      "description": "How it is built, the API and the compatibility rules.",
+      "items": [
+        "developers/architecture.md",
+        "developers/api.md",
+        "developers/compatibility.md",
+        "developers/build.md",
+        "developers/build-speed.md",
+        "developers/screenshots.md",
+        "developers/naming.md",
+        "developers/apple-watch.md",
+        "developers/ios-location.md",
+        "api-compat.md",
+        "developers/api-efficiency.md",
+        "developers/performance-low-memory.md",
+        "design/OPTIMIZATION_ARCHITECTURE.md",
+        "design/OPTIMIZATION_BACKLOG.md",
+        "design/RESEARCH_NOTES_PERFORMANCE.md",
+        "design/PRIVACY_MODEL_V1.md",
+        "developers/performance-watch.md",
+        "developers/performance-foldables.md"
+      ],
+      "icon": "code"
+    },
+    {
+      "id": "release",
+      "title": "Release and stores",
+      "description": "Getting Orbitly 1.0 into Google Play and the App Store: checklists, listings, privacy answers and legal drafts.",
+      "items": [
+        "release/V1_READINESS.md",
+        "release/GOOGLE_PLAY.md",
+        "release/APP_STORE.md",
+        "release/STORE_ASSETS.md",
+        "legal/PRIVACY_POLICY.md",
+        "legal/TERMS.md",
+        "google-play-release.md",
+        "android-release.md"
+      ],
+      "icon": "rocket"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "icon": "wrench",
+      "description": "Something not working? Start with the checklist for your symptom.",
+      "items": [
+        "troubleshooting/index.md"
+      ]
+    },
+    {
+      "id": "reference",
+      "title": "Feature reference",
+      "icon": "book",
+      "description": "How each feature works in detail.",
+      "items": [
+        "chat.md",
+        "safety.md",
+        "checkin-sharing.md",
+        "share-links.md",
+        "geofencing.md",
+        "bubbles.md",
+        "driving.md",
+        "driving-sensors.md",
+        "push.md",
+        "sms.md",
+        "passkeys.md",
+        "maps.md",
+        "reliability.md",
+        "integrations/home-assistant.md"
+      ]
+    }
+  ],
+  "popular": [
+    "quick-start.md",
+    "concepts.md",
+    "troubleshooting/index.md",
+    "user/privacy-modes.md",
+    "admin/backups.md",
+    "admin/updates.md",
+    "faq.md"
+  ]
+}
