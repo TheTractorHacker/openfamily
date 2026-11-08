@@ -38,7 +38,7 @@ dependencies:
   image_picker: ^1.1.2
   # Native contact picker for emergency contacts. Uses the OS picker so the
   # app never needs READ_CONTACTS / full address-book access.
-  flutter_native_contact_picker: ^0.0.12
+  flutter_native_contact_picker: ^0.0.13
   # Current device location (place picker + welcome hero), with graceful
   # fallback when permission is denied or services are off.
   geolocator: ^13.0.2
