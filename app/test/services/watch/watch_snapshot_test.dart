@@ -174,6 +174,14 @@ void main() {
       expect(WatchCommand.tryParse(cmd('ack', arg: 'alert-1'))?.arg, 'alert-1');
     });
 
+    test('visible and hidden: the cadence vocabulary, additive', () {
+      expect(WatchCommand.tryParse(cmd('visible'))?.cmd, WatchCmd.visible);
+      expect(WatchCommand.tryParse(cmd('visible', arg: 'ambient'))?.arg, 'ambient');
+      expect(WatchCommand.tryParse(cmd('hidden'))?.cmd, WatchCmd.hidden);
+      expect(WatchCommand.tryParse(cmd('visible', arg: 'always')), isNull);
+      expect(WatchCommand.tryParse(cmd('hidden', arg: 'x')), isNull);
+    });
+
     test('rejects unknown commands, bad arguments and malformed input', () {
       expect(WatchCommand.tryParse(cmd('format_disk')), isNull);
       expect(WatchCommand.tryParse(cmd('pause', arg: '5')), isNull);
