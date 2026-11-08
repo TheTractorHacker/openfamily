@@ -68,6 +68,8 @@ android {
             if (keystorePropertiesFile.exists()) {
                 signingConfig = signingConfigs.getByName("release")
             }
+            // Never debuggable, minified with R8 (full mode is the default in AGP 8+) and resource-shrunk.
+            isDebuggable = false
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
@@ -77,6 +79,12 @@ android {
     lint { abortOnError = false }
 
     testOptions { unitTests.isReturnDefaultValues = true }
+}
+
+composeCompiler {
+    // The data and logic classes hold List/Map and are immutable in practice; tell the Compose
+    // compiler so composables taking them are skipped when nothing changed.
+    stabilityConfigurationFiles.add(rootProject.layout.projectDirectory.file("stability_config.conf"))
 }
 
 kotlin {
@@ -96,6 +104,8 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.12.1")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.9.4")
     implementation("androidx.core:core-ktx:1.17.0")
+    // Installs the baseline profile (assets/dexopt/baseline.prof) on first run so the hot paths are precompiled.
+    implementation("androidx.profileinstaller:profileinstaller:1.4.1")
     implementation("androidx.wear:wear:1.4.0")
     implementation("androidx.wear:wear-remote-interactions:1.1.0")
     implementation("androidx.wear.tiles:tiles:1.5.0")
