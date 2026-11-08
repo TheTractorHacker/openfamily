@@ -19,21 +19,44 @@ final class WatchBridge: NSObject, WCSessionDelegate {
   private var session: WCSession?
 
   // Sign-out must reach the watch even when it is out of reach at that moment.
-  // The flag survives app restarts; while set, snapshots are refused until
-  // Dart says `signedIn` again (login or switching the setting back on).
-  private let clearPendingKey = "orbitly.watch.clearPending"
-  private var clearPending: Bool {
-    get { UserDefaults.standard.bool(forKey: clearPendingKey) }
-    set { UserDefaults.standard.set(newValue, forKey: clearPendingKey) }
+  // Two persisted facts, deliberately separate:
+  //  - blocked: no family data may be sent (after clear, until signedIn/resume);
+  //  - clearUndelivered: the wipe has not reached the watch yet. A new sign-in
+  //    does NOT reset it; it is cleared only after a context carrying the wipe
+  //    or a snapshot of the NEW session was accepted by WatchConnectivity.
+  // Every context also carries the sign-in's session id; the watch drops what
+  // it stored for any other session, so a previous user's data is never shown.
+  private let blockedKey = "orbitly.watch.blocked"
+  private let undeliveredKey = "orbitly.watch.clearUndelivered"
+  private let sessionKey = "orbitly.watch.sessionId"
+  private var blocked: Bool {
+    get { UserDefaults.standard.bool(forKey: blockedKey) }
+    set { UserDefaults.standard.set(newValue, forKey: blockedKey) }
+  }
+  private var clearUndelivered: Bool {
+    get { UserDefaults.standard.bool(forKey: undeliveredKey) }
+    set { UserDefaults.standard.set(newValue, forKey: undeliveredKey) }
+  }
+  private var sessionId: String? {
+    get { UserDefaults.standard.string(forKey: sessionKey) }
+    set { UserDefaults.standard.set(newValue, forKey: sessionKey) }
   }
 
-  /// Sends the wipe to the watch when a usable session exists. Safe to repeat.
+  /// Sends the wipe (plus the current session id, when signed in) if a usable
+  /// session exists. Safe to repeat.
   private func deliverClearIfPending() {
-    guard clearPending, let s = session, s.activationState == .activated,
+    guard clearUndelivered, let s = session, s.activationState == .activated,
       s.isPaired, s.isWatchAppInstalled
     else { return }
     for t in s.outstandingUserInfoTransfers { t.cancel() }
-    try? s.updateApplicationContext(["cleared": true, "sentAt": Date().timeIntervalSince1970])
+    var ctx: [String: Any] = ["cleared": true, "sentAt": Date().timeIntervalSince1970]
+    if !blocked, let id = sessionId { ctx["session"] = id }
+    do {
+      try s.updateApplicationContext(ctx)
+      clearUndelivered = false
+    } catch {
+      // stays undelivered; retried on the next session event
+    }
   }
 
   func attach(messenger: FlutterBinaryMessenger) {
@@ -79,25 +102,42 @@ final class WatchBridge: NSObject, WCSessionDelegate {
     case "status":
       result(statusMap())
     case "snapshot":
-      if clearPending {
-        // Signed out: never send family data again until `signedIn`.
+      if blocked || sessionId == nil {
+        // Signed out or switched off: never send family data.
         deliverClearIfPending()
-      } else if let s = usable(), let json = call.arguments as? String {
+      } else if let s = usable(), let json = call.arguments as? String, let sid = sessionId {
         // Latest value wins; delivered when the watch next wakes. No polling.
-        try? s.updateApplicationContext(["snapshot": json, "sentAt": Date().timeIntervalSince1970])
+        do {
+          try s.updateApplicationContext(
+            ["snapshot": json, "session": sid, "sentAt": Date().timeIntervalSince1970])
+          // The new session id makes the watch drop any older user's data.
+          clearUndelivered = false
+        } catch {}
       }
       result(nil)
     case "alert":
-      if !clearPending, let s = usable(), let json = call.arguments as? String {
+      if !blocked, let s = usable(), let json = call.arguments as? String {
         s.transferUserInfo(["alert": json])
       }
       result(nil)
     case "clear":
-      clearPending = true
+      blocked = true
+      clearUndelivered = true
+      let keep = (call.arguments as? [String: Any])?["keepSession"] as? Bool ?? false
+      if !keep { sessionId = nil }
       deliverClearIfPending()
       result(nil)
     case "signedIn":
-      clearPending = false
+      // A real sign-in: new session id. Any undelivered wipe is sent FIRST.
+      if let id = call.arguments as? String, !id.isEmpty {
+        sessionId = id
+        blocked = false
+        deliverClearIfPending()
+      }
+      result(nil)
+    case "resume":
+      // The setting was switched back on (same session): sending is allowed again.
+      if sessionId != nil { blocked = false }
       result(nil)
     default:
       result(FlutterMethodNotImplemented)

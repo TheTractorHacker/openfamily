@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -62,14 +63,26 @@ class WatchBridgeIos {
     DateTime Function()? clock,
     this.throttle = const Duration(seconds: 15),
     this.extrasTtl = const Duration(seconds: 60),
+    String Function()? sessionIdFactory,
   })  : _channel = channel ?? const MethodChannel('app.openfamily/watch'),
         _actions = actions ?? const DefaultWatchActions(),
         _supported = supported ?? (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS),
-        _clock = clock ?? DateTime.now;
+        _clock = clock ?? DateTime.now,
+        _newSessionId = sessionIdFactory ?? _randomSessionId;
 
   static final WatchBridgeIos instance = WatchBridgeIos();
 
   static const String prefKey = 'watch_show_family';
+  static const String sessionPrefKey = 'watch_session_id';
+
+  static String _randomSessionId() {
+    final math.Random r = math.Random.secure();
+    return List<String>.generate(16, (_) => r.nextInt(256).toRadixString(16).padLeft(2, '0')).join();
+  }
+
+  final String Function() _newSessionId;
+  // Identity of the current sign-in; every snapshot carries it.
+  String? _sessionId;
 
   final MethodChannel _channel;
   final WatchPhoneActions _actions;
@@ -106,6 +119,7 @@ class WatchBridgeIos {
     try {
       final SharedPreferences p = await SharedPreferences.getInstance();
       _enabled = p.getBool(prefKey) ?? true;
+      _sessionId = p.getString(sessionPrefKey);
       _channel.setMethodCallHandler(_onCall);
       await refreshStatus();
     } catch (_) {
@@ -135,16 +149,31 @@ class WatchBridgeIos {
     final SharedPreferences p = await SharedPreferences.getInstance();
     await p.setBool(prefKey, value);
     if (!value) {
-      await clear();
+      await clear(keepSession: true);
     } else {
-      await signedIn();
+      // Same sign-in, sending allowed again. This is NOT a sign-in.
+      _clearRequested = false;
+      if (_supported && _started && _sessionId != null) {
+        try {
+          await _channel.invokeMethod<void>('resume');
+        } catch (_) {}
+      }
       _schedule(force: true);
     }
   }
 
   /// Sign-out: the watch must not keep any family data.
-  Future<void> clear() async {
+  ///
+  /// [keepSession] is for switching the setting off (same user); sign-out
+  /// leaves it false and forgets the session identity.
+  Future<void> clear({bool keepSession = false}) async {
     _clearRequested = true;
+    if (!keepSession) {
+      _sessionId = null;
+      try {
+        (await SharedPreferences.getInstance()).remove(sessionPrefKey);
+      } catch (_) {}
+    }
     _generation++;
     _timer?.cancel();
     _timer = null;
@@ -155,16 +184,24 @@ class WatchBridgeIos {
     if (!_supported || !_started) return;
     try {
       // The native side remembers the wipe until the watch has it.
-      await _channel.invokeMethod<void>('clear');
+      await _channel.invokeMethod<void>('clear', <String, dynamic>{'keepSession': keepSession});
     } catch (_) {}
   }
 
-  /// A user signed in (or switched the watch back on): pushes are allowed again.
+  /// A real sign-in (AuthService login): new session identity, pushes allowed
+  /// again. The native side delivers any wipe that never reached the watch
+  /// BEFORE the new session's data, and the watch drops data of other sessions.
+  /// Never call this from the settings switch.
   Future<void> signedIn() async {
     _clearRequested = false;
+    final String id = _newSessionId();
+    _sessionId = id;
+    try {
+      (await SharedPreferences.getInstance()).setString(sessionPrefKey, id);
+    } catch (_) {}
     if (!_supported || !_started) return;
     try {
-      await _channel.invokeMethod<void>('signedIn');
+      await _channel.invokeMethod<void>('signedIn', id);
     } catch (_) {}
   }
 
@@ -196,6 +233,9 @@ class WatchBridgeIos {
   Future<void> pushNow() async {
     if (!_supported || !_started || !_enabled || _clearRequested) return;
     final int gen = _generation;
+    // A restored session (app start with a saved login) has no identity yet:
+    // the roster only exists for an authenticated user, so this is that path.
+    if (_sessionId == null) await signedIn();
     try {
       final DateTime now = _clock();
       if (_extras == null || _extrasAt == null || now.difference(_extrasAt!) > extrasTtl) {
@@ -218,6 +258,7 @@ class WatchBridgeIos {
         pausedUntil: x.pausedUntil,
         alerts: x.alerts,
         units: UnitPreferenceService.units.value,
+        sessionId: _sessionId,
         now: now,
       );
       // A sign-out or switch-off may have happened while the extras loaded.

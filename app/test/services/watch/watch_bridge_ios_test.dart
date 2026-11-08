@@ -74,10 +74,12 @@ void main() {
   late List<MethodCall> sent;
   late Map<String, dynamic> statusReply;
   DateTime now = DateTime.utc(2026, 1, 1, 12);
+  int sidCounter = 0;
 
   setUp(() {
     SharedPreferences.setMockInitialValues(<String, Object>{});
     sent = <MethodCall>[];
+    sidCounter = 0;
     statusReply = <String, dynamic>{'supported': true, 'paired': true, 'installed': true, 'reachable': true};
     now = DateTime.utc(2026, 1, 1, 12);
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(ch, (MethodCall c) async {
@@ -91,7 +93,13 @@ void main() {
   });
 
   WatchBridgeIos make(_Actions a, {bool supported = true}) =>
-      WatchBridgeIos(channel: ch, actions: a, supported: supported, clock: () => now, throttle: Duration.zero);
+      WatchBridgeIos(
+          channel: ch,
+          actions: a,
+          supported: supported,
+          clock: () => now,
+          throttle: Duration.zero,
+          sessionIdFactory: () => 'sid${++sidCounter}');
 
   test('snapshot has distance/bearing, no raw coordinates, capped and tolerant', () {
     final Member me = _m('me', 'Me Self', const LatLng(0, 0));
@@ -249,6 +257,40 @@ void main() {
     gate.complete();
     await Future<void>.delayed(const Duration(milliseconds: 20));
     expect(sent.where((MethodCall c) => c.method == 'snapshot'), isEmpty);
+  });
+
+  test('sign-out then new sign-in: wipe is sent first, new identity differs, old one is gone', () async {
+    final WatchBridgeIos b = make(_Actions());
+    await b.start();
+    final List<Member> roster = <Member>[_m('me', 'Me', const LatLng(1, 1))];
+    await b.signedIn();
+    b.onRoster(roster, userId: 'me', circleId: 'c1');
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    final String first = (jsonDecode(sent.lastWhere((MethodCall c) => c.method == 'snapshot').arguments as String)
+        as Map<String, dynamic>)['sid'] as String;
+    await b.clear();
+    expect((sent.last.arguments as Map)['keepSession'], false);
+    await b.signedIn();
+    final List<String> order = sent.map((MethodCall c) => c.method).toList();
+    expect(order.lastIndexOf('clear') < order.lastIndexOf('signedIn'), isTrue);
+    sent.clear();
+    b.onRoster(roster, userId: 'me', circleId: 'c1');
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    final String second = (jsonDecode(sent.firstWhere((MethodCall c) => c.method == 'snapshot').arguments as String)
+        as Map<String, dynamic>)['sid'] as String;
+    expect(second, isNot(first));
+  });
+
+  test('the settings switch never signs in; it keeps the session and only resumes', () async {
+    final WatchBridgeIos b = make(_Actions());
+    await b.start();
+    await b.signedIn();
+    sent.clear();
+    await b.setEnabled(false);
+    expect((sent.last.arguments as Map)['keepSession'], true);
+    await b.setEnabled(true);
+    expect(sent.map((MethodCall c) => c.method), contains('resume'));
+    expect(sent.map((MethodCall c) => c.method), isNot(contains('signedIn')));
   });
 
   test('status parsing is tolerant', () {

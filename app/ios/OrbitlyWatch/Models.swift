@@ -123,6 +123,7 @@ struct WAlert: Decodable, Identifiable {
 
 struct WSnapshot: Decodable {
     var version: Int = 1
+    var sessionId: String = ""
     var ts: Double = 0
     var units: String = "imperial"
     var me: WMe = WMe()
@@ -134,12 +135,14 @@ struct WSnapshot: Decodable {
 
     enum CodingKeys: String, CodingKey {
         case version = "v"
+        case sessionId = "sid"
         case ts, units, me, circles, alerts, quickReplies
     }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         version = (try? c.decodeIfPresent(Int.self, forKey: .version)) ?? 1
+        sessionId = (try? c.decodeIfPresent(String.self, forKey: .sessionId)) ?? ""
         ts = (try? c.decodeIfPresent(Double.self, forKey: .ts)) ?? 0
         units = (try? c.decodeIfPresent(String.self, forKey: .units)) ?? "imperial"
         me = (try? c.decodeIfPresent(WMe.self, forKey: .me)) ?? WMe()

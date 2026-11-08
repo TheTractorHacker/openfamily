@@ -170,6 +170,7 @@ Map<String, dynamic> buildWatchSnapshot({
   DateTime? pausedUntil,
   List<WatchAlert> alerts = const <WatchAlert>[],
   UnitSystem units = UnitSystem.imperial,
+  String? sessionId,
   DateTime? now,
 }) {
   final DateTime n = now ?? DateTime.now();
@@ -187,6 +188,8 @@ Map<String, dynamic> buildWatchSnapshot({
   ];
   return <String, dynamic>{
     'v': kWatchSnapshotVersion,
+    // Identity of the sign-in this snapshot belongs to; the watch drops data of any other.
+    'sid': sessionId,
     'ts': n.millisecondsSinceEpoch,
     'units': units == UnitSystem.metric ? 'metric' : 'imperial',
     'me': <String, dynamic>{

@@ -29,19 +29,35 @@ final class PhoneLink: NSObject, ObservableObject, WCSessionDelegate {
 
     // MARK: Receiving
 
+    private let sessionKey = "orbitly.session"
+
+    private func wipe() {
+        snapshot = nil
+        lastAlerts = []
+        UserDefaults.standard.removeObject(forKey: storeKey)
+    }
+
+    /// Applies one application context. Everything runs on the main thread in
+    /// arrival order, so a wipe can never be overtaken by older data.
     private func apply(context: [String: Any]) {
-        if context["cleared"] as? Bool == true {
-            DispatchQueue.main.async {
-                self.snapshot = nil
-                self.lastAlerts = []
-                UserDefaults.standard.removeObject(forKey: self.storeKey)
-            }
-            return
-        }
-        guard let json = context["snapshot"] as? String,
-              let decoded = WSnapshot.decode(json: json) else { return }
-        UserDefaults.standard.set(json, forKey: storeKey)
         DispatchQueue.main.async {
+            let defaults = UserDefaults.standard
+            let known = defaults.string(forKey: self.sessionKey)
+            let sid = context["session"] as? String
+            if context["cleared"] as? Bool == true {
+                self.wipe()
+                defaults.removeObject(forKey: self.sessionKey)
+            }
+            // Another sign-in than the one the stored data belongs to: drop it.
+            if let sid = sid, sid != defaults.string(forKey: self.sessionKey) {
+                if known != nil || self.snapshot != nil { self.wipe() }
+                defaults.set(sid, forKey: self.sessionKey)
+            }
+            guard let json = context["snapshot"] as? String,
+                  let decoded = WSnapshot.decode(json: json) else { return }
+            if let current = defaults.string(forKey: self.sessionKey),
+               !decoded.sessionId.isEmpty, decoded.sessionId != current { return }
+            defaults.set(json, forKey: self.storeKey)
             self.snapshot = decoded
         }
     }
