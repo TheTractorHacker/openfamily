@@ -88,7 +88,7 @@ void main() {
         b: Brightness.dark));
     await tester.pumpAndSettle();
     expect(find.text('Weekly summary'), findsOneWidget);
-    expect(find.text('You'), findsOneWidget);
+    expect(find.text('Blake (you)'), findsOneWidget);
     expect(find.text('Sam'), findsOneWidget);
     expect(find.text('100 mi, 2 drives'), findsOneWidget);
     expect(find.text('50 mi, 1 drive'), findsOneWidget);
@@ -96,8 +96,8 @@ void main() {
     expect(find.text('Hard braking 3 (was 0)'), findsOneWidget);
     expect(find.textContaining('Phone use'), findsNothing);
     expect(find.textContaining('Top speed 67 mph'), findsOneWidget);
-    // Self ("You") is listed before Sam.
-    expect(tester.getTopLeft(find.text('You')).dy,
+    // Self (Blake (you)) is listed before Sam.
+    expect(tester.getTopLeft(find.text('Blake (you)')).dy,
         lessThan(tester.getTopLeft(find.text('Sam')).dy));
     // Bars: this week is the longest, last week half as wide.
     final double cur =
