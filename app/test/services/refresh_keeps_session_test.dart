@@ -106,7 +106,21 @@ void main() {
     expect(await TokenStorage.readRefreshToken(), 'old.refresh.token');
   });
 
-  for (final int status in <int>[400, 401, 403]) {
+  // A 400/403 comes from a proxy, a captive portal or a malformed request; the
+  // server answers every bad refresh token with 401. Only that ends a session.
+  for (final int status in <int>[400, 403]) {
+    test('refresh answered $status keeps the session (not the server\'s "invalid refresh")', () async {
+      bool expired = false;
+      ApiClient.onSessionExpired = () => expired = true;
+      await http.runWithClient(() async {
+        await expectLater(ApiClient.get('/family'), throwsA(isA<ApiException>()));
+      }, () => _client(status));
+      expect(expired, isFalse);
+      expect(await TokenStorage.readRefreshToken(), 'old.refresh.token');
+    });
+  }
+
+  for (final int status in <int>[401]) {
     test('refresh rejected with $status ends the session', () async {
       bool expired = false;
       ApiClient.onSessionExpired = () => expired = true;

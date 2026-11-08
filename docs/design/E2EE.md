@@ -194,6 +194,28 @@ The key is created in StrongBox when the phone has it, otherwise in the TEE. It 
 (StrongBox / TEE / software). If the Keystore key is invalidated, reads fail closed (`VaultInvalidatedException`) and the app asks for a recovery-phrase restore rather than minting a new identity. Backups are disabled (`allowBackup=false`), so keys are not in cloud backups.
 Unverified: StrongBox/TEE reporting and the auth-bound mode have not been exercised on a physical device.
 
+### Keys survive updates
+
+Owner report (v0.26.x, Android, sideloaded updates with the same signing certificate): after an update, and now and then without one, the app showed the sign-in screen and "This phone's encryption key can't be read"; the only way out was "Set this phone up again" and another admin's approval. What the dependency code actually does (flutter_secure_storage 9.2.4, androidx.security-crypto 1.1.0-alpha06, Tink 1.9.0):
+
+- `resetOnError` defaults to **false** in 9.2.4 (`android_options.dart`), so the plugin did not wipe the files. Every `AndroidOptions` in the app now spells out `resetOnError: false` anyway, and a test fails if one does not.
+- When `EncryptedSharedPreferences` cannot be opened once (the Tink keyset does not decrypt, a Keystore hiccup), the plugin logs it, switches **for the rest of the process** to the plain file and from then on every read returns **null**: "no data", not an error (`FlutterSecureStorage.ensureInitialized`, sticky `failedToUseEncryptedSharedPreferences`). Writes in that state go to the plain file and are copied over the encrypted values at the next healthy start (`checkAndMigrateToEncrypted`).
+- The plugin's own non-ESP cipher (used by the token stores B and C) generates a **new AES key and overwrites the stored one** whenever unwrapping the old one fails once (`StorageCipher18Implementation`), which makes everything in those stores unreadable for good.
+- The Keystore plugin reported a transient `UnrecoverableKeyException` from `getKey()` as `invalidated` ("key storage was reset"), and would generate a new wrapping key if `getKey()` returned null for an alias that exists.
+- The v0.26.1 move from `KeystoreChannel.kt` to the `e2ee_keystore` plugin kept the alias, key parameters, blob format and channel name exactly (diffed); nothing deletes keys on a version change.
+
+So a transient fault could make the identity read as missing or unreadable, and the screen then steered towards "Set this phone up again", which deleted it. The rules now (`SecureVault`, `E2eeService`, `E2eeKeystorePlugin`):
+
+1. **A read failure is never "no key".** Key material (`identity_seed`, `device_id`, `identity_user`, `ck/*`, `sk/*`) is read with bounded retries; after that the vault throws `VaultUnreadableException` (shown as "can't be read, try again"), never null, and the app never generates an identity because of it. A seed without its device id is a partial read, not a reason to make a new one.
+2. **A mirror copy.** Every Keystore-wrapped blob (flag 1 or 2, never a plain flag-0 blob) is also kept in the app's ordinary private preferences (`e2ee_vault_mirror/live/<name>`). It is ciphertext under the non-extractable Keystore key, so it is no easier to read than the primary copy. When the secure store is empty or failing, the mirror copy is used and the store is healed. Blobs written before this version are copied on first read and by the startup self-check.
+3. **Write-verify-swap.** A new blob must open to the same bytes before it replaces anything; the previous blob is kept (`prev/<name>`) until the new one has been read back; if neither store keeps the new one, the old one is put back and the write fails loudly.
+4. **Nothing is deleted automatically.** Deleting key material (including "Set this phone up again" and a different account signing in) archives it, still wrapped (`archive/<time>/<name>`, newest 5 sets). If it becomes readable again, Encryption keys offers "Bring back the key this phone had before" (only for the same account, only while there is no live key, never over a live value).
+5. **The Keystore plugin never replaces a key that is merely unavailable.** A new wrapping key is generated only when the alias does not exist; key generation is serialised across the app and background engines; only `KeyPermanentlyInvalidatedException` (or a missing alias) is reported as `invalidated`, other `getKey()` failures stay retryable.
+6. **Storage errors never sign out.** Token stores that throw are re-read a few times; if they still fail, no refresh is attempted and nothing is cleared. Only the server's `401` on `/auth/refresh` (plus no working saved login) ends a session; a `400` or `403` (a proxy, a captive portal) does not.
+7. **Every event is logged.** A persisted ring buffer of the last 50 storage events (reason codes only: read or decrypt failures, retries, mirror use, heals, archives, migrations, sign-out causes, and a one-time startup self-check of tokens and identity) is shown under Diagnostics, "Sign-in and key storage", and included in the copied diagnostic report.
+
+Still true: uninstalling the app (or clearing its storage) deletes the Keystore key and every copy. Write down the recovery phrase, and keep a second admin in each Private circle so a new phone can be approved.
+
 ## iOS: what is different (written, not yet run on an iPhone)
 
 The Dart code and the method channel `app.openfamily/keystore` are shared with Android; only the

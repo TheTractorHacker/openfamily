@@ -12,8 +12,7 @@ the phones afterwards.
 
 ## Unreleased
 
-Nothing yet. The owner moves these notes under a version heading when a
-release is tagged.
+- **Sign-in and encryption keys survive updates.** A storage or Keystore hiccup (after an update, a restart, or now and then) no longer reads as "no key", never makes a new key, never deletes one and never signs you out: reads are retried, a copy of the encrypted keys is kept in case the secure store reads empty, writes keep the old key until the new one is verified, and "Set this phone up again" puts the old key aside so it can be brought back. Only the server's "invalid session" answer signs you out. Diagnostics shows a new "Sign-in and key storage" log (reason codes only) and includes it in the copied report. See [Updates](android-install-and-updates.md#sign-in-and-encryption-keys-survive-updates).
 
 ## v0.26.2 (2026-11-08)
 

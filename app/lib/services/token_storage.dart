@@ -8,6 +8,7 @@ import 'offline/offline_sync.dart';
 import 'server_config.dart';
 import 'session_diary.dart';
 import 'session_gate.dart';
+import 'storage_event_log.dart';
 
 /// One stored token pair as read from a single backing store.
 class StoredSession {
@@ -42,11 +43,12 @@ class TokenStorage {
   TokenStorage._();
 
   static const FlutterSecureStorage _storage = FlutterSecureStorage(
-    aOptions: AndroidOptions(encryptedSharedPreferences: true),
+    aOptions: AndroidOptions(encryptedSharedPreferences: true, resetOnError: false),
   );
 
   static const FlutterSecureStorage _storageB = FlutterSecureStorage(
     aOptions: AndroidOptions(
+      resetOnError: false,
       sharedPreferencesName: 'openfamily_session_b',
       preferencesKeyPrefix: 'sb_',
     ),
@@ -54,6 +56,7 @@ class TokenStorage {
 
   static const FlutterSecureStorage _storageC = FlutterSecureStorage(
     aOptions: AndroidOptions(
+      resetOnError: false,
       sharedPreferencesName: 'openfamily_saved_login',
       preferencesKeyPrefix: 'sl_',
     ),
@@ -100,10 +103,24 @@ class TokenStorage {
 
   static final SessionDiary _diary = SessionDiary.instance;
 
-  static Future<String?> _safeRead(FlutterSecureStorage s, String key) async {
+  /// Read errors seen by the current [readAllStores] pass (store letter ->
+  /// exception type). A store that throws is "unavailable", never "empty".
+  static final Map<String, String> _readErrors = <String, String>{};
+
+  /// Store letters that failed during the last [readAllStores] (after retries).
+  static Map<String, String> get lastReadErrors => Map<String, String>.unmodifiable(_readErrors);
+
+  /// Test seam: replaces the delays between whole-store re-reads.
+  static List<Duration> retryDelays = const <Duration>[
+    Duration(milliseconds: 200),
+    Duration(milliseconds: 600),
+  ];
+
+  static Future<String?> _safeRead(FlutterSecureStorage s, String key, [String store = '?']) async {
     try {
       return await s.read(key: key);
-    } catch (_) {
+    } catch (e) {
+      _readErrors[store] = e.runtimeType.toString();
       return null;
     }
   }
@@ -128,7 +145,8 @@ class TokenStorage {
         access: prefs.getString(_prefAccessKey),
         refresh: prefs.getString(_prefRefreshKey),
       );
-    } catch (_) {
+    } catch (e) {
+      _readErrors['D'] = e.runtimeType.toString();
       return const StoredSession(source: 'D', access: null, refresh: null);
     }
   }
@@ -199,18 +217,38 @@ class TokenStorage {
     );
   }
 
-  /// Reads both stores. Entries with no tokens are omitted.
+  /// Reads every store. Entries with no tokens are omitted.
+  ///
+  /// When nothing at all comes back but a store THREW, the read is retried a
+  /// few times before the empty answer is believed: a Keystore hiccup right
+  /// after an update or a reboot must not look like "signed out". Every such
+  /// failure lands in the [StorageEventLog].
   static Future<List<StoredSession>> readAllStores() async {
+    List<StoredSession> out = await _readAllOnce();
+    for (int i = 0; out.isEmpty && _readErrors.isNotEmpty && i < retryDelays.length; i++) {
+      StorageEventLog.instance.record('read_error', store: 'tokens',
+          detail: '${_readErrors.entries.map((MapEntry<String, String> e) => '${e.key}=${e.value}').join(' ')} retry=$i');
+      await Future<void>.delayed(retryDelays[i]);
+      out = await _readAllOnce();
+    }
+    if (out.isEmpty && _readErrors.isNotEmpty) {
+      StorageEventLog.instance.record('read_failed', store: 'tokens', detail: _readErrors.keys.join(','));
+    }
+    return out;
+  }
+
+  static Future<List<StoredSession>> _readAllOnce() async {
+    _readErrors.clear();
     final List<StoredSession> out = <StoredSession>[];
     final StoredSession a = StoredSession(
       source: 'A',
-      access: await _safeRead(_storage, _accessKey),
-      refresh: await _safeRead(_storage, _refreshKey),
+      access: await _safeRead(_storage, _accessKey, 'A'),
+      refresh: await _safeRead(_storage, _refreshKey, 'A'),
     );
     final StoredSession b = StoredSession(
       source: 'B',
-      access: await _safeRead(_storageB, _accessKeyB),
-      refresh: await _safeRead(_storageB, _refreshKeyB),
+      access: await _safeRead(_storageB, _accessKeyB, 'B'),
+      refresh: await _safeRead(_storageB, _refreshKeyB, 'B'),
     );
     final StoredSession d = await _readPrefs();
     // Pre-v2 session: used only when nothing else holds a token.
@@ -224,8 +262,8 @@ class TokenStorage {
         ? null
         : StoredSession(
             source: 'L',
-            access: await _safeRead(_storage, _legacyAccessKey),
-            refresh: await _safeRead(_storage, _legacyRefreshKey),
+            access: await _safeRead(_storage, _legacyAccessKey, 'L'),
+            refresh: await _safeRead(_storage, _legacyRefreshKey, 'L'),
           );
     for (final StoredSession s in <StoredSession>[
       a,
@@ -348,9 +386,10 @@ class TokenStorage {
       await readAccessToken(),
       await readRefreshToken(),
     ];
-    return credentials.any(
-      (String? credential) => credential != null && credential.isNotEmpty,
-    );
+    if (credentials.any((String? credential) => credential != null && credential.isNotEmpty)) return true;
+    // A store that could not be read may still hold the session: assume it does (keeps the app lock and the
+    // biometric opt-in in place) rather than treating a storage error as "signed out".
+    return _readErrors.isNotEmpty;
   }
 
   /// Removes all stored tokens AND the device id (full session teardown).
@@ -360,6 +399,7 @@ class TokenStorage {
   /// would reuse the previous user's device id.
   static Future<bool> clear({String reason = 'unspecified', bool keepOfflineData = false}) async {
     _diary.record('clear', 'reason=$reason');
+    StorageEventLog.instance.record('signout', store: 'tokens', detail: 'reason=$reason');
     _mem = null;
     // Keep the lock enabled until every credential has been deleted and its
     // absence verified. If deletion fails or the process stops midway, any

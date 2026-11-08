@@ -38,6 +38,8 @@ import 'services/session_gate.dart';
 import 'services/map_style_preference.dart';
 import 'services/theme_preference.dart';
 import 'services/tile_config.dart';
+import 'services/storage_event_log.dart';
+import 'services/storage_self_check.dart';
 import 'services/token_storage.dart';
 import 'theme/app_theme.dart';
 import 'widgets/biometric_app_lock.dart';
@@ -280,6 +282,9 @@ class _SessionGateState extends State<_SessionGate> {
         await TokenStorage.clear(reason: 'gate: refresh rejected', keepOfflineData: true);
         return _GateResult.noSession;
       case SessionGateResult.none:
+        // Nothing is cleared here: if the stores were merely unreadable, the tokens are still on disk.
+        StorageEventLog.instance.record('gate_no_session', store: 'tokens',
+            detail: TokenStorage.lastReadErrors.isEmpty ? 'stores empty' : 'unreadable ${TokenStorage.lastReadErrors.keys.join(',')}');
         return _GateResult.noSession;
     }
   }
@@ -300,7 +305,11 @@ class _SessionGateState extends State<_SessionGate> {
     }
 
     // Re-wrap keys stored by older versions so they work with the screen locked. Foreground only, never throws.
-    unawaited(SecureVault().migrateLegacy().catchError((Object _) => VaultMigration.failedKept));
+    // Then the one-time startup self-check: are the tokens and the identity readable? (Storage event log.)
+    unawaited(SecureVault()
+        .migrateLegacy()
+        .catchError((Object _) => VaultMigration.failedKept)
+        .then((_) => StorageSelfCheck.runOnce()));
 
     if (!ServerConfig.instance.isConfigured) return null;
 

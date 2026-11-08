@@ -51,6 +51,11 @@ import javax.crypto.spec.GCMParameterSpec
  * `setSecure` needs an Activity and is a no-op in an engine without one.
  */
 class E2eeKeystorePlugin : FlutterPlugin, ActivityAware {
+    companion object {
+        /** One lock for every engine in the process: key generation must never race. */
+        private val keyLock = Any()
+    }
+
     private var channel: MethodChannel? = null
     private var context: Context? = null
     private var activity: Activity? = null
@@ -123,8 +128,15 @@ class E2eeKeystorePlugin : FlutterPlugin, ActivityAware {
         } catch (e: android.security.keystore.UserNotAuthenticatedException) {
             // Locked phone / auth-bound key: the key is fine, just not usable right now.
             result.error("locked", "key not usable now", null)
+        } catch (e: KeyMissingException) {
+            // The alias is really gone (keystore cleared): the blobs cannot be opened by anyone.
+            result.error("invalidated", "key missing", null)
         } catch (e: java.security.UnrecoverableKeyException) {
-            result.error("invalidated", "key unrecoverable", null)
+            // getKey() throws this for a permanently invalidated key AND for transient keystore2
+            // failures ("Failed to obtain information about key", system error). Only the former is a loss;
+            // the latter must stay retryable, so the app never offers a reset for a hiccup.
+            if (isPermanentlyInvalidated(e)) result.error("invalidated", "key unrecoverable", null)
+            else result.error("keystore", "UnrecoverableKeyException", null)
         } catch (e: Throwable) {
             // Never put key material or plaintext in the message.
             result.error("keystore", e.javaClass.simpleName, null)
@@ -133,11 +145,32 @@ class E2eeKeystorePlugin : FlutterPlugin, ActivityAware {
 
     private fun store(): KeyStore = KeyStore.getInstance(provider).apply { load(null) }
 
+    /** Thrown when the wrapping key alias does not exist at all (see [handle]). */
+    private class KeyMissingException : Exception()
+
+    private fun isPermanentlyInvalidated(e: Throwable): Boolean {
+        var c: Throwable? = e
+        while (c != null) {
+            if (c is KeyPermanentlyInvalidatedException) return true
+            c = c.cause
+        }
+        return false
+    }
+
+    /**
+     * The wrapping key. A NEW key is generated only when the alias does not exist (first use). If the alias exists
+     * but cannot be loaded right now, this throws instead: replacing a key that is merely unavailable would make
+     * every stored blob unreadable for good. Generation is serialised across engines (the app's and the
+     * background-location engine share this process and the one Keystore alias).
+     */
     private fun key(): SecretKey {
-        val ks = store()
-        val existing = ks.getKey(alias, null) as? SecretKey
-        if (existing != null) return existing
-        return generate(false)
+        synchronized(keyLock) {
+            val ks = store()
+            val existing = ks.getKey(alias, null) as? SecretKey
+            if (existing != null) return existing
+            if (ks.containsAlias(alias)) throw java.security.KeyStoreException("wrapping key present but not loadable")
+            return generate(false)
+        }
     }
 
     private fun generate(requireUserAuth: Boolean): SecretKey {
@@ -182,9 +215,11 @@ class E2eeKeystorePlugin : FlutterPlugin, ActivityAware {
     }
 
     private fun recreate(requireUserAuth: Boolean) {
-        val ks = store()
-        if (ks.containsAlias(alias)) ks.deleteEntry(alias)
-        generate(requireUserAuth)
+        synchronized(keyLock) {
+            val ks = store()
+            if (ks.containsAlias(alias)) ks.deleteEntry(alias)
+            generate(requireUserAuth)
+        }
     }
 
     private fun encrypt(plain: ByteArray): ByteArray {
@@ -200,8 +235,11 @@ class E2eeKeystorePlugin : FlutterPlugin, ActivityAware {
         val iv = blob.copyOfRange(1, 1 + ivLen)
         val ct = blob.copyOfRange(1 + ivLen, blob.size)
         val c = Cipher.getInstance("AES/GCM/NoPadding")
-        c.init(Cipher.DECRYPT_MODE, store().getKey(which, null) ?: throw java.security.UnrecoverableKeyException(),
-            GCMParameterSpec(128, iv))
+        val ks = store()
+        val k = ks.getKey(which, null)
+            ?: if (ks.containsAlias(which)) throw java.security.KeyStoreException("key present but not loadable")
+            else throw KeyMissingException()
+        c.init(Cipher.DECRYPT_MODE, k, GCMParameterSpec(128, iv))
         return c.doFinal(ct)
     }
 

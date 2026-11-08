@@ -14,6 +14,7 @@ import '../services/diagnostics/diagnostics_reporter.dart';
 import '../services/offline/offline_sync.dart';
 import '../services/location_sharing_service.dart';
 import '../services/permission_service.dart';
+import '../services/storage_event_log.dart';
 import '../theme/app_theme.dart';
 import '../widgets/ds/ds.dart';
 import 'encryption_keys_screen.dart';
@@ -38,6 +39,9 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> with WidgetsBindi
   DiagFacts? _facts;
   List<DiagCheck> _checks = const <DiagCheck>[];
   bool _busy = true;
+
+  /// Sign-in and key storage events (reason codes only), newest last.
+  List<String> _storageEvents = const <String>[];
 
   @override
   void initState() {
@@ -77,8 +81,11 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> with WidgetsBindi
     } catch (_) {
       facts = DiagFacts(now: DateTime.now().toUtc());
     }
+    // The test seam supplies facts only; the event log is read from the phone.
+    final List<String> events = widget.collect != null ? const <String>[] : await StorageEventLog.instance.events();
     if (!mounted) return;
     setState(() {
+      _storageEvents = events;
       _facts = facts;
       _checks = evaluateDiagnostics(facts);
       _busy = false;
@@ -135,7 +142,8 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> with WidgetsBindi
   Future<void> _copy() async {
     final DiagFacts? f = _facts;
     if (f == null) return;
-    await Clipboard.setData(ClipboardData(text: buildDiagnosticReport(f, _checks)));
+    final String storage = widget.collect != null ? '' : await StorageEventLog.instance.render();
+    await Clipboard.setData(ClipboardData(text: '${buildDiagnosticReport(f, _checks)}\n$storage'));
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Copied. The report has no locations or tokens.')),
@@ -170,6 +178,7 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> with WidgetsBindi
             chevron: true,
             onTap: () => _push(const SelfTestScreen()),
           ),
+          _StorageEvents(events: _storageEvents),
           const Padding(
             padding: EdgeInsets.all(AppSpace.lg),
             child: Text(
@@ -319,6 +328,40 @@ class _CheckCard extends StatelessWidget {
               ],
             ),
           ],
+        ],
+      ),
+    );
+  }
+}
+
+/// The sign-in and key storage event log (Diagnostics): every storage read or
+/// decrypt failure, fallback, archive, migration and sign-out cause, as reason
+/// codes. Collapsed by default; included in the copied report.
+class _StorageEvents extends StatelessWidget {
+  const _StorageEvents({required this.events});
+  final List<String> events;
+
+  @override
+  Widget build(BuildContext context) {
+    return Theme(
+      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+      child: ExpansionTile(
+        key: const Key('diag-storage-events'),
+        leading: DsListRow.iconTile(context, Icons.history),
+        title: const Text('Sign-in and key storage', style: AppType.body),
+        subtitle: Text(
+          events.isEmpty ? 'No storage events recorded' : '${events.length} recent events (no secrets)',
+          style: AppType.secondary,
+        ),
+        childrenPadding: const EdgeInsets.fromLTRB(AppSpace.lg, 0, AppSpace.lg, AppSpace.md),
+        expandedCrossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          if (events.isEmpty) const Text('Nothing went wrong with stored sign-in or keys.', style: AppType.secondary),
+          for (final String e in events.reversed)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 2),
+              child: Text(e, style: AppType.secondary.copyWith(fontFamily: 'monospace')),
+            ),
         ],
       ),
     );
