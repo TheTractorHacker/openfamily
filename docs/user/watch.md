@@ -1,5 +1,7 @@
 # Orbitly on your watch (Wear OS)
 
+See your people, send "I'm OK" or SOS and reply to chat from a Wear OS watch, with your phone doing the work.
+
 Orbitly has a watch app for **Wear OS 3 and newer**: Samsung Galaxy Watch 4 and
 later, Google Pixel Watch, and other Wear OS 3+ watches. Older Samsung watches
 that run **Tizen** (Galaxy Watch 3 and earlier, Galaxy Watch Active, Gear) are a

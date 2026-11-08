@@ -1,5 +1,7 @@
 # Watch apps (companion model)
 
+The phone holds all secrets and sends watches a small readable snapshot; watches send back a fixed set of commands.
+
 Status: Wear OS part implemented in v0.25 (unreleased). The Apple Watch part is
 written by the Apple Watch workstream and is kept in its own section at the end;
 the snapshot and command contract below is shared so both watches speak the same
