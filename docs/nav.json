@@ -79,7 +79,8 @@
         "developers/performance-low-memory.md",
         "design/OPTIMIZATION_ARCHITECTURE.md",
         "design/OPTIMIZATION_BACKLOG.md",
-        "design/RESEARCH_NOTES_PERFORMANCE.md"
+        "design/RESEARCH_NOTES_PERFORMANCE.md",
+        "design/PRIVACY_MODEL_V1.md"
       ],
       "icon": "code"
     },

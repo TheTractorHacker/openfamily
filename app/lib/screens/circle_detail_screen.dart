@@ -70,7 +70,7 @@ class _CircleDetailScreenState extends State<CircleDetailScreen> {
               'events and the position in check-ins and SOS are encrypted on each phone. The server '
               'stores and forwards ciphertext only and cannot read where anyone is.\n\n'
               'Still visible to the server: who is in the circle, when phones are online and how often '
-              'they upload. Chat messages are not end-to-end encrypted in this version.\n\n'
+              'they upload. Chat in this circle is end-to-end encrypted too.\n\n'
               'Trips, driving reports and the weekly summary: members who keep their data on their phone get them '
               'calculated by their own phone (it may use more battery and data and can arrive late). The admin map, '
               'Dawarich export and place alerts made by the server only work for members who allow server processing; '
@@ -202,13 +202,18 @@ class _CircleDetailScreenState extends State<CircleDetailScreen> {
             icon: st.isPrivate ? Icons.lock : Icons.lock_open,
             title: 'Private circle',
             subtitle: st.isPrivate
-                ? (_circle.e2eeServerMember ? 'Old mode: the server can read it' : 'On: only members can read locations')
+                ? (_circle.e2eeServerMember
+                    ? 'Old mode: the server can read it'
+                    : _circle.serverAssist
+                        ? 'On: the server reads members who use it'
+                        : 'On: only members can read locations')
                 : 'Off: locations are not encrypted for the server',
             info: st.isPrivate
                 ? (_circle.e2eeServerMember
                     ? 'OLD TRUSTED-SERVER MODE: the Orbitly server can read this circle (every member allowed it). An admin can upgrade it under Encryption keys > Server processing.'
-                    : 'Positions, history, places and events are end-to-end encrypted: only the members can read them. '
-                        'Server processing is optional and each member decides for their own data (Encryption keys > Server processing).')
+                    : 'Positions, history, places and events are end-to-end encrypted: only the members can read them, '
+                        'except the data of members who use server processing, which the server can read too. '
+                        'Each member\'s own setting is under Encryption keys > Server processing. Chat is always end-to-end encrypted.')
                 : 'Turning it on encrypts locations so the server cannot read them. Some server features are not available in private circles.',
             infoTitle: 'Private circle',
             value: st.isPrivate,

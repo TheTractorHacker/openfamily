@@ -323,7 +323,7 @@ class _LocationTabViewState extends State<LocationTabView> {
                           '${c.memberCount} '
                           '${c.memberCount == 1 ? 'person' : 'people'}'
                           '${c.isAdmin ? ' - Admin' : ''}'
-                          '${c.isPrivate ? ' - End-to-end encrypted' : ''}'
+                          '${c.isPrivate ? (c.e2eeServerMember ? ' - Server can read' : c.serverAssist ? ' - Private, server helps some' : ' - End-to-end encrypted') : ''}'
                           '${c.sharingEnabled ? '' : ' - Sharing paused'}'
                           '${_isActive(c) ? ' - Shown on the map' : ''}',
                       leading: _circleLeading(ctx, c),
@@ -606,7 +606,7 @@ class _LocationTabViewState extends State<LocationTabView> {
               if (_activeCircle?.isPrivate == true)
                 Padding(
                   padding: const EdgeInsets.only(top: AppSpace.sm),
-                  child: PrivateCircleBadge(serverMember: _activeCircle?.e2eeServerMember == true),
+                  child: PrivateCircleBadge(serverMember: _activeCircle?.e2eeServerMember == true, serverAssist: _activeCircle?.serverAssist == true),
                 ),
               if (widget.circleSharingPaused)
                 Padding(

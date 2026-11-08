@@ -7,11 +7,16 @@ import '../theme/app_theme.dart';
 /// encrypted) circle. Honest wording: members' phones can read positions, the
 /// server cannot.
 class PrivateCircleBadge extends StatelessWidget {
-  const PrivateCircleBadge({super.key, this.compact = false, this.serverMember = false});
+  const PrivateCircleBadge({super.key, this.compact = false, this.serverMember = false, this.serverAssist = false});
 
   /// Trusted-server mode: the server holds a key too, so say so instead of
   /// "End-to-end encrypted".
   final bool serverMember;
+
+  /// Per-member processing is on (lanes circle): members who chose the server
+  /// lane are readable by the server, so "End-to-end encrypted" for the whole
+  /// circle would be wrong. Say "Private" plus "server helps" instead.
+  final bool serverAssist;
 
   /// Icon plus short label only (for tight rows).
   final bool compact;
@@ -22,7 +27,10 @@ class PrivateCircleBadge extends StatelessWidget {
     return Semantics(
       label: serverMember
           ? 'Private circle with a trusted server member. The Orbitly server can read locations in this circle.'
-          : 'End-to-end encrypted circle. The server cannot read locations in this circle.',
+          : serverAssist
+              ? 'Private circle with server help. The server can read the data of members who use the server; '
+                  'members who keep data on their phone stay end-to-end encrypted.'
+              : 'End-to-end encrypted circle. The server cannot read locations in this circle.',
       child: Container(
         key: const ValueKey<String>('private-circle-badge'),
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
@@ -34,10 +42,14 @@ class PrivateCircleBadge extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
-            Icon(serverMember ? Icons.dns_outlined : Icons.lock_outline, size: 15, color: brand.accentInk),
+            Icon(serverMember || serverAssist ? Icons.dns_outlined : Icons.lock_outline, size: 15, color: brand.accentInk),
             const SizedBox(width: 5),
             Text(
-              serverMember ? (compact ? 'Server can read' : 'Server can read (trusted server)') : (compact ? 'Encrypted' : 'End-to-end encrypted'),
+              serverMember
+                  ? (compact ? 'Server can read' : 'Server can read (trusted server)')
+                  : serverAssist
+                      ? (compact ? 'Private + server' : 'Private, server helps some')
+                      : (compact ? 'Encrypted' : 'End-to-end encrypted'),
               style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: brand.accentInk),
             ),
           ],

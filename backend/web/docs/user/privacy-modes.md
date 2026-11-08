@@ -73,14 +73,19 @@ setting. It works like this:
 ## What opting out does not hide
 
 - That you are using the app and roughly when (the server sees that data was
-  uploaded, its size and time).
+  uploaded, its size and time, and what kind it is, for example an arrival
+  event or a check-in).
+- Your network address. On a server at home, a phone that connects from the
+  home network tells the server that you are at home.
 - Anything already copied before you opted out, and old backups.
 - Other members: a member who holds the circle key can read what the circle
   shares. Only add people you trust.
 
 ## Chat, sharing links and SOS
 
-Chat is stored readable on the server (see [Chat](chat.md)). Share links are
+Chat is stored readable on the server in a Normal circle and is end-to-end
+encrypted in a Private circle, whatever each person chose for their location
+(see [Chat](chat.md)). Share links are
 for anyone with the link, until they expire. SOS messages work in every mode;
 see [Safety](safety-and-check-ins.md).
 
@@ -100,6 +105,8 @@ see [Safety](safety-and-check-ins.md).
 * **Private.** Only phones can read locations; the server keeps nothing readable. Inside a Private circle
   each person then chooses **Use the server (recommended)** (reports, history and maps work for you) or
   **Keep on my phone** (shared privately, encrypted from phone to phone; no reports unless you turn on phone
-  reports, which uses more battery). Nobody can choose for you, and you can change your mind any time.
+  reports, which uses more battery). Nobody else can choose for you, except that on a **Home** server with
+  auto-apply your own phone switches you to the server by default and tells you (see above). You can change your
+  mind any time.
 * If a Private circle shows people missing because their app is old, a circle admin can **switch the circle
   to normal mode** so everyone shows up again. The server then keeps readable locations for that circle.
