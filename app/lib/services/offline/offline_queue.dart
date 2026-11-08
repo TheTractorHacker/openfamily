@@ -110,12 +110,15 @@ class VaultQueueStorage implements QueueStorage {
   VaultQueueStorage(this.vault);
   final E2eeVault vault;
   static const String name = 'offline/v1/queue';
+
+  /// A Keystore call that does not answer must not freeze the SOS screen: give up, use preferences.
+  static const Duration vaultTimeout = Duration(seconds: 3);
   static const String _fallbackKey = 'offline_queue_fallback_v1';
 
   @override
   Future<String?> read() async {
     try {
-      final Uint8List? raw = await vault.read(name);
+      final Uint8List? raw = await vault.read(name).timeout(vaultTimeout);
       if (raw != null) return utf8.decode(raw);
     } catch (_) {}
     try {
@@ -129,7 +132,7 @@ class VaultQueueStorage implements QueueStorage {
   @override
   Future<void> write(String json) async {
     try {
-      await vault.write(name, Uint8List.fromList(utf8.encode(json)));
+      await vault.write(name, Uint8List.fromList(utf8.encode(json))).timeout(vaultTimeout);
       final SharedPreferences p = await SharedPreferences.getInstance();
       if (p.containsKey(_fallbackKey)) await p.remove(_fallbackKey);
       return;
@@ -206,12 +209,14 @@ class OfflineQueue {
 
   List<QueuedItem>? _items;
   List<Map<String, dynamic>> _rejected = <Map<String, dynamic>>[];
-  Future<void> _lock = Future<void>.value();
+  // Created on first use, in the caller's zone (a future made in another zone, for example in a
+  // test's setUp, would never run its callbacks under a fake clock).
+  Future<void>? _lock;
   bool _flushing = false;
 
   Future<T> _locked<T>(Future<T> Function() f) {
     final Completer<T> c = Completer<T>();
-    _lock = _lock.then((_) async {
+    _lock = (_lock ?? Future<void>.value()).then((_) async {
       try {
         c.complete(await f());
       } catch (e, st) {

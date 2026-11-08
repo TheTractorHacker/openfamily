@@ -42,6 +42,9 @@ class OfflineCache {
   static OfflineCache instance = OfflineCache(vault: SecureVault());
 
   static const String prefix = 'offline/v1/';
+
+  /// A Keystore call that does not answer means "no cache right now", never a frozen screen.
+  static const Duration vaultTimeout = Duration(seconds: 3);
   final Map<String, CacheEntry> _mem = <String, CacheEntry>{};
 
   String _name(String key) => '$prefix$key';
@@ -50,7 +53,7 @@ class OfflineCache {
     final CacheEntry? hot = _mem[key];
     if (hot != null) return hot;
     try {
-      final Uint8List? raw = await vault.read(_name(key));
+      final Uint8List? raw = await vault.read(_name(key)).timeout(vaultTimeout);
       if (raw == null) return null;
       final Map<String, dynamic> m = jsonDecode(utf8.decode(raw)) as Map<String, dynamic>;
       final CacheEntry e = CacheEntry(
@@ -74,7 +77,7 @@ class OfflineCache {
       })));
       if (bytes.length > maxBytes) return false;
       _mem[key] = e;
-      await vault.write(_name(key), bytes);
+      await vault.write(_name(key), bytes).timeout(vaultTimeout);
       return true;
     } catch (_) {
       return false;

@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:openfamily/screens/help_alert_screen.dart';
 import 'package:openfamily/screens/sos_screen.dart';
+import 'package:openfamily/services/location_reporter.dart';
 import 'package:openfamily/services/api_client.dart';
 import 'package:openfamily/services/e2ee/e2ee_vault.dart';
 import 'package:openfamily/services/offline/offline_cache.dart';
@@ -38,7 +39,14 @@ void main() {
     ]);
   });
 
-  Future<void> pressSos(WidgetTester t) async {
+  /// Leave no timer behind: the SOS location burst (5 min) and the contacts fetch retry.
+Future<void> finish(WidgetTester t) async {
+  LocationReporter.stopSosBurst();
+  await t.pumpWidget(const SizedBox());
+  await t.pump(const Duration(seconds: 2));
+}
+
+Future<void> pressSos(WidgetTester t) async {
     await t.pumpWidget(const MaterialApp(home: SosScreen(smsConfigured: false)));
     await t.pumpAndSettle();
     await t.tap(find.byKey(const ValueKey<String>('sos-send-button')));
@@ -61,6 +69,7 @@ void main() {
     expect(q.length, 1);
     expect(q.single.path, '/alerts/sos');
     expect(q.single.body!['client_id'], q.single.id, reason: 'the server stores a replay once');
+    await finish(t);
   });
   });
 
@@ -76,6 +85,7 @@ void main() {
       await t.pump(const Duration(milliseconds: 50));
     }
     expect(find.text('SOS not sent yet'), findsOneWidget);
+    await finish(t);
   });
   });
 
@@ -87,6 +97,7 @@ void main() {
     await t.pump(const Duration(milliseconds: 100));
     expect(await t.runAsync(() => OfflineQueue.instance.size()), 0);
     expect(find.text('Cancelled'), findsOneWidget);
+    await finish(t);
   });
   });
 
@@ -103,6 +114,7 @@ void main() {
     expect(find.text('Help alert sent'), findsNothing);
     expect(find.textContaining('Not sent yet'), findsOneWidget);
     expect(await t.runAsync(() => OfflineQueue.instance.size()), 1);
+    await finish(t);
   });
   });
 }

@@ -82,13 +82,21 @@ void main() {
   test('a 5xx / rate-limit storm never drops anything, however long it lasts', () async {
     await q.enqueue(item('sos', QueueKind.sos, at: t(1)));
     await q.enqueue(item('msg', QueueKind.chat, at: t(2)));
-    for (final int status in <int>[500, 502, 503, 504, 429, 408, 0]) {
+    for (final int status in <int>[500, 502, 503, 504, 408, 0]) {
       for (int i = 0; i < 30; i++) {
         await q.flush(send: (QueuedItem _) async => throw ApiException(status, 'down'));
       }
     }
     expect(await q.size(), 2);
     expect(await q.rejectedCount(), 0);
+  });
+
+  test('rate limiting keeps a chat message queued (an SOS 429 is a different case, below)', () async {
+    await q.enqueue(item('msg', QueueKind.chat, at: t(1)));
+    for (int i = 0; i < 30; i++) {
+      await q.flush(send: (QueuedItem _) async => throw const ApiException(429, 'slow down'));
+    }
+    expect(await q.size(), 1);
   });
 
   test('the server refusing one item for good moves it aside and the rest still go out', () async {

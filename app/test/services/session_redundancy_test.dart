@@ -143,7 +143,9 @@ void main() {
     await http.runWithClient(() async {
       await expectLater(
           ApiClient.get('/family'), throwsA(isA<ApiException>()));
-    }, () => server(valid: {noIatNew}, calls: calls));
+    // The client may retry the GET after the first "could not reach" answer; the rotated token
+    // (what the server handed out) must keep working, as it would on a real server.
+    }, () => server(valid: {noIatNew, jwt(iat: 3000, exp: 9999999999, tag: 'rot')}, calls: calls));
     expect(calls.take(2), <String>['refresh:$staleRefresh', 'refresh:$noIatNew']);
     expect(await TokenStorage.hasStoredSession(), isTrue);
   });
