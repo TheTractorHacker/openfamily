@@ -1,4 +1,5 @@
 import 'dart:typed_data';
+import '../services/perf/perf_profile.dart';
 import 'dart:ui' show FontFeature;
 
 import 'package:flutter/material.dart';
@@ -246,7 +247,9 @@ class _StatusAvatarState extends State<StatusAvatar> {
               color: widget.member.avatarColor == AppColors.purple
                   ? BrandTheme.of(context).accent
                   : widget.member.avatarColor,
-              boxShadow: [
+              boxShadow: PerfProfile.current.reduceEffects
+                  ? null
+                  : [
                 BoxShadow(
                   color: statusColor.withValues(alpha: 0.35),
                   blurRadius: 8,
@@ -525,9 +528,9 @@ class _MovementGlyphBadge extends StatelessWidget {
         border: Border.all(
           color: speeding ? _speedingBorder : _badgeBorder,
         ),
-        boxShadow: const [
-          BoxShadow(color: Color(0x22000000), blurRadius: 3),
-        ],
+        boxShadow: PerfProfile.current.reduceEffects
+            ? null
+            : const [BoxShadow(color: Color(0x22000000), blurRadius: 3)],
       ),
       child: Center(
         child: MovementIcon(
@@ -565,9 +568,9 @@ class _SpeedCaption extends StatelessWidget {
             border: Border.all(
               color: speeding ? _speedingBorder : _badgeBorder,
             ),
-            boxShadow: const [
-              BoxShadow(color: Color(0x22000000), blurRadius: 3),
-            ],
+            boxShadow: PerfProfile.current.reduceEffects
+                ? null
+                : const [BoxShadow(color: Color(0x22000000), blurRadius: 3)],
           ),
           child: Text.rich(
             TextSpan(

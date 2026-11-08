@@ -601,7 +601,7 @@ export interface AdminPlaceInput {
   lon?: number
   radius_meters?: number
   address?: string
-  /** Circle id to share with; null = whole family (update only). */
+  /** Circle id to share with; null = whole group (update only). */
   circle_id?: string | null
 }
 
@@ -948,4 +948,75 @@ export function getAdminBuilds(refresh = false): Promise<AdminBuilds> {
 
 export function getSystemChecks(): Promise<SystemChecks> {
   return request<SystemChecks>('/api/admin/system/checks')
+}
+
+// ---- Admin hygiene (platform admin) ----
+
+export interface StaleDevicesResult {
+  count: number
+  devices: { id: string; user_name: string; platform: string; name: string; last_seen: string | null }[]
+}
+
+/** Preview (dryRun) or hide device rows not seen for `days`. */
+export function hideStaleDevices(days: number, dryRun: boolean): Promise<StaleDevicesResult> {
+  return request<StaleDevicesResult>('/api/admin/fleet/hide-stale', { method: 'POST', body: { days, dry_run: dryRun } })
+}
+
+export interface BulkRevokeRequest {
+  mode: 'all_except_current' | 'inactive'
+  days?: number
+  user_id?: string
+  dry_run?: boolean
+  include_current?: boolean
+}
+
+export function bulkRevokeSessions(body: BulkRevokeRequest): Promise<{ count: number; revoked?: number; dry_run: boolean }> {
+  return request('/api/admin/sessions/bulk-revoke', { method: 'POST', body })
+}
+
+export interface SecuritySettings {
+  session_idle_days: number
+  max_sessions_per_user: number
+}
+
+export function getSecuritySettings(): Promise<{ settings: SecuritySettings; defaults: SecuritySettings }> {
+  return request('/api/admin/settings/security')
+}
+
+export function putSecuritySettings(s: SecuritySettings): Promise<{ settings: SecuritySettings }> {
+  return request('/api/admin/settings/security', { method: 'PUT', body: s })
+}
+
+// ---- Member defaults (platform admin; endpoint may not exist on older servers) ----
+
+export interface MemberDefaults {
+  default_lane: 'server' | 'phone'
+  auto_apply: boolean
+}
+
+export function getMemberDefaults(): Promise<MemberDefaults> {
+  return request<MemberDefaults>('/api/admin/settings/member-defaults')
+}
+
+export function putMemberDefaults(v: MemberDefaults): Promise<MemberDefaults> {
+  return request<MemberDefaults>('/api/admin/settings/member-defaults', { method: 'PUT', body: v })
+}
+
+// ---- Server processing overview (platform admin) ----
+
+export interface ProcessingMember {
+  user_id: string
+  name: string
+  lane: 'server' | 'phone' | 'not_chosen'
+  last_data_at: string | null
+  points_today: number
+  last_private_update_at: string | null
+}
+export interface ProcessingOverview {
+  server_key: { state: 'approved' | 'waiting' | 'none'; device?: string; label?: string }
+  circles: { id: string; name: string; server_assist: boolean; members: ProcessingMember[] }[]
+}
+
+export function getProcessingOverview(): Promise<ProcessingOverview> {
+  return request<ProcessingOverview>('/api/admin/processing-overview')
 }

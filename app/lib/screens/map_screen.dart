@@ -33,6 +33,7 @@ import '../services/member_motion_hub.dart';
 import '../services/speed_units.dart';
 import '../services/watch_client.dart';
 import '../services/location_outbox.dart';
+import '../services/offline/server_reachability.dart';
 import '../services/location_service.dart';
 import '../services/location_sharing_service.dart';
 import '../services/perf/perf_monitor.dart';
@@ -44,6 +45,7 @@ import '../theme/app_theme.dart';
 import '../utils/member_clustering.dart';
 import '../widgets/location_tab_view.dart';
 import '../widgets/sharing_sheet.dart';
+import '../widgets/sync_status_chip.dart';
 import '../widgets/member_avatar_bubble.dart';
 import '../widgets/visible_value_builder.dart';
 import 'check_in_screen.dart';
@@ -250,6 +252,7 @@ class _MapScreenState extends State<MapScreen>
     _selection.addListener(_onSelectionChanged);
     _connectivitySub =
         Connectivity().onConnectivityChanged.listen(_onConnectivityChanged);
+    ServerReachability.instance.onRecovered.add(_onServerBack);
     _load();
     unawaited(BubbleStore.instance.refresh());
     unawaited(InboxStore.instance.refresh());
@@ -438,6 +441,18 @@ class _MapScreenState extends State<MapScreen>
     unawaited(LocationOutbox.drain(send: sendOutboxBatchViaApi));
   }
 
+  /// The server answers again after being unreachable: replace the remembered
+  /// roster with the live one, or run the initial load that had failed.
+  Future<void> _onServerBack() async {
+    if (!mounted) return;
+    if (_error != null) {
+      await _load();
+    } else if (_familyService.servedFromCache) {
+      unawaited(_loadCircles());
+      await _familyService.refreshMembers();
+    }
+  }
+
   /// Loads circles, resolves the selected circle, fetches the name + members
   /// for it, then opens the live WebSocket (scoped to that circle).
   Future<void> _load({bool retriedAfterGone = false}) async {
@@ -586,6 +601,7 @@ class _MapScreenState extends State<MapScreen>
   @override
   void dispose() {
     InboxFocus.memberId.removeListener(_onInboxFocus);
+    ServerReachability.instance.onRecovered.remove(_onServerBack);
     WidgetsBinding.instance.removeObserver(this);
     _connectivitySub?.cancel();
     _selection
@@ -1107,6 +1123,7 @@ class _MapScreenState extends State<MapScreen>
       topOverlay: Column(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
+          const SyncStatusChip(),
           InboxBanner(onOpen: _openInbox),
           ValueListenableBuilder<FollowUi?>(
             valueListenable: _followUi,

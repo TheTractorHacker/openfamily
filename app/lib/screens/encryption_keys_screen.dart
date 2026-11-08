@@ -18,7 +18,7 @@ import 'security_widgets.dart';
 import 'link_device_screen.dart';
 import 'recovery_screens.dart';
 
-/// Settings > Security > Encryption keys.
+/// Settings > Security > Encryption keys. Plain status and the two everyday actions up top; the technical items sit under Advanced.
 ///
 /// Shows this phone's key fingerprint (large, copyable, QR), when it was made,
 /// where its storage key lives, a "Check server record" action, per-circle
@@ -231,62 +231,91 @@ class _EncryptionKeysScreenState extends State<EncryptionKeysScreen> {
         padding: const EdgeInsets.all(AppSpace.xl),
         children: <Widget>[
           for (final E2eeAlarm a in _alarms) AlarmBanner(alarm: a),
-          const Text(
-            'Private circles are end-to-end encrypted: the keys below are made on '
-            'this phone and never leave it. The server only stores public keys and '
-            'scrambled copies it cannot read. In this version only the key setup is '
-            'active; locations are not encrypted yet.',
-            style: AppType.secondary,
-          ),
+          if (id == null || _myRecord == null) _setupCard(id) else _statusCard(),
           const SizedBox(height: AppSpace.lg),
-          if (id == null || _myRecord == null) _setupCard(id) else ..._deviceSection(id),
+          if (id != null && _myRecord != null)
+            DsRowGroup(children: <Widget>[
+              DsListRow(
+                key: const Key('keys-recovery'),
+                leading: DsListRow.iconTile(context, Icons.pin_outlined),
+                title: 'Recovery phrase',
+                subtitle: '24 words to get your circles back',
+                info: 'Write down 24 words to get your encrypted circles back on a new phone. '
+                    'If you lose every phone and the recovery phrase, the encrypted data of your private circles '
+                    'cannot be recovered by anyone, including the server operator.',
+                chevron: true,
+                onTap: () => _push(RecoverySetupScreen(service: _svc)),
+              ),
+              DsListRow(
+                key: const Key('keys-link'),
+                leading: DsListRow.iconTile(context, Icons.phonelink_setup),
+                title: 'Link another phone',
+                subtitle: 'Add a new phone to your account',
+                info: 'Use this on a new phone, or to approve a new phone from this one. '
+                    'You will need both phones in front of you.',
+                chevron: true,
+                onTap: () => _push(LinkDeviceScreen(service: _svc)),
+              ),
+            ]),
           if (_rows.isNotEmpty) ...<Widget>[
             const DsSectionHeader('Circles', padding: EdgeInsets.fromLTRB(0, AppSpace.xl, 0, AppSpace.xs)),
             DsRowGroup(children: <Widget>[for (final _CircleRow r in _rows) _circleRow(r)]),
           ],
           if (id != null && _myRecord != null) ...<Widget>[
-            const DsSectionHeader('Backup and devices', padding: EdgeInsets.fromLTRB(0, AppSpace.xl, 0, AppSpace.xs)),
+            const SizedBox(height: AppSpace.lg),
             DsRowGroup(children: <Widget>[
-              DsListRow(
-                leading: DsListRow.iconTile(context, Icons.pin_outlined),
-                title: 'Recovery phrase',
-                subtitle: 'Write down 24 words to get your encrypted circles back on a new phone.',
-                chevron: true,
-                onTap: () => _push(RecoverySetupScreen(service: _svc)),
-              ),
-              DsListRow(
-                leading: DsListRow.iconTile(context, Icons.restore),
-                title: 'Restore from a recovery phrase',
-                subtitle: 'For a new phone.',
-                chevron: true,
-                onTap: () => _push(RestoreScreen(service: _svc, circles: _circles)),
-              ),
-              DsListRow(
-                leading: DsListRow.iconTile(context, Icons.phonelink_setup),
-                title: 'Link another phone',
-                subtitle: 'Approve a new phone, or link this one to your account.',
-                chevron: true,
-                onTap: () => _push(LinkDeviceScreen(service: _svc)),
-              ),
-              DsListRow(
-                leading: DsListRow.iconTile(context, Icons.fact_check_outlined),
-                title: 'Key log and compare heads',
-                subtitle: 'Detects a server that rewrites or forks key history.',
-                chevron: true,
-                onTap: () => _push(KeyLogScreen(service: _svc)),
+              Theme(
+                data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+                child: ExpansionTile(
+                  key: const Key('keys-advanced'),
+                  leading: DsListRow.iconTile(context, Icons.settings_outlined),
+                  title: const Text('Advanced', style: AppType.body),
+                  subtitle: const Text('Fingerprint, key storage, checks', style: AppType.secondary),
+                  childrenPadding: const EdgeInsets.fromLTRB(AppSpace.xl, 0, AppSpace.xl, AppSpace.lg),
+                  expandedCrossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[..._deviceSection(id), ..._advancedRows()],
+                ),
               ),
             ]),
           ],
           const SizedBox(height: AppSpace.xxl),
-          Text(
-            'If you lose every phone and the recovery phrase, the encrypted data of your '
-            'private circles cannot be recovered by anyone, including the server operator.',
-            style: AppType.secondary.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
-          ),
         ],
       ),
     );
   }
+
+  Widget _statusCard() {
+    final bool lockedOk = _store?.usableWhileLocked ?? true;
+    return DsRowGroup(children: <Widget>[
+      DsListRow(
+        key: const Key('keys-status'),
+        leading: DsListRow.iconTile(context, Icons.verified_user_outlined),
+        title: 'Your keys are safe on this phone',
+        subtitle: lockedOk ? 'Works with the screen locked' : 'Unlock the phone once to finish updating',
+        info: 'Private circles are end-to-end encrypted: the keys are made on this phone and never leave it. '
+            'The server only stores public keys and scrambled copies it cannot read.',
+        infoTitle: 'Your keys',
+      ),
+    ]);
+  }
+
+  List<Widget> _advancedRows() => <Widget>[
+        const SizedBox(height: AppSpace.md),
+        DsListRow(
+          leading: DsListRow.iconTile(context, Icons.restore),
+          title: 'Restore on a new phone',
+          subtitle: 'Use your recovery phrase',
+          chevron: true,
+          onTap: () => _push(RestoreScreen(service: _svc, circles: _circles)),
+        ),
+        DsListRow(
+          leading: DsListRow.iconTile(context, Icons.fact_check_outlined),
+          title: 'Key history',
+          subtitle: 'Spots a server that changes key history',
+          chevron: true,
+          onTap: () => _push(KeyLogScreen(service: _svc)),
+        ),
+      ];
 
   Widget _setupCard(LocalIdentity? id) => DsRowGroup(children: <Widget>[
         Padding(
@@ -305,8 +334,6 @@ class _EncryptionKeysScreenState extends State<EncryptionKeysScreen> {
   List<Widget> _deviceSection(LocalIdentity id) {
     final ColorScheme cs = Theme.of(context).colorScheme;
     return <Widget>[
-      const Text('This phone', style: AppType.headline),
-      const SizedBox(height: AppSpace.sm),
       DigitBlock(digits: _digits.isEmpty ? '...' : _digits, label: 'This phone\'s fingerprint', copyLabel: 'Copy fingerprint'),
       const SizedBox(height: AppSpace.sm),
       Text('Short form: ${id.short}', style: AppType.secondary),
@@ -331,6 +358,12 @@ class _EncryptionKeysScreenState extends State<EncryptionKeysScreen> {
       ),
       const SizedBox(height: AppSpace.lg),
       Text('Key storage: ${_store?.label ?? '...'}', key: const Key('keystore-level'), style: AppType.secondary),
+      if (_store != null)
+        Text(
+          _store!.usableWhileLocked ? 'Keys available while locked' : 'Keys only work while the phone is unlocked',
+          key: const Key('keystore-locked-state'),
+          style: AppType.secondary,
+        ),
       Text(
         defaultTargetPlatform == TargetPlatform.iOS
             ? 'Only the key that protects your private keys at rest lives in the iPhone Keychain '
@@ -342,7 +375,7 @@ class _EncryptionKeysScreenState extends State<EncryptionKeysScreen> {
       ),
       const SizedBox(height: AppSpace.lg),
       DsPillButton(
-        label: 'Check server record',
+        label: 'Check my keys with the server',
         icon: Icons.fact_check,
         style: DsPillStyle.tonal,
         onPressed: _busy ? null : _checkServer,
@@ -361,15 +394,15 @@ class _EncryptionKeysScreenState extends State<EncryptionKeysScreen> {
     if (st == null) {
       sub = 'Status unavailable';
     } else if (st.isPrivate) {
-      sub = 'Private - end-to-end key epoch ${st.epoch}';
+      sub = 'Private';
       if (st.rekeyRequired) {
-        sub += ' - new key needed';
+        sub = 'Private, new key needed';
         trailing = const DsStatusChip(label: 'Action needed', icon: Icons.warning_amber_rounded, color: Color(0xFFD97706));
       } else {
         trailing = const DsStatusChip(label: 'Private', icon: Icons.lock, color: Color(0xFF16A34A));
       }
     } else {
-      sub = 'Normal - not end-to-end encrypted';
+      sub = 'Normal circle';
     }
     return DsListRow(
       leading: DsListRow.iconTile(context, st?.isPrivate == true ? Icons.lock : Icons.lock_open),

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:latlong2/latlong.dart';
 
 import '../models/place.dart';
@@ -5,6 +7,8 @@ import 'api_client.dart';
 import 'e2ee/e2ee_crypto.dart';
 import 'e2ee/private_places.dart';
 import 'e2ee/private_runtime.dart';
+import 'offline/offline_cache.dart';
+import 'offline/offline_errors.dart';
 
 /// Client for the backend Places (geofence) endpoints.
 ///
@@ -57,7 +61,17 @@ class PlaceService {
   }
 
   static Future<List<Place>> _fetchFresh() async {
-    final dynamic data = await ApiClient.get('/family/places');
+    dynamic data;
+    try {
+      data = await ApiClient.get('/family/places');
+      unawaited(OfflineCache.instance.write('places', data));
+    } catch (e) {
+      // Server unreachable: the places this phone knew (sealed places are local anyway).
+      if (!isOfflineError(e)) rethrow;
+      final CacheEntry? c = await OfflineCache.instance.read('places');
+      if (c == null) rethrow;
+      data = c.data;
+    }
     if (data is! List) {
       throw const ApiException(0, 'Unexpected places response.');
     }

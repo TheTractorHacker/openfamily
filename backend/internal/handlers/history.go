@@ -114,34 +114,46 @@ func (s *Server) GetMemberHistory(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "member id is required")
 		return
 	}
-
-	callerFamily, err := s.familyIDForUser(r.Context(), claims.UserID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load family")
+	out, status, msg := s.memberHistoryForViewer(r.Context(), claims.UserID, memberID, from, to)
+	if status != http.StatusOK {
+		writeError(w, status, msg)
 		return
 	}
-	targetFamily, found, err := s.userFamilyID(r.Context(), memberID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load member")
+	trail, ok := applyTrailParams(r, out.Trail)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "simplify must be 0-500 metres and max_points 10-1500")
 		return
+	}
+	out.Trail = trail
+	writeJSON(w, http.StatusOK, out)
+}
+
+// memberHistoryForViewer applies the circle-permission rules for reading one
+// member's history and builds it. It returns the HTTP status and message to
+// send when the viewer may not read it.
+func (s *Server) memberHistoryForViewer(ctx context.Context, viewerID, memberID string, from, to time.Time) (historyOut, int, string) {
+	callerFamily, err := s.familyIDForUser(ctx, viewerID)
+	if err != nil {
+		return historyOut{}, http.StatusInternalServerError, "failed to load family"
+	}
+	targetFamily, found, err := s.userFamilyID(ctx, memberID)
+	if err != nil {
+		return historyOut{}, http.StatusInternalServerError, "failed to load member"
 	}
 	if !found {
-		writeError(w, http.StatusNotFound, "member not found")
-		return
+		return historyOut{}, http.StatusNotFound, "member not found"
 	}
 	// History follows circle permissions (the same rule as the live map): the
 	// caller sees a member's trail only through a live circle both belong to in
 	// which the member currently shares their location. A member who turned
 	// sharing off (or paused it) is no longer readable by the circle, whatever
 	// their legacy family says. A user always sees their own history.
-	shared, err := circles.New(s.Pool).SharedWith(r.Context(), claims.UserID, memberID)
+	shared, err := circles.New(s.Pool).SharedWith(ctx, viewerID, memberID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to check sharing")
-		return
+		return historyOut{}, http.StatusInternalServerError, "failed to check sharing"
 	}
 	if len(shared) == 0 {
-		writeError(w, http.StatusForbidden, "member is not sharing with you")
-		return
+		return historyOut{}, http.StatusForbidden, "member is not sharing with you"
 	}
 	// Place names resolve only for the legacy family both sides belong to; a
 	// viewer reaching the member through another circle must not learn the
@@ -150,14 +162,11 @@ func (s *Server) GetMemberHistory(w http.ResponseWriter, r *http.Request) {
 	if callerFamily != "" && callerFamily == targetFamily {
 		placesFamily = targetFamily
 	}
-	targetFamily = placesFamily
-
-	out, err := s.buildMemberHistory(r.Context(), memberID, targetFamily, from, to)
+	out, err := s.buildMemberHistory(ctx, memberID, placesFamily, from, to)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load history")
-		return
+		return historyOut{}, http.StatusInternalServerError, "failed to load history"
 	}
-	writeJSON(w, http.StatusOK, out)
+	return out, http.StatusOK, ""
 }
 
 // AdminGetMemberHistory returns any member's location trail and visits.

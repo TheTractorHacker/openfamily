@@ -34,6 +34,33 @@ class LanesNotReady implements Exception {
   String toString() => 'LanesNotReady(${names.length} members)';
 }
 
+/// Why [LanesService.autoApplyIfDue] did or did not sign.
+enum AutoApplyOutcome {
+  /// This phone just signed the server lane for its own member.
+  applied,
+
+  /// The admin policy is off for auto-apply.
+  disabled,
+
+  /// Not a Private circle, or the circle's server assistance is off / has no approved server key.
+  notAvailable,
+
+  /// `required_server`: consent stays an explicit, informed act; nothing is signed on its own.
+  consentRequired,
+
+  /// A child account: the pairing-time choice stands.
+  child,
+
+  /// The member signed a pref at some point (phone or server): never overridden.
+  hasChoice,
+
+  /// This phone already auto-applied or the member opted out once: never again.
+  alreadyHandled,
+
+  /// This phone does not hold the server key yet (an admin phone has to be online first) or the call failed. Tried again later.
+  notYet,
+}
+
 /// One member of the circle with their VERIFIED lane.
 class MemberLaneView {
   const MemberLaneView(this.userId, this.lane, this.sinceMs, {required this.verified});
@@ -572,6 +599,57 @@ class LanesService {
     if (!cur.policy.assist) return;
     await publishPolicy(circleId,
         serverAssist: true, defaultForNew: cur.policy.defaultForNew, memberOptOut: cur.policy.memberOptOut, rotate: true);
+  }
+
+  // ------------------------------------------------------- auto-apply (section 23)
+
+  /// Admin policy "members are on the server by default": signs `lane = server` with THIS member's own key,
+  /// exactly like a tap on "Use the server", when ALL of these hold: [autoApply] (server setting), the circle is
+  /// Private with verified server assistance on and an approved pinned server key, the policy is not
+  /// `required_server`, I am not a child account, this phone holds the server key, and my member never signed a
+  /// pref in this circle (the key log is the judge: a signed phone pref, or a server pref voided later, both
+  /// count) and never declined here. The signature is the member's own and shows in the key log. Safe to call often.
+  Future<AutoApplyOutcome> autoApplyIfDue(String circleId, {required bool autoApply}) async {
+    if (!autoApply) return AutoApplyOutcome.disabled;
+    final LocalIdentity? me = await service.identity();
+    if (me == null) return AutoApplyOutcome.notYet;
+    if (await store.autoRecord(circleId) != null) return AutoApplyOutcome.alreadyHandled;
+    if (await store.pendingPhoneRef(circleId) != null || await store.pendingBody(circleId) != null) return AutoApplyOutcome.hasChoice;
+    final CircleLanes cl = await refresh(circleId, force: true);
+    final CircleE2eeState? st = cl.state;
+    if (st == null || !st.isPrivate || !cl.policy.assist || cl.serverKey == null || cl.status == LaneStatus.verificationFailed) {
+      return AutoApplyOutcome.notAvailable;
+    }
+    if (cl.policy.memberOptOut == E2ee.optOutRequiredServer) return AutoApplyOutcome.consentRequired;
+    for (final CircleE2eeMember m in st.members) {
+      if (m.userId == me.userId && m.role == 'child') return AutoApplyOutcome.child;
+    }
+    for (final MemberLaneView v in cl.members) {
+      if (v.userId == me.userId && v.verified) return AutoApplyOutcome.hasChoice;
+    }
+    final List<LogEntry>? log = await _verifiedLog();
+    if (log == null) return AutoApplyOutcome.notAvailable;
+    for (final LogEntry e in log) {
+      if (e.action == E2ee.actProcessingPref && e.userId == me.userId && e.circleId == circleId) return AutoApplyOutcome.hasChoice;
+    }
+    if (await service.serverKey(circleId, cl.policy.skGen) == null) return AutoApplyOutcome.notYet;
+    try {
+      // The fingerprint is the one in the admin's signed policy / approved key list that this phone verified above.
+      await setLane(circleId, E2ee.lineServer, confirmServerFingerprintHex: cl.serverKey!.fingerprint);
+    } catch (_) {
+      return AutoApplyOutcome.notYet;
+    }
+    await store.setAutoRecord(circleId, AutoApplyRecord(state: 'applied', atMs: clock.now().millisecondsSinceEpoch));
+    return AutoApplyOutcome.applied;
+  }
+
+  /// One tap on "Keep on my phone" in the auto-apply notice: signs `lane = phone` now (the existing opt-out, effective
+  /// at once on this phone), asks the server to delete this member's copies, and remembers the choice for good.
+  Future<int> keepOnPhone(String circleId, {bool deleteCopies = true}) async {
+    await setLane(circleId, E2ee.linePhone);
+    await store.setAutoRecord(circleId, AutoApplyRecord(state: 'declined', atMs: clock.now().millisecondsSinceEpoch, dismissed: true));
+    if (!deleteCopies) return 0;
+    return api.purgeServerCopies(circleId);
   }
 
   // ------------------------------------------------------------ duties

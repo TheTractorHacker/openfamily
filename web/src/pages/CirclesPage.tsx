@@ -234,7 +234,7 @@ export function CirclesPage() {
                             {c.icon ? `${c.icon} ` : ''}
                             {c.name}
                           </div>
-                          {c.family_backed && <div className="wb-audit-sub">Family circle</div>}
+                          {c.family_backed && <div className="wb-audit-sub">Group circle</div>}
                         </td>
                         <td>{c.member_count}</td>
                         <td>{c.creator_name ?? '—'}</td>
@@ -320,7 +320,7 @@ export function CirclesPage() {
         ) : invitesQ.error ? (
           <ErrorState title="Couldn’t load invites" description={invitesQ.error.message} onRetry={invitesQ.refetch} />
         ) : invites.length === 0 ? (
-          <EmptyState title="No invite codes" description="Codes created in the app or on the Families page show here." />
+          <EmptyState title="No invite codes" description="Codes created in the app or on the Groups page show here." />
         ) : (
           <Card padded={false}>
             <div className="wb-audit-tablewrap">

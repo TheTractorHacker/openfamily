@@ -22,8 +22,8 @@ import (
 	"github.com/TheTractorHacker/openfamily/backend/internal/backupsettings"
 	"github.com/TheTractorHacker/openfamily/backend/internal/config"
 	"github.com/TheTractorHacker/openfamily/backend/internal/db"
-	"github.com/TheTractorHacker/openfamily/backend/internal/geocode"
 	"github.com/TheTractorHacker/openfamily/backend/internal/errlog"
+	"github.com/TheTractorHacker/openfamily/backend/internal/geocode"
 	handlers "github.com/TheTractorHacker/openfamily/backend/internal/handlers"
 	mid "github.com/TheTractorHacker/openfamily/backend/internal/middleware"
 	"github.com/TheTractorHacker/openfamily/backend/internal/push"
@@ -188,6 +188,7 @@ func main() {
 	srv.APKGitHubToken = cfg.APKGitHubToken
 	srv.FlutterAppDir = cfg.FlutterAppDir
 	srv.BuildVersion = config.BuildVersion()
+	srv.QueryMethod, _ = strconv.ParseBool(os.Getenv("QUERY_METHOD"))
 	if v, err := strconv.Atoi(os.Getenv("BACKUP_STALE_HOURS")); err == nil && v > 0 && v <= 24*365 {
 		srv.BackupStaleHours = v
 	}
@@ -214,6 +215,7 @@ func main() {
 	// or was interrupted during ingest.
 	go srv.ReconcileGeofences(ctx)
 	go srv.RunCirclePurge(ctx)
+	go srv.RunSessionSweep(ctx)
 	go srv.RunUserRetention(ctx)
 	go srv.RunE2EEItemPurge(ctx)
 	if err := srv.EnsureCrashSchema(ctx); err != nil {
@@ -259,10 +261,14 @@ func main() {
 	srv.OnMapStyleChange = setAdminCSPStyle
 	setAdminCSPStyle(srv.EffectiveMapStyleURL(ctx))
 
+	// HTTP QUERY (draft-ietf-httpbis-safe-method-w-body): chi only routes methods it
+	// knows, so register the name before any route uses it.
+	chi.RegisterMethod(handlers.QueryMethod)
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(mid.ClientIP(trustedProxies))
 	r.Use(middleware.Recoverer)
+	r.Use(mid.Compress)
 	r.Use(mid.SecurityHeaders)
 	r.Use(mid.LimitBody(mid.BodyLimitFor))
 	r.Use(cors(cfg.AllowedOrigin))
@@ -328,9 +334,15 @@ func main() {
 	// Authenticated API.
 	r.Group(func(r chi.Router) {
 		r.Use(mid.NoStore)
+		r.Use(mid.ETag)
 		r.Use(mid.RequireAuth(tm))
 		r.Use(mid.RequireTokenVersion(pool))
 		r.Use(mid.RecordAppVersion(pool))
+
+		// Wire efficiency (docs/developers/api-efficiency.md).
+		r.Get("/app/bootstrap", srv.Bootstrap)
+		r.Post("/family/history/query", srv.HistoryQuery)
+		r.MethodFunc(handlers.QueryMethod, "/family/history/query", srv.HistoryQuery)
 
 		r.Get("/me", srv.GetMe)
 		// Release the server runs, for signed-in users only (not on /healthz).
@@ -351,6 +363,7 @@ func main() {
 		r.Get("/auth/passkeys", srv.ListPasskeys)
 		r.Delete("/auth/passkeys/{id}", srv.DeletePasskey)
 		r.Get("/auth/sessions", srv.ListSessions)
+		r.Post("/auth/sessions/current", srv.CurrentSession)
 		r.Delete("/auth/sessions/{id}", srv.RevokeSession)
 		r.Get("/me/export", srv.ExportMe)
 		r.Get("/me/location-retention", srv.GetLocationRetention)
@@ -586,6 +599,8 @@ func main() {
 		r.Get("/api/admin/families/{id}/members", srv.AdminListFamilyMembers)
 		r.Get("/api/admin/members", srv.AdminListMembers)
 		r.Get("/api/admin/fleet", srv.AdminFleetHealth)
+		r.Post("/api/admin/fleet/hide-stale", srv.AdminHideStaleDevices)
+		r.Get("/api/admin/processing-overview", srv.AdminProcessingOverview)
 		r.Get("/api/admin/members/{id}/avatar", srv.GetAdminMemberAvatar)
 		r.Get("/api/admin/members/{id}/history", srv.AdminGetMemberHistory)
 		r.Get("/api/admin/members/{id}/history/export", srv.AdminExportMemberHistory)
@@ -606,6 +621,9 @@ func main() {
 		r.Get("/api/admin/audit/actions", srv.AdminListAuditActions)
 		r.Get("/api/admin/audit/export", srv.AdminExportAudit)
 		r.Get("/api/admin/sessions", srv.AdminListSessions)
+		r.Get("/api/admin/settings/security", srv.AdminGetSecuritySettings)
+		r.Put("/api/admin/settings/security", srv.AdminPutSecuritySettings)
+		r.Post("/api/admin/sessions/bulk-revoke", srv.AdminBulkRevokeSessions)
 		r.Delete("/api/admin/sessions/{id}", srv.AdminRevokeSession)
 		r.Get("/api/admin/activity", srv.AdminActivityFeed)
 		r.Get("/api/admin/bubbles", srv.AdminListBubbles)
@@ -624,6 +642,7 @@ func main() {
 		r.Post("/api/admin/settings/map-style/test", srv.AdminTestMapStyle)
 
 		r.Get("/api/admin/apk", srv.AdminDownloadAPK)
+		r.Get("/api/admin/ipa", srv.AdminDownloadIPA)
 		r.Post("/api/admin/apk/build", srv.AdminBuildAPK)
 		r.Get("/api/admin/apk/status", srv.AdminAPKStatus)
 		r.Get("/api/admin/builds", srv.AdminBuilds)
@@ -637,6 +656,9 @@ func main() {
 		r.Put("/api/admin/settings/e2ee-trusted-default", srv.AdminPutTrustedServerDefault)
 		r.Get("/api/admin/settings/deployment-profile", srv.AdminGetDeploymentProfile)
 		r.Put("/api/admin/settings/deployment-profile", srv.AdminPutDeploymentProfile)
+		r.Get("/api/admin/settings/member-defaults", srv.AdminGetMemberDefaults)
+		r.Put("/api/admin/settings/member-defaults", srv.AdminPutMemberDefaults)
+		r.Get("/api/admin/members-not-on-server", srv.AdminMembersNotOnServer)
 		r.Get("/api/admin/settings/dawarich", srv.AdminGetDawarich)
 		r.Put("/api/admin/settings/dawarich", srv.AdminPutDawarich)
 		r.Delete("/api/admin/settings/dawarich", srv.AdminDeleteDawarich)
@@ -762,8 +784,9 @@ func cors(allowedOrigin string) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if allowedOrigin != "" {
 				w.Header().Set("Access-Control-Allow-Origin", allowedOrigin)
-				w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-App-Version, X-App-Platform, X-Device-Id")
-				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+				w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-App-Version, X-App-Platform, X-Device-Id, If-None-Match")
+				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, QUERY, OPTIONS")
+				w.Header().Add("Access-Control-Expose-Headers", "ETag, X-Next-Cursor, Accept-Query")
 			}
 			if r.Method == http.MethodOptions {
 				w.WriteHeader(http.StatusNoContent)

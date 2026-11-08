@@ -504,3 +504,22 @@ func TestPickAPKAssetAcceptsBothBrandNames(t *testing.T) {
 		}
 	}
 }
+
+func TestPickAPKAssetPrefersCombinedThenArm64(t *testing.T) {
+	got, err := pickAPKAsset([]asset{
+		{Name: "orbitly-1.0.0-armeabi-v7a.apk", ID: 1},
+		{Name: "orbitly-1.0.0-arm64-v8a.apk", ID: 2},
+		{Name: "orbitly-1.0.0.apk", ID: 3},
+	})
+	if err != nil || got.ID != 3 {
+		t.Fatalf("combined APK should win, got %+v %v", got, err)
+	}
+	got, err = pickAPKAsset([]asset{
+		{Name: "orbitly-1.0.0-x86_64.apk", ID: 1},
+		{Name: "orbitly-1.0.0-armeabi-v7a.apk", ID: 2},
+		{Name: "orbitly-1.0.0-arm64-v8a.apk", ID: 3},
+	})
+	if err != nil || got.ID != 3 {
+		t.Fatalf("arm64 should win without a combined APK, got %+v %v", got, err)
+	}
+}

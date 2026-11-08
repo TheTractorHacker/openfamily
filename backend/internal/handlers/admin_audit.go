@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -239,13 +240,16 @@ type adminSessionOut struct {
 	CreatedAt  time.Time `json:"created_at"`
 	LastUsedAt time.Time `json:"last_used_at"`
 	ExpiresAt  time.Time `json:"expires_at"`
+	// Current marks the sign-in this very request is using.
+	Current bool `json:"current"`
 }
 
 // AdminListSessions lists active sign-ins (refresh-token families), newest
 // activity first; ?user_id= narrows to one account.
 // GET /api/admin/sessions
 func (s *Server) AdminListSessions(w http.ResponseWriter, r *http.Request) {
-	if middleware.ClaimsFromContext(r.Context()) == nil {
+	claims := middleware.ClaimsFromContext(r.Context())
+	if claims == nil {
 		writeError(w, http.StatusUnauthorized, "unauthenticated")
 		return
 	}
@@ -267,7 +271,7 @@ func (s *Server) AdminListSessions(w http.ResponseWriter, r *http.Request) {
 		GROUP BY rs.family_id, rs.user_id, u.name, u.email
 		HAVING bool_or(rs.used_at IS NULL AND rs.revoked_at IS NULL AND rs.expires_at > now())
 		ORDER BY max(rs.created_at) DESC
-		LIMIT 500`, uid)
+		LIMIT 2000`, uid)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list sessions")
 		return
@@ -281,6 +285,7 @@ func (s *Server) AdminListSessions(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed to read sessions")
 			return
 		}
+		o.Current = claims.SessionID != "" && o.ID == claims.SessionID
 		out = append(out, o)
 	}
 	if rows.Err() != nil {
@@ -325,4 +330,99 @@ func (s *Server) AdminRevokeSession(w http.ResponseWriter, r *http.Request) {
 	s.logAudit(r.Context(), claims.UserID, "", "admin.session_revoked",
 		"revoked a session of user "+target, clientIP(r))
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// AdminBulkRevokeSessions revokes many sign-ins at once.
+// POST /api/admin/sessions/bulk-revoke
+//
+//	{"mode":"all_except_current"}            every sign-in but the caller's own
+//	{"mode":"inactive","days":N}             sign-ins with no activity for N days
+//	optional: "user_id" to narrow to one account, "dry_run":true for a count
+//	preview, "include_current":true to allow cutting off the caller's own
+//	sign-in (refused otherwise).
+//
+// Activity is the newest refresh token of the sign-in: the apps and the admin
+// panel rotate it every few minutes while in use.
+func (s *Server) AdminBulkRevokeSessions(w http.ResponseWriter, r *http.Request) {
+	claims := middleware.ClaimsFromContext(r.Context())
+	if claims == nil {
+		writeError(w, http.StatusUnauthorized, "unauthenticated")
+		return
+	}
+	var req struct {
+		Mode           string `json:"mode"`
+		Days           int    `json:"days"`
+		UserID         string `json:"user_id"`
+		DryRun         bool   `json:"dry_run"`
+		IncludeCurrent bool   `json:"include_current"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	days := 0
+	switch req.Mode {
+	case "all_except_current":
+	case "inactive":
+		if req.Days < 1 || req.Days > 3650 {
+			writeError(w, http.StatusBadRequest, "days must be between 1 and 3650")
+			return
+		}
+		days = req.Days
+	default:
+		writeError(w, http.StatusBadRequest, "mode must be all_except_current or inactive")
+		return
+	}
+	if req.Mode == "all_except_current" && req.IncludeCurrent {
+		writeError(w, http.StatusBadRequest, "include_current cannot be combined with all_except_current")
+		return
+	}
+	var uid any
+	if req.UserID != "" {
+		if !circles.ValidID(req.UserID) {
+			writeError(w, http.StatusBadRequest, "invalid user_id")
+			return
+		}
+		uid = req.UserID
+	}
+	if claims.SessionID == "" && !req.IncludeCurrent {
+		// An older access token does not say which sign-in is the caller's, so
+		// the caller's own session cannot be protected: refuse rather than guess.
+		writeError(w, http.StatusConflict, "cannot tell which session is yours; sign in again, then retry")
+		return
+	}
+	// Families that qualify. The caller's own family is skipped unless asked.
+	const target = `
+		SELECT family_id FROM refresh_sessions
+		WHERE ($1::uuid IS NULL OR user_id = $1::uuid)
+		  AND ($3 OR family_id <> $2)
+		GROUP BY family_id
+		HAVING bool_or(used_at IS NULL AND revoked_at IS NULL AND expires_at > now())
+		   AND ($4 = 0 OR max(created_at) < now() - make_interval(days => $4))`
+	args := []any{uid, claims.SessionID, req.IncludeCurrent, days}
+	if req.DryRun {
+		var n int
+		if err := s.Pool.QueryRow(r.Context(), `SELECT count(*) FROM (`+target+`) t`, args...).Scan(&n); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to count sessions")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"count": n, "dry_run": true})
+		return
+	}
+	var n int
+	err := s.Pool.QueryRow(r.Context(), `
+		WITH t AS (`+target+`),
+		r AS (UPDATE refresh_sessions SET revoked_at = now()
+		      WHERE family_id IN (SELECT family_id FROM t) AND revoked_at IS NULL RETURNING family_id)
+		SELECT count(DISTINCT family_id) FROM r`, args...).Scan(&n)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to revoke sessions")
+		return
+	}
+	detail := fmt.Sprintf("revoked %d sign-ins (%s)", n, req.Mode)
+	if days > 0 {
+		detail = fmt.Sprintf("revoked %d sign-ins inactive for %d days", n, days)
+	}
+	s.logAudit(r.Context(), claims.UserID, "", "admin.sessions_bulk_revoked", detail, clientIP(r))
+	writeJSON(w, http.StatusOK, map[string]any{"count": n, "revoked": n, "dry_run": false})
 }

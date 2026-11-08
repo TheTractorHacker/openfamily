@@ -3,6 +3,7 @@ package handlers
 import (
 	"errors"
 	"net/http"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -99,4 +100,9 @@ func (s *Server) resolveIPA(r *http.Request) (string, error) {
 		return cached, nil
 	}
 	return "", err
+}
+
+// AdminDownloadIPA is GET /api/admin/ipa (platform admin): the same file as /app.ipa.
+func (s *Server) AdminDownloadIPA(w http.ResponseWriter, r *http.Request) {
+	s.PublicDownloadIPA(w, r)
 }

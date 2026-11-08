@@ -34,6 +34,8 @@ class _SessionsScreenState extends State<SessionsScreen> {
   bool _offline = false;
   final Set<String> _revoking = <String>{};
   bool _loggingOut = false;
+  bool _signingOutOthers = false;
+  String? _currentId;
 
   @override
   void initState() {
@@ -47,9 +49,15 @@ class _SessionsScreenState extends State<SessionsScreen> {
       _offline = false;
     });
     try {
-      final List<SessionInfo> s = await widget.api.listSessions();
+      final List<Object?> r = await Future.wait<Object?>(<Future<Object?>>[
+        widget.api.listSessions(),
+        widget.api.currentSessionId().then<Object?>((String? v) => v).catchError((Object _) => null),
+      ]);
       if (!mounted) return;
-      setState(() => _sessions = s);
+      setState(() {
+        _sessions = r[0] as List<SessionInfo>;
+        _currentId = r[1] as String?;
+      });
     } on SessionExpiredException {
       return;
     } catch (e) {
@@ -78,6 +86,66 @@ class _SessionsScreenState extends State<SessionsScreen> {
     } finally {
       if (mounted) setState(() => _revoking.remove(s.id));
     }
+  }
+
+  Future<void> _signOutOthers() async {
+    final List<SessionInfo> others = (_sessions ?? <SessionInfo>[]).where((SessionInfo x) => x.id != _currentId).toList();
+    if (_currentId == null || others.isEmpty) return;
+    final bool ok = await showDsConfirm(
+      context,
+      title: 'Sign out other sessions?',
+      message: 'This device stays signed in. ${others.length} other ${others.length == 1 ? 'session is' : 'sessions are'} signed out.',
+      confirmLabel: 'Sign out others',
+      destructive: true,
+    );
+    if (!ok || !mounted) return;
+    setState(() => _signingOutOthers = true);
+    try {
+      for (final SessionInfo o in others) {
+        await widget.api.revokeSession(o.id);
+      }
+      _snack('Signed out ${others.length} other ${others.length == 1 ? 'session' : 'sessions'}.');
+    } on SessionExpiredException {
+      return;
+    } catch (e) {
+      if (mounted) _snack(errorText(e));
+    } finally {
+      if (mounted) setState(() => _signingOutOthers = false);
+    }
+    if (mounted) await _load();
+  }
+
+  static bool _isRecent(SessionInfo s, DateTime now) {
+    final DateTime? t = s.lastUsedAt ?? s.createdAt;
+    return t == null || now.difference(t).inDays < 7;
+  }
+
+  static bool _isBrowser(String ua) {
+    final String u = ua.toLowerCase();
+    return !u.contains('dart') && !u.contains('android') && !u.contains('iphone') && !u.contains('ios') &&
+        (u.contains('windows') || u.contains('mac') || u.contains('linux') || u.contains('chrome') || u.contains('firefox') || u.contains('safari'));
+  }
+
+  Widget _row(SessionInfo s) {
+    final bool me = s.id == _currentId;
+    return DsListRow(
+      key: Key('session-${s.id}'),
+      leading: DsListRow.iconTile(context, _isBrowser(s.userAgent) ? Icons.desktop_windows_outlined : Icons.smartphone),
+      title: describeUserAgent(s.userAgent),
+      subtitle: 'Last used ${relativeTime(s.lastUsedAt)}',
+      info: 'Signed in ${relativeTime(s.createdAt)}. Signing a device out ends its access within about 15 minutes at most.',
+      infoTitle: describeUserAgent(s.userAgent),
+      trailing: me
+          ? const DsStatusChip(label: 'This device', icon: Icons.check_circle_outline, color: AppColors.accentInk)
+          : _revoking.contains(s.id)
+              ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2))
+              : IconButton(
+                  tooltip: 'Sign out ${describeUserAgent(s.userAgent)}',
+                  constraints: const BoxConstraints(minWidth: kMinTarget, minHeight: kMinTarget),
+                  icon: const Icon(Icons.logout),
+                  onPressed: () => _revoke(s),
+                ),
+    );
   }
 
   Future<void> _logoutAll() async {
@@ -127,11 +195,13 @@ class _SessionsScreenState extends State<SessionsScreen> {
         ],
       );
     }
+    final DateTime now = DateTime.now();
+    final List<SessionInfo> recent = sessions.where((SessionInfo x) => x.id == _currentId || _isRecent(x, now)).toList();
+    final List<SessionInfo> older = sessions.where((SessionInfo x) => !recent.contains(x)).toList();
     return SecurityPage(
       title: 'Active sessions',
       heading: 'Where you are signed in',
-      subtitle: 'Devices signed in to your account. Signing one out ends its '
-          'access within about 15 minutes at most.',
+      subtitle: 'Devices signed in to your account.',
       appBarActions: <Widget>[
         IconButton(
           tooltip: 'Refresh sessions',
@@ -141,6 +211,13 @@ class _SessionsScreenState extends State<SessionsScreen> {
         ),
       ],
       actions: <Widget>[
+        if (_currentId != null && sessions.any((SessionInfo x) => x.id != _currentId))
+          BusyButton(
+            label: 'Sign out other sessions',
+            icon: Icons.devices_other_outlined,
+            onPressed: _signOutOthers,
+            busy: _signingOutOthers,
+          ),
         BusyButton(
           label: 'Log out everywhere',
           icon: Icons.logout,
@@ -156,34 +233,23 @@ class _SessionsScreenState extends State<SessionsScreen> {
             icon: Icons.devices_outlined,
             title: 'No active sessions',
           )
-        else
-          DsRowGroup(
-            children: <Widget>[
-              for (final SessionInfo s in sessions)
-                DsListRow(
-                  leading: DsListRow.iconTile(context, Icons.smartphone),
-                  title: describeUserAgent(s.userAgent),
-                  subtitle: 'Last used ${relativeTime(s.lastUsedAt)}\n'
-                      'Signed in ${relativeTime(s.createdAt)}',
-                  trailing: _revoking.contains(s.id)
-                      ? const SizedBox(
-                          width: 24,
-                          height: 24,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : IconButton(
-                          tooltip:
-                              'Sign out ${describeUserAgent(s.userAgent)}',
-                          constraints: const BoxConstraints(
-                            minWidth: kMinTarget,
-                            minHeight: kMinTarget,
-                          ),
-                          icon: const Icon(Icons.logout),
-                          onPressed: () => _revoke(s),
-                        ),
+        else ...<Widget>[
+          DsRowGroup(children: <Widget>[for (final SessionInfo s in recent) _row(s)]),
+          if (older.isNotEmpty) ...<Widget>[
+            const SizedBox(height: AppSpace.lg),
+            DsRowGroup(children: <Widget>[
+              Theme(
+                data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+                child: ExpansionTile(
+                  key: const Key('older-sessions'),
+                  title: Text('Older sessions (${older.length})', style: AppType.body),
+                  subtitle: const Text('Not used for over a week', style: AppType.secondary),
+                  children: <Widget>[for (final SessionInfo s in older) _row(s)],
                 ),
-            ],
-          ),
+              ),
+            ]),
+          ],
+        ],
       ],
     );
   }

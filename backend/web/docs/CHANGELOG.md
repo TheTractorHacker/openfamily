@@ -10,6 +10,23 @@ for the **last 5 minor versions** of the app (see
 [API compatibility](api-compat.md)), so you can update the server first and
 the phones afterwards.
 
+## Unreleased
+
+- **Members are on the server by default; they opt out by hand.** On a server set to **Home**, a member of a circle
+  that has server processing on no longer has to find "Use the server": the next time they open the app, their own
+  phone signs it for them (same signature as a tap, visible in the circle's key log). They see "Your circle uses the
+  server so maps, history and driving reports work. Tap to keep your data on your phone." and one tap on **Keep on my
+  phone** switches it off and deletes what the server holds of theirs. If they ever chose, nothing is changed again.
+- Not applied automatically: circles that **require** server processing (they keep their consent card), child
+  accounts, members on an old app (they get it after updating), and servers set to **Cloud** or not chosen (the app
+  asks instead).
+- Admin: the member default (server or phone, auto-apply on or off; API
+  `/api/admin/settings/member-defaults`) and a list of **members not yet on the server** with a message to send
+  (API `/api/admin/members-not-on-server`). Circle admins see the same list on the circle's processing screen.
+- Joining: the invite preview says "This circle uses the server by default; you can opt out."
+- The server can read the data of everyone on it, as before; this changes who presses the button, not what the server
+  can read.
+
 ## v0.24.1 (2026-11-08)
 
 - Build fix: the v0.24.0 release files were not produced because of a file-name

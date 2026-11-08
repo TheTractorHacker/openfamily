@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../theme/app_theme.dart';
+import 'info_hint.dart';
 import 'list_row.dart';
 
 /// A list row with a trailing [Switch]. The whole row toggles.
@@ -13,7 +14,13 @@ class DsToggleRow extends StatelessWidget {
     this.subtitle,
     this.icon,
     this.subtitleColor,
+    this.info,
+    this.infoTitle,
   });
+
+  /// Longer explanation behind a small (i) button.
+  final String? info;
+  final String? infoTitle;
 
   final String title;
   final String? subtitle;
@@ -70,6 +77,7 @@ class DsToggleRow extends StatelessWidget {
                           ],
                         ),
                       ),
+                      if (info != null) InfoHint(title: infoTitle ?? title, body: info!),
                       const SizedBox(width: AppSpace.sm),
                       Switch(value: value, onChanged: cb),
                     ],

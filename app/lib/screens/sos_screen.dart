@@ -7,7 +7,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/alert.dart';
 import '../services/alert_service.dart';
 import '../services/api_client.dart';
+import '../models/emergency_contact.dart';
 import '../services/e2ee/private_runtime.dart';
+import '../services/emergency_contact_service.dart';
+import '../services/offline/offline_queue.dart';
+import '../services/offline/offline_sync.dart';
+import '../services/offline/server_reachability.dart';
+import '../services/offline/sos_sms_fallback.dart';
+import '../services/person_launcher.dart';
 import '../services/location_reporter.dart';
 import '../services/location_service.dart';
 import '../services/server_features.dart';
@@ -52,6 +59,9 @@ enum _SosPhase {
   practice,
   sending,
   sent,
+
+  /// Saved on the phone, not delivered yet: the server cannot be reached.
+  queued,
   practiceDone,
   cancelled,
   resolved,
@@ -70,16 +80,46 @@ class _SosScreenState extends State<SosScreen> {
   String? _alertId;
   String? _error;
 
+  /// The SOS waiting on this phone (server unreachable), if any.
+  QueuedItem? _queuedSos;
+  List<EmergencyContact> _contacts = const <EmergencyContact>[];
+
   @override
   void initState() {
     super.initState();
+    OfflineQueue.instance.onDelivered.add(_onQueueDelivered);
     _restore();
+    // Keeps the emergency numbers on the phone (cached) for the "text my contacts" fallback.
+    unawaited(EmergencyContactService().list().then((List<EmergencyContact> l) {
+      if (mounted) setState(() => _contacts = l);
+    }).catchError((Object _) {}));
   }
 
   @override
   void dispose() {
+    OfflineQueue.instance.onDelivered.remove(_onQueueDelivered);
     _timer?.cancel();
     super.dispose();
+  }
+
+  /// The queued SOS finally reached the server: carry on as a normal sent SOS.
+  void _onQueueDelivered(QueuedItem item, dynamic response) {
+    if (item.kind != QueueKind.sos || !mounted) return;
+    final String? id = _alertIdFrom(response);
+    if (id != null) {
+      unawaited(_storeAlert(id));
+      setState(() {
+        _alertId = id;
+        _queuedSos = null;
+        _phase = _SosPhase.sent;
+      });
+    } else {
+      // Delivered as "already notified a moment ago": nothing more to track.
+      setState(() {
+        _queuedSos = null;
+        _phase = _SosPhase.idle;
+      });
+    }
   }
 
   Future<void> _restore() async {
@@ -96,6 +136,15 @@ class _SosScreenState extends State<SosScreen> {
             _activeAlertTtl;
 
     if (!mounted) return;
+    final List<QueuedItem> waiting = await OfflineQueue.instance.items(kind: QueueKind.sos);
+    if (!mounted) return;
+    if (waiting.isNotEmpty) {
+      setState(() {
+        _queuedSos = waiting.first;
+        _phase = _SosPhase.queued;
+      });
+      return;
+    }
     if (alertFresh) {
       final bool stillActive = await _alertStillActive(storedId);
       if (!mounted) return;
@@ -271,8 +320,35 @@ class _SosScreenState extends State<SosScreen> {
         body['lat'] = position.latitude;
         body['lon'] = position.longitude;
       }
-      final dynamic response = await ApiClient.post('/alerts/sos', body: body);
+      // Private circles: the position is sealed on the phone right away, so it is
+      // queued (encrypted) even when the server cannot be reached.
       unawaited(PrivateRuntime.instance.sealAlertPosition('sos', body['lat'] as double?, body['lon'] as double?));
+      final String clientId = 'sos-${DateTime.now().microsecondsSinceEpoch}';
+      final QueuedItem item = QueuedItem(
+        id: clientId,
+        kind: QueueKind.sos,
+        method: 'POST',
+        path: '/alerts/sos',
+        body: <String, dynamic>{...body, 'client_id': clientId},
+        meta: <String, dynamic>{if (body['lat'] != null) 'lat': body['lat'], if (body['lon'] != null) 'lon': body['lon']},
+      );
+      final Submitted result = await OfflineQueue.instance.submit(
+        item,
+        serverKnownDown: () => ServerReachability.instance.unreachable,
+      );
+      if (result.queued) {
+        // Not delivered yet. Say so plainly, keep trying, and offer the phone's own SMS.
+        LocationReporter.startSosBurst();
+        unawaited(OfflineSync.refreshPending());
+        if (!mounted) return;
+        setState(() {
+          _queuedSos = item;
+          _phase = _SosPhase.queued;
+          _practice = false;
+        });
+        return;
+      }
+      final dynamic response = result.response;
       final String? id = _alertIdFrom(response);
       if (id == null || id.isEmpty) {
         throw const ApiException(500, 'SOS sent, but no alert id came back.');
@@ -548,6 +624,49 @@ class _SosScreenState extends State<SosScreen> {
             ),
           ],
         );
+      case _SosPhase.queued:
+        return _PhaseColumn(
+          key: const ValueKey<String>('sos-queued'),
+          children: <Widget>[
+            const Center(child: Icon(Icons.cloud_off, size: 72, color: AppColors.sosRed)),
+            const SizedBox(height: AppSpace.lg),
+            const DsHeading(
+              'SOS not sent yet',
+              subtitle: 'Your phone cannot reach the server right now. Your SOS is saved on this phone '
+                  'and goes out by itself the moment the connection works.',
+              center: true,
+            ),
+            if (widget.dialer.available) ...<Widget>[
+              EmergencyCallButton(
+                key: const ValueKey<String>('sos-call-button'),
+                dialer: widget.dialer,
+                onPressed: _callEmergency,
+              ),
+              const SizedBox(height: AppSpace.sm),
+            ],
+            if (buildSosSmsUri(_contacts) != null) ...<Widget>[
+              DsPillButton(
+                key: const ValueKey<String>('sos-sms-fallback'),
+                label: 'Text my emergency contacts',
+                onPressed: _textContacts,
+              ),
+              const SizedBox(height: AppSpace.sm),
+            ],
+            DsPillButton(
+              key: const ValueKey<String>('sos-retry-now'),
+              label: 'Try again now',
+              style: DsPillStyle.tonal,
+              onPressed: _retryQueuedNow,
+            ),
+            const SizedBox(height: AppSpace.sm),
+            DsPillButton(
+              key: const ValueKey<String>('sos-cancel-queued'),
+              label: 'I\'m safe, cancel this SOS',
+              style: DsPillStyle.outlined,
+              onPressed: _cancelQueued,
+            ),
+          ],
+        );
       case _SosPhase.practiceDone:
         return _ResultCard(
           icon: Icons.check_circle,
@@ -578,6 +697,43 @@ class _SosScreenState extends State<SosScreen> {
           onAction: () => Navigator.of(context).pop(),
         );
     }
+  }
+
+  /// Opens the phone's own messaging app with the contacts and a ready SOS text.
+  /// Works without any data connection; the person presses send.
+  Future<void> _textContacts() async {
+    final double? lat = (_queuedSos?.meta['lat'] as num?)?.toDouble();
+    final double? lon = (_queuedSos?.meta['lon'] as num?)?.toDouble();
+    final Uri? uri = buildSosSmsUri(_contacts, lat: lat, lon: lon);
+    if (uri == null) return;
+    final bool ok = await launchPersonUri(uri);
+    if (!ok && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not open your messages app. Text your contacts yourself.')),
+      );
+    }
+  }
+
+  Future<void> _retryQueuedNow() async {
+    await ServerReachability.instance.probeNow();
+    await OfflineSync.flushAll();
+    if (!mounted || _phase != _SosPhase.queued) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Still no connection. Your SOS is saved and will keep trying.')),
+    );
+  }
+
+  /// "I'm safe" before the SOS ever left the phone: nobody was alerted, so just remove it.
+  Future<void> _cancelQueued() async {
+    final QueuedItem? q = _queuedSos;
+    if (q != null) await OfflineQueue.instance.remove(q.id);
+    LocationReporter.stopSosBurst();
+    unawaited(OfflineSync.refreshPending());
+    if (!mounted) return;
+    setState(() {
+      _queuedSos = null;
+      _phase = _SosPhase.cancelled;
+    });
   }
 
   Future<void> _callEmergency() async {
@@ -662,7 +818,7 @@ class _IntroCard extends StatelessWidget {
 /// Centers phase content. The scaffold stretches this to full width so a
 /// long hint line cannot shift the SOS disc.
 class _PhaseColumn extends StatelessWidget {
-  const _PhaseColumn({required this.children});
+  const _PhaseColumn({super.key, required this.children});
 
   final List<Widget> children;
 

@@ -13,3 +13,20 @@
 .wb-audit-detail { min-width: 220px; max-width: 420px; overflow-wrap: anywhere; color: var(--text-muted); }
 .wb-audit-tablewrap .wb-table { min-width: 720px; }
 .wb-audit-more { display: flex; justify-content: center; }
+
+.wb-sess-bulk { display: flex; flex-direction: column; gap: var(--space-3); }
+.wb-sess-bulk-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
+.wb-sess-or { color: var(--text-muted); font-size: var(--font-sm); }
+.wb-sess-days { font-size: var(--font-sm); color: var(--text-muted); }
+.wb-sess-days .wb-input { width: 72px; height: 32px; }
+.wb-sess-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); padding: var(--space-3); border-radius: var(--radius-xs); background: var(--status-orange-bg); color: var(--status-orange-fg); }
+.wb-sess-groups { display: flex; flex-direction: column; gap: var(--space-3); }
+.wb-sess-grouphead { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); width: 100%; padding: var(--space-3) var(--space-4); background: none; border: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.wb-sess-grouphead:hover { background: var(--surface-hover); }
+.wb-sess-grouphead:focus-visible { outline: none; box-shadow: inset 0 0 0 3px var(--ring); }
+.wb-sess-who { display: flex; flex-direction: column; min-width: 0; flex: 1 1 200px; overflow-wrap: anywhere; }
+.wb-sess-table { min-width: 560px; }
+
+.wb-srvproc { display: flex; flex-direction: column; gap: var(--space-3); margin: var(--space-6) 0; }
+.wb-srvproc-head { padding: var(--space-3) var(--space-4); }
+.wb-srvproc-table { min-width: 520px; }

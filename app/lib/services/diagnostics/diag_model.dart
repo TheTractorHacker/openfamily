@@ -145,8 +145,8 @@ class DiagFacts {
   final bool? vaultReadable;
   final String vaultDetail;
 
-  /// True when the Keystore key can only be used while the phone is unlocked
-  /// (always the case on Android 9+): fixes taken while locked are parked.
+  /// True when the Keystore key can only be used while the phone is unlocked (an old pre-0.24.2 key that has not been
+  /// re-wrapped yet, or the strict mode): fixes taken while locked are parked until the next unlock.
   final bool vaultNeedsUnlock;
 
   /// True when the key demands biometrics / PIN on every use, which the
@@ -453,17 +453,17 @@ List<DiagCheck> evaluateDiagnostics(DiagFacts f) {
   if (q != null) {
     out.add(DiagCheck(
         id: 'outbox',
-        title: 'Waiting to upload',
+        title: 'Updates waiting',
         status: q >= kOutboxFail
             ? DiagStatus.fail
             : q >= kOutboxWarn
                 ? DiagStatus.warn
                 : DiagStatus.pass,
         detail: q == 0
-            ? 'Nothing is waiting: every position has been sent.'
+            ? 'Nothing is waiting: everything has been sent.'
             : q >= kOutboxWarn
-                ? '$q positions are stuck on the phone. They are sent as soon as the connection to the server works.'
-                : '$q position${q == 1 ? ' is' : 's are'} waiting to be sent.',
+                ? '$q updates are stuck on the phone. They are sent as soon as the connection to the server works.'
+                : '$q update${q == 1 ? '' : 's'} waiting (positions, messages, check-ins). They are sent in order when the server can be reached.',
         fix: q > 0 && f.server == ServerState.ok ? const DiagFix(DiagFixKind.sendQueue, 'Send now') : null));
   }
 
@@ -535,11 +535,9 @@ List<DiagCheck> evaluateDiagnostics(DiagFacts f) {
 
   // 13. Private circles: can the background reporter use its keys?
   //
-  // By design the Keystore key can only be used while the phone is unlocked
-  // (setUnlockedDeviceRequired), so fixes taken while it is locked are parked on
-  // the phone and sealed on the next unlock (PrivateRuntime). That is reported
-  // as information, not as a fault. A key bound to biometrics/PIN every time
-  // (userAuthRequired) is a real problem: the background service can never use it.
+  // Since 0.24.2 the wrapping key works while the phone is locked (after the first unlock since it started), so
+  // background reporting seals and sends normally. Only an old key that was not re-wrapped yet, or a key bound to
+  // biometrics/PIN every time (userAuthRequired), stops the background service: both are reported as warnings.
   if (f.hasPrivateCircle) {
     if (f.vaultReadable != true) {
       out.add(DiagCheck(
@@ -563,12 +561,13 @@ List<DiagCheck> evaluateDiagnostics(DiagFacts f) {
       out.add(DiagCheck(
           id: 'vault',
           title: 'Private circle keys',
-          status: f.vaultNeedsUnlock ? DiagStatus.info : DiagStatus.pass,
+          status: f.vaultNeedsUnlock ? DiagStatus.warn : DiagStatus.pass,
           detail: f.vaultNeedsUnlock
-              ? 'The encryption keys opened just now. They can only be used while the phone is unlocked, so '
-                  'positions taken while it is locked are held on the phone and encrypted and sent when you next '
-                  'unlock it. Your circle may see updates late; this is by design.'
-              : 'The encryption keys on this phone opened just now, so background reporting can encrypt positions.'));
+              ? 'The keys on this phone still only work while it is unlocked, so positions taken with the screen off '
+                  'wait until you unlock it. Open the app once and unlock the phone: the keys are moved to the new '
+                  'setting automatically.'
+              : 'Keys available while locked: the encryption keys opened just now and work with the screen off, so '
+                  'your Private circle keeps updating from a locked phone (after you have unlocked it once since it started).'));
     }
   }
 

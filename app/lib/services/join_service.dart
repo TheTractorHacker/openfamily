@@ -6,7 +6,7 @@ import 'api_client.dart';
 /// active invite codes and assigns the caller to the code's family and role.
 /// What an invite says about the circle's server processing, before joining.
 class InvitePreview {
-  const InvitePreview({required this.isPrivate, required this.serverAssist, required this.required, required this.defaultServer, this.legacy = false});
+  const InvitePreview({required this.isPrivate, required this.serverAssist, required this.required, required this.defaultServer, this.legacy = false, this.autoApply = false});
   final bool isPrivate;
   final bool serverAssist;
 
@@ -19,6 +19,10 @@ class InvitePreview {
   /// The circle is still in the old trusted-server mode (the server holds its key). Absent on an older server = false.
   final bool legacy;
 
+  /// Section 23: the server's admin setting says new members are put on the server by their own phone (they can opt out).
+  /// Absent on an older server = false.
+  final bool autoApply;
+
   /// Null for anything that is not a well formed answer (fail towards the generic note).
   static InvitePreview? tryParse(Object? j) {
     if (j is! Map<String, dynamic>) return null;
@@ -26,7 +30,7 @@ class InvitePreview {
     if (j['private'] is! bool || j['server_assist'] is! bool) return null;
     if ((opt != 'allowed' && opt != 'required_server') || (def != 'phone' && def != 'server')) return null;
     return InvitePreview(
-        isPrivate: j['private'] as bool, serverAssist: j['server_assist'] as bool, required: opt == 'required_server', defaultServer: def == 'server', legacy: j['legacy'] == true);
+        isPrivate: j['private'] as bool, serverAssist: j['server_assist'] as bool, required: opt == 'required_server', defaultServer: def == 'server', legacy: j['legacy'] == true, autoApply: j['auto_apply'] == true);
   }
 }
 

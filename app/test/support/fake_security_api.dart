@@ -8,6 +8,10 @@ class FakeSecurityApi implements SecurityApi {
   AccountInfo? account;
   List<SessionInfo> sessions;
   Object? fail;
+  String? currentId;
+
+  @override
+  Future<String?> currentSessionId() async => currentId;
   final List<String> calls = <String>[];
   Map<String, Object?> lastArgs = <String, Object?>{};
 

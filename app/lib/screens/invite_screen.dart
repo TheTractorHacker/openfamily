@@ -123,7 +123,7 @@ class _InviteScreenState extends State<InviteScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final String circle = widget.circleName ?? 'your family';
+    final String circle = widget.circleName ?? 'your circle';
     final bool hasCode = _code != null;
     final ColorScheme cs = Theme.of(context).colorScheme;
     final BrandTheme brand = BrandTheme.of(context);
@@ -160,11 +160,11 @@ class _InviteScreenState extends State<InviteScreen> {
       ],
       children: <Widget>[
         DsHeading(
-          hasCode ? 'Your invite code' : 'Invite your family',
+          hasCode ? 'Your invite code' : 'Invite people',
           subtitle: hasCode
-              ? 'Share it so your family can join $circle. Read it out loud '
+              ? 'Share it so people can join $circle. Read it out loud '
                   'or send it in a message.'
-              : 'Share a code so your family can join $circle and appear on '
+              : 'Share a code so people can join $circle and appear on '
                   'your map.',
         ),
         if (hasCode) ...<Widget>[

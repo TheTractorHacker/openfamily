@@ -727,3 +727,89 @@ defaults and adds one component; it changes **no** wire format, signature, key l
   normal again and the server keeps readable locations. Plaintext rows the server already holds for server-lane
   members stay; phone-only places and history stay on phones.
 
+## 23. Members are on the server by default; they opt out by hand
+
+Status: implemented on branch `feat/optout-default` (migration `000330_member_defaults`). Owner request: "by default
+all members are on server processing and they have to manually opt out." Until v0.24.x every member had to tap "Use
+the server" on their own phone, so a member who never opened the sheet (the owner's Kinsley) stayed on the phone lane
+and the server received nothing from her. This section changes **who presses the button**, not what the button is.
+It adds NO new cryptography, no wire format and no key line: every rule of sections 5 to 22 holds.
+
+### 23.1 Decision
+
+* A server-wide **member default** `{default_lane: server|phone, auto_apply: bool}` decided by the platform admin. NULL
+  columns mean "derive from the deployment profile": `home` gives `server` + `auto_apply = true`; `cloud` and unset
+  give `phone` + `auto_apply = false` (the app only asks). The owner's server is a home server; the admin can change
+  it (`auto_apply` needs `default_lane = server`).
+* **Auto-apply is signed by the member's own phone.** On the next app open or resume the phone signs
+  `processing_pref lane = server` with the member's own device key, exactly the statement a tap on "Use the server"
+  produces, and the usual log entry. So every invariant still holds: only the member's phone ever puts data on the
+  server; the server never signs, never writes a pref, never gets a key because of a setting; the entry is visible in
+  the key log to every member; the member can undo it.
+* **Who gets it.** Only a phone for which ALL of these are true: the setting says `auto_apply`; the circle is Private
+  with a verified policy that has server assistance **on**, an approved pinned server key, and `member_opt_out`
+  `allowed` (not `required_server`); this phone holds the server line key SK; the member is not a child account; the
+  verified key log holds **no** `processing_pref` entry by this member in this circle (a phone pref, a server pref that
+  a later policy-off voided, anything: if they ever signed, they decided); and this phone never auto-applied or
+  declined in this circle before (a local record that is deliberately not cleared with the circle facts).
+* **Opt-out is sticky.** "Keep on my phone" signs `lane = phone` (existing semantics: effective on this phone at once,
+  re-sent until the server has it), asks the server to delete this member's copies (existing purge), and records
+  "declined". After any explicit pref nothing is ever re-applied, including after the admin turns assistance off and on
+  again: the member then sees the ordinary "Use the server?" question.
+* **Not auto-signed, on purpose.** `required_server` circles keep their explicit, informed consent card (a signature
+  the member did not knowingly give is worth less where leaving is the only alternative). Child accounts keep the
+  pairing-time choice. A phone that does not hold SK yet, or cannot reach the server, does nothing and tries at the
+  next open. Old apps (no `lanes2`): unchanged "needs update"; once updated they auto-apply on first open.
+* **No per-circle override in the protocol.** The signed policy already carries `default_for_new`, but its meaning
+  ("what the sheet suggests") is also what a cloud-profile admin wrote into every existing policy, so treating it as an
+  opt-out of auto-apply would silently exempt the circles of exactly the people this feature is for. The circle
+  admin's levers are unchanged: turn server assistance off for the circle (voids every server pref), or members opt
+  out. `default_for_existing` was therefore not added; the policy statement is byte-for-byte unchanged.
+* **Background.** The background isolate has neither the vault nor a session, so it cannot sign. Auto-apply therefore
+  runs on app open / resume / network regain (`onAppActive`), not on the background heartbeat. A member who never opens
+  the app is not switched; the admin list (23.4) shows them.
+
+### 23.2 What the server can read afterwards (say this in the notice and the docs)
+
+From the moment the member's phone signs, new fixes, places, trips and driving data of that member are stored
+**readable** on the server (section 4, "Private, server-assisted"): the server operator and anyone who backs up or
+steals the database can read them, and the deployment profile text (home / cloud) applies. Nothing earlier is
+uploaded retroactively. "Keep on my phone" stops new uploads and deletes this member's copies; backups and exports
+cannot be deleted. The admin setting is policy, not consent: the notice, the visible log entry and the one-tap undo
+are what keep it honest. A member whose phone fingerprint-compare step is skipped by auto-apply (no sheet) relies on
+the admin's signed policy and the approved server key that the phone verified; the code can still be compared on the
+circle's processing screen.
+
+### 23.3 API
+
+| Route | Who | Notes |
+|---|---|---|
+| `GET` / `PUT /api/admin/settings/member-defaults` | platform admin (audited `admin.member_defaults_changed`) | `default_lane`, `auto_apply`, `source` (`admin` or `profile`), `profile`, `profile_effective`, `server_pinned`, `remind_text`. PUT: `{default_lane?, auto_apply?}` or `{reset: true}`. Validation: lane is `server`/`phone`; `auto_apply` needs `server`. |
+| `GET /api/admin/members-not-on-server` | platform admin | Every member of a Private circle with assistance on whose own signed lane is not `server`: `{circle_id, circle_name, user_id, name, role, reason, remind_text}`; `reason` is `no_choice` (covered by auto-apply when it is on), `phone` (their own choice, no reminder text), `needs_update`. |
+| `GET /e2ee/server-device` (every user) | read-only | adds `member_defaults: {default_lane, auto_apply}`. Old servers send none: the app reads phone / no auto-apply. |
+| `GET /invites/{code}/preview` (public) | read-only | adds `auto_apply` (true only when the circle has assistance on and the setting is on): new members see "This circle uses the server by default; you can opt out." |
+
+### 23.4 App
+
+* `LanesService.autoApplyIfDue` / `keepOnPhone`; `PrivateRuntime.onAppActive` calls them after `maintain` for every
+  Private circle, only when the profile object says `auto_apply`.
+* A non-blocking card "`<circle>` uses the server" with the sentence "Your circle uses the server so maps, history and
+  driving reports work. Tap to keep your data on your phone.", **Keep on my phone** (sign phone lane, purge, sticky) and
+  **OK**. It stays until dismissed; it is this phone's own in-app entry (no push, nothing leaves the phone). A row in the
+  Activity feed was not added: that feed lists server-side check-ins and shares, and a local entry would need a second
+  source in screens that other work is restructuring.
+* Join: the invite preview and the join screen show the default and the opt-out; the first app open after joining runs
+  the same auto-apply and notice, so a newly joined member needs no tap to be on the server.
+* Circle admins see "Members not yet on the server" (names, reason, and the copy-paste message) on the circle's
+  processing screen; platform admins get the same data from the API for the web.
+
+### 23.5 Tests
+
+Go: member defaults API (validation, profile-derived defaults, admin override, reset, audit, exposure to apps, no pref is
+ever written), members-not-on-server, invite preview; authorization comes from the route-table authz matrix
+(platform-admin-only, 403 for ordinary users). Dart: auto-apply fires once, never over an earlier pref (phone, or a
+voided server pref), `required_server`, child, policy off, no server key, cloud profile prompts instead, Keep on my phone
+purges and is final, the app-open path, the notice card. Real server e2e (`builtin_e2e_test.dart`): Ben and Cleo never
+tap a sheet; after the app opens Ben is server-assisted and the server stores readable fixes, Cleo (opted out) leaves
+nothing.
+

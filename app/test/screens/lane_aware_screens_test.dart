@@ -350,6 +350,48 @@ void main() {
       expect(WeekFigures.tryParse(bad), isNull);
     });
   });
+
+  group('driving tab never dead-ends in a Private circle', () {
+    FamilyDrivingReportScreen screen(PrimaryLanesLoader loader, _FakeReport api) => FamilyDrivingReportScreen(
+          members: ValueNotifier<List<Member>>(<Member>[]),
+          userId: ValueNotifier<String?>('u1'),
+          api: api,
+          clock: () => DateTime(2026, 11, 4, 12),
+          detectionLoader: () async => true,
+          lanes: loader,
+        );
+
+    testWidgets('lanes could not be read: a retry state, not the old "not available" text', (t) async {
+      _big(t);
+      await t.pumpWidget(_wrap(screen(() async => null, _FakeReport())));
+      await t.pumpAndSettle();
+      expect(find.byKey(const Key('driving-lanes-failed')), findsOneWidget);
+      expect(find.textContaining('not available in Private'), findsNothing);
+      expect(find.text('Try again'), findsOneWidget);
+    });
+
+    testWidgets('my own phone-only card offers "Use the server" and the on-phone option', (t) async {
+      _big(t);
+      final PrimaryLanes l = PrimaryLanes(circleId: 'c1', names: const <String, String>{'u1': 'Blake'}, members: const <MemberProcessing>[
+        MemberProcessing(userId: 'u1', origin: ProcessingOrigin.phone, placeholder: PlaceholderReason.notSharedYet),
+      ]);
+      await t.pumpWidget(_wrap(screen(() async => l, _FakeReport())));
+      await t.pumpAndSettle();
+      expect(find.byKey(const Key('use-the-server')), findsOneWidget);
+      expect(find.text('Compute reports on this phone (uses battery)'), findsOneWidget);
+    });
+
+    testWidgets('someone else\'s phone-only card has no buttons', (t) async {
+      _big(t);
+      final PrimaryLanes l = PrimaryLanes(circleId: 'c1', names: const <String, String>{'u3': 'Alex'}, members: const <MemberProcessing>[
+        MemberProcessing(userId: 'u3', origin: ProcessingOrigin.phone, placeholder: PlaceholderReason.notSharedYet),
+      ]);
+      await t.pumpWidget(_wrap(screen(() async => l, _FakeReport())));
+      await t.pumpAndSettle();
+      expect(find.byKey(const Key('use-the-server')), findsNothing);
+    });
+  });
+
 }
 
 class _FakeReport implements TripReportApi {

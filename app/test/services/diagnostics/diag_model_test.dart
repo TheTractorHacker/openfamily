@@ -138,11 +138,15 @@ void main() {
     expect(c.fix?.kind, DiagFixKind.startTracking);
   });
 
-  test('private circle vault: readable, locked-by-design, user-auth, unreadable', () {
+  test('private circle vault: readable, old-key-needs-unlock, user-auth, unreadable', () {
     expect(find(evaluateDiagnostics(healthy(privateCircle: true)), 'vault').status, DiagStatus.pass);
     final DiagCheck locked = find(evaluateDiagnostics(healthy(privateCircle: true, needsUnlock: true)), 'vault');
-    expect(locked.status, DiagStatus.info);
+    expect(locked.status, DiagStatus.warn);
     expect(locked.detail, contains('unlock'));
+    expect(locked.detail, isNot(contains('by design')));
+    final DiagCheck ok = find(evaluateDiagnostics(healthy(privateCircle: true)), 'vault');
+    expect(ok.detail, contains('Keys available while locked'));
+    expect(ok.detail, isNot(contains('by design')));
     expect(find(evaluateDiagnostics(healthy(privateCircle: true, userAuth: true)), 'vault').status, DiagStatus.warn);
     final DiagCheck bad = find(evaluateDiagnostics(healthy(privateCircle: true, vault: false)), 'vault');
     expect(bad.status, DiagStatus.fail);

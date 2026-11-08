@@ -11,7 +11,7 @@ import '../services/battery_optimization_service.dart';
 import '../services/diagnostics/diag_model.dart';
 import '../services/diagnostics/diagnostics_probe.dart';
 import '../services/diagnostics/diagnostics_reporter.dart';
-import '../services/location_outbox.dart';
+import '../services/offline/offline_sync.dart';
 import '../services/location_sharing_service.dart';
 import '../services/permission_service.dart';
 import '../theme/app_theme.dart';
@@ -113,7 +113,7 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> with WidgetsBindi
         ApiClient.onSessionExpired?.call();
       case DiagFixKind.sendQueue:
         setState(() => _busy = true);
-        await LocationOutbox.drain(send: sendOutboxBatchViaApi);
+        await OfflineSync.flushAll();
         await _run();
       case DiagFixKind.openPushSettings:
         _push(const NotificationSettingsScreen());
@@ -165,18 +165,20 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> with WidgetsBindi
           DsListRow(
             leading: DsListRow.iconTile(context, Icons.science_outlined),
             title: 'Self-test',
-            subtitle: 'Upload a test fix, check encryption, send a test alert',
+            subtitle: 'Send a test position and alert',
+            info: 'Uploads a test position, checks encryption and sends a test alert, so you can see the whole path works.',
             chevron: true,
             onTap: () => _push(const SelfTestScreen()),
           ),
           const Padding(
             padding: EdgeInsets.all(AppSpace.lg),
             child: Text(
-              'These checks run on this phone. They can tell you what is set up '
-              'wrongly; only a real walk with the screen off proves tracking '
-              'survives hours in your pocket.',
+              'These checks run on this phone. Only a real walk with the screen off proves tracking works.',
+              style: AppType.secondary,
             ),
           ),
+          // Room for the pinned buttons so the last item is never covered.
+          const SizedBox(key: Key('diag-bottom-pad'), height: AppSpace.xxl),
         ],
       ],
     );

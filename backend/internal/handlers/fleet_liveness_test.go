@@ -62,9 +62,9 @@ func TestDeviceVersionAndPrivateLiveness(t *testing.T) {
 	if err := middleware.TouchDeviceVersion(ctx, fx.pool, fx.b, other, "android", "9.9.9"); err != nil || ver(other) != "0.1.0" {
 		t.Fatalf("foreign id: %v %q", err, ver(other))
 	}
-	// Fallback: no id, newest device of that platform.
-	if err := middleware.TouchDeviceVersion(ctx, fx.pool, fx.b, "", "android", "0.24.0"); err != nil || ver(mine) != "0.24.0" {
-		t.Fatalf("fallback: %v %q", err, ver(mine))
+	// No id: nothing is written (no "newest device" guess).
+	if err := middleware.TouchDeviceVersion(ctx, fx.pool, fx.b, "", "android", "0.24.0"); err != nil || ver(mine) != "0.23.0" {
+		t.Fatalf("no-id must not write: %v %q", err, ver(mine))
 	}
 
 	// Private-circle liveness: needs a valid own X-Device-Id and a platform.

@@ -66,6 +66,7 @@ class _ChatScreenState extends State<ChatScreen> {
   StreamSubscription<ChatMessage>? _editSub;
   StreamSubscription<(String, String)>? _delSub;
   StreamSubscription<void>? _reconnectSub;
+  StreamSubscription<(String, ChatMessage)>? _deliveredSub;
   String? _clientId;
   String? _clientIdBody;
   ChatMessage? _editing;
@@ -103,6 +104,12 @@ class _ChatScreenState extends State<ChatScreen> {
     });
     _reconnectSub =
         (widget.reconnects ?? ChatEvents.reconnects).listen((_) => _catchUp());
+    _deliveredSub = ChatEvents.localDelivered.listen(((String, ChatMessage) e) {
+      if (e.$2.circleId != widget.circleId || !mounted) return;
+      // A message that waited on the phone reached the server: swap the bubble for the stored one.
+      _remove('local:${e.$1}');
+      setState(() => _addAll(<ChatMessage>[e.$2]));
+    });
     _scroll.addListener(_onScroll);
     _text.addListener(() => setState(() {}));
     unawaited(_load());
@@ -118,6 +125,7 @@ class _ChatScreenState extends State<ChatScreen> {
     _editSub?.cancel();
     _delSub?.cancel();
     _reconnectSub?.cancel();
+    _deliveredSub?.cancel();
     _scroll.dispose();
     _text.dispose();
     super.dispose();
@@ -815,7 +823,7 @@ class _Bubble extends StatelessWidget {
               <String>[
                 _time(message.createdAt),
                 if (message.editedAt != null) 'edited',
-                if (message.sendState == ChatSendState.sending) 'sending',
+                if (message.sendState == ChatSendState.sending) message.id.startsWith('local:') ? 'waiting to send' : 'sending',
               ].join(' · '),
               key: message.sendState == ChatSendState.sending ? const Key('chat-sending') : null,
               style: AppType.secondary

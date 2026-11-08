@@ -147,10 +147,10 @@ class _SingleCircleContext extends StatelessWidget {
               if (onJoinCircle != null) ...[
                 const SizedBox(width: 8),
                 Tooltip(
-                  message: 'Join a family',
+                  message: 'Join a circle',
                   child: Semantics(
                     button: true,
-                    label: 'Join a family',
+                    label: 'Join a circle',
                     child: Material(
                       color: BrandTheme.of(context).sheet,
                       shape: const CircleBorder(),
@@ -239,7 +239,7 @@ class _JoinChip extends StatelessWidget {
             Icon(Icons.add, size: 18, color: BrandTheme.of(context).accentInk),
             const SizedBox(width: 4),
             Text(
-              'Join a family',
+              'Join a circle',
               style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w600,

@@ -157,17 +157,17 @@ void main() {
       expect(queue.single['ts'], lateTs);
     });
 
-    test('quarantines a batch that keeps failing so it cannot pin the queue',
+    test('quarantines a batch the server keeps refusing so it cannot pin the queue',
         () async {
       final String badTs =
           now.subtract(const Duration(minutes: 5)).toIso8601String();
       await prefsWith(<Map<String, dynamic>>[point(badTs)]);
       for (int i = 0; i < LocationOutbox.maxAttempts - 1; i++) {
-        expect(await LocationOutbox.drain(send: (batch) async => false), 0);
+        expect(await LocationOutbox.drain(send: (batch) async => throw const OutboxRejected()), 0);
         expect(await LocationOutbox.size(), 1);
       }
       // The final strike drops the poisoned point.
-      expect(await LocationOutbox.drain(send: (batch) async => false), 1);
+      expect(await LocationOutbox.drain(send: (batch) async => throw const OutboxRejected()), 1);
       expect(await LocationOutbox.size(), 0);
     });
 

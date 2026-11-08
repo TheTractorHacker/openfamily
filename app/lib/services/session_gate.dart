@@ -238,3 +238,27 @@ DateTime? _jwtTimeClaim(String token, String claim) {
     return null;
   }
 }
+
+
+/// The start-up session check, but never longer than [limit] in front of the
+/// first screen. On a blackholed network (Wi-Fi with no internet, a dead
+/// server) the refresh call would otherwise hold the splash for its whole
+/// request timeout. When the limit passes and a refresh token is stored, the
+/// session is presumed alive ([SessionGateResult.unreachable]: the app opens on
+/// the cached snapshot); the check keeps running and still saves a refreshed
+/// token pair when the answer arrives. Nothing here ever signs anybody out.
+Future<SessionGateResult> checkSessionWithin(
+  Future<SessionGateResult> check,
+  Duration limit, {
+  required Future<bool> Function() hasRefreshToken,
+}) {
+  return check.timeout(limit, onTimeout: () async {
+    try {
+      return await hasRefreshToken()
+          ? SessionGateResult.unreachable
+          : SessionGateResult.none;
+    } catch (_) {
+      return SessionGateResult.unreachable;
+    }
+  });
+}

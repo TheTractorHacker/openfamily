@@ -57,3 +57,11 @@
   .wb-build-android { flex-direction: column; }
   .wb-build-old > summary { flex-wrap: wrap; gap: var(--space-2) var(--space-4); }
 }
+
+.wb-builds-all { display: flex; flex-direction: column; gap: var(--space-4); margin-top: var(--space-4); }
+.wb-build-files-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--space-2); padding: var(--space-4) var(--space-5) var(--space-2); }
+.wb-build-table { min-width: 640px; }
+.wb-build-sha { white-space: nowrap; }
+.wb-build-copy { background: none; border: 0; color: var(--sky); cursor: pointer; font: inherit; font-size: var(--font-xs); padding: 0 4px; }
+.wb-build-copy:focus-visible { outline: 2px solid var(--accent); }
+.wb-build-older { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); overflow-wrap: anywhere; }

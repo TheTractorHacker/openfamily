@@ -1,6 +1,10 @@
 import 'dart:async';
+
 import 'api_client.dart';
 import 'e2ee/private_runtime.dart';
+import 'offline/offline_queue.dart';
+import 'offline/offline_sync.dart';
+import 'offline/server_reachability.dart';
 
 /// Whether the caller's location sharing is paused, and until when.
 class SharingPause {
@@ -140,6 +144,15 @@ String formatTimeLeft(Duration d) {
 
 /// Thin wrapper over the check-in / pause / live-share endpoints
 /// (docs/checkin-sharing.md). Screens take one so tests can fake it.
+/// The check-in could not be delivered because the server is unreachable. It is
+/// saved on the phone and sent automatically later; the screen says "not sent yet".
+class CheckInQueued implements Exception {
+  const CheckInQueued();
+  String get message => 'Not sent yet. Your check-in is saved on this phone and goes out by itself when the connection is back.';
+  @override
+  String toString() => message;
+}
+
 class SharingService {
   const SharingService();
 
@@ -166,13 +179,29 @@ class SharingService {
     double? lat,
     double? lon,
   }) async {
-    await ApiClient.post('/checkins', body: <String, dynamic>{
-      'recipient_ids': recipientIds,
-      'note': note,
-      if (lat != null && lon != null) ...<String, dynamic>{'lat': lat, 'lon': lon},
-    });
-    // Private circles: the position travels sealed, never in the request above.
+    final String clientId = 'ci-${DateTime.now().microsecondsSinceEpoch}';
+    final Submitted result = await OfflineQueue.instance.submit(
+      QueuedItem(
+        id: clientId,
+        kind: QueueKind.checkin,
+        method: 'POST',
+        path: '/checkins',
+        body: <String, dynamic>{
+          'recipient_ids': recipientIds,
+          'note': note,
+          'client_id': clientId,
+          if (lat != null && lon != null) ...<String, dynamic>{'lat': lat, 'lon': lon},
+        },
+      ),
+      serverKnownDown: () => ServerReachability.instance.unreachable,
+    );
+    // Private circles: the position travels sealed, never in the request above (and is
+    // sealed on the phone even when the server cannot be reached).
     unawaited(PrivateRuntime.instance.sealAlertPosition('checkin', lat, lon, note: note));
+    if (result.queued) {
+      unawaited(OfflineSync.refreshPending());
+      throw const CheckInQueued();
+    }
   }
 
   Future<LiveShares> liveShares() async =>

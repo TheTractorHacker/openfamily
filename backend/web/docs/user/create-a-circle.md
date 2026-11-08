@@ -1,7 +1,7 @@
 # Create a circle
 
 A **circle** is a group of people who share their location with each other:
-your family, a carpool, the grandparents. You can be in several circles and
+your family, friends, a carpool, the grandparents. You can be in several circles and
 choose in each one whether you share.
 
 ![Create or join a family](../images/app/create-or-join.png)

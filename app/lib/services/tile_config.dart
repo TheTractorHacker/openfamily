@@ -1,5 +1,6 @@
 import 'accent_preference.dart';
 import 'api_client.dart';
+import 'offline/offline_cache.dart';
 import 'secure_url.dart';
 import 'server_features.dart';
 import 'speed_units.dart';
@@ -31,7 +32,15 @@ class TileConfig {
   /// Missing or empty fields keep the current values.
   Future<void> refresh() async {
     try {
-      final Map<String, dynamic> cfg = await ApiClient.getPushConfig();
+      // The last answer is kept, so an offline start still knows the map style and which
+      // features (SMS, processing) this server offers.
+      final Map<String, dynamic> cfg = (await OfflineCache.instance.fetch<Map<String, dynamic>>(
+        'server-config',
+        () => ApiClient.getPushConfig(),
+        encode: (Map<String, dynamic> v) => v,
+        decode: (Object? j) => Map<String, dynamic>.from(j! as Map),
+      ))
+          .value;
       final String? street = cfg['tile_url'] as String?;
       final String? satellite = cfg['satellite_tile_url'] as String?;
       if (street != null && isHttpsUrl(street)) {

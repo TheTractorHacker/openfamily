@@ -38,3 +38,15 @@ in the server lane whose chat still goes on the phone line while the real
 sidecar runs. The database is searched for the message words (`e2ee_items`,
 `chat_messages`, `audit_log`, photo blobs) and the script greps the server log
 for them at the end. Plaintext send answers 409 `chat_encrypted`.
+
+## Offline scenario (server stopped mid-test)
+
+`app/test/e2e_real_server/offline_e2e_test.dart` (run it on its own:
+`scripts/e2e-lanes.sh test/e2e_real_server/offline_e2e_test.dart`) proves the store-and-forward path against
+the real server. The script runs a small control loop next to the tests (`E2E_CTL_DIR`, mounted at `/ctl`): the test
+writes `stop` or `start` to `/ctl/request` and the script stops or starts the API container, answering in
+`/ctl/ack`. Anna's phone sends a chat message, the server is stopped, and her phone keeps queuing three more
+messages, a check-in and an SOS (real refused connections, no fakes), failed flushes lose nothing, the queue is
+"killed" and re-read from storage, the server is started, and everything arrives once and in order. Replaying the
+same client ids (a lost answer) changes nothing: the database is queried for exactly one check-in, one SOS and the
+four messages in order. See `docs/design/OFFLINE_RESILIENCE.md`.

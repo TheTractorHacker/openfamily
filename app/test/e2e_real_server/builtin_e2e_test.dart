@@ -2,6 +2,7 @@
 library;
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:openfamily/models/circle.dart';
 import 'package:openfamily/services/e2ee/add_server_flow.dart';
 import 'package:openfamily/services/e2ee/e2ee_api.dart';
 import 'package:openfamily/services/e2ee/e2ee_crypto.dart';
@@ -14,8 +15,9 @@ import 'harness.dart';
 
 // The built-in server participant (docs/design/PRIVACY_PROCESSING.md section 22) against the REAL
 // Go server with NO sidecar process and NO ingest token in the environment: the API made its own
-// key; Anna's phone approves "Your server wants to join"; Ben taps "Use the server"; Cleo keeps her
-// phone. The in-process loop then stores Ben's readable location and never Cleo's.
+// key; Anna's phone approves "Your server wants to join"; the admin turns on member defaults; Ben and
+// Cleo only OPEN the app (their own phones sign the server lane, section 23); Cleo then taps "Keep on my
+// phone". The in-process loop then stores Ben's readable location and never Cleo's.
 // Run with: E2E_BUILTIN=1 scripts/e2e-lanes.sh test/e2e_real_server/builtin_e2e_test.dart
 // (own invocation: registration rate limits are shared with the other e2e files).
 
@@ -90,13 +92,41 @@ void main() {
     expect(proc.serverAssist, isTrue);
   });
 
-  test('Ben taps "Use the server" (his own signed lane); Cleo does nothing', () async {
-    final AddServerFlow flow = AddServerFlow(LanesProcessingController(b.lanes));
-    final AddServerPlan plan = await b.run(() => flow.plan(circle));
-    expect(plan.state, AddServerState.ready);
-    await b.run(() => flow.confirm(circle, plan));
+  test('the admin turns on "members are on the server by default"; nobody has tapped anything yet', () async {
+    final Map<String, dynamic> md = await rawJson(env, 'PUT', '/api/admin/settings/member-defaults',
+        body: <String, dynamic>{'default_lane': 'server', 'auto_apply': true}, token: a.token);
+    expect(md['auto_apply'], isTrue);
+    expect(md['default_lane'], 'server');
+    // Ordinary members cannot change it and can read it only as advice.
+    final Map<String, dynamic> seen = await rawJson(env, 'GET', '/e2ee/server-device', token: b.token);
+    expect((seen['member_defaults'] as Map<String, dynamic>)['auto_apply'], isTrue);
+    expect(await db.count("SELECT count(*) FROM e2ee_processing_pref WHERE user_id IN ('${b.userId}', '${c.userId}')"), 0);
+  });
+
+  test('Ben and Cleo only open the app: their own phones sign the server lane (visible, per member)', () async {
+    for (final Phone p in <Phone>[b, c]) {
+      await p.run(() => p.runtime.onAppActive(<Circle>[circleOf(circle)]));
+    }
     await a.run(() => a.lanes.maintain(circle));
+    for (final Phone p in <Phone>[b, c]) {
+      expect(await p.run(() => p.store.status(circle)), LaneStatus.serverAssisted, reason: '${p.name} was put on the server by their own phone');
+      expect((await p.run(() => p.store.autoRecord(circle)))!.applied, isTrue);
+    }
+    expect(await db.count("SELECT count(*) FROM e2ee_processing_pref WHERE lane = 'server' AND user_id IN ('${b.userId}', '${c.userId}')"), 2);
+    // Opening again signs nothing more.
+    final int before = await db.count("SELECT count(*) FROM e2ee_processing_statements WHERE kind = 'pref'");
+    await b.run(() => b.runtime.onAppActive(<Circle>[circleOf(circle)]));
+    expect(await db.count("SELECT count(*) FROM e2ee_processing_statements WHERE kind = 'pref'"), before);
+  });
+
+  test('Cleo taps "Keep on my phone": opted out for good, copies purged, nothing of hers is stored afterwards', () async {
+    await c.run(() => c.lanes.keepOnPhone(circle));
     expect(await c.run(() => c.store.status(circle)), isNot(LaneStatus.serverAssisted));
+    expect(await db.count("SELECT count(*) FROM e2ee_processing_pref WHERE lane = 'phone' AND user_id = '${c.userId}'"), 1);
+    // Opening the app again must not put her back.
+    await c.run(() => c.runtime.onAppActive(<Circle>[circleOf(circle)]));
+    expect(await c.run(() => c.store.status(circle)), isNot(LaneStatus.serverAssisted));
+    expect(await db.count("SELECT count(*) FROM e2ee_processing_pref WHERE lane = 'server' AND user_id = '${c.userId}'"), 0);
   });
 
   test('the in-process server device stores Ben\'s readable location and never Cleo\'s', () async {

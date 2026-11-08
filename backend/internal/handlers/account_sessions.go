@@ -1,10 +1,12 @@
 package handlers
 
 import (
+	"encoding/json"
 	"net/http"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/TheTractorHacker/openfamily/backend/internal/auth"
 	"github.com/TheTractorHacker/openfamily/backend/internal/middleware"
 )
 
@@ -68,6 +70,38 @@ func (s *Server) ListSessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// CurrentSession tells the caller which session (refresh family) they are using, so apps can mark
+// "This device". The client sends its own refresh token; it must be valid and belong to the caller.
+// POST /auth/sessions/current {"refresh_token": "..."} -> {"id": "<family id>"}
+func (s *Server) CurrentSession(w http.ResponseWriter, r *http.Request) {
+	claims := middleware.ClaimsFromContext(r.Context())
+	if claims == nil {
+		writeError(w, http.StatusUnauthorized, "unauthenticated")
+		return
+	}
+	var body struct {
+		RefreshToken string `json:"refresh_token"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10)).Decode(&body); err != nil || body.RefreshToken == "" {
+		writeError(w, http.StatusBadRequest, "refresh_token required")
+		return
+	}
+	rc, err := s.TM.Parse(body.RefreshToken, auth.RefreshToken)
+	if err != nil || rc.UserID != claims.UserID || rc.ID == "" {
+		writeError(w, http.StatusNotFound, "session not found")
+		return
+	}
+	var id string
+	err = s.Pool.QueryRow(r.Context(), `
+		SELECT family_id FROM refresh_sessions
+		WHERE jti = $1 AND user_id = $2 AND revoked_at IS NULL`, rc.ID, claims.UserID).Scan(&id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "session not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"id": id})
 }
 
 // RevokeSession revokes one refresh family owned by the caller. Its refresh
