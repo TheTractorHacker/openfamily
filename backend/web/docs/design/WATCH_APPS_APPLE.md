@@ -29,9 +29,19 @@ covers what is specific to Apple.
 | phone to watch | `updateApplicationContext(["cleared": true, "session": id?])` | sign-out or switch off: the watch deletes its copy |
 | watch to phone | `sendMessage(["json": command], replyHandler)` | every command; needs the phone reachable. The reply only means "taken"; the result is `lastCommand` in the next snapshot |
 
-No polling and no timer on either side. The watch waits at most 20 seconds for the phone's
-answer and then says "No confirmation from the iPhone". Nothing is queued, so a stale SOS can
-never fire later.
+No polling on either side. The watch waits at most 20 seconds for the phone's answer and then
+says "No confirmation from the iPhone". Nothing is queued, so a stale SOS can never fire later.
+
+Cadence (same Dart bridge as Wear OS, [WATCH_APPS.md](WATCH_APPS.md), Cadence): the watch app
+sends `visible` when its scene becomes active and once a minute while it stays active (the only
+timer, and only while on screen), `visible` with `ambient` when the scene goes inactive (wrist
+down, always-on), and `hidden` in the background, all fire and forget through `sendMessage`
+when the iPhone is reachable. The iPhone then sends every few seconds while the app is on
+screen and only meaningful changes, at most every 2 minutes, otherwise.
+`updateApplicationContext` has no urgency switch, so the `urgent` flag the bridge passes is
+ignored on the iPhone. Member lines with a relative time come as `line` plus `lineAt`, and the
+watch adds the age itself ("Left Work 25 min ago"). The Swift changes for this were not
+compiled here (no Xcode on the build host); the first macOS CI run proves them.
 
 ## Sign-out and switch-off are a debt
 

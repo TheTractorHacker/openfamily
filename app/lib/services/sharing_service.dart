@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show ValueNotifier;
+
 import 'api_client.dart';
 import 'e2ee/private_runtime.dart';
 import 'offline/offline_queue.dart';
@@ -156,6 +158,10 @@ class CheckInQueued implements Exception {
 class SharingService {
   const SharingService();
 
+  /// Bumped after this phone paused or resumed sharing, so listeners that
+  /// cache the pause state (the watch bridge) refresh it without polling.
+  static final ValueNotifier<int> pauseChanges = ValueNotifier<int>(0);
+
   Future<SharingPause> pauseStatus() async =>
       SharingPause.fromJson(_map(await ApiClient.get('/sharing/pause')));
 
@@ -166,11 +172,13 @@ class SharingService {
           if (minutes != null) 'minutes': minutes,
           if (until != null) 'until': until.toUtc().toIso8601String(),
         });
+    pauseChanges.value++;
     return SharingPause.fromJson(_map(r));
   }
 
   Future<void> resume() async {
     await ApiClient.delete('/sharing/pause');
+    pauseChanges.value++;
   }
 
   Future<void> checkIn({

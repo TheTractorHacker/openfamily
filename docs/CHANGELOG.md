@@ -17,6 +17,17 @@ the phones afterwards.
   theft and signed the person out, which showed up as "Couldn't reach the server". For 10 seconds
   after a refresh token is used, repeated refreshes now get the same new token. After that, and
   if the new token was already used, the strict theft rules still apply.
+- **Watches: much lighter on both batteries.** The phone used to send the watch a new update
+  nearly every 5 seconds whenever anyone's position changed, each one waking the watch at once.
+  Now it sends every few seconds only while the Orbitly app is open on the watch; otherwise
+  only real changes (someone moved more than 100 m, arrived or left, a battery step), at most
+  every 2 minutes, plus a check every 10 minutes. Alerts, answers to watch buttons, new
+  messages and sharing changes still arrive within seconds. In a test hour with someone
+  driving: 31 updates instead of 720. "Left Work 25 min ago" is now counted on the watch. The
+  phone also stopped asking the server for alerts and the sharing pause every minute while a
+  watch is connected, and notices an Orbitly watch connecting or leaving right away. Wear OS
+  tile and complication redraw only when what they show changed. Needs the matching watch app
+  (older watch apps keep working, with the old timing for connect and disconnect).
 
 ## v0.25.2 (2026-11-08)
 

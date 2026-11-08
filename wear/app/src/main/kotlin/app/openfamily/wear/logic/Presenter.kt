@@ -24,8 +24,12 @@ object Presenter {
         else -> Link.Offline(Format.age(nowMs, s.ts))
     }
 
-    /** Line under a name: the phone's status text, plus how old the position is when it is not fresh. */
+    /**
+     * Line under a name: the phone's status text, plus how old the position is when it is not fresh.
+     * A line with `lineAt` ("Left Work", "Updates stopped, last seen") gets its age from the watch's clock.
+     */
     fun subtitle(m: Snapshot.Member, nowMs: Long): String {
+        if (m.line.isNotEmpty() && m.lineAt != null) return "${m.line} ${Format.age(nowMs, m.lineAt)}"
         val base = m.line.ifEmpty {
             when (m.state) {
                 Snapshot.State.Driving -> m.speedKmh?.let { "Driving" } ?: "Driving"

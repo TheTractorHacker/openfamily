@@ -40,6 +40,11 @@ data class Snapshot(
         val address: String,
         /** The phone's own one-line status, shown as is. */
         val line: String,
+        /**
+         * When set, the watch appends how long ago this was ("Left Work" + " 25 min ago").
+         * The phone leaves relative times out of [line] so a minute passing never needs a new snapshot.
+         */
+        val lineAt: Long? = null,
         val isPrivate: Boolean,
         val isYou: Boolean,
     ) {
@@ -103,6 +108,7 @@ data class Snapshot(
                             place = m.optString("place"),
                             address = m.optString("address"),
                             line = m.optString("line"),
+                            lineAt = m.optLongOrNull("lineAt")?.takeIf { it > 0 },
                             isPrivate = m.optBoolean("private", false),
                             isYou = m.optBoolean("you", false),
                         )

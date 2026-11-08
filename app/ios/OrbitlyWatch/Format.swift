@@ -78,7 +78,11 @@ func compassWord(_ degrees: Double) -> String {
 func statusLine(_ m: WMember, snapshot: WSnapshot, now: Date = Date()) -> String {
     if m.you && snapshot.isPaused { return "Sharing paused" }
     if m.state == "none" { return "No location yet" }
-    if m.state == "still" && m.place.isEmpty, let d = m.fixDate { return agoText(d, now: now) }
+    if m.state == "still" && m.place.isEmpty, m.lineAt == nil, let d = m.fixDate { return agoText(d, now: now) }
+    // "Left Work" + "25 min ago", counted on the watch so a minute passing needs no new snapshot.
+    if !m.line.isEmpty, let at = m.lineAt {
+        return m.line + " " + agoText(Date(timeIntervalSince1970: at / 1000.0), now: now).lowercased()
+    }
     if !m.line.isEmpty { return m.line }
     if let d = m.fixDate { return agoText(d, now: now) }
     return "Location shared"

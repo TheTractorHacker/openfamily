@@ -74,9 +74,10 @@ cannot work alone (see "Standalone LTE mode" below).
   paid only when the delete succeeded and a watch was connected to receive it.
   Otherwise the flag stays, no snapshot is published (Dart refuses, and the
   native `publish` refuses) until the user signs in again, and the debt is paid
-  the next time a watch connects (`WatchListenerService.onPeerConnected` /
-  `onCapabilityChanged`, which also works with the app closed) or at the next app
-  start. Just before sending, the bridge re-checks enabled, signed in and
+  the next time a watch connects (the watch app's `orbitly_watch_app`
+  capability appears: `WatchListenerService.onCapabilityChanged`, which also
+  works with the app closed, and a runtime `CapabilityClient` listener while it
+  runs) or at the next app start. Just before sending, the bridge re-checks enabled, signed in and
   not-pending, so a snapshot being built during a sign-out cannot override the
   clear. On the watch, a deleted item, an empty (`signedIn: false`) snapshot, or
   a connected phone with no snapshot item at all wipes the stored snapshot and
@@ -102,8 +103,11 @@ important members until it fits; in practice it is about 3 to 6 KB for a family)
     "id": "u1", "name": "Sam", "initials": "S", "color": 4283215696,
     "lat": 51.5, "lon": -0.12, "fixAt": 1767225500000,
     "battery": 63, "state": "driving", "speedKmh": 68,
-    "place": "Home", "address": "12 High St", "line": "Driving 42 mph",
+    "place": "Home", "address": "12 High St", "line": "Driving 40 mph",
     "private": false, "you": false
+  }, {
+    "id": "u2", "name": "Ana", "state": "still", "line": "Left Work",
+    "lineAt": 1767224100000, "...": "..."
   }],
   "alerts": [{"id": "a1", "kind": "sos", "from": "Sam", "at": 1767225000000,
               "note": "", "active": true}],
@@ -114,19 +118,98 @@ important members until it fits; in practice it is about 3 to 6 KB for a family)
 
 - `state` is one of `driving`, `moving`, `at_place`, `still`, `stopped`, `none`.
 - `line` is the phone's own one-line status text, so the watch and the phone
-  always say the same thing (units follow the phone's setting).
+  always say the same thing (units follow the phone's setting), **minus anything
+  that changes by itself as time passes**: the driving speed is rounded to 5 mph,
+  and a relative time is split off into `lineAt` (epoch ms). The watch shows
+  `line + " " + age(lineAt)` ("Left Work 25 min ago", "Updates stopped, last
+  seen 3 d ago"), counting the age on its own clock. A watch app that does not
+  know `lineAt` shows the line alone. Ages are worded `just now`, `N min ago`,
+  `N h ago`, `N d ago` on both watches (shared vectors in the Kotlin and Dart
+  tests).
 - `ts` is when the snapshot was built; the watch shows "updated N min ago" from
   it. Members carry their own `fixAt` (when the position was taken).
 - `lastCommand` is how the phone answers a command; a watch matches `id` with the
   command it sent. This avoids a second channel and is delta-friendly.
 - The Apple Watch uses the same JSON (WatchConnectivity `applicationContext`).
 
-**Rate limiting and deltas.** The phone builds a *content hash* of the snapshot
-without `ts`; it publishes only when the hash changed, never more than once per
-5 seconds (trailing edge, so the newest state always goes out), and a periodic
-keep-alive at most every 10 minutes so the age stays honest. The Data Layer
-itself also drops writes that do not change the item. Positions are rounded to
-5 decimals (about 1 m). Members are capped at 15.
+Positions are rounded to 5 decimals (about 1 m). Members are capped at 15.
+
+## Cadence
+
+Every snapshot wakes the watch, rewrites its stored copy and may redraw the
+tile and complication, so the phone sends only what the watch needs, at the
+pace the watch asked for. All of it lives in the shared Dart bridge
+(`watch_snapshot.dart`, `watch_bridge.dart`), so Wear OS and the Apple Watch
+behave the same.
+
+**Nothing in the snapshot ticks by itself.** The content hash is the snapshot
+without `ts`, and nothing else in it changes as time passes: ages are formatted
+on the watch from `fixAt`, `lineAt` and the alert `at`. A minute passing never
+produces a snapshot.
+
+**What changed decides how soon it goes out** (`classifyWatchChange`, compared
+with the last snapshot the watch actually got):
+
+| Change | Examples | Sent | Urgent |
+|---|---|---|---|
+| urgent | an alert arrived or ended; the answer to a watch command; first snapshot after sign-in, app start or a watch (re)connecting | within the 5 s floor | yes |
+| event | unread count, sharing paused or resumed | within the 5 s floor | only if the watch app is on screen |
+| meaningful | someone moved more than 100 m from where the watch last saw them, changed state (driving, at a place, stopped), place, status text or battery step (5% at 20% and below, 10% above), joined or left; circles or scope changed | at the tier's pace (below) | only if the watch app is on screen |
+| minor | GPS jitter under 100 m, a newer fix time, a driving speed step | with the next keep-alive, or within 5 s while the app is on screen | as the tier |
+| none | identical apart from `ts` | never | |
+
+**Tiers: the watch says whether it is on screen.** The watch app sends
+`visible` when it comes on screen and every 60 s while it stays there,
+`visible` with arg `ambient` when it goes into always-on mode, and `hidden`
+when it leaves. A `visible` not repeated within 150 s (an `ambient` within
+15 min) expires by itself, so a lost `hidden` costs nothing.
+
+| Tier | Meaningful changes | Keep-alive | Data Layer |
+|---|---|---|---|
+| visible | every change, at most one snapshot per 5 s; a fresh one right away when the app comes on screen | 60 s (keeps "Updated" current) | urgent |
+| ambient | at most once per 60 s | 10 min | urgent |
+| hidden (default) | at most once per 2 min | 10 min | not urgent: the system may batch it for a few minutes |
+
+The roster is looked at no more than once per 5 s whatever the tier. Pushed
+changes (alerts, unread, sharing) skip that floor.
+
+**Measured** in `app/test/services/watch/watch_cadence_test.dart` (one simulated
+hour, deterministic data; before = the same hour through the previous logic;
+the two urgent ones in the quiet hours are the start-up snapshot and the first
+roster after it):
+
+| Hour | Before | After (hidden) | Urgent after |
+|---|---|---|---|
+| one person driving at 1 Hz | 720, all urgent | 31 | 2 |
+| still family with GPS jitter | 125, all urgent | 7 | 2 |
+| still family plus 4 alerts, 20 chat messages, a pause | 125, all urgent | 31 | 7 |
+| one person driving, watch app on screen | 720 | 721 | all |
+| one person driving, watch app in always-on | 720 | 61 | all |
+
+**No polling for the watch.** Alerts and the pause state used to be fetched
+over REST every minute while a watch was connected (about 126 requests an
+hour). They are now fetched once and again only when the live socket reports
+an alert or acknowledgement, the socket reconnects, or this phone pauses or
+resumes, with a 10-minute safety refresh: 18 requests an hour.
+
+**Link state.** The Wear app advertises the capability `orbitly_watch_app`
+(`wear/app/src/main/res/values/wear.xml`). The phone listens for it with a
+`CapabilityClient` listener while the app runs and through
+`WatchListenerService` (manifest `CAPABILITY_CHANGED`, path
+`/orbitly_watch_app`) while it does not; `status` counts reachable nodes with
+the capability. A watch running an older Orbitly app does not advertise it:
+then any connected watch counts as before, and its comings and goings are only
+noticed by the 10-minute keep-alive re-check (the old peer callbacks needed the
+deprecated `BIND_LISTENER`, which Android lint rejects). Not verified on a
+device: whether `CAPABILITY_CHANGED` is delivered to the closed app on every
+Wear OS and Play services version.
+
+**On the watch (Wear OS).** An identical item is dropped with one string
+comparison. The tile and complication are redrawn only when what they show
+changed (`SurfaceGate`): signed in, unread, sharing or who has a position at
+once; positions (about 100 m) and fix times (to the minute) at most once a
+minute; battery, status text, alerts and keep-alives never. When the app leaves
+the screen they are redrawn once with the latest data.
 
 ## Commands (watch to phone)
 
@@ -142,6 +225,8 @@ Wear OS: `MessageClient`, path `/orbitly/cmd`, payload a small JSON:
 | `ack` | alert id | Marks an alert seen (`POST /alerts/{id}/ack`). |
 | `refresh` | none | Rebuilds and publishes the snapshot now (still rate limited to once per 5 s). |
 | `reply` | reply id (`ok`, `omw`, `late`, `call`, `thanks`) | Sends the fixed text to the circle chat the phone has open (or the first circle). |
+| `visible` | none, or `ambient` | The watch app is on screen (or in always-on mode): faster cadence (see Cadence). Never answered in `lastCommand`. |
+| `hidden` | none | The watch app left the screen: back to the slow cadence. Never answered. |
 
 The phone replies through `lastCommand` in the next snapshot. A command is
 valid for 2 minutes after `at` (replay window; the watch and phone clocks only
@@ -173,7 +258,8 @@ and the SOS screen says "If it did not send, call emergency services".
   this design.
 - Updates arrive by `DataClient` changes only (a `WearableListenerService` is
   woken by the system; the UI collects from a `StateFlow`). No polling, no
-  background service, no wake locks.
+  background service, no wake locks. The only repeating message is `visible`
+  once a minute while the app is on screen and not in ambient mode.
 - Screens: People, Person (place, age, "Open on phone", distance and direction),
   SOS (hold to arm, 5 s countdown, cancel, haptics), I'm OK, Sharing pause and
   resume, Quick replies with unread badge, Alerts. A Tile ("Circle", the people

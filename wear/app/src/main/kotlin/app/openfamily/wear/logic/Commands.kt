@@ -9,7 +9,18 @@ object Commands {
     const val ACK_PATH = "/orbitly/ack"
     const val SNAPSHOT_PATH = "/orbitly/snapshot"
 
-    enum class Cmd(val wire: String) { Sos("sos"), CheckIn("checkin"), Pause("pause"), Resume("resume"), Ack("ack"), Refresh("refresh"), Reply("reply") }
+    enum class Cmd(val wire: String) {
+        Sos("sos"), CheckIn("checkin"), Pause("pause"), Resume("resume"), Ack("ack"), Refresh("refresh"), Reply("reply"),
+
+        /** The app is on screen (arg "ambient" in always-on mode): the phone sends more often. Never answered. */
+        Visible("visible"),
+
+        /** The app left the screen: the phone falls back to its slow cadence. Never answered. */
+        Hidden("hidden"),
+    }
+
+    /** How often the app repeats [Cmd.Visible] while on screen; the phone forgets it after 150 s without one. */
+    const val VISIBLE_REPEAT_MS = 60_000L
 
     data class Built(val id: String, val bytes: ByteArray)
 

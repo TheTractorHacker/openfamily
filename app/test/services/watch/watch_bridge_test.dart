@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -10,6 +11,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 class FakeTransport implements WatchTransport {
   WatchLinkStatus st = const WatchLinkStatus(available: true, nodes: 1, names: <String>['Pixel Watch']);
   final List<String> published = <String>[];
+  final List<bool> urgent = <bool>[];
   int cleared = 0;
   bool clearDelivers = true;
   int allowed = 0;
@@ -19,12 +21,13 @@ class FakeTransport implements WatchTransport {
   void Function()? onPeer;
 
   @override
-  Future<bool> publish(String json) async {
+  Future<bool> publish(String json, {bool urgent = true}) async {
     if (failNext) {
       failNext = false;
       return false;
     }
     published.add(json);
+    this.urgent.add(urgent);
     return true;
   }
 
@@ -94,6 +97,11 @@ class FakeSource implements WatchContextSource {
 
   @override
   void invalidate() => invalidations++;
+
+  final StreamController<void> changed = StreamController<void>.broadcast();
+
+  @override
+  Stream<void> get changes => changed.stream;
 }
 
 Member _m(String id, {int battery = 50, double lat = 51.5}) => Member(
@@ -131,6 +139,9 @@ void main() {
       source: src,
       clock: () => now,
       minInterval: minInterval,
+      // These tests are about the throttle, the hash and sign-out: one pace for every tier.
+      ambientInterval: minInterval,
+      hiddenInterval: minInterval,
       keepAlive: const Duration(hours: 1),
       sosCooldown: const Duration(seconds: 60),
       commandCooldown: const Duration(seconds: 2),
