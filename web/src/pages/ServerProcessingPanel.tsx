@@ -3,7 +3,6 @@
 // processing, who keeps data on the phone, who has not chosen, and when data
 // last arrived. Timestamps and counts only; no coordinates.
 
-import React from 'react'
 import { getProcessingOverview } from '../lib/api'
 import { useAsync } from '../lib/useAsync'
 import { Badge, Card, Spinner } from '../components/primitives'
