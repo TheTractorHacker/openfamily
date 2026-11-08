@@ -1,5 +1,7 @@
 # Installing Orbitly on Android and getting updates
 
+How family members install Orbitly on Android with Obtainium and receive updates, and how the operator publishes them.
+
 ## Family members: install once
 
 1. On your phone install **Obtainium** (get it from obtainium.imranr.dev or its

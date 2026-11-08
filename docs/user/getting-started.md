@@ -4,7 +4,7 @@ Orbitly is a private way for your people (family, friends, a team) to see where
 everyone is, get arrival and departure alerts, chat, and send an SOS. It runs
 on a small server that your circle (or the person who looks after your tech)
 controls, so your locations are not sold or stored by a company. Orbitly was
-published as OpenFamily before the rename.
+published as OpenFamily before the rename. Apps for Wear OS and Apple Watch are coming.
 
 ![The Orbitly welcome screen with Create account and Sign in buttons](../images/app/welcome.png)
 
@@ -31,13 +31,15 @@ published as OpenFamily before the rename.
 
 ## Where to go next
 
+- Setting up the server yourself? [Quick start (5 minutes)](../quick-start.md)
+- Normal, Private and server processing in one picture: [Concepts](../concepts.md)
 - [Places and arrival alerts](places.md)
 - [Driving reports](driving-reports.md)
 - [Chat](chat.md)
 - [Privacy modes explained](privacy-modes.md): what the server can and cannot see
 - [Safety: SOS and check-ins](safety-and-check-ins.md)
 - [Removing a person, a lost phone](members-and-devices.md)
-- Something wrong? [Troubleshooting](../admin/troubleshooting.md)
+- Something wrong? [Troubleshooting](../troubleshooting/index.md); [FAQ](../faq.md); [Glossary](../glossary.md)
 
 All the screenshots in these guides are drawn from the app's own screens with
 made-up data (the "Rivera Family"). See [How screenshots are made](../developers/screenshots.md).

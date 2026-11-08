@@ -1,5 +1,7 @@
 # Google Play release preparation
 
+Where the Google Play listing stands and what is still needed before Orbitly can go public on Google Play.
+
 ## Current status
 
 The English listing is saved in Play Console as **Orbitly**, with an icon,

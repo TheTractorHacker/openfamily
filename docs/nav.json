@@ -7,8 +7,13 @@
       "items": [
         "user/getting-started.md",
         "CHANGELOG.md",
-        "about/credits-and-license.md"
-      ]
+        "about/credits-and-license.md",
+        "quick-start.md",
+        "concepts.md",
+        "faq.md",
+        "glossary.md"
+      ],
+      "icon": "rocket"
     },
     {
       "id": "family",
@@ -28,7 +33,8 @@
         "user/members-and-devices.md",
         "user/battery-and-permissions.md",
         "user/when-the-server-is-down.md"
-      ]
+      ],
+      "icon": "users"
     },
     {
       "id": "admin",
@@ -49,8 +55,11 @@
         "self-hosting.md",
         "custom-domain.md",
         "backup-restore.md",
-        "android-install-and-updates.md"
-      ]
+        "android-install-and-updates.md",
+        "server-setup.md",
+        "privacy-controls.md"
+      ],
+      "icon": "server"
     },
     {
       "id": "developers",
@@ -66,7 +75,48 @@
         "developers/naming.md",
         "api-compat.md",
         "developers/performance-low-memory.md"
+      ],
+      "icon": "code"
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Troubleshooting",
+      "icon": "wrench",
+      "description": "Something not working? Start with the checklist for your symptom.",
+      "items": [
+        "troubleshooting/index.md"
+      ]
+    },
+    {
+      "id": "reference",
+      "title": "Feature reference",
+      "icon": "book",
+      "description": "How each feature works in detail.",
+      "items": [
+        "chat.md",
+        "safety.md",
+        "checkin-sharing.md",
+        "share-links.md",
+        "geofencing.md",
+        "bubbles.md",
+        "driving.md",
+        "driving-sensors.md",
+        "push.md",
+        "sms.md",
+        "passkeys.md",
+        "maps.md",
+        "reliability.md",
+        "integrations/home-assistant.md"
       ]
     }
+  ],
+  "popular": [
+    "quick-start.md",
+    "concepts.md",
+    "troubleshooting/index.md",
+    "user/privacy-modes.md",
+    "admin/backups.md",
+    "admin/updates.md",
+    "faq.md"
   ]
 }

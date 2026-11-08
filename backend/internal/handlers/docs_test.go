@@ -29,10 +29,15 @@ func docsGet(t *testing.T, path string) *httptest.ResponseRecorder {
 type docsManifest struct {
 	Release    string `json:"release"`
 	Categories []struct {
+		ID   string `json:"id"`
+		Icon string `json:"icon"`
 		Docs []struct {
-			Path string `json:"path"`
+			Path    string `json:"path"`
+			Title   string `json:"title"`
+			Summary string `json:"summary"`
 		} `json:"docs"`
 	} `json:"categories"`
+	Popular []string `json:"popular"`
 }
 
 func TestDocsManifestAndContent(t *testing.T) {
@@ -61,6 +66,44 @@ func TestDocsManifestAndContent(t *testing.T) {
 	}
 	if r := docsGet(t, "/api/docs/user/getting-started.md"); r.Header().Get("X-Content-Type-Options") != "nosniff" {
 		t.Fatal("nosniff missing")
+	}
+}
+
+// Every page has a one-line summary (search results and the category cards use
+// it), the popular list points at real pages, and drawings are served inert.
+func TestDocsSummariesPopularAndDrawings(t *testing.T) {
+	var m docsManifest
+	if err := json.Unmarshal(docsGet(t, "/api/docs/manifest.json").Body.Bytes(), &m); err != nil {
+		t.Fatal(err)
+	}
+	known := map[string]bool{}
+	for _, c := range m.Categories {
+		for _, d := range c.Docs {
+			known[d.Path] = true
+			if len(d.Summary) < 20 || d.Title == "" {
+				t.Errorf("%s: missing title or summary (%q)", d.Path, d.Summary)
+			}
+		}
+	}
+	if len(m.Popular) == 0 {
+		t.Error("manifest has no popular pages")
+	}
+	for _, p := range m.Popular {
+		if !known[p] {
+			t.Errorf("popular page %s is not in the manifest", p)
+		}
+	}
+	for _, want := range []string{"quick-start.md", "concepts.md", "glossary.md", "faq.md", "troubleshooting/index.md"} {
+		if !known[want] {
+			t.Errorf("%s missing from the manifest", want)
+		}
+	}
+	w := docsGet(t, "/api/docs/images/concepts-processing.svg")
+	if w.Code != 200 || w.Header().Get("Content-Type") != "image/svg+xml" {
+		t.Fatalf("svg: %d %s", w.Code, w.Header().Get("Content-Type"))
+	}
+	if !strings.Contains(w.Header().Get("Content-Security-Policy"), "sandbox") {
+		t.Error("svg must carry a sandboxing Content-Security-Policy")
 	}
 }
 

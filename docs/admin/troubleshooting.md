@@ -1,5 +1,7 @@
 # Troubleshooting
 
+A quick checklist for the server admin. The full hub with every topic is [Troubleshooting](../troubleshooting/index.md).
+
 Start with `docker compose ps` (all services "healthy"/"running"),
 `curl http://localhost:8080/healthz` and `docker compose logs --tail 100 api`.
 The admin **System** page lists recent warnings and errors.

@@ -1,5 +1,7 @@
 # Operator privacy controls
 
+The switches a server operator controls over what platform admins can see, such as live locations, and how access is recorded.
+
 ## Platform admin access to live location (SEC-007)
 
 A platform admin manages accounts and servers; by default they **cannot see

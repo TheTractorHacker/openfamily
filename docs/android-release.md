@@ -1,5 +1,7 @@
 # Android release process (operator)
 
+For the person who publishes the Android app: where the signing key lives and how the release files are built.
+
 ## Signing key
 
 The release keystore lives OUTSIDE the repository:

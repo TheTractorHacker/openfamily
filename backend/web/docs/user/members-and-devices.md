@@ -1,5 +1,7 @@
 # Removing a member, devices and lost phones
 
+Remove someone from a circle, sign out a lost or replaced phone, and what each person can do with their own devices.
+
 ## Remove a person from a circle
 
 Circle admins: open the circle, tap the person, choose **Remove**. They lose the

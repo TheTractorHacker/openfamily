@@ -76,6 +76,17 @@ Works with apps 0.20 and newer; nothing here needs an app update.
 - The server can read the data of everyone on it, as before; this changes who presses the button, not what the server
   can read.
 
+- **Better Documents page.** A topic tree you can collapse, an "On this page"
+  list that follows you as you read, breadcrumbs, previous and next links,
+  search with highlighted matches and recent searches (press `/`), notes and
+  warnings in colour, code you can copy, pictures you can enlarge, and a layout
+  that works on a phone and prints cleanly.
+- **New guides.** [Quick start (5 minutes)](quick-start.md),
+  [Concepts](concepts.md) (Normal, Private and server processing, with a
+  picture), [Troubleshooting](troubleshooting/index.md), [FAQ](faq.md) and a
+  [Glossary](glossary.md). The privacy and chat pages now say the same thing as
+  the app.
+
 ## v0.24.1 (2026-11-08)
 
 - Build fix: the v0.24.0 release files were not produced because of a file-name

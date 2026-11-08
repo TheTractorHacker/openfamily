@@ -24,6 +24,7 @@ var docsTypes = map[string]string{
 	".md":   "text/plain; charset=utf-8",
 	".json": "application/json",
 	".png":  "image/png",
+	".svg":  "image/svg+xml",
 	".webp": "image/webp",
 	".jpg":  "image/jpeg",
 	".jpeg": "image/jpeg",
@@ -53,5 +54,8 @@ func (s *Server) DocsContent(w http.ResponseWriter, r *http.Request) {
 	h.Set("Content-Type", ct)
 	h.Set("Cache-Control", "private, max-age=300")
 	h.Set("X-Content-Type-Options", "nosniff")
+	// Drawings are shown through <img>, which never runs scripts; the policy
+	// also keeps a drawing inert if someone opens its address directly.
+	h.Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox")
 	_, _ = w.Write(data)
 }
