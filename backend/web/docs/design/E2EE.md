@@ -41,10 +41,10 @@ the user's session reads the same data the user can), traffic analysis by the ne
 | Place arrival/departure alerts (`geofence.go`, `place_presence.go`) | SQL evaluation of fixes against places | **Computed on the sender's phone**; it sends an encrypted "arrived at Home" event. Places are distributed encrypted. Server only relays. |
 | Live map, history, day view | server serves rows | Phones decrypt; history is stored as ciphertext and decrypted on the phone |
 | Trips, driving reports, crash scoring, weekly summary | server segments and aggregates fixes | **Computed on-device** and shared as encrypted summaries, or documented as unavailable. Server-side trips/driving/weekly summary are **unavailable** for Private circles |
-| SOS with position | server pushes last position | Position travels in the encrypted payload. The server (and so the SMS/Twilio fallback) **cannot know the position**; SOS in a Private circle must say so in the UI. The wake-up push has no position |
+| SOS with position | server pushes last position | Position travels in the encrypted payload. The server does not store it and the SMS/Twilio fallback cannot be told it; SOS in a Private circle must say so in the UI. The wake-up push has no position. **Known gap (PRIVACY_MODEL_V1 L1):** the app still includes the coordinates in the plaintext alert request, which the server discards, so a malicious server or a TLS-terminating proxy can see them (backlog B3) |
 | Admin map and device last-known positions | operator reads positions | **Unavailable** for Private circles (by design), except circles in trusted-server mode (below), where the server holds the plaintext it ingested. Admin panel still lists accounts, devices, keys |
 | Dawarich export | server forwards points | **Server-side sync skips Private circles** (it reads only the plaintext table). Use the `e2ee-bridge` (phase 3), a `service` device member that you run off the server host. **Exception:** with the opt-in trusted-server mode (below) the built-in sync works again for the circles whose members all consented |
-| Server geocoded place names and address search | server reverse-geocodes | Geocoding moves to the phone (or an on-device lookup); the server never learns an address |
+| Server geocoded place names and address search | server reverse-geocodes | Intended: geocoding moves to the phone (or an on-device lookup) so the server never learns an address. **Known gap (PRIVACY_MODEL_V1 L2):** the place picker still asks the server to reverse-geocode the pin and to search typed addresses (backlog B4) |
 | Push text naming a place or person | server composes the text | Server sends a content-free wake-up; the app decrypts and raises a LOCAL notification |
 
 **Downgrade rule (implemented in phase 2, see "Enforcement"):** `circles.e2ee_mode = 'private'` is the switch. The server refuses or drops plaintext
@@ -339,7 +339,7 @@ So a private circle's data is never written in plaintext, but a person who also 
 | Day history / trail | yes, from the phone's decrypted store (7 days, sealed `history` chunks rebuild it after a re-install) |
 | Places and arrival/departure alerts | yes, evaluated on the sender's phone (accuracy gate 100 m, 60 s debounce, pending/reversal rules ported from `geofence_eval.go`) |
 | Check-in, help, SOS | yes; position travels sealed; the server and SMS contacts do not learn it |
-| Chat | works as before, NOT end-to-end encrypted yet (shown in the migration dialog) |
+| Chat | end-to-end encrypted on the phone key line, for every member whatever their processing lane (`E2EE_CHAT.md`) |
 | Trips, driving report, weekly summary | NOT available (explicit placeholder) |
 | Admin map, device last-known positions | NOT available from the server (it holds none). A member (including a platform admin who is a member) can read them in the browser viewer after one of their own phones approved that browser |
 | Dawarich export | Through the `e2ee-bridge` only (phase 3); the built-in server export skips Private circles |
@@ -455,7 +455,7 @@ Closed in this pass: a listed voucher is now bound to its logged fingerprint; ro
 * Items from a phone key that was revoked before a viewer/bridge first looked cannot be verified (the circle state lists active keys only) and are dropped.
 * The viewer is a snapshot-and-stream tool: it does not persist decrypted history, and `history` chunks are limited by the sender's retention.
 * Not exercised: a real Dawarich instance, a physical phone, the browser pages in several real browsers (Node 22 and the bundle build were exercised; the UI was not click-tested), and WebCrypto Ed25519/X25519 in Safari/Firefox ESR. Browsers without them fall back to the passphrase mode.
-* The viewer cannot upload; a read-only web key cannot send positions. No chat or media is decrypted (still plaintext).
+* The viewer cannot upload; a read-only web key cannot send positions. The viewer does not show chat (encrypted chat is read in the phone app, `E2EE_CHAT.md`).
 
 ## Trusted-server mode (the Orbitly server as a member device)
 
