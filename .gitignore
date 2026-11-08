@@ -44,3 +44,6 @@ key.properties
 *.jks
 *.keystore
 app/android/release.jks
+
+# scripts/dev/apk-fast.sh output
+/.local-apks/

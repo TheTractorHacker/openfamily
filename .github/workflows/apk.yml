@@ -6,7 +6,22 @@ name: Android release
 # (workflow_dispatch) build and keep the files as workflow artifacts only; they
 # never create a release.
 #
-# Secrets (see docs/android-release.md and scripts/android-secrets.sh):
+# Shape (why: docs/developers/build-speed.md). Jobs run in PARALLEL and only the
+# last one ("publish") waits for all of them:
+#   meta           version name/code (seconds)
+#   sbom           SPDX file of the source tree
+#   compile-check  Kotlin compile + Android lint (vital) of the release variant;
+#                  fails in a few minutes on native errors, long before the
+#                  full builds finish
+#   verify         flutter analyze + flutter test; does NOT delay the builds,
+#                  but "publish" needs it, so a red test still blocks the release
+#   build-main     ONE Gradle run produces the combined APK and the AAB
+#   build-abi      matrix: arm64-v8a and armeabi-v7a only APKs
+#   publish        checksums, signature check, GitHub Release (contents: write)
+#
+# Secrets (see docs/android-release.md and scripts/android-secrets.sh) are only
+# read by the two build jobs, in the signing step; the key files are deleted
+# right after the build step (and again with if: always()).
 #   ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD,
 #   ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD
 #
@@ -14,6 +29,9 @@ name: Android release
 # versionCode = (major*1000000 + minor*1000 + patch)*100 + suffix, where suffix
 # is 99 for a final release and the rc/beta number (1..98) for a pre-release,
 # so every newer tag installs over older builds. Patch/minor must stay < 1000.
+#
+# Caches: tag refs cannot save caches other tags can read, so the caches are
+# written by android-cache.yml on main and only RESTORED here.
 
 on:
   push:
@@ -25,28 +43,28 @@ permissions:
 
 concurrency:
   group: android-release-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: false # never cancel a release build
+
+env:
+  FLUTTER_VERSION: '3.47.0'
 
 jobs:
-  build:
+  meta:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
-    permissions:
-      contents: write # only used to create the Release on tag pushes
+    timeout-minutes: 5
+    outputs:
+      name: ${{ steps.ver.outputs.name }}
+      code: ${{ steps.ver.outputs.code }}
+      prerelease: ${{ steps.ver.outputs.prerelease }}
     env:
       IS_TAG: ${{ startsWith(github.ref, 'refs/tags/v') }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: SBOM (SPDX) for this release (taken before any build output or signing material exists)
-        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          path: .
-          format: spdx-json
-          output-file: sbom.spdx.json
-          upload-artifact: false
-          upload-release-assets: false
+          fetch-depth: 1
+          sparse-checkout: app/pubspec.yaml
+          sparse-checkout-cone-mode: false
 
       - name: Derive version
         id: ver
@@ -78,25 +96,134 @@ jobs:
           echo "prerelease=$PRE" >> "$GITHUB_OUTPUT"
           echo "versionName=$V versionCode=$CODE prerelease=$PRE"
 
-      - name: Set up Java 17
-        uses: actions/setup-java@v4
+  sbom:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 1
+      # Taken from the source tree before any build output or signing material exists.
+      - name: SBOM (SPDX) for this release
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
+        with:
+          path: .
+          format: spdx-json
+          output-file: sbom.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: parts-sbom
+          path: sbom.spdx.json
+          if-no-files-found: error
+
+  # Early warning: a Kotlin or lint error in the release variant fails here in
+  # a few minutes instead of after the whole build.
+  compile-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
         with:
           distribution: temurin
           java-version: '17'
-
-      - name: Set up Flutter
-        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
           channel: stable
-          flutter-version: '3.47.0'
+          flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
+      - name: Restore Gradle and Android SDK caches (written on main)
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            /usr/local/lib/android/sdk/ndk
+            /usr/local/lib/android/sdk/cmake
+          key: android-gradle-${{ runner.os }}-${{ hashFiles('app/android/**/*.gradle*', 'app/android/gradle/wrapper/gradle-wrapper.properties', 'app/pubspec.lock') }}
+          restore-keys: |
+            android-gradle-${{ runner.os }}-
+      - name: Gradle settings for a 16 GB runner
+        run: |
+          mkdir -p ~/.gradle
+          printf '%s\n' 'org.gradle.jvmargs=-Xmx6G -XX:MaxMetaspaceSize=2G -XX:+UseParallelGC' \
+            'org.gradle.parallel=true' 'org.gradle.caching=true' 'kotlin.daemon.jvmargs=-Xmx3G' > ~/.gradle/gradle.properties
+      - name: Dependencies and Gradle wrapper
+        working-directory: app
+        run: |
+          flutter pub get
+          # android/gradlew is generated by Flutter (git-ignored). --config-only
+          # prepares the Android project without building; if the wrapper is
+          # still missing, fall back to one real debug build so it exists.
+          flutter build apk --config-only --no-pub || true
+          if [ ! -x android/gradlew ]; then
+            flutter build apk --debug --target-platform android-arm64 --no-pub
+          fi
+      - name: Kotlin compile and vital lint (release variant)
+        working-directory: app/android
+        run: ./gradlew --no-daemon :app:compileReleaseKotlin :app:lintVitalRelease
 
+  # analyze + test do not delay the builds, but publish needs them.
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 1
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
       - name: Analyze and test
         working-directory: app
         run: |
           flutter pub get
-          flutter analyze --no-fatal-infos
-          flutter test
+          flutter analyze --no-fatal-infos --no-pub
+          flutter test --no-pub
+
+  build-main:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    needs: meta
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - name: Restore Gradle and Android SDK caches (written on main)
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            /usr/local/lib/android/sdk/ndk
+            /usr/local/lib/android/sdk/cmake
+          key: android-gradle-${{ runner.os }}-${{ hashFiles('app/android/**/*.gradle*', 'app/android/gradle/wrapper/gradle-wrapper.properties', 'app/pubspec.lock') }}
+          restore-keys: |
+            android-gradle-${{ runner.os }}-
+      - name: Gradle settings for a 16 GB runner
+        run: |
+          mkdir -p ~/.gradle
+          printf '%s\n' 'org.gradle.jvmargs=-Xmx6G -XX:MaxMetaspaceSize=2G -XX:+UseParallelGC' \
+            'org.gradle.parallel=true' 'org.gradle.caching=true' 'kotlin.daemon.jvmargs=-Xmx3G' > ~/.gradle/gradle.properties
+      - name: Dependencies
+        working-directory: app
+        run: flutter pub get
 
       - name: Configure Android signing
         env:
@@ -118,59 +245,169 @@ jobs:
             printf 'storeFile=%s\n' "../release.jks"
           } > app/android/key.properties
 
-      - name: Build release APKs and AAB
+      - name: Build combined APK, then the AAB
         working-directory: app
         run: |
-          # Three APKs, all with the SAME versionCode (no --split-per-abi, which
-          # would add 1000*ABI to it and break updates between variants):
-          #   orbitly-<v>.apk            arm64 + 32-bit arm. The default: it
-          #                              installs on every phone (many 2 GB
-          #                              phones run a 32-bit system) and is
-          #                              what /app.apk serves.
-          #   orbitly-<v>-arm64-v8a.apk  64-bit only, about 40 percent smaller.
-          #   orbitly-<v>-armeabi-v7a.apk 32-bit only.
-          # The x86_64 slice only serves emulators/ChromeOS; the AAB keeps every
-          # ABI. The server's APK cache prefers the plain orbitly-<v>.apk, then
-          # arm64-v8a (see backend/internal/apkrelease). Debug symbols are
-          # stripped by Gradle; Dart symbols are not split (no --obfuscate, see
-          # docs/developers/performance-low-memory.md).
-          B=(--build-name='${{ steps.ver.outputs.name }}' --build-number='${{ steps.ver.outputs.code }}')
-          mkdir -p ../apks
+          # Same versionCode in every file (no --split-per-abi, which would add
+          # 1000*ABI to it and break updates between variants).
+          #   orbitly-<v>.apk  arm64 + 32-bit arm. The default: installs on every
+          #                    phone (many 2 GB phones run a 32-bit system) and is
+          #                    what /app.apk serves. The AAB keeps every ABI.
+          # The AAB build runs after the APK build in the same checkout, so
+          # Gradle's up-to-date checks and the build cache can skip what is
+          # unchanged (resources, Kotlin/Java, merged manifests). Dart AOT per ABI
+          # may still run again; see docs/developers/build-speed.md for what to
+          # check in the first run. Debug symbols are stripped by Gradle; no
+          # --obfuscate (docs/developers/performance-low-memory.md).
+          B=(--no-pub --build-name='${{ needs.meta.outputs.name }}' --build-number='${{ needs.meta.outputs.code }}')
+          mkdir -p ../parts
           flutter build apk --release --target-platform android-arm,android-arm64 "${B[@]}"
-          cp build/app/outputs/flutter-apk/app-release.apk ../apks/combined.apk
-          flutter build apk --release --target-platform android-arm64 "${B[@]}"
-          cp build/app/outputs/flutter-apk/app-release.apk ../apks/arm64-v8a.apk
-          flutter build apk --release --target-platform android-arm "${B[@]}"
-          cp build/app/outputs/flutter-apk/app-release.apk ../apks/armeabi-v7a.apk
+          cp build/app/outputs/flutter-apk/app-release.apk ../parts/combined.apk
           flutter build appbundle --release "${B[@]}"
-
-      - name: Stage and checksum
-        run: |
-          set -euo pipefail
-          V='${{ steps.ver.outputs.name }}'
-          mkdir -p dist
-          cp sbom.spdx.json "dist/orbitly-$V.spdx.json"
-          cp apks/combined.apk "dist/orbitly-$V.apk"
-          cp apks/arm64-v8a.apk "dist/orbitly-$V-arm64-v8a.apk"
-          cp apks/armeabi-v7a.apk "dist/orbitly-$V-armeabi-v7a.apk"
-          cp app/build/app/outputs/bundle/release/app-release.aab "dist/orbitly-$V.aab"
-          (cd dist && sha256sum "orbitly-$V.apk" "orbitly-$V-arm64-v8a.apk" "orbitly-$V-armeabi-v7a.apk" "orbitly-$V.aab" "orbitly-$V.spdx.json" > SHA256SUMS.txt && cat SHA256SUMS.txt)
-          BT="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)"
-          for f in "dist/orbitly-$V.apk" "dist/orbitly-$V-arm64-v8a.apk" "dist/orbitly-$V-armeabi-v7a.apk"; do
-            "$BT/apksigner" verify --print-certs "$f" | grep -i 'SHA-256'
-          done
-          # Warning only (never fails the release): the 64-bit APK against the
-          # recorded size baseline.
-          scripts/apk-size-budget.sh "dist/orbitly-$V-arm64-v8a.apk" || echo "::warning::arm64 APK exceeds the size budget (scripts/apk-size-baseline.txt)"
+          cp build/app/outputs/bundle/release/app-release.aab ../parts/app.aab
 
       - name: Remove signing material
         if: always()
         run: rm -f app/android/key.properties app/android/release.jks
 
-      - name: Keep build files
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: orbitly-${{ steps.ver.outputs.name }}
+          name: parts-main
+          path: parts/*
+          if-no-files-found: error
+
+  # One runner per single-ABI APK. They only differ in --target-platform, so they
+  # run side by side and add no wall-clock time. Cheap to keep: about 40 percent
+  # smaller arm64 file for people who sideload and the server's cache fallback.
+  build-abi:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    needs: meta
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - abi: arm64-v8a
+            platform: android-arm64
+          - abi: armeabi-v7a
+            platform: android-arm
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - name: Restore Gradle and Android SDK caches (written on main)
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            /usr/local/lib/android/sdk/ndk
+            /usr/local/lib/android/sdk/cmake
+          key: android-gradle-${{ runner.os }}-${{ hashFiles('app/android/**/*.gradle*', 'app/android/gradle/wrapper/gradle-wrapper.properties', 'app/pubspec.lock') }}
+          restore-keys: |
+            android-gradle-${{ runner.os }}-
+      - name: Gradle settings for a 16 GB runner
+        run: |
+          mkdir -p ~/.gradle
+          printf '%s\n' 'org.gradle.jvmargs=-Xmx6G -XX:MaxMetaspaceSize=2G -XX:+UseParallelGC' \
+            'org.gradle.parallel=true' 'org.gradle.caching=true' 'kotlin.daemon.jvmargs=-Xmx3G' > ~/.gradle/gradle.properties
+      - name: Dependencies
+        working-directory: app
+        run: flutter pub get
+
+      - name: Configure Android signing
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for v in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            if [ -z "${!v}" ]; then echo "Missing secret $v" >&2; exit 1; fi
+          done
+          umask 077
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > app/android/release.jks
+          {
+            printf 'storePassword=%s\n' "$ANDROID_KEYSTORE_PASSWORD"
+            printf 'keyPassword=%s\n' "$ANDROID_KEY_PASSWORD"
+            printf 'keyAlias=%s\n' "$ANDROID_KEY_ALIAS"
+            printf 'storeFile=%s\n' "../release.jks"
+          } > app/android/key.properties
+
+      - name: Build ${{ matrix.abi }} APK
+        working-directory: app
+        run: |
+          flutter build apk --release --no-pub --target-platform ${{ matrix.platform }} \
+            --build-name='${{ needs.meta.outputs.name }}' --build-number='${{ needs.meta.outputs.code }}'
+          mkdir -p ../parts
+          cp build/app/outputs/flutter-apk/app-release.apk "../parts/${{ matrix.abi }}.apk"
+
+      - name: Remove signing material
+        if: always()
+        run: rm -f app/android/key.properties app/android/release.jks
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: parts-${{ matrix.abi }}
+          path: parts/*
+          if-no-files-found: error
+
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [meta, sbom, compile-check, verify, build-main, build-abi]
+    permissions:
+      contents: write # only used to create the Release on tag pushes
+    env:
+      IS_TAG: ${{ startsWith(github.ref, 'refs/tags/v') }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 1
+          sparse-checkout: scripts
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: parts-*
+          path: parts
+          merge-multiple: true
+
+      - name: Stage and checksum
+        env:
+          V: ${{ needs.meta.outputs.name }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp parts/sbom.spdx.json "dist/orbitly-$V.spdx.json"
+          cp parts/combined.apk "dist/orbitly-$V.apk"
+          cp parts/arm64-v8a.apk "dist/orbitly-$V-arm64-v8a.apk"
+          cp parts/armeabi-v7a.apk "dist/orbitly-$V-armeabi-v7a.apk"
+          cp parts/app.aab "dist/orbitly-$V.aab"
+          (cd dist && sha256sum "orbitly-$V.apk" "orbitly-$V-arm64-v8a.apk" "orbitly-$V-armeabi-v7a.apk" "orbitly-$V.aab" "orbitly-$V.spdx.json" > SHA256SUMS.txt && cat SHA256SUMS.txt)
+          BT="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)"
+          for f in "dist/orbitly-$V.apk" "dist/orbitly-$V-arm64-v8a.apk" "dist/orbitly-$V-armeabi-v7a.apk"; do
+            "$BT/apksigner" verify --print-certs "$f" | grep -i 'SHA-256'
+          done
+          # All three APKs must carry the SAME signing certificate.
+          n="$(for f in dist/*.apk; do "$BT/apksigner" verify --print-certs "$f" | grep -i 'certificate SHA-256 digest'; done | sort -u | wc -l)"
+          [ "$n" = 1 ] || { echo "APKs are signed with different certificates" >&2; exit 1; }
+          # Warning only (never fails the release): the 64-bit APK against the
+          # recorded size baseline.
+          scripts/apk-size-budget.sh "dist/orbitly-$V-arm64-v8a.apk" || echo "::warning::arm64 APK exceeds the size budget (scripts/apk-size-baseline.txt)"
+
+      - name: Keep build files
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: orbitly-${{ needs.meta.outputs.name }}
           path: dist/*
           if-no-files-found: error
 
@@ -178,13 +415,15 @@ jobs:
         if: env.IS_TAG == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          PRE: ${{ steps.ver.outputs.prerelease }}
-          V: ${{ steps.ver.outputs.name }}
+          PRE: ${{ needs.meta.outputs.prerelease }}
+          V: ${{ needs.meta.outputs.name }}
+          CODE: ${{ needs.meta.outputs.code }}
         run: |
           set -euo pipefail
           FLAGS=()
           if [ "$PRE" = "true" ]; then FLAGS+=(--prerelease); else FLAGS+=(--latest); fi
           gh release create "$GITHUB_REF_NAME" "${FLAGS[@]}" \
+            --repo "$GITHUB_REPOSITORY" \
             --title "Orbitly $V" \
-            --notes "Android build $V (versionCode ${{ steps.ver.outputs.code }}). Verify the APK against SHA256SUMS.txt. Install/update with Obtainium; see docs/android-install-and-updates.md." \
+            --notes "Android build $V (versionCode $CODE). Verify the APK against SHA256SUMS.txt. Install/update with Obtainium; see docs/android-install-and-updates.md." \
             dist/*
