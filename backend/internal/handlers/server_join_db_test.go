@@ -99,8 +99,19 @@ func TestBuiltinServerDeviceJoinApprovePin(t *testing.T) {
 
 	// The in-process loop pins the key by itself.
 	rctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	go dev.Run(rctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		dev.Run(rctx)
+	}()
+	// Stop the loop and wait for it before the temporary directory is removed: it writes state files.
+	defer func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(15 * time.Second):
+		}
+	}()
 	deadline := time.Now().Add(20 * time.Second)
 	for {
 		m := e.mustCode("B", "GET", "/e2ee/server-device", nil, 200)
