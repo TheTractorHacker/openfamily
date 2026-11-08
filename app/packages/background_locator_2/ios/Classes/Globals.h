@@ -17,6 +17,8 @@ FOUNDATION_EXPORT NSString *const kInitCallbackKey;
 FOUNDATION_EXPORT NSString *const kInitDataCallbackKey;
 FOUNDATION_EXPORT NSString *const kDisposeCallbackKey;
 FOUNDATION_EXPORT NSString *const kDistanceFilterKey;
+FOUNDATION_EXPORT NSString *const kAccuracyKey;
+FOUNDATION_EXPORT NSString *const kHeartbeatCallbackKey;
 
 FOUNDATION_EXPORT NSString *const kChannelId;
 FOUNDATION_EXPORT NSString *const kBackgroundChannelId;
@@ -28,6 +30,7 @@ FOUNDATION_EXPORT NSString *const kMethodPluginUnRegisterLocationUpdate;
 FOUNDATION_EXPORT NSString *const kMethodPluginIsRegisteredLocationUpdate;
 FOUNDATION_EXPORT NSString *const kMethodPluginIsServiceRunning;
 FOUNDATION_EXPORT NSString *const kMethodPluginUpdateNotification;
+FOUNDATION_EXPORT NSString *const kMethodPluginUpdateLocationRequest;
 
 FOUNDATION_EXPORT NSString *const kArgLatitude;
 FOUNDATION_EXPORT NSString *const kArgLongitude;
@@ -44,6 +47,13 @@ FOUNDATION_EXPORT NSString *const kArgDisposeCallback;
 FOUNDATION_EXPORT NSString *const kArgLocation;
 FOUNDATION_EXPORT NSString *const kArgSettings;
 FOUNDATION_EXPORT NSString *const kArgCallbackDispatcher;
+FOUNDATION_EXPORT NSString *const kArgHeartbeatCallback;
+FOUNDATION_EXPORT NSString *const kArgNativeReset;
+
+FOUNDATION_EXPORT NSString *const kArgRequestIosAccuracy;
+FOUNDATION_EXPORT NSString *const kArgRequestIosDistanceFilter;
+FOUNDATION_EXPORT NSString *const kArgRequestIosActivityType;
+FOUNDATION_EXPORT NSString *const kArgRequestIosStillRegionM;
 
 FOUNDATION_EXPORT NSString *const kSettingsAccuracy;
 FOUNDATION_EXPORT NSString *const kSettingsDistanceFilter;
@@ -53,10 +63,12 @@ FOUNDATION_EXPORT NSString *const kSettingsStopWithTerminate;
 FOUNDATION_EXPORT NSString *const kBCMSendLocation;
 FOUNDATION_EXPORT NSString *const kBCMInit;
 FOUNDATION_EXPORT NSString *const kBCMDispose;
+FOUNDATION_EXPORT NSString *const kBCMSendHeartbeat;
 
 FOUNDATION_EXPORT NSString *const kPrefObservingRegion;
 FOUNDATION_EXPORT NSString *const kPrefServiceRunning;
 FOUNDATION_EXPORT NSString *const kPrefStopWithTerminate;
+FOUNDATION_EXPORT NSString *const kPrefShowsBackgroundLocationIndicator;
 
 @end
 

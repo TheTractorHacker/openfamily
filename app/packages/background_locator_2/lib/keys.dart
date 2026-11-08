@@ -21,6 +21,19 @@ class Keys {
   static const String ARG_REQUEST_INTERVAL_MS = 'request_interval_ms';
   static const String ARG_REQUEST_DISTANCE_FILTER = 'request_distance_filter';
   static const String ARG_REQUEST_HIGH_ACCURACY = 'request_high_accuracy';
+  // iOS-only fields of updateLocationRequest (ignored by Android). The codes
+  // are mirrored in ios/Classes/Utils/Util.m (requestAccuracy:/activityType:).
+  static const String ARG_REQUEST_IOS_ACCURACY = 'request_ios_accuracy';
+  static const String ARG_REQUEST_IOS_DISTANCE_FILTER =
+      'request_ios_distance_filter';
+  static const String ARG_REQUEST_IOS_ACTIVITY_TYPE =
+      'request_ios_activity_type';
+  static const String ARG_REQUEST_IOS_STILL_REGION_M =
+      'request_ios_still_region_m';
+
+  /// Set (true) on the first fix delivered after the native side changed the
+  /// location request on its own (registration, relaunch, still-region exit).
+  static const String ARG_NATIVE_RESET = 'native_reset';
 
   static const String ARG_IS_MOCKED = 'is_mocked';
   static const String ARG_LATITUDE = 'latitude';

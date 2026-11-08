@@ -19,6 +19,7 @@
         [delegate startLocatorService:callbackDispatcher];
         result(@(YES));
     } else if ([kMethodServiceInitialized isEqualToString:call.method]) {
+        [delegate serviceInitialized];
         result(nil);
     } else if ([kMethodPluginRegisterLocationUpdate isEqualToString:call.method]) {
         int64_t callbackHandle = [[arguments objectForKey:kArgCallback] longLongValue];
@@ -38,6 +39,10 @@
     }else if ([kMethodPluginIsServiceRunning isEqualToString:call.method]) {
         BOOL val = [delegate isServiceRunning];
         result(@(val));
+    } else if ([kMethodPluginUpdateLocationRequest isEqualToString:call.method]) {
+        NSDictionary *requestArguments = [arguments isKindOfClass:[NSDictionary class]] ? arguments : @{};
+        BOOL ok = [delegate updateLocationRequest:requestArguments];
+        result(@(ok));
     } else if([kMethodPluginUpdateNotification isEqualToString:call.method]) {
         // updating notification's text is just for android
         result(nil);

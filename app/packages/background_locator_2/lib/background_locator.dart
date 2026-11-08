@@ -89,10 +89,14 @@ class BackgroundLocator {
   /// filter, accuracy) in place, without restarting the foreground service.
   /// Returns false when the service is not running or the native side does
   /// not support the call (older build), so the caller can fall back.
+  ///
+  /// [ios] is what the iOS plugin applies (iOS has no interval); Android
+  /// ignores it. Without [ios] the iOS plugin answers false.
   static Future<bool> updateLocationRequest({
     required int intervalMs,
     required double distanceFilter,
     required bool highAccuracy,
+    IOSLocationRequest? ios,
   }) async {
     try {
       final bool? ok = await _channel.invokeMethod<bool>(
@@ -101,6 +105,7 @@ class BackgroundLocator {
           Keys.ARG_REQUEST_INTERVAL_MS: intervalMs,
           Keys.ARG_REQUEST_DISTANCE_FILTER: distanceFilter,
           Keys.ARG_REQUEST_HIGH_ACCURACY: highAccuracy,
+          if (ios != null) ...ios.toMap(),
         },
       );
       return ok ?? false;

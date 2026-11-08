@@ -18,6 +18,11 @@
 - (void) removeLocator;
 - (BOOL) isServiceRunning;
 - (void) setServiceRunning:(BOOL)value;
+/// Applies the iOS fields of LocatorPlugin.updateLocationRequest; NO when the
+/// service is not running or the fields are missing.
+- (BOOL) updateLocationRequest:(NSDictionary *_Nonnull)arguments;
+/// The background isolate finished starting (LocatorService.initialized).
+- (void) serviceInitialized;
 
 @end
 
