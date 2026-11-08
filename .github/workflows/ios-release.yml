@@ -57,18 +57,39 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
+      # Every missing or malformed input is reported in ONE pass, each with how to fix it
+      # (docs/release/APP_STORE.md, "Secrets and variables"), before any signing work starts.
       - name: Check configuration
         env:
           HAVE_P12: ${{ secrets.IOS_P12_BASE64 != '' && secrets.IOS_P12_PASSWORD != '' }}
           HAVE_PROFILE: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 != '' }}
           HAVE_ASC: ${{ secrets.ASC_KEY_ID != '' && secrets.ASC_ISSUER_ID != '' && secrets.ASC_PRIVATE_KEY != '' }}
+          IOS_P12_BASE64: ${{ secrets.IOS_P12_BASE64 }}
+          IOS_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
+          ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          WATCH_ENABLED: ${{ vars.IOS_WATCH_ENABLED }}
         run: |
           set -euo pipefail
           fail=0
-          if ! [[ "$TEAM_ID" =~ ^[A-Z0-9]{10}$ ]]; then echo "::error::Repository variable IOS_TEAM_ID must be the 10-character Team ID"; fail=1; fi
-          [ "$HAVE_P12" = "true" ] || { echo "::error::Secrets IOS_P12_BASE64 / IOS_P12_PASSWORD missing"; fail=1; }
-          [ "$HAVE_PROFILE" = "true" ] || { echo "::error::Secret IOS_PROVISIONING_PROFILE_BASE64 missing"; fail=1; }
-          [ "$HAVE_ASC" = "true" ] || { echo "::error::Secrets ASC_KEY_ID / ASC_ISSUER_ID / ASC_PRIVATE_KEY missing"; fail=1; }
+          if ! [[ "$TEAM_ID" =~ ^[A-Z0-9]{10}$ ]]; then echo "::error::Repository VARIABLE IOS_TEAM_ID must be the 10-character Team ID (developer.apple.com > Account > Membership details). Got '${TEAM_ID}'."; fail=1; fi
+          if ! [[ "$BUNDLE_ID" =~ ^[A-Za-z0-9.-]+$ ]]; then echo "::error::Repository variable IOS_BUNDLE_ID '${BUNDLE_ID}' is not a valid bundle id (reverse-DNS, letters, digits, dots, hyphens)."; fail=1; fi
+          [ "$HAVE_P12" = "true" ] || { echo "::error::Repository SECRETS IOS_P12_BASE64 and IOS_P12_PASSWORD are missing (Apple Distribution certificate exported as .p12; base64 of the file and the export password)."; fail=1; }
+          [ "$HAVE_PROFILE" = "true" ] || { echo "::error::Repository SECRET IOS_PROVISIONING_PROFILE_BASE64 is missing (base64 of the App Store .mobileprovision for $BUNDLE_ID)."; fail=1; }
+          [ "$HAVE_ASC" = "true" ] || { echo "::error::Repository SECRETS ASC_KEY_ID, ASC_ISSUER_ID and ASC_PRIVATE_KEY are missing (App Store Connect > Users and Access > Integrations > App Store Connect API)."; fail=1; }
+          if [ "$HAVE_P12" = "true" ] && ! printf '%s' "$IOS_P12_BASE64" | base64 --decode > /dev/null 2>&1; then echo "::error::IOS_P12_BASE64 is not valid base64. Use: base64 -i cert.p12 | pbcopy (no line breaks added by hand)."; fail=1; fi
+          if [ "$HAVE_PROFILE" = "true" ] && ! printf '%s' "$IOS_PROVISIONING_PROFILE_BASE64" | base64 --decode > /dev/null 2>&1; then echo "::error::IOS_PROVISIONING_PROFILE_BASE64 is not valid base64."; fail=1; fi
+          if [ "$HAVE_ASC" = "true" ]; then
+            case "$ASC_PRIVATE_KEY" in
+              *"BEGIN PRIVATE KEY"*) ;;
+              *) echo "::error::ASC_PRIVATE_KEY must be the full text of the AuthKey_XXXX.p8 file including the -----BEGIN PRIVATE KEY----- line (not base64, not the key id)."; fail=1 ;;
+            esac
+            [[ "$ASC_ISSUER_ID" =~ ^[0-9a-fA-F-]{36}$ ]] || { echo "::error::ASC_ISSUER_ID must be the issuer UUID shown at the top of the App Store Connect API keys page."; fail=1; }
+          fi
+          if [ "$WATCH_ENABLED" = "true" ]; then
+            echo "::error::IOS_WATCH_ENABLED=true is not supported by this workflow yet: the Apple Watch app (app.openfamily.watchkitapp) needs its own App ID, App Store provisioning profile and an entry in ExportOptions.plist, which this job does not install. Leave IOS_WATCH_ENABLED unset for v1.0 (the watch app is left out of the signed build) or extend the workflow first. See docs/release/APP_STORE.md, section Apple Watch."; fail=1
+          fi
+          [ "$fail" = "0" ] && echo "Configuration looks complete."
           exit $fail
 
       - name: Compute version
