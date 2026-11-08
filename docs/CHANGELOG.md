@@ -15,6 +15,14 @@ the phones afterwards.
 Nothing yet. The owner moves these notes under a version heading when a
 release is tagged.
 
+## v0.25.2 (2026-11-08)
+
+- Build fixes only: the Android app did not compile in v0.25.0 and v0.25.1 (a key-storage
+  call that does not exist and a deprecated watch listener setting). Same server as
+  v0.25.0. The phone APK, AAB, Wear OS APK and iPhone file are attached to this release.
+  The phone no longer wakes when a watch merely connects while the app is closed;
+  it still wakes for watch commands.
+
 ## v0.25.1 (2026-11-08)
 
 - Build fixes only: the v0.25.0 Android and Wear OS release files were not produced

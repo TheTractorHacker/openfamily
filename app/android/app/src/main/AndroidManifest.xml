@@ -138,8 +138,11 @@
         <service
             android:name=".WatchListenerService"
             android:exported="true">
+            <!-- Only the watch's command messages wake this service. BIND_LISTENER (every Wear
+                 event) is deprecated and Android lint rejects it for release builds. -->
             <intent-filter>
-                <action android:name="com.google.android.gms.wearable.BIND_LISTENER"/>
+                <action android:name="com.google.android.gms.wearable.MESSAGE_RECEIVED"/>
+                <data android:scheme="wear" android:host="*" android:pathPrefix="/orbitly/cmd"/>
             </intent-filter>
         </service>
     </application>

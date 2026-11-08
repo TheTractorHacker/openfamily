@@ -185,8 +185,10 @@ class KeystoreChannel(private val activity: Activity) {
             }
             // KeyInfo cannot report this; it was requested when the key was created (API 28+).
             auth = info.isUserAuthenticationRequired
-            // Reported truthfully from the key itself where the OS can say so (API 31+).
-            unlocked = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && info.isUnlockedDeviceRequired
+            // KeyInfo does not expose "unlocked device required" at all, so it cannot be read back.
+            // The v2 key is created without that flag (see the key generator above); the opt-in strict
+            // mode is the only path that sets it, and nothing in the UI turns that on.
+            unlocked = false
         } catch (_: Throwable) {
             // keep "software": we could not prove hardware backing
         }
