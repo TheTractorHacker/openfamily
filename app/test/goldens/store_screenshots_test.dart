@@ -9,7 +9,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:latlong2/latlong.dart' show LatLng;
 import 'package:openfamily/models/member.dart';
 import 'package:openfamily/models/place.dart';
-import 'package:openfamily/screens/chat_screen.dart';
 import 'package:openfamily/screens/check_in_screen.dart';
 import 'package:openfamily/screens/circles_screen.dart';
 import 'package:openfamily/screens/people_screen.dart';
