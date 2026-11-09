@@ -2,8 +2,10 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:openfamily/models/circle.dart';
 import 'package:openfamily/services/e2ee/e2ee_service.dart';
+import 'package:openfamily/services/notification_prefs_service.dart';
 import 'package:openfamily/services/e2ee/e2ee_trust.dart';
 import 'package:openfamily/services/e2ee/e2ee_vault.dart';
 import 'package:openfamily/services/e2ee/private_channel.dart';
@@ -206,7 +208,9 @@ void main() {
       expect(pts.single.lat, 10);
     });
 
-    test('places are sealed, distributed, and the sender phone raises arrival events', () async {
+    test('places are sealed, distributed, and the sender phone raises arrival events (names on)', () async {
+      SharedPreferences.setMockInitialValues(<String, Object>{'notif.show_names.v1': true});
+      NotificationNames.cached = false;
       const SealedPlace home = SealedPlace(id: 'p1', name: 'Home', lat: 40, lon: -75, radiusMeters: 100);
       await b.runtime.savePlace(priv, home); // Bob (any member) adds a place
       await Future<void>.delayed(const Duration(milliseconds: 50));
@@ -222,6 +226,30 @@ void main() {
       await a.runtime.flush();
       await b.runtime.catchUp(priv);
       expect(b.notes, <String>['Alice arrived at Home']);
+      expect(a.notes, isEmpty); // the sender is not notified about herself
+      // Catch-up of the same items again does not notify twice.
+      await b.runtime.catchUp(priv);
+      expect(b.notes.length, 1);
+    });
+
+    test('with Show names off the arrival names the place but not the person', () async {
+      SharedPreferences.setMockInitialValues(<String, Object>{'notif.show_names.v1': false});
+      NotificationNames.cached = false;
+      const SealedPlace home = SealedPlace(id: 'p1', name: 'Home', lat: 40, lon: -75, radiusMeters: 100);
+      await b.runtime.savePlace(priv, home); // Bob (any member) adds a place
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      await b.runtime.flush();
+      await a.runtime.catchUp(priv);
+      expect(a.runtime.places(priv).single.name, 'Home');
+
+      // Alice walks: outside, then inside 5 min later. Her phone evaluates and seals the event.
+      await a.runtime.routeFix(loc(40.003, -75, at: clock.t));
+      clock.t = clock.t.add(const Duration(minutes: 5));
+      await a.runtime.routeFix(loc(40, -75, at: clock.t, acc: 6));
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      await a.runtime.flush();
+      await b.runtime.catchUp(priv);
+      expect(b.notes, <String>['A family member arrived at Home']);
       expect(a.notes, isEmpty); // the sender is not notified about herself
       // Catch-up of the same items again does not notify twice.
       await b.runtime.catchUp(priv);

@@ -479,7 +479,13 @@ class ChannelSealer {
     // Places are too: they belong to the whole circle, and only phones that hold the server key can open a
     // server-line item, so a place sealed in an admin's server lane stayed invisible to every other member
     // (the server does not use places; it never imports them).
-    final bool phoneLineOnly = purpose == ChannelPurpose.chat || purpose == ChannelPurpose.place;
+    // Events and check-ins (arrivals, departures, SOS) are the same: members read them, the server never does (it
+    // asks for fix and history items only), so a server-lane copy only hid them from every member without the
+    // server key (no arrival or SOS notification for them).
+    final bool phoneLineOnly = purpose == ChannelPurpose.chat ||
+        purpose == ChannelPurpose.place ||
+        purpose == ChannelPurpose.event ||
+        purpose == ChannelPurpose.checkin;
     final LaneChoice choice = phoneLineOnly ? LaneChoice.phone : await _choice(circleId);
     final int tsMs = (at ?? clock.now()).toUtc().millisecondsSinceEpoch;
     final Uint8List bodyBytes = Uint8List.fromList(utf8.encode(jsonEncode(body)));

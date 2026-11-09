@@ -10,6 +10,14 @@ for the **last 5 minor versions** of the app (see
 [API compatibility](api-compat.md)), so you can update the server first and
 the phones afterwards.
 
+## v0.26.21 (2026-11-09)
+
+App-only release (the server needs no change). Install over the current app.
+
+- **Your phone keeps reporting in the background even when its sign-in has lapsed.** Until now, when the app lost its sign-in (the server refused the session), it also stopped the background service and deleted the phone's upload key, so your position stopped reaching the family until you opened the app and signed in again. That is why opening the app while driving could show you still at work. Now a lapsed sign-in leaves the background service and its device key in place and the phone keeps sending positions; the app only asks you to sign in. Only an explicit **Sign out** removes the device key. If a different person signs in on the same phone, nothing of the previous account is kept.
+- **Arrival and check-in notifications follow "Show names in notifications", and always name the place.** With names off they read "A family member arrived at Home"; with names on, "Henry arrived at Home". An empty place name now falls back to "a place" instead of leaving the text blank.
+- **Arrivals, departures and check-ins (including SOS) reach every member of a Private circle.** If the person who made them uses server processing, they were sealed under the server's key, which other members' phones cannot open, so those members never got the notification. They are now sealed under the circle key every member holds, like chat and places. The server only uses location points and history, so nothing it relied on changed. Everyone in the circle needs this version to receive them.
+
 ## v0.26.20 (2026-11-09)
 
 App-only release (the server needs no change). Install over the current app.

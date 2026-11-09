@@ -152,6 +152,42 @@ class TokenStorage {
     } catch (_) {}
   }
 
+  /// Whose background credentials were kept when the session merely ran out (see [clear]). Plain preferences, so
+  /// the next sign-in (any isolate) can compare accounts.
+  static const String _keptForUserKey = 'wb_bg_kept_for_user';
+
+  /// The account id (`uid` claim) of whatever token is held right now, or null.
+  static Future<String?> _heldUserId() async {
+    try {
+      for (final StoredSession h in <StoredSession>[if (_mem != null) _mem!, ...await readAllStores()]) {
+        for (final String? t in <String?>[h.access, h.refresh]) {
+          final String? uid = (t == null || t.isEmpty) ? null : jwtUserIdOf(t);
+          if (uid != null) return uid;
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  /// A session that merely ran out keeps the phone reporting in the background (the device key and id stay). This
+  /// runs on the next sign-in: the same person simply carries on; a DIFFERENT account must inherit nothing of the
+  /// previous one (device, key, queued positions). Never throws.
+  static Future<void> _reconcileKeptBackground(String access) async {
+    try {
+      final SharedPreferences prefs = await SharedPreferences.getInstance();
+      await prefs.reload();
+      final String? kept = prefs.getString(_keptForUserKey);
+      if (kept == null) return;
+      await prefs.remove(_keptForUserKey);
+      final String? uid = jwtUserIdOf(access);
+      if (uid != null && uid == kept) return;
+      await BackgroundCredentialStore.clear();
+      await LocationOutbox.clear();
+      await _storage.delete(key: _deviceIdKey);
+      _diary.record('bg_creds', 'cleared: a different account signed in');
+    } catch (_) {}
+  }
+
   /// Marks every stored refresh token that was issued strictly BEFORE [newRefresh] as spent: it was replaced by
   /// this save. Tokens with an unknown or equal issue time are left alone (never mark a live token).
   static Future<void> _spendReplaced(String newRefresh) async {
@@ -251,6 +287,7 @@ class TokenStorage {
     // back, the next refresh replays a spent token. Write and verify both
     // stores; one verified copy keeps the session, none is a loud failure.
     await _spendReplaced(refresh);
+    await _reconcileKeptBackground(access);
     final bool okA =
         await _writeVerified(_storage, _accessKey, _refreshKey, access, refresh);
     final bool okB = await _writeVerified(
@@ -470,6 +507,23 @@ class TokenStorage {
         if (r != null && r.isNotEmpty) await markSpent(r);
       }
     } catch (_) {}
+    // A session that merely ran out (keepOfflineData) is not a sign-out: the phone keeps reporting its position in
+    // the background with its device key, so the family's map stays current until the person signs in again.
+    // Only an explicit sign-out removes the device key. Whose credentials these are is remembered so a different
+    // account signing in next inherits none of them ([_reconcileKeptBackground]).
+    String? keepFor;
+    if (keepOfflineData) {
+      keepFor = await _heldUserId();
+      if (keepFor != null) {
+        try {
+          final SharedPreferences prefs = await SharedPreferences.getInstance();
+          await prefs.setString(_keptForUserKey, keepFor);
+        } catch (_) {
+          keepFor = null;
+        }
+      }
+    }
+    final bool keepBackground = keepFor != null;
     _mem = null;
     // Keep the lock enabled until every credential has been deleted and its
     // absence verified. If deletion fails or the process stops midway, any
@@ -490,14 +544,14 @@ class TokenStorage {
     await attempt(() => _storageB.delete(key: _refreshKeyB));
     await attempt(_clearPrefs);
     await attempt(clearSavedCredentials);
-    await attempt(() => _storage.delete(key: _deviceIdKey));
+    if (!keepBackground) await attempt(() => _storage.delete(key: _deviceIdKey));
     await attempt(removeLegacyProfilePhotoPath);
-    await attempt(BackgroundCredentialStore.clear);
+    if (!keepBackground) await attempt(BackgroundCredentialStore.clear);
     // The offline backfill queue holds points reported under THIS device
     // identity; after teardown they would reference a dead device id and
     // pin the queue (mixed-device batches are rejected server-side), so the
     // cache lifecycle is tied to the session it was created in.
-    await attempt(LocationOutbox.clear);
+    if (!keepBackground) await attempt(LocationOutbox.clear);
     // Same for the local-first snapshot and the store-and-forward queue (docs/design/OFFLINE_RESILIENCE.md):
     // they belong to the account that created them.
     // A session that merely ran out (not a sign-out) keeps what is waiting to be sent: an SOS or a check-in
@@ -510,10 +564,10 @@ class TokenStorage {
         await readRefreshToken(),
         await _safeRead(_storageC, _credPasswordKey),
         (await _readPrefs()).refresh,
-        await readDeviceId(),
-        await BackgroundCredentialStore.readApiBaseUrl(),
-        await BackgroundCredentialStore.readDeviceId(),
-        await BackgroundCredentialStore.readIngestKey(),
+        if (!keepBackground) await readDeviceId(),
+        if (!keepBackground) await BackgroundCredentialStore.readApiBaseUrl(),
+        if (!keepBackground) await BackgroundCredentialStore.readDeviceId(),
+        if (!keepBackground) await BackgroundCredentialStore.readIngestKey(),
       ];
       if (remaining.any((String? value) => value != null)) {
         throw StateError('One or more session credentials remain.');

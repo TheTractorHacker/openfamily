@@ -1687,6 +1687,14 @@ class PrivateRuntime {
     } catch (_) {}
   }
 
+  /// Who a notification names: the person when the account's "Show names in notifications" is on, otherwise
+  /// "A family member" (the same rule as the server's pushes and the chat notifications). The place of an arrival
+  /// is always shown.
+  Future<String> _notificationWho(String userId) async {
+    if (!await NotificationNames.load()) return 'A family member';
+    return nameOf?.call(userId) ?? 'Someone';
+  }
+
   Future<void> _apply(ReceivedItem r) async {
     final SenderIdentity? me = await _me();
     final bool mine = me != null && r.userId == me.userId;
@@ -1711,9 +1719,9 @@ class PrivateRuntime {
         // Only fresh events raise a notification; catch-up of old ones stays silent.
         if (clock.now().difference(r.ts) > const Duration(minutes: 30)) return;
         if (r.body['k'] == 'place') {
-          final String place = (r.body['name'] as String?) ?? 'a place';
-          final String who = nameOf?.call(r.userId) ?? 'Someone';
-          await notify('Orbitly', placeEventText(who, place, r.body['a'] == 'enter'));
+          final String rawPlace = ((r.body['name'] as String?) ?? '').trim();
+          await notify('Orbitly',
+              placeEventText(await _notificationWho(r.userId), rawPlace.isEmpty ? 'a place' : rawPlace, r.body['a'] == 'enter'));
         }
       case ChannelPurpose.trip:
       case ChannelPurpose.drive:
@@ -1724,7 +1732,7 @@ class PrivateRuntime {
         await chat.apply(r, me: me?.userId ?? '');
       case ChannelPurpose.checkin:
         if (mine) return;
-        final String who = nameOf?.call(r.userId) ?? 'Someone';
+        final String who = await _notificationWho(r.userId);
         final String kind = (r.body['k'] as String?) ?? 'checkin';
         final double? la = (r.body['lat'] as num?)?.toDouble(), lo = (r.body['lon'] as num?)?.toDouble();
         if (la != null && lo != null && la >= -90 && la <= 90 && lo >= -180 && lo <= 180) {

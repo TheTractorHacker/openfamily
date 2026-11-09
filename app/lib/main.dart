@@ -22,7 +22,6 @@ import 'services/api_client.dart';
 import 'services/app_compat.dart';
 import 'services/auth_service.dart';
 import 'services/background_credential_store.dart';
-import 'services/background_location_service.dart';
 import 'services/deep_link_service.dart';
 import 'services/direct_push_service.dart' show onOpenRoute;
 import 'services/invite_link.dart';
@@ -156,9 +155,9 @@ class _OpenFamilyAppState extends State<OpenFamilyApp> {
   }
 
   void _handleSessionExpired() {
-    // Stop background reporting: the session is dead and the background isolate
-    // can no longer authenticate.
-    BackgroundLocationService.stop();
+    // Background reporting keeps running: it authenticates with the device key, not the session, and the family's
+    // map must stay current while this phone is waiting to be signed in again. Only an explicit sign-out stops it
+    // (AuthService.logout).
     final NavigatorState? navigator = navigatorKey.currentState;
     if (navigator == null) return;
     navigator.pushAndRemoveUntil(

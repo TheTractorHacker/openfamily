@@ -137,6 +137,21 @@ void main() {
       expect(chat.twin, isNull);
     });
 
+    test('events and check-ins are sealed on the phone line even in the server lane (members read them)', () async {
+      final Phone p = await Phone.make(uA, 0xa1);
+      final Keys keys = Keys()..byEpoch[1] = Uint8List.fromList(List<int>.filled(32, 7));
+      final FakeLanes lanes = FakeLanes()..own = const LaneChoice(E2ee.lineServer, 1);
+      final FakeSk sk = FakeSk()..byGen[1] = Uint8List.fromList(List<int>.filled(32, 9));
+      final ChannelSealer s = ChannelSealer(keys: keys, kv: MemoryKv(), clock: clock, lanes: lanes, serverKeys: sk);
+      final SenderIdentity me = SenderIdentity(p.deviceId, p.edSeed, uA);
+      for (final String purpose in <String>[ChannelPurpose.event, ChannelPurpose.checkin]) {
+        final WireItem it = await s.seal(me, priv, purpose, <String, dynamic>{'k': 'place', 'a': 'enter', 'name': 'Home'});
+        expect(it.line, E2ee.linePhone, reason: purpose);
+      }
+      // Fixes still follow the lane (the server processes them).
+      expect((await s.seal(me, priv, ChannelPurpose.fix, <String, dynamic>{'lat': 1.0, 'lon': 2.0})).line, E2ee.lineServer);
+    });
+
     test('a place is sealed on the phone line even in the server lane, so every member can read it', () async {
       final Phone p = await Phone.make(uA, 0xa1);
       final Keys keys = Keys()..byEpoch[1] = Uint8List.fromList(List<int>.filled(32, 7));

@@ -5,6 +5,7 @@ import 'dart:convert';
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:openfamily/services/background_credential_store.dart';
 import 'package:openfamily/services/session_diary.dart';
 import 'package:openfamily/services/token_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -106,5 +107,58 @@ void main() {
     TokenStorage.resetForTest();
     expect(await TokenStorage.refreshCandidates(), isEmpty);
     expect(await TokenStorage.readRefreshToken(), isNull);
+  });
+
+  group('a session that ran out keeps the phone reporting in the background', () {
+    String uidJwt(String uid, int iat) =>
+        '${_b64(<String, Object>{'alg': 'none'})}.${_b64(<String, Object>{'iat': iat, 'exp': iat + 100000, 'uid': uid})}.sig';
+
+    Future<void> seed(String uid) async {
+      FlutterSecureStorage.setMockInitialValues(<String, String>{
+        'access_token_v2': uidJwt(uid, 1000),
+        'refresh_token_v2': uidJwt(uid, 1000),
+      });
+      SharedPreferences.setMockInitialValues(<String, Object>{'wb_api_base_url': 'https://example.test'});
+      await BackgroundCredentialStore.saveIngestKey('device-key');
+      await BackgroundCredentialStore.sync(apiBaseUrl: 'https://example.test', deviceId: 'dev-1');
+    }
+
+    test('an expired session (keepOfflineData) keeps the device key and id; the tokens are gone', () async {
+      await seed('u1');
+      await TokenStorage.clear(reason: 'refresh rejected', keepOfflineData: true);
+      expect(await BackgroundCredentialStore.readIngestKey(), 'device-key');
+      expect(await BackgroundCredentialStore.readDeviceId(), 'dev-1');
+      expect(await TokenStorage.readRefreshToken(), isNull);
+    });
+
+    test('an explicit sign-out removes the device key and id', () async {
+      await seed('u1');
+      await TokenStorage.clear(reason: 'logout');
+      expect(await BackgroundCredentialStore.readIngestKey(), isNull);
+      expect(await BackgroundCredentialStore.readDeviceId(), isNull);
+    });
+
+    test('the same person signing in again carries on with the kept device key', () async {
+      await seed('u1');
+      await TokenStorage.clear(reason: 'refresh rejected', keepOfflineData: true);
+      await TokenStorage.saveTokens(access: uidJwt('u1', 5000), refresh: uidJwt('u1', 5000));
+      expect(await BackgroundCredentialStore.readIngestKey(), 'device-key');
+    });
+
+    test('a DIFFERENT account signing in inherits nothing of the previous one', () async {
+      await seed('u1');
+      await TokenStorage.clear(reason: 'refresh rejected', keepOfflineData: true);
+      await TokenStorage.saveTokens(access: uidJwt('u2', 5000), refresh: uidJwt('u2', 5000));
+      expect(await BackgroundCredentialStore.readIngestKey(), isNull);
+      expect(await BackgroundCredentialStore.readDeviceId(), isNot('dev-1'));
+    });
+
+    test('when whose credentials they are cannot be told, nothing is kept (fail closed)', () async {
+      FlutterSecureStorage.setMockInitialValues(<String, String>{'access_token_v2': 'opaque', 'refresh_token_v2': 'opaque'});
+      SharedPreferences.setMockInitialValues(<String, Object>{'wb_api_base_url': 'https://example.test'});
+      await BackgroundCredentialStore.saveIngestKey('device-key');
+      await TokenStorage.clear(reason: 'refresh rejected', keepOfflineData: true);
+      expect(await BackgroundCredentialStore.readIngestKey(), isNull);
+    });
   });
 }
