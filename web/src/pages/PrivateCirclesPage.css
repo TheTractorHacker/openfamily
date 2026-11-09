@@ -103,3 +103,10 @@
   .wb-pc-map { height: 300px; }
   .wb-pc-page { padding: var(--space-4) var(--space-3) var(--space-6); }
 }
+
+/* Web access from any browser: password + 2FA fields side by side when there is room. */
+.wb-pc-stepup {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}

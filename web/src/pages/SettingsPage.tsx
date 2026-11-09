@@ -34,6 +34,7 @@ import { MapStyleCard } from './MapStyleCard'
 import { MemberDefaultsCard, SessionSecurityCard } from './SecurityCards'
 import { BackupsCard } from './BackupsCard'
 import { AccountSettings } from './AccountSettings'
+import { WebAccessCard } from './WebAccessCard'
 import './pages.css'
 import './SettingsPage.css'
 
@@ -208,6 +209,7 @@ function SettingsContent({
       return (
         <>
           <SessionSecurityCard />
+          <WebAccessCard isPlatformAdmin={isPlatformAdmin} />
           <Card>
             <h3 className="wb-settings-title">Sign-ins and the audit log</h3>
             <p className="wb-settings-section-help wb-settings-help-flush">

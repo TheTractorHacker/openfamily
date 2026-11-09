@@ -142,5 +142,20 @@ test('sealing policy: weak passphrases and weak parameters are refused outside t
   assert.match(av.passphraseProblem('alex@example.org rules', ['alex@example.org']), /email/)
   assert.equal(av.passphraseProblem(PASS), null)
   await assert.rejects(av.sealAccountVault({ userId: USER_A, deviceId: s.sub.deviceId, secret: s.secret, passphrase: 'short' }), /at least 12/)
-  await assert.rejects(av.sealAccountVault({ userId: USER_A, deviceId: s.sub.deviceId, secret: s.secret, passphrase: PASS, argon: WEAK }), /too weak/)
+  await assert.rejects(av.sealAccountVault({ userId: USER_A, deviceId: s.sub.deviceId, secret: s.secret, passphrase: PASS, argon: WEAK, pepper: c.randomBytes(32) }), /too weak/)
+})
+
+test('server pepper: required to open, bound in the AAD, and per account', async () => {
+  const s = setup()
+  const pepper = c.randomBytes(32)
+  const { blob } = await av.sealAccountVault({ userId: USER_A, deviceId: s.sub.deviceId, secret: s.secret, passphrase: PASS, argon: WEAK, pepper, testing: true })
+  assert.equal(blob.unlockers[0].pep, 1)
+  await assert.rejects(av.openAccountVault(blob, { passphrase: PASS, userId: USER_A }), /pepper/)
+  await assert.rejects(av.openAccountVault(blob, { passphrase: PASS, userId: USER_A, pepper: c.randomBytes(32) }), /wrong vault passphrase/)
+  // The server cannot strip the pepper requirement by flipping the flag.
+  await assert.rejects(av.openAccountVault({ ...blob, unlockers: [{ ...blob.unlockers[0], pep: 0 }] }, { passphrase: PASS, userId: USER_A, pepper }), /wrong vault passphrase/)
+  const o = await av.openAccountVault(blob, { passphrase: PASS, userId: USER_A, pepper })
+  assert.deepEqual(o.secret.seed, s.secret.seed)
+  // Outside tests a pepper is mandatory.
+  await assert.rejects(av.sealAccountVault({ userId: USER_A, deviceId: s.sub.deviceId, secret: s.secret, passphrase: PASS }), /pepper/)
 })

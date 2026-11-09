@@ -37,7 +37,7 @@ import {
   xPublic,
 } from './core.ts'
 
-export type CustodyMode = 'device' | 'passphrase' | 'session'
+export type CustodyMode = 'device' | 'passphrase' | 'session' | 'account'
 
 /** What the rest of the code needs from a key holder; secrets stay inside. */
 export interface KeyOps {
@@ -294,6 +294,7 @@ export interface CreateOpts {
 
 /** Creates a new viewer identity in the chosen custody mode and (unless session) stores it. */
 export async function createIdentity(o: CreateOpts): Promise<Unlocked> {
+  if (o.mode === 'account') throw new E2eeError('account-bound keys are made by accountAccess.ts')
   const base = { userId: o.userId, deviceId: o.deviceId, name: o.name, registered: false, createdAt: Date.now() }
   if (o.mode === 'device') {
     const ed = (await crypto.subtle.generateKey({ name: 'Ed25519' }, false, ['sign', 'verify'])) as CryptoKeyPair

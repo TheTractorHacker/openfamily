@@ -32,7 +32,12 @@ func (s *Server) EnsureThemeSchema(ctx context.Context) error {
 		return err
 	}
 	// Trusted-server default (docs/design/E2EE.md): a recommendation only.
-	_, err = s.Pool.Exec(ctx, `ALTER TABLE app_theme_settings ADD COLUMN IF NOT EXISTS e2ee_trusted_server_default BOOLEAN NOT NULL DEFAULT FALSE`)
+	if _, err = s.Pool.Exec(ctx, `ALTER TABLE app_theme_settings ADD COLUMN IF NOT EXISTS e2ee_trusted_server_default BOOLEAN NOT NULL DEFAULT FALSE`); err != nil {
+		return err
+	}
+	// Web access from any browser (docs/design/WEB_VIEWER_ANYWHERE.md): on by
+	// default, inert until an admin sets it up; E2EE_VIEWER_VAULT=off overrides.
+	_, err = s.Pool.Exec(ctx, `ALTER TABLE app_theme_settings ADD COLUMN IF NOT EXISTS e2ee_viewer_vault_enabled BOOLEAN NOT NULL DEFAULT TRUE`)
 	return err
 }
 

@@ -14,6 +14,7 @@ import { MapArea } from '../components/MapArea'
 import { Badge, Card, EmptyState, Spinner, Button } from '../components/primitives'
 import './pages.css'
 import { ServerProcessingPanel } from './ServerProcessingPanel'
+import { PrivateAccessChip } from '../components/PrivateAccessChip'
 import './DashboardPage.css'
 
 export function DashboardPage() {
@@ -106,6 +107,7 @@ export function DashboardPage() {
               Streaming
             </Badge>
           )}
+          <PrivateAccessChip />
         </div>
       </div>
 

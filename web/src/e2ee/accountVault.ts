@@ -1,7 +1,7 @@
-// Account-bound web viewer ("sign in from any browser"): FIRST SLICE, NOT WIRED.
+// Account-bound web viewer ("web access from any browser").
 //
-// Design: docs/design/WEB_VIEWER_ANYWHERE.md. Nothing in the app imports this module
-// yet, and the server has no route that stores the blob, so the feature is OFF.
+// Design: docs/design/WEB_VIEWER_ANYWHERE.md. Used by accountAccess.ts (the HTTP flow)
+// and the Private circles page; the server stores the blob without being able to open it.
 //
 // What it does: the viewer's 32-byte identity seed (the same derivation as phones and
 // as today's passphrase viewer) is sealed, together with the approving phone's key
@@ -60,6 +60,8 @@ export interface PassphraseUnlocker {
   m: number
   t: number
   p: 1
+  /** 1: the server's per-account pepper is mixed into the KEK (the default); 0: not. */
+  pep: 0 | 1
   salt: string // b64, 16 bytes
   nonce: string // b64, 24 bytes
   wrapped: string // b64, XChaCha20-Poly1305(KEK, nonce, AAD, DEK) = 48 bytes
@@ -118,8 +120,8 @@ export function passphraseProblem(pass: string, avoid: string[] = []): string | 
 
 // ------------------------------------------------------------------ AADs
 
-function kekAad(userId: string, deviceId: string, u: Pick<PassphraseUnlocker, 'kind' | 'kdf' | 'm' | 't' | 'p'>, salt: Uint8Array): Uint8Array {
-  return cat(dom(D_KEK), utf8(userId), utf8(deviceId), dom(u.kind), dom(u.kdf), u32(u.m), u32(u.t), u32(u.p), salt)
+function kekAad(userId: string, deviceId: string, u: Pick<PassphraseUnlocker, 'kind' | 'kdf' | 'm' | 't' | 'p' | 'pep'>, salt: Uint8Array): Uint8Array {
+  return cat(dom(D_KEK), utf8(userId), utf8(deviceId), dom(u.kind), dom(u.kdf), u32(u.m), u32(u.t), u32(u.p), new Uint8Array([u.pep]), salt)
 }
 
 function payloadAad(userId: string, deviceId: string): Uint8Array {
@@ -130,18 +132,28 @@ function pinAad(userId: string, deviceId: string, seq: number): Uint8Array {
   return cat(dom(D_PIN), utf8(userId), utf8(deviceId), u64(seq))
 }
 
-async function kekFrom(pass: string, salt: Uint8Array, m: number, t: number): Promise<Uint8Array> {
+async function kekFrom(pass: string, salt: Uint8Array, m: number, t: number, pepper: Uint8Array | undefined): Promise<Uint8Array> {
   const root = await argon2idAsync(utf8(pass.normalize('NFKC')), salt, { t, m, p: 1, dkLen: 32 })
-  const kek = hkdfSha256(root, undefined, utf8(D_KEK), 32)
+  // The pepper (from the server, after re-authentication) is the HKDF salt: without it a
+  // copy of the blob alone is not enough to test a single passphrase guess.
+  const kek = hkdfSha256(root, pepper, utf8(D_KEK), 32)
   root.fill(0)
   return kek
 }
 
-async function makeUnlocker(userId: string, deviceId: string, dek: Uint8Array, pass: string, argon: ArgonParams): Promise<PassphraseUnlocker> {
+async function makeUnlocker(
+  userId: string,
+  deviceId: string,
+  dek: Uint8Array,
+  pass: string,
+  argon: ArgonParams,
+  pepper: Uint8Array | undefined,
+): Promise<PassphraseUnlocker> {
   const salt = randomBytes(16)
   const nonce = randomBytes(24)
-  const shape = { kind: 'passphrase' as const, kdf: 'argon2id' as const, m: argon.m, t: argon.t, p: 1 as const }
-  const kek = await kekFrom(pass, salt, argon.m, argon.t)
+  const pep: 0 | 1 = pepper && pepper.length ? 1 : 0
+  const shape = { kind: 'passphrase' as const, kdf: 'argon2id' as const, m: argon.m, t: argon.t, p: 1 as const, pep }
+  const kek = await kekFrom(pass, salt, argon.m, argon.t, pepper)
   const wrapped = xchacha20poly1305(kek, nonce, kekAad(userId, deviceId, shape, salt)).encrypt(dek)
   kek.fill(0)
   return { ...shape, salt: b64(salt), nonce: b64(nonce), wrapped: b64(wrapped) }
@@ -164,7 +176,9 @@ export interface SealOpts {
   /** Extra strings the passphrase must not contain (email, display name). */
   avoid?: string[]
   argon?: ArgonParams
-  /** Tests only: allow tiny Argon2 parameters and skip the passphrase policy. */
+  /** The server's per-account pepper (required unless testing). */
+  pepper?: Uint8Array
+  /** Tests only: allow tiny Argon2 parameters, no pepper, and skip the passphrase policy. */
   testing?: boolean
 }
 
@@ -177,6 +191,7 @@ export async function sealAccountVault(o: SealOpts): Promise<{ blob: AccountVaul
   if (!o.testing) {
     const why = passphraseProblem(o.passphrase, o.avoid)
     if (why) throw new E2eeError(why)
+    if (!o.pepper || o.pepper.length < 32) throw new E2eeError('the server did not provide its vault pepper')
   }
   const argon = o.argon ?? { m: AVAULT_ARGON_M_KIB, t: AVAULT_ARGON_T }
   checkArgon(argon, !!o.testing)
@@ -192,7 +207,7 @@ export async function sealAccountVault(o: SealOpts): Promise<{ blob: AccountVaul
   )
   const sealed = xchacha20poly1305(dek, nonce, payloadAad(o.userId, o.deviceId)).encrypt(body)
   body.fill(0)
-  const unlocker = await makeUnlocker(o.userId, o.deviceId, dek, o.passphrase, argon)
+  const unlocker = await makeUnlocker(o.userId, o.deviceId, dek, o.passphrase, argon, o.pepper)
   return {
     blob: { v: 1, user_id: o.userId, device_id: o.deviceId, unlockers: [unlocker], nonce: b64(nonce), sealed: b64(sealed) },
     dek,
@@ -213,6 +228,8 @@ export interface OpenOpts {
   passphrase: string
   /** The signed-in account. A blob for another account is refused. */
   userId: string
+  /** The server's per-account pepper (needed for unlockers sealed with one). */
+  pepper?: Uint8Array
 }
 
 /** Opens a blob. Wrong passphrase, another account, or any tampering throws. */
@@ -221,10 +238,11 @@ export async function openAccountVault(raw: unknown, o: OpenOpts): Promise<{ sec
   if (b.user_id !== o.userId) throw new E2eeError('this viewer vault belongs to another account')
   let dek: Uint8Array | null = null
   for (const u of b.unlockers) {
-    if (u.kind !== 'passphrase' || u.kdf !== 'argon2id' || u.p !== 1) continue
+    if (u.kind !== 'passphrase' || u.kdf !== 'argon2id' || u.p !== 1 || (u.pep !== 0 && u.pep !== 1)) continue
     checkArgon({ m: u.m, t: u.t }, true)
+    if (u.pep === 1 && (!o.pepper || o.pepper.length === 0)) throw new E2eeError('the server did not provide its vault pepper')
     const salt = unb64(u.salt)
-    const kek = await kekFrom(o.passphrase, salt, u.m, u.t)
+    const kek = await kekFrom(o.passphrase, salt, u.m, u.t, u.pep === 1 ? o.pepper : undefined)
     try {
       dek = xchacha20poly1305(kek, unb64(u.nonce), kekAad(b.user_id, b.device_id, u, salt)).decrypt(unb64(u.wrapped))
     } catch {
@@ -254,12 +272,13 @@ export async function changeVaultPassphrase(
   raw: unknown,
   dek: Uint8Array,
   newPassphrase: string,
-  o: { avoid?: string[]; argon?: ArgonParams; testing?: boolean } = {},
+  o: { avoid?: string[]; argon?: ArgonParams; pepper?: Uint8Array; testing?: boolean } = {},
 ): Promise<AccountVaultBlob> {
   const b = parseBlob(raw)
   if (!o.testing) {
     const why = passphraseProblem(newPassphrase, o.avoid)
     if (why) throw new E2eeError(why)
+    if (!o.pepper || o.pepper.length < 32) throw new E2eeError('the server did not provide its vault pepper')
   }
   // The DEK must really open this blob, so a wrong DEK can never produce an unopenable vault.
   try {
@@ -269,7 +288,7 @@ export async function changeVaultPassphrase(
   }
   const argon = o.argon ?? { m: AVAULT_ARGON_M_KIB, t: AVAULT_ARGON_T }
   checkArgon(argon, !!o.testing)
-  const u = await makeUnlocker(b.user_id, b.device_id, dek, newPassphrase, argon)
+  const u = await makeUnlocker(b.user_id, b.device_id, dek, newPassphrase, argon, o.pepper)
   return { ...b, unlockers: [u] }
 }
 
@@ -335,7 +354,7 @@ export function accountIdentity(secret: AccountVaultSecret, deviceId: string, re
     throw new E2eeError('the viewer vault does not match the registered key')
   }
   const ops: KeyOps = {
-    mode: 'session',
+    mode: 'account',
     edPub,
     xPub,
     async sign(msg) {
@@ -350,7 +369,7 @@ export function accountIdentity(secret: AccountVaultSecret, deviceId: string, re
   // Circle keys are re-opened from the server's wraps each session and kept in memory only.
   const mem = new Map<string, Uint8Array>()
   const vault: Vault = {
-    mode: 'session',
+    mode: 'account',
     async putCircleKey(c, e, k) {
       mem.set(`${c}:${e}`, k.slice())
     },

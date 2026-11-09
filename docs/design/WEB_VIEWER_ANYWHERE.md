@@ -1,6 +1,6 @@
 # Design: open the web viewer from any browser ("account-bound viewer")
 
-Status: **PROPOSED**. First slice (client-side vault format, not wired, no server route) implemented on branch `feat/web-viewer-design`; everything else is design only.
+Status: **ACCEPTED and implemented** (owner decisions D1-D8 below, 2026-11-09): server routes, web screens, docs. User and operator guide: [Web access from any browser](../admin/web-access-anywhere.md). Not yet exercised on a live deployment or a physical phone.
 Related: `E2EE.md` (phase 3, "Web viewer: keys and custody"), `PRIVACY_PROCESSING.md` (lanes, sections 8.9, 19.1, 23), `PRIVACY_MODEL_V1.md`.
 
 ## 0. The request and why it fails today
@@ -76,14 +76,15 @@ sealed      XChaCha20-Poly1305(DEK, nonce24, AAD_P, payload)
 AAD_P       "OFE2EE-AVAULT1\0" || user_id || device_id || u32(1)
 
 root        Argon2id(NFKC(passphrase), salt16, m=65536 KiB, t=3, p=1, 32 bytes)
-KEK         HKDF-SHA256(root, salt=none, info="OFE2EE-AVAULT1-KEK", 32)
+pepper_u    HMAC-SHA256(server pepper file, "OFE2EE-AVAULT1-PEPPER\0" || user_id)   (released after step-up)
+KEK         HKDF-SHA256(root, salt=pepper_u, info="OFE2EE-AVAULT1-KEK", 32)        (pep=1; pep=0 only in tests)
 wrapped     XChaCha20-Poly1305(KEK, nonce24, AAD_K, DEK)                    (48 bytes)
 AAD_K       "OFE2EE-AVAULT1-KEK\0" || user_id || device_id || "passphrase\0" || "argon2id\0"
-            || u32(m) || u32(t) || u32(p) || salt
+            || u32(m) || u32(t) || u32(p) || u8(pep) || salt
 
 blob (stored by the server, opaque):
 { "v":1, "user_id", "device_id",
-  "unlockers":[{"kind":"passphrase","kdf":"argon2id","m","t","p":1,"salt","nonce","wrapped"}],
+  "unlockers":[{"kind":"passphrase","kdf":"argon2id","m","t","p":1,"pep":1,"salt","nonce","wrapped"}],
   "nonce", "sealed" }
 
 pin record (log head, updated often, no Argon2 needed):
@@ -94,20 +95,22 @@ Properties: the AADs bind account, device and the stretching parameters, so the 
 
 Pin: the browser takes the **higher** of its own remembered pin and the server's sealed pin. The server can only return an older genuine pin (it cannot forge one), so a brand-new browser starts from the newest pin the owner's browsers ever stored, which is strictly better than today's fresh browser (no pin at all). The approver anchor travels inside the sealed payload, so the own-account anchor rule (`E2EE.md` rule 6) is unchanged.
 
-### 3.2 Server API (slice 2, not implemented)
+### 3.2 Server API (implemented: `backend/internal/handlers/e2ee_viewer_vault.go`, migration `000380_e2ee_viewer_vault`)
 
-Feature flag `E2EE_VIEWER_VAULT=1` (env; default off: every route answers 404 and the web panel hides the option). One row per account.
+Switches: `E2EE_VIEWER_VAULT` (env, default `on`; `off` is the operator's hard switch) and the admin setting `app_theme_settings.e2ee_viewer_vault_enabled` (default on, Settings > Security). Usable only by **platform admins** (D7) and only while the pepper file is readable. Until an admin sets it up nothing is stored and nothing changes. Unavailable routes answer 404 with `code = viewer_vault_<reason>`.
 
 | Route | Who | Body / reply | Rules |
 |---|---|---|---|
-| `POST /e2ee/viewer-vault/open` | self | `{password, totp_code}` (or a fresh passkey assertion) -> `{blob, pin, updated_at}`; 404 if none | step-up (`stepUp` in `account_factor.go`); rate limit 10/h/user; audit `e2ee.viewer_vault_opened` with IP; push notice to the owner's phones "Web access was unlocked from a new browser" (decision D5) |
-| `PUT /e2ee/viewer-vault` | self | `{blob, password, totp_code}` | step-up; `blob.device_id` must be an **active `web` key of the caller**; `blob.user_id` = caller; JSON <= 8 KiB; audit `e2ee.viewer_vault_saved` |
-| `PUT /e2ee/viewer-vault/pin` | self, session | `{pin}` | `pin.seq` must be greater than the stored seq; <= 512 bytes; no step-up (it only makes things stricter) |
-| `DELETE /e2ee/viewer-vault` | self | `{}` | audit |
+| `GET /e2ee/viewer-vault` | any signed-in user | `{available, reason, exists, device_id, created_at, updated_at, last_opened_at, pepper_changed, key_active}` | never returns the blob; `reason` is `off_by_operator`, `off_in_settings`, `pepper_unavailable` or `admins_only` |
+| `POST /e2ee/viewer-vault/unlock` | self, admin | `{password, totp_code, browser_id}` -> `{pepper, ticket, blob, pin, device_id}` (`blob` null before setup) | step-up (`stepUp`: password + TOTP/recovery code, throttled); 10/h/user; audit `e2ee.viewer_vault_opened`; 409 `viewer_vault_pepper_changed` / `viewer_vault_key_revoked`; first unlock from a browser id never seen (SHA-256 stored) audits `e2ee.viewer_vault_new_browser` and pushes "Private circles opened in a new browser" to the owner's phones (D5) |
+| `PUT /e2ee/viewer-vault` | self, admin | `{ticket, blob}` | `ticket` = one-time, 10-minute, per-user grant from the last unlock (so one 2FA code covers set-up); `blob.v = 1`, `blob.user_id` = caller, `blob.device_id` = an **active `web` key of the caller**; compact JSON <= 8 KiB; audit `e2ee.viewer_vault_saved` |
+| `PUT /e2ee/viewer-vault/pin` | self, admin | `{pin}` | `pin.seq` must exceed the stored seq; <= 1 KiB; 30/min |
+| `DELETE /e2ee/viewer-vault` | self | `{}` -> `{deleted}` | works even when switched off; audit `e2ee.viewer_vault_deleted` |
+| `GET/PUT /api/admin/settings/e2ee-viewer-vault` | platform admin | `{enabled}` -> `{enabled, off_by_operator, pepper_available, pepper_error, vaults}` | audit `admin.e2ee_viewer_vault_changed` |
 
-Migration `0003xx_e2ee_viewer_vault` (idempotent, with down file): `e2ee_viewer_vaults(user_id uuid PK REFERENCES users ON DELETE CASCADE, device_id uuid NOT NULL, blob jsonb NOT NULL, pin jsonb, pin_seq bigint NOT NULL DEFAULT 0, created_at, updated_at)`; a trigger deletes the row when the referenced `device_keys` row is revoked (so revoke-from-phone kills web access everywhere). The server never parses beyond the size, `v`, `user_id` and `device_id`. Authz-matrix entries for the four routes (self only, 404 for anyone else). Logs and audit: no blob bytes.
+Storage: `e2ee_viewer_vaults(user_id PK -> users ON DELETE CASCADE, device_id -> device_keys ON DELETE CASCADE, blob jsonb, pin jsonb, pin_seq, pepper_id, created_at, updated_at, last_opened_at)` and `e2ee_viewer_vault_browsers(user_id, browser sha256, first_seen, last_seen)`. Trigger `trg_e2ee_viewer_vault_on_revoke`: revoking the web key (from a phone or self) deletes the vault, so every browser loses it at once. `pepper_id` is a non-secret tag (`HMAC(pepper, "OFE2EE-AVAULT1-PEPPER-ID")`, 16 hex) so a lost or replaced pepper file is reported instead of a misleading "wrong passphrase". Replacing the blob with another key resets the pin history.
 
-Optional **server pepper** (decision D3): if `E2EE_VIEWER_VAULT_PEPPER` (32+ random bytes, a file outside the database) is set, `open` also returns `pepper_u = HMAC-SHA256(pepper, user_id)` and the client mixes it in: `KEK = HKDF(root, salt=pepper_u, info=...)`. A thief with only the database or a DB backup then cannot even start guessing. Cost: losing the pepper file makes every vault unopenable (re-pair from a phone).
+**Pepper (D3, implemented).** File `E2EE_VIEWER_VAULT_PEPPER_FILE`, default `/data/server-device/viewer-vault-pepper` (the `server_device` volume, not in the database and not in the database backups), 32 random bytes hex, 0600, created on first start. Per account the server derives `pepper_u` and returns it only after the step-up; the browser uses it as the HKDF salt of the KEK, and the unlocker records `pep = 1` inside the authenticated data, so the server cannot silently drop it. A thief with only the database or a database backup cannot test a single guess. Losing the file means every admin sets web access up again from a phone.
 
 ### 3.3 Protocol steps
 
@@ -115,12 +118,12 @@ Optional **server pepper** (decision D3): if `E2EE_VIEWER_VAULT_PEPPER` (32+ ran
 1. Admin web, Private circles, "Web access from any browser" (shown only when the flag is on). The browser makes `seed` and a new `device_id`, shows the usual request code (`buildRequestCode`, kind `web`, name e.g. "Web access (any browser)").
 2. Phone: **Approve a viewer or bridge**, compare digits, approve (unchanged; in lanes circles the existing per-circle phone-key warning still applies).
 3. Browser: paste the approval code, `registerViewer` (unchanged, `POST /e2ee/devices`), pin the approver (unchanged).
-4. Browser asks for a vault passphrase (12+ characters, not the email or name, shown strength hint; "do not reuse your account password" unless D2 allows it), seals the blob (3.1) and `PUT /e2ee/viewer-vault` with a step-up. It keeps the DEK in memory for pin updates.
+4. Browser asks for a vault passphrase (12+ characters, not the email or name, shown strength hint; refused if equal to the account password (D2)), seals the blob (3.1) and `PUT /e2ee/viewer-vault` with the ticket from a step-up. It keeps the DEK in memory for pin updates.
 5. The phone wraps circle keys to the key on its next pending-queue run (unchanged).
 
 **Unlock in any browser:**
 1. Sign in normally (password + TOTP, or passkey). Map shows server-lane members (c).
-2. "Unlock private circles": enter account password (+TOTP) for the step-up and the vault passphrase in one dialog. `POST /e2ee/viewer-vault/open`.
+2. "Unlock private circles": enter account password (+TOTP) for the step-up and the vault passphrase in one dialog. `POST /e2ee/viewer-vault/unlock`.
 3. Browser: `openAccountVault` (wrong passphrase: "wrong vault passphrase", nothing sent anywhere), `GET /e2ee/me`, `accountIdentity` (seed must match the active web key), `newerPin(local, server)`, then `syncCircle` exactly as today (full log verification, wraps, commitments, item checks). After each successful sync, `PUT /e2ee/viewer-vault/pin` if the head advanced.
 4. Lock: tab close, sign-out, idle timeout, or "Lock" clears the in-memory seed, DEK and circle keys.
 
@@ -157,22 +160,24 @@ Argon2id 64 MiB x 3 in the browser (about 1-3 s); minimum 12 characters and a si
 * Web UI (slice 3): unlock dialog, lock on idle/sign-out, second browser end to end against a dev server, Firefox/Safari/Chrome; Argon2 time on a low-end laptop.
 * Manual: phone revoke while a browser is unlocked (browser stops at next sync, new epoch excludes it); password reset by an admin then unlock still needs the vault passphrase.
 
-## 6. Decisions for the owner
+## 6. Decisions (owner approved all recommendations, 2026-11-09)
 
-* **D1. Vault passphrase separate from the account password?** Recommended: **yes, separate** (it is never sent to the server, so a server compromise or a password reset does not open the vault).
-* **D2. Allow "use my account password as the vault passphrase"?** Convenient, but then anyone with the password (and TOTP) reads phone-only members, and the server sees that password at every login. Recommended: **no** (or allow with a red warning).
-* **D3. Server pepper** (a secret file outside the database mixed into the key)? Protects against a database-only/backup leak; losing the file means everyone re-pairs once. Recommended: **yes, if backups of the env/secret files are kept separately from DB backups**.
-* **D4. Idle lock timeout.** Recommended 30 minutes; reload always re-asks.
-* **D5. Phone notice on each unlock from a new browser?** Recommended **yes**.
-* **D6. One account-bound viewer per account** (all browsers share it, revoke is all-or-nothing) vs per-browser sub-keys (each browser registers its own key vouched by the account viewer; needs the viewer to wrap circle keys to its own sub-keys, more log entries). Recommended: **one per account** for v1.
-* **D7. Who may use it.** Recommended: any account (it only reads what that account could read on its own phone), but show the option only to platform admins first.
-* **D8. Passkey unlock later** (WebAuthn PRF as a second unlocker, so a synced passkey replaces typing the vault passphrase)? Recommended: later, after v1.
+* **D1. Vault passphrase separate from the account password?** Decided (as recommended): **yes, separate** (it is never sent to the server, so a server compromise or a password reset does not open the vault).
+* **D2. Allow "use my account password as the vault passphrase"?** Convenient, but then anyone with the password (and TOTP) reads phone-only members, and the server sees that password at every login. Decided (as recommended): **no** (or allow with a red warning).
+* **D3. Server pepper** (a secret file outside the database mixed into the key)? Protects against a database-only/backup leak; losing the file means everyone re-pairs once. Decided (as recommended): **yes, if backups of the env/secret files are kept separately from DB backups**.
+* **D4. Idle lock timeout.** Decided (as recommended): 30 minutes; reload always re-asks.
+* **D5. Phone notice on each unlock from a new browser?** Decided (as recommended): **yes**.
+* **D6. One account-bound viewer per account** (all browsers share it, revoke is all-or-nothing) vs per-browser sub-keys (each browser registers its own key vouched by the account viewer; needs the viewer to wrap circle keys to its own sub-keys, more log entries). Decided (as recommended): **one per account** for v1.
+* **D7. Who may use it.** Decided (as recommended): platform admins only for now (the server enforces it); other accounts later, since it only reads what that account could read on its own phone.
+* **D8. Passkey unlock later** (WebAuthn PRF as a second unlocker, so a synced passkey replaces typing the vault passphrase)? Decided (as recommended): later, after v1.
 
-## 7. Slices and estimates
+## 7. Slices
 
-| Slice | Content | State / estimate |
+| Slice | Content | State |
 |---|---|---|
-| 1 | Client vault format: seal/open/change passphrase, pin records, check against the registered key, in-memory key ops; tests | **done** (`web/src/e2ee/accountVault.ts`, not imported anywhere) |
-| 2 | Migration, four routes behind `E2EE_VIEWER_VAULT`, step-up, trigger on revoke, audit, rate limits, optional pepper, DB tests, authz matrix | about 1 day |
-| 3 | Web UI: set-up wizard, unlock dialog, lock, pin upload, passphrase change, "set up again" | about 1-1.5 days |
-| 4 | Phone wording ("Web access from any browser"), docs, end-to-end check on a dev server and real browsers | about 0.5 day |
+| 1 | Client vault format (`web/src/e2ee/accountVault.ts`) with tests | done |
+| 2 | Migration `000380`, routes, step-up, ticket, pepper file, trigger on revoke, new-browser push, admin switch, DB tests (`e2ee_viewer_vault_db_test.go`), config test | done |
+| 3 | Web: `accountAccess.ts` (HTTP flow), controller account mode, Private circles page (set up, unlock, lock, change passphrase), shared controller with 30-minute idle lock (`lib/privateViewer.ts`), map header chip, Settings > Security card; tests `accountAccess.test.mjs` | done |
+| 4 | Docs (`docs/admin/web-access-anywhere.md`), compose/env switches. Phone: no change needed; the existing "Approve a viewer or bridge" flow and wording ("Web viewer (browser)") already fit | done |
+
+Not done / unverified: end to end on a live deployment with a real phone; WebCrypto/Argon2 timing in Safari and Firefox; the push text on iOS/Android.

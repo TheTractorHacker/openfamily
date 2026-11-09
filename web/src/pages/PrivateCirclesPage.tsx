@@ -8,9 +8,10 @@
 
 import { ServerProcessingPanel } from './ServerProcessingPanel'
 import React from 'react'
-import { e2eeHttp, getProfile } from '../lib/api'
-import { getAccessToken } from '../lib/auth'
+import { e2eeHttp } from '../lib/api'
+import { getEmail } from '../lib/auth'
 import { useMe } from '../lib/me'
+import { useViewerController } from '../lib/privateViewer'
 import { useAsync } from '../lib/useAsync'
 import { Badge, Button, Card, CopyButton, EmptyState, ErrorState, Spinner } from '../components/primitives'
 import MapView from '../map/MapView'
@@ -49,29 +50,8 @@ async function bundleFingerprint(): Promise<string> {
   return parts.join('\n')
 }
 
-function useController(): { ctl: ViewerController | null; tick: number } {
-  const [ctl, setCtl] = React.useState<ViewerController | null>(null)
-  const [tick, setTick] = React.useState(0)
-  React.useEffect(() => {
-    let alive = true
-    let c: ViewerController | null = null
-    getProfile().then(async (p) => {
-      if (!alive) return
-      c = new ViewerController(e2eeHttp, p.id, undefined, getAccessToken)
-      c.subscribe(() => setTick((t) => t + 1))
-      await c.init()
-      if (alive) setCtl(c)
-    })
-    return () => {
-      alive = false
-      c?.dispose()
-    }
-  }, [])
-  return { ctl, tick }
-}
-
 export function PrivateCirclesPage() {
-  const { ctl, tick } = useController()
+  const { ctl, tick } = useViewerController()
   const { isPlatformAdmin } = useMe()
   const circles = useAsync(() => e2eeHttp.get<CircleRow[]>('/circles'), [])
   const [selected, setSelected] = React.useState<string | null>(null)
@@ -100,8 +80,23 @@ export function PrivateCirclesPage() {
         </div>
       </div>
       {isPlatformAdmin && <ServerProcessingPanel />}
-      <TrustCard isPlatformAdmin={isPlatformAdmin} defaultOpen={!ctl.meta} />
-      <ViewerSetup ctl={ctl} />
+      <TrustCard isPlatformAdmin={isPlatformAdmin} defaultOpen={!ctl.meta && !ctl.account.status?.exists} />
+      <AccountAccess ctl={ctl} />
+      {showLocalSetup(ctl) ? (
+        <ViewerSetup ctl={ctl} />
+      ) : (
+        <details className="wb-card wb-pc-trust">
+          <summary>
+            <span className="wb-pc-trust-icon"><BrowserIcon /></span>
+            <span className="wb-pc-trust-title">Or keep a key only in this browser</span>
+            <span className="wb-pc-trust-hint">The older way: a key tied to this computer</span>
+            <span className="wb-pc-chevron" aria-hidden="true" />
+          </summary>
+          <div className="wb-pc-trust-body">
+            <ViewerSetup ctl={ctl} />
+          </div>
+        </details>
+      )}
       {ctl.unlocked && ctl.meta?.registered ? (
         <>
           {circles.loading ? (
@@ -263,8 +258,13 @@ function TrustCard({ isPlatformAdmin, defaultOpen }: { isPlatformAdmin: boolean;
         </div>
         <ul className="wb-pc-bullets">
           <li>
-            <strong>Key stays here.</strong> The private key is created in this browser and is never sent anywhere. The server
-            cannot decrypt anything and cannot approve this viewer.
+            <strong>Key stays here</strong> (a key for this browser only). The private key is created in this browser and is
+            never sent anywhere. The server cannot decrypt anything and cannot approve this viewer.
+          </li>
+          <li>
+            <strong>Web access from any browser</strong> stores the key on the server, sealed with your vault passphrase,
+            which never leaves the browser. The server cannot open it, but a weak passphrase can be guessed by someone who
+            steals the database and the server&rsquo;s vault key file. Choose a long one.
           </li>
           <li>
             <strong>Extensions and injected scripts</strong> can also read what is shown. Use a clean browser profile; do not
@@ -302,6 +302,248 @@ function TrustCard({ isPlatformAdmin, defaultOpen }: { isPlatformAdmin: boolean;
         )}
       </div>
     </details>
+  )
+}
+
+/** The local (this-browser) setup is shown directly unless web access from any browser is offered or in use. */
+function showLocalSetup(ctl: ViewerController): boolean {
+  if (ctl.accountMode) return true // pairing or connected card of the account key
+  if (ctl.meta) return true // this browser already has its own key
+  const st = ctl.account.status
+  return !st || !st.available
+}
+
+const VAULT_REASON: Record<string, string> = {
+  off_by_operator: 'Web access from any browser is switched off on this server (E2EE_VIEWER_VAULT=off).',
+  off_in_settings: 'Web access from any browser is switched off in Settings, Security.',
+  pepper_unavailable: 'Web access from any browser is unavailable: the server cannot read or create its vault key file. See the server log.',
+}
+
+function errText(e: unknown): string {
+  return e instanceof Error ? e.message : String(e)
+}
+
+function StepUpFields({ pw, setPw, totp, setTotp, id }: { pw: string; setPw: (v: string) => void; totp: string; setTotp: (v: string) => void; id: string }) {
+  return (
+    <div className="wb-pc-stepup">
+      <label className="wb-field" htmlFor={`${id}-pw`}>
+        <span className="wb-label">Account password</span>
+        <input id={`${id}-pw`} className="wb-input" type="password" autoComplete="current-password" value={pw} onChange={(e) => setPw(e.target.value)} />
+      </label>
+      <label className="wb-field" htmlFor={`${id}-totp`}>
+        <span className="wb-label">Two-factor code (if two-factor sign-in is on)</span>
+        <input id={`${id}-totp`} className="wb-input" inputMode="numeric" autoComplete="one-time-code" value={totp} onChange={(e) => setTotp(e.target.value)} />
+      </label>
+    </div>
+  )
+}
+
+/** Web access from any browser: set up, unlock, lock, change passphrase. */
+function AccountAccess({ ctl }: { ctl: ViewerController }) {
+  const st = ctl.account.status
+  const [name, setName] = React.useState('Web access (any browser)')
+  const [vp, setVp] = React.useState('')
+  const [vp2, setVp2] = React.useState('')
+  const [pw, setPw] = React.useState('')
+  const [totp, setTotp] = React.useState('')
+  const [err, setErr] = React.useState<string | null>(null)
+  const [msg, setMsg] = React.useState<string | null>(null)
+  const [busy, setBusy] = React.useState(false)
+  const [changing, setChanging] = React.useState(false)
+  const avoid = [getEmail() ?? '', (getEmail() ?? '').split('@')[0] ?? ''].filter(Boolean)
+
+  const run = async (f: () => Promise<void>, done?: string) => {
+    setBusy(true)
+    setErr(null)
+    setMsg(null)
+    try {
+      await f()
+      setPw('')
+      setTotp('')
+      setVp('')
+      setVp2('')
+      if (done) setMsg(done)
+    } catch (e) {
+      setErr(errText(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+  if (!st) return null
+  if (!st.available && !(ctl.accountMode && ctl.meta?.registered)) {
+    const why = VAULT_REASON[st.reason]
+    return why ? <p className="wb-hint">{why}</p> : null
+  }
+
+  // A new account key was approved and registered: seal it.
+  if (ctl.accountMode && ctl.meta?.registered && !ctl.account.saved) {
+    return (
+      <Card className="wb-pc-card" data-testid="vault-choose">
+        <h2 className="wb-pc-h2">Choose a vault passphrase</h2>
+        <p className="wb-hint">
+          This passphrase unlocks your private circles in any browser. It is never sent to the server; only the key sealed
+          with it is stored there. Use at least 12 characters (a few unrelated words work well), not your account password.
+          If you forget it, set web access up again from your phone.
+        </p>
+        <label className="wb-field" htmlFor="wb-vault-new">
+          <span className="wb-label">Vault passphrase</span>
+          <input id="wb-vault-new" className="wb-input" type="password" autoComplete="new-password" value={vp} onChange={(e) => setVp(e.target.value)} />
+        </label>
+        <label className="wb-field" htmlFor="wb-vault-new2">
+          <span className="wb-label">Repeat the vault passphrase</span>
+          <input id="wb-vault-new2" className="wb-input" type="password" autoComplete="new-password" value={vp2} onChange={(e) => setVp2(e.target.value)} />
+        </label>
+        <p className="wb-hint">Confirm it is you:</p>
+        <StepUpFields id="wb-vault-save" pw={pw} setPw={setPw} totp={totp} setTotp={setTotp} />
+        {err && <p className="wb-error" role="alert">{err}</p>}
+        <div className="wb-pc-actions">
+          <Button
+            loading={busy}
+            disabled={!vp || !pw}
+            onClick={() =>
+              run(async () => {
+                if (vp !== vp2) throw new Error('the two vault passphrases differ')
+                await ctl.saveAccountKey(vp, { password: pw, totpCode: totp }, avoid)
+              }, 'Web access is set up. Next time, sign in from any browser and unlock here.')
+            }
+          >
+            Save web access
+          </Button>
+        </div>
+      </Card>
+    )
+  }
+
+  // Unlocked with the account key.
+  if (ctl.accountMode && ctl.meta?.registered) {
+    return (
+      <Card className="wb-pc-card" data-testid="vault-unlocked">
+        <div className="wb-pc-connected">
+          <div>
+            <h2 className="wb-pc-h2">
+              Web access from any browser <Badge tone="green" dot>Unlocked</Badge>
+            </h2>
+            <p className="wb-hint">
+              The key is open in this tab only. It locks when you close or reload the tab, sign out, or after 30 minutes
+              without activity.
+            </p>
+          </div>
+          <div className="wb-pc-actions">
+            <Button size="sm" variant="secondary" onClick={() => setChanging((v) => !v)}>
+              Change vault passphrase
+            </Button>
+            <Button size="sm" onClick={() => ctl.lock()}>
+              Lock
+            </Button>
+          </div>
+        </div>
+        {changing && (
+          <div className="wb-pc-phase">
+            <label className="wb-field" htmlFor="wb-vault-chg">
+              <span className="wb-label">New vault passphrase</span>
+              <input id="wb-vault-chg" className="wb-input" type="password" autoComplete="new-password" value={vp} onChange={(e) => setVp(e.target.value)} />
+            </label>
+            <label className="wb-field" htmlFor="wb-vault-chg2">
+              <span className="wb-label">Repeat it</span>
+              <input id="wb-vault-chg2" className="wb-input" type="password" autoComplete="new-password" value={vp2} onChange={(e) => setVp2(e.target.value)} />
+            </label>
+            <StepUpFields id="wb-vault-chg" pw={pw} setPw={setPw} totp={totp} setTotp={setTotp} />
+            <p className="wb-hint">
+              If you think the old passphrase leaked, do not just change it: revoke this key and set web access up again,
+              because someone could have copied the old sealed key.
+            </p>
+            <Button
+              loading={busy}
+              disabled={!vp || !pw}
+              onClick={() =>
+                run(async () => {
+                  if (vp !== vp2) throw new Error('the two vault passphrases differ')
+                  await ctl.changeAccountPassphrase(vp, { password: pw, totpCode: totp }, avoid)
+                  setChanging(false)
+                }, 'Vault passphrase changed.')
+              }
+            >
+              Save new passphrase
+            </Button>
+          </div>
+        )}
+        {err && <p className="wb-error" role="alert">{err}</p>}
+        {msg && <p className="wb-help" role="status">{msg}</p>}
+      </Card>
+    )
+  }
+  if (ctl.accountMode) return null // pairing in progress: ViewerSetup shows the request code
+
+  // Set up, stored on the server: unlock.
+  if (st.exists) {
+    const broken = st.pepper_changed || st.key_active === false
+    return (
+      <Card className="wb-pc-card" data-testid="vault-locked">
+        <h2 className="wb-pc-h2">
+          Private circles are locked <Badge tone="orange" dot>Web access from any browser</Badge>
+        </h2>
+        {broken ? (
+          <>
+            <p className="wb-error">
+              {st.pepper_changed
+                ? 'The server’s vault key file changed since web access was set up (for example a restore without it), so the stored key cannot be opened. Set web access up again.'
+                : 'The web access key was revoked. Set web access up again.'}
+            </p>
+            <Button variant="danger" size="sm" loading={busy} onClick={() => run(() => ctl.deleteAccountVault())}>
+              Remove the old setup
+            </Button>
+          </>
+        ) : (
+          <>
+            <p className="wb-hint">Enter your vault passphrase. The server releases the sealed key only after you confirm your password.</p>
+            <label className="wb-field" htmlFor="wb-vault-pass">
+              <span className="wb-label">Vault passphrase</span>
+              <input id="wb-vault-pass" className="wb-input" type="password" autoComplete="off" value={vp} onChange={(e) => setVp(e.target.value)} />
+            </label>
+            <StepUpFields id="wb-vault-unlock" pw={pw} setPw={setPw} totp={totp} setTotp={setTotp} />
+            {err && <p className="wb-error" role="alert">{err}</p>}
+            <div className="wb-pc-actions">
+              <Button loading={busy} disabled={!vp || !pw} onClick={() => run(() => ctl.unlockAccount(vp, { password: pw, totpCode: totp }))}>
+                Unlock
+              </Button>
+            </div>
+            <p className="wb-hint">
+              Unlocking takes a few seconds (the passphrase is deliberately slow to guess). Your phones are told when a
+              browser unlocks for the first time. Forgot the vault passphrase? Revoke the web viewer on your phone, then
+              set web access up again.
+            </p>
+          </>
+        )}
+      </Card>
+    )
+  }
+
+  // Not set up yet.
+  return (
+    <Card className="wb-pc-card" data-testid="vault-setup">
+      <h2 className="wb-pc-h2">
+        Web access from any browser <Badge tone="green">Recommended</Badge>
+      </h2>
+      <p className="wb-hint">
+        Approve one viewer key with your phone once. It is sealed with a vault passphrase that only you know and stored on
+        the server, so you can sign in from any browser and unlock your private circles. The server cannot open it.
+      </p>
+      <ul className="wb-pc-bullets">
+        <li>Unlocking needs your account password (and two-factor code), then the vault passphrase.</li>
+        <li>A weak vault passphrase plus a stolen server database could expose the circles: choose a long one.</li>
+        <li>The server’s vault key file (outside the database) is needed too: back it up separately from database backups.</li>
+      </ul>
+      <label className="wb-field" htmlFor="wb-vault-name">
+        <span className="wb-label">Name shown on your phone</span>
+        <input id="wb-vault-name" className="wb-input" value={name} maxLength={40} onChange={(e) => setName(e.target.value)} />
+      </label>
+      {err && <p className="wb-error" role="alert">{err}</p>}
+      <div className="wb-pc-actions">
+        <Button loading={busy} onClick={() => run(async () => void (await ctl.createAccountKey(name.trim() || 'Web access')))}>
+          Set up web access
+        </Button>
+      </div>
+    </Card>
   )
 }
 
@@ -490,7 +732,14 @@ function ViewerSetup({ ctl }: { ctl: ViewerController }) {
             This viewer <Badge tone="green" dot>Approved by your phone</Badge>
           </h2>
           <p className="wb-hint">
-            {meta.name} · key kept: {meta.mode === 'device' ? 'in this browser (non-extractable)' : meta.mode === 'passphrase' ? 'passphrase protected' : 'this visit only'}
+            {meta.name} · key kept:{' '}
+            {meta.mode === 'device'
+              ? 'in this browser (non-extractable)'
+              : meta.mode === 'passphrase'
+                ? 'passphrase protected'
+                : meta.mode === 'account'
+                  ? 'sealed on the server under your vault passphrase, open in this tab only'
+                  : 'this visit only'}
           </p>
         </div>
         <Button

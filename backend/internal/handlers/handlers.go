@@ -40,6 +40,12 @@ type Server struct {
 	// return 403, and the denial is audit-logged.
 	AdminLocationAccess bool
 
+	// ViewerVault configures web access from any browser
+	// (docs/design/WEB_VIEWER_ANYWHERE.md); viewerVaultTickets are its
+	// short-lived save permissions.
+	ViewerVault        ViewerVaultConfig
+	viewerVaultTickets viewerVaultTickets
+
 	// Direct is the built-in direct push channel (nil = disabled, see
 	// docs/push.md).
 	Direct *push.DirectBroker

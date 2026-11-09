@@ -53,6 +53,7 @@
         "admin/notifications.md",
         "admin/integrations.md",
         "admin/deployment-profile.md",
+        "admin/web-access-anywhere.md",
         "admin/app-versions.md",
         "admin/troubleshooting.md",
         "troubleshooting/no-locations.md",
@@ -86,6 +87,7 @@
         "design/OPTIMIZATION_BACKLOG.md",
         "design/RESEARCH_NOTES_PERFORMANCE.md",
         "design/PRIVACY_MODEL_V1.md",
+        "design/WEB_VIEWER_ANYWHERE.md",
         "developers/performance-watch.md",
         "developers/performance-foldables.md"
       ],

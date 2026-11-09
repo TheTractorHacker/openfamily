@@ -96,6 +96,10 @@ services:
       # auto (default): the API is its own server device unless E2EE_SERVER_INGEST_TOKEN is set for the
       # optional sidecar. builtin | sidecar | off to force.
       OPENFAMILY_SERVER_DEVICE: ${OPENFAMILY_SERVER_DEVICE:-auto}
+      # Web access from any browser (docs/admin/web-access-anywhere.md): on by default, inert until an
+      # admin sets it up. off = hard off switch. Its pepper file lives in the server_device volume.
+      E2EE_VIEWER_VAULT: ${E2EE_VIEWER_VAULT:-on}
+      E2EE_VIEWER_VAULT_PEPPER_FILE: ${E2EE_VIEWER_VAULT_PEPPER_FILE:-}
       VERBOSE_PUSH: ${VERBOSE_PUSH:-false}
       DIRECT_PUSH: ${DIRECT_PUSH:-true}
       PLATFORM_ADMIN_EMAIL: ${PLATFORM_ADMIN_EMAIL:-}

@@ -20,8 +20,21 @@ import {
 } from './keystore.ts'
 import { newUuid } from './core.ts'
 import {
+  type PendingAccountKey,
+  type StepUp,
+  type VaultHttp,
+  type VaultStatus,
+  changeAccountPassphrase,
+  deleteVault,
+  newAccountKey,
+  pushPin,
+  saveAccountKey,
+  unlockAccountKey,
+  vaultStatus,
+} from './accountAccess.ts'
+import { newerPin } from './accountVault.ts'
+import {
   type CircleState,
-  type Http,
   type ItemResult,
   PositionBook,
   Receiver,
@@ -65,8 +78,17 @@ export class ViewerController {
   private wsTimer: ReturnType<typeof setTimeout> | null = null
   private closed = false
 
+  /** Web access from any browser: server status, a key being set up, the in-memory DEK. */
+  account: { status: VaultStatus | null; pending: PendingAccountKey | null; saved: boolean } = { status: null, pending: null, saved: false }
+  private dek: Uint8Array | null = null
+  private pinPushed = 0
+  /** True while the unlocked key is the account-bound one (memory only). */
+  get accountMode(): boolean {
+    return this.meta?.mode === 'account'
+  }
+
   constructor(
-    private http: Http,
+    private http: VaultHttp,
     private userId: string,
     private kv: KV = new IdbKV(),
     private tokenProvider: () => string | null = () => null,
@@ -84,7 +106,99 @@ export class ViewerController {
 
   async init(): Promise<void> {
     this.meta = await loadMeta(this.kv, this.userId)
+    await this.refreshAccount()
     this.emit()
+  }
+
+  // ---- web access from any browser (account-bound key, docs/design/WEB_VIEWER_ANYWHERE.md)
+
+  async refreshAccount(): Promise<void> {
+    try {
+      this.account.status = await vaultStatus(this.http)
+    } catch {
+      this.account.status = null // older server or no access: the feature is simply not offered
+    }
+    this.emit()
+  }
+
+  /** Step 1: a new key in memory (nothing stored yet). Returns the request code for the phone. */
+  async createAccountKey(name: string): Promise<string> {
+    this.disconnectAll()
+    const k = newAccountKey(this.userId, newUuid(), name)
+    this.account.pending = k
+    this.account.saved = false
+    this.unlocked = { meta: k.meta, ops: k.ops, vault: k.vault }
+    this.meta = k.meta
+    this.emit()
+    return buildRequestCode(k.meta, k.ops, 'web')
+  }
+
+  /** Step 3 (after register): seal under the vault passphrase and store on the server. */
+  async saveAccountKey(passphrase: string, s: StepUp, avoid: string[] = []): Promise<void> {
+    const k = this.account.pending
+    if (!k || !this.meta?.registered || !this.meta.approver) throw new Error('approve the key on your phone first')
+    this.dek = await saveAccountKey(this.http, { ...k, meta: this.meta }, this.meta.approver, passphrase, s, { avoid })
+    k.seed.fill(0)
+    this.account.pending = null
+    this.account.saved = true
+    await this.refreshAccount()
+  }
+
+  /** Opens the stored key in memory (password + 2FA, then the vault passphrase). */
+  async unlockAccount(passphrase: string, s: StepUp): Promise<void> {
+    const o = await unlockAccountKey(this.http, this.userId, passphrase, s)
+    this.disconnectAll()
+    this.closed = false
+    this.unlocked = { meta: o.meta, ops: o.ops, vault: o.vault }
+    this.meta = o.meta
+    this.dek = o.dek
+    this.account.saved = true
+    // Start from the newer of this browser's pin and the server's sealed pin.
+    const local = await getPin(this.kv, `acct:${this.userId}`)
+    const best = newerPin(local, o.remotePin)
+    if (best) await setPin(this.kv, `acct:${this.userId}`, best)
+    this.pinPushed = o.remotePin?.seq ?? 0
+    this.emit()
+  }
+
+  async changeAccountPassphrase(passphrase: string, s: StepUp, avoid: string[] = []): Promise<void> {
+    if (!this.accountMode || !this.dek) throw new Error('unlock first')
+    await changeAccountPassphrase(this.http, this.userId, this.dek, passphrase, s, { avoid })
+    await this.refreshAccount()
+  }
+
+  /** Forgets the unlocked key, circle keys and DEK in this tab. The stored vault stays. */
+  lock(): void {
+    if (!this.accountMode) return
+    this.disconnectAll()
+    this.dek?.fill(0)
+    this.dek = null
+    this.unlocked = null
+    this.meta = null
+    this.account.pending = null
+    void this.init()
+  }
+
+  /** Deletes the stored vault (the key must be revoked separately, see revoke()). */
+  async deleteAccountVault(): Promise<void> {
+    await deleteVault(this.http)
+    await this.refreshAccount()
+  }
+
+  private pinKey(): string {
+    return this.accountMode ? `acct:${this.userId}` : this.userId
+  }
+
+  private async savePin(h: { seq: number; hash: string }): Promise<void> {
+    await setPin(this.kv, this.pinKey(), h)
+    if (this.accountMode && this.dek && this.meta && h.seq > this.pinPushed) {
+      try {
+        await pushPin(this.http, this.dek, this.userId, this.meta.deviceId, h)
+        this.pinPushed = h.seq
+      } catch {
+        // best effort: this browser still remembers the pin
+      }
+    }
   }
 
   /** Creates the keys. Returns the request code to paste into the phone. */
@@ -122,7 +236,7 @@ export class ViewerController {
   async register(approvalCode: string): Promise<void> {
     if (!this.unlocked) throw new Error('unlock first')
     const { anchor } = await registerViewer(this.http, this.unlocked.meta, this.unlocked.ops, parseApproval(approvalCode), 'web')
-    await markRegistered(this.kv, this.userId, anchor)
+    if (!this.accountMode) await markRegistered(this.kv, this.userId, anchor)
     this.meta = { ...this.unlocked.meta, registered: true, approver: anchor }
     this.unlocked.meta = this.meta
     this.emit()
@@ -130,12 +244,23 @@ export class ViewerController {
 
   async revoke(): Promise<void> {
     if (!this.unlocked) throw new Error('unlock first')
+    const account = this.accountMode
     await revokeSelf(this.http, this.unlocked.meta, this.unlocked.ops)
+    if (account) {
+      // The server deletes the vault with the key; delete explicitly too (idempotent).
+      await deleteVault(this.http).catch(() => undefined)
+      this.lock()
+      return
+    }
     await this.forget()
   }
 
   /** Removes the keys from this browser (does not revoke on the server). */
   async forget(): Promise<void> {
+    if (this.accountMode) {
+      this.lock() // an account key lives on the server, not in this browser
+      return
+    }
     this.disconnectAll()
     await wipeIdentity(this.kv, this.userId)
     this.unlocked = null
@@ -167,8 +292,8 @@ export class ViewerController {
           meta: u.meta,
           ops: u.ops,
           vault: u.vault,
-          getPin: () => getPin(this.kv, this.userId),
-          setPin: (h) => setPin(this.kv, this.userId, h),
+          getPin: () => getPin(this.kv, this.pinKey()),
+          setPin: (h) => this.savePin(h),
         },
         circleId,
       )
@@ -195,7 +320,7 @@ export class ViewerController {
       }
       const pre = this.deferred.get(circleId) ?? []
       this.deferred.set(circleId, [])
-      for (const it of pre) this.account(c, await rx.handle(it), it)
+      for (const it of pre) this.applyItem(c, await rx.handle(it), it)
       const r = await pullItems(this.http, u.meta.deviceId, circleId, rx, c.book, c.cursor, (res) => this.countOnly(c, res))
       c.cursor = r.cursor
       this.deferred.set(circleId, [...(this.deferred.get(circleId) ?? []), ...r.deferred])
@@ -216,7 +341,7 @@ export class ViewerController {
     else if (res.type === 'dropped') c.counts.dropped++
   }
 
-  private account(c: CircleConn, res: ItemResult, it?: RelayedItem) {
+  private applyItem(c: CircleConn, res: ItemResult, it?: RelayedItem) {
     this.countOnly(c, res)
     applyResult(c.book, res)
     if (res.type === 'deferred' && it) {
@@ -262,7 +387,7 @@ export class ViewerController {
       const rx = this.rx.get(f.circle_id)
       if (!c || !rx) return
       void rx.handle(f).then((res) => {
-        this.account(c, res, f!)
+        this.applyItem(c, res, f!)
         if (f!.id > c.cursor) c.cursor = f!.id
         this.emit()
       })
@@ -293,6 +418,9 @@ export class ViewerController {
 
   dispose() {
     this.disconnectAll()
+    this.dek?.fill(0)
+    this.dek = null
+    this.unlocked = null
     this.listeners.clear()
   }
 

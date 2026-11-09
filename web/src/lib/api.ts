@@ -836,7 +836,25 @@ export function listE2eeKeys(): Promise<{ devices: E2eeAdminDevice[]; circles: E
 export const e2eeHttp = {
   get: <T,>(path: string): Promise<T> => request<T>(path),
   post: <T,>(path: string, body: unknown): Promise<T> => request<T>(path, { method: 'POST', body }),
+  put: <T,>(path: string, body: unknown): Promise<T> => request<T>(path, { method: 'PUT', body }),
   del: <T,>(path: string, body?: unknown): Promise<T> => request<T>(path, { method: 'DELETE', body }),
+}
+
+// ---- Web access from any browser (admin switch; docs/design/WEB_VIEWER_ANYWHERE.md) ----
+export type ViewerVaultAdmin = {
+  enabled: boolean
+  off_by_operator: boolean
+  pepper_available: boolean
+  pepper_error: string
+  vaults: number
+}
+
+export function getViewerVaultAdmin(): Promise<ViewerVaultAdmin> {
+  return request<ViewerVaultAdmin>('/api/admin/settings/e2ee-viewer-vault')
+}
+
+export function setViewerVaultAdmin(enabled: boolean): Promise<ViewerVaultAdmin> {
+  return request<ViewerVaultAdmin>('/api/admin/settings/e2ee-viewer-vault', { method: 'PUT', body: { enabled } })
 }
 
 // ---- Home Assistant integration tokens (any adult account; own tokens only) ----

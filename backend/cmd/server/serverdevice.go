@@ -19,6 +19,7 @@ import (
 	"github.com/TheTractorHacker/openfamily/backend/internal/auth"
 	"github.com/TheTractorHacker/openfamily/backend/internal/config"
 	"github.com/TheTractorHacker/openfamily/backend/internal/e2eebridge"
+	"github.com/TheTractorHacker/openfamily/backend/internal/handlers"
 )
 
 // serverDeviceMode decides whether the API runs its own server device
@@ -135,4 +136,32 @@ func startServerDevice(ctx context.Context, cfg config.Config, pool *pgxpool.Poo
 		go dev.Run(ctx)
 	}
 	return dev
+}
+
+// viewerVaultConfig reads web access from any browser (docs/design/WEB_VIEWER_ANYWHERE.md):
+//
+//	E2EE_VIEWER_VAULT=off                 the operator's hard off switch (default: on; an
+//	                                      admin can also switch it off in Settings > Security)
+//	E2EE_VIEWER_VAULT_PEPPER_FILE=<path>  the pepper file, outside the database (default
+//	                                      /data/server-device/viewer-vault-pepper, created once)
+func viewerVaultConfig(getenv func(string) string) handlers.ViewerVaultConfig {
+	switch strings.ToLower(strings.TrimSpace(getenv("E2EE_VIEWER_VAULT"))) {
+	case "off", "false", "0", "no":
+		slog.Info("web access from any browser: switched off (E2EE_VIEWER_VAULT)")
+		return handlers.ViewerVaultConfig{Off: true}
+	}
+	path := strings.TrimSpace(getenv("E2EE_VIEWER_VAULT_PEPPER_FILE"))
+	if path == "" {
+		dir := strings.TrimSpace(getenv("OPENFAMILY_SERVER_DEVICE_DIR"))
+		if dir == "" {
+			dir = "/data/server-device"
+		}
+		path = filepath.Join(dir, "viewer-vault-pepper")
+	}
+	pepper, err := handlers.LoadViewerVaultPepper(path)
+	if err != nil {
+		slog.Warn("web access from any browser unavailable: cannot read or create its pepper file (mount a volume or set E2EE_VIEWER_VAULT_PEPPER_FILE)", "path", path, "err", err)
+		return handlers.ViewerVaultConfig{PepperErr: "cannot read or create " + path}
+	}
+	return handlers.ViewerVaultConfig{Pepper: pepper}
 }

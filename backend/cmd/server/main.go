@@ -131,6 +131,7 @@ func main() {
 	}
 	srv.VerbosePush = cfg.VerbosePush
 	srv.AdminLocationAccess = cfg.AdminLocationAccess
+	srv.ViewerVault = viewerVaultConfig(os.Getenv)
 	if wa, err := handlers.WebAuthnFromPublicURL(cfg.PublicBaseURL, os.Getenv("WEBAUTHN_RP_ID"), os.Getenv("WEBAUTHN_ORIGINS")); err != nil {
 		slog.Warn("passkeys disabled: invalid WebAuthn configuration", "reason", err.Error())
 	} else if wa != nil {
@@ -467,6 +468,13 @@ func main() {
 		r.Post("/circles/{id}/e2ee/processing-upgrade", srv.E2EEUpgradeProcessing)
 		r.Delete("/circles/{id}/e2ee/legacy-server-access", srv.E2EEFinishLegacyAccess)
 		r.Get("/e2ee/log", srv.E2EELog)
+		// Web access from any browser (docs/design/WEB_VIEWER_ANYWHERE.md): an opaque
+		// blob sealed in the browser; the server never holds a usable key.
+		r.Get("/e2ee/viewer-vault", srv.E2EEViewerVaultStatus)
+		r.Post("/e2ee/viewer-vault/unlock", srv.E2EEViewerVaultUnlock)
+		r.Put("/e2ee/viewer-vault", srv.E2EEViewerVaultPut)
+		r.Put("/e2ee/viewer-vault/pin", srv.E2EEViewerVaultPin)
+		r.Delete("/e2ee/viewer-vault", srv.E2EEViewerVaultDelete)
 
 		r.Post("/families", srv.CreateFamily)
 		r.Get("/family", srv.GetFamily)
@@ -662,6 +670,8 @@ func main() {
 		r.Put("/api/admin/settings/theme", srv.AdminPutTheme)
 		r.Get("/api/admin/settings/e2ee-trusted-default", srv.AdminGetTrustedServerDefault)
 		r.Put("/api/admin/settings/e2ee-trusted-default", srv.AdminPutTrustedServerDefault)
+		r.Get("/api/admin/settings/e2ee-viewer-vault", srv.AdminGetViewerVault)
+		r.Put("/api/admin/settings/e2ee-viewer-vault", srv.AdminPutViewerVault)
 		r.Get("/api/admin/settings/deployment-profile", srv.AdminGetDeploymentProfile)
 		r.Put("/api/admin/settings/deployment-profile", srv.AdminPutDeploymentProfile)
 		r.Get("/api/admin/settings/member-defaults", srv.AdminGetMemberDefaults)

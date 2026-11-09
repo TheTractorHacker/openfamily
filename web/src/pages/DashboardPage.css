@@ -72,3 +72,17 @@
   .wb-dashboard-stat .wb-stat-hint { display: none; }
   .wb-dashboard-map { min-height: 520px; }
 }
+
+/* "Private circles locked / unlocked" chip in the map header. */
+.wb-private-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.wb-private-chip-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  text-decoration: none;
+  font-weight: 600;
+}
