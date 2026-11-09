@@ -342,7 +342,7 @@ func (s *Server) ListMembers(w http.ResponseWriter, r *http.Request) {
 		SELECT u.id, u.email, u.name, u.role, u.totp_enabled, u.created_at, u.updated_at,
 		       u.avatar_data IS NOT NULL, u.avatar_version, u.avatar_updated_at,
 		       mp.lat, mp.lon, mp.ts, mp.battery_pct, mp.speed_mps, mp.motion_state, mp.accuracy_meters, mp.heading_deg,
-		       d.last_seen, u.phone, u.platform_admin
+		       d.last_seen, u.phone, u.platform_admin, mp.charging
 		FROM users u
 		LEFT JOIN member_positions mp ON mp.user_id = u.id AND NOT e2ee_keeps_data_on_phone(u.id)
 		LEFT JOIN (
@@ -370,13 +370,14 @@ func (s *Server) ListMembers(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(&m.ID, &m.Email, &m.Name, &m.Role, &m.TOTPEnabled, &m.CreatedAt, &m.UpdatedAt,
 			&m.HasAvatar, &m.AvatarVersion, &m.AvatarUpdatedAt,
 			&m.Lat, &m.Lon, &m.TS, &m.BatteryPct, &m.SpeedMPS, &m.MotionState, &m.AccuracyMeters, &m.HeadingDeg,
-			&m.LastSeenAt, &m.Phone, &memberIsPlatformAdmin); err != nil {
+			&m.LastSeenAt, &m.Phone, &memberIsPlatformAdmin, &m.Charging); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to scan member")
 			return
 		}
 		if !visible[m.ID] {
 			m.Lat, m.Lon, m.TS, m.BatteryPct, m.SpeedMPS, m.HeadingDeg, m.MotionState, m.AccuracyMeters, m.LastSeenAt =
 				nil, nil, nil, nil, nil, nil, nil, nil, nil
+			m.Charging = nil
 		} else {
 			m.PlacePresence = presence[m.ID]
 		}

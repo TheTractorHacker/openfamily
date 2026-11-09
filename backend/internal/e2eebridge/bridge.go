@@ -710,6 +710,7 @@ type fixBody struct {
 	Alt *float64 `json:"alt"`
 	Spd *float64 `json:"spd"`
 	Bat *float64 `json:"bat"`
+	Chg *bool    `json:"chg"` // optional (apps from 0.26.14): phone was charging
 }
 
 func validCoord(lat, lon float64) bool {
@@ -736,13 +737,13 @@ func (b *bridge) collect(circle, purpose, userID, memberName, device string, tsM
 	if name == "" {
 		name = "Orbitly"
 	}
-	add := func(ts int64, lat, lon float64, acc, alt, spd, bat *float64) {
+	add := func(ts int64, lat, lon float64, acc, alt, spd, bat *float64, chg *bool) {
 		if !mapped {
 			b.rs.Stats.Dropped["unmapped_user"]++
 			return
 		}
 		b.pending = append(b.pending, point{user: userID, circle: circle, kind: purpose, tgt: tgt, name: name, device: device, tsMs: ts, lat: lat, lon: lon,
-			acc: okNum(acc), alt: okNum(alt), spd: okNum(spd), batt: okNum(bat)})
+			acc: okNum(acc), alt: okNum(alt), spd: okNum(spd), batt: okNum(bat), chg: chg})
 	}
 	switch purpose {
 	case "fix":
@@ -750,7 +751,7 @@ func (b *bridge) collect(circle, purpose, userID, memberName, device string, tsM
 		if json.Unmarshal(body, &f) != nil || f.Lat == nil || f.Lon == nil || !validCoord(*f.Lat, *f.Lon) {
 			return false
 		}
-		add(tsMs, *f.Lat, *f.Lon, f.Acc, f.Alt, f.Spd, f.Bat)
+		add(tsMs, *f.Lat, *f.Lon, f.Acc, f.Alt, f.Spd, f.Bat, f.Chg)
 	case "history":
 		var h struct {
 			Pts [][]json.Number `json:"pts"`
@@ -775,7 +776,7 @@ func (b *bridge) collect(circle, purpose, userID, memberName, device string, tsM
 					acc = &a
 				}
 			}
-			add(int64(ts), lat, lon, acc, nil, nil, nil)
+			add(int64(ts), lat, lon, acc, nil, nil, nil, nil)
 			good++
 		}
 		if good == 0 && len(h.Pts) > 0 {

@@ -320,7 +320,7 @@ Bodies (keys are short on purpose; unknown keys are ignored):
 
 | purpose | body | notes |
 |---|---|---|
-| `fix` | `{lat, lon, acc?, alt?, spd?, hdg?, bat?, mo?}` | live position. Cap: bucket 1024 |
+| `fix` | `{lat, lon, acc?, alt?, spd?, hdg?, bat?, chg?, mo?}` | live position (`chg`: phone charging, boolean, apps from 0.26.14; readers ignore unknown keys). Cap: bucket 1024 |
 | `event` | `{k:"place", a:"enter"|"exit", pid, name, at}` | arrival/departure from the sender's phone. Bucket 1024 |
 | `place` | `{id, name, lat, lon, r, type, addr, en, ex, del}` | newest signed `ts` per `id` wins; `del:true` is a tombstone. Bucket 4096, at most 2000 per circle |
 | `history` | `{pts:[[ts_ms, lat, lon, acc?], ...]}` | sealed track chunks for retention and re-install. Up to bucket 69632 |

@@ -43,6 +43,7 @@ var Features = map[string]string{
 	"chat_e2ee":           "0.23.0", // chat sealed phone to phone in Private circles
 	"wire_v2":             "0.25.0", // API wire efficiency: bootstrap, ETag, delta lists, compact views, history simplify
 	"owner_approval":      "0.26.3", // circle owner may approve their own replacement device (key-log action 12, opt-in via ?owner_approval=1)
+	"member_charging":     "0.26.14", // optional `charging` flag on reports and member positions (sealed fixes: "chg"); older apps simply omit it
 }
 
 // Version is a parsed x.y.z app version. Pre-release and build suffixes are

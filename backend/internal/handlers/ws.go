@@ -30,6 +30,8 @@ type wsMember struct {
 	Lon             *float64    `json:"lon"`
 	TS              *time.Time  `json:"ts"`
 	BatteryPct      *float64    `json:"battery_pct"`
+	// Charging: the phone was charging at its last report; omitted when unknown.
+	Charging        *bool       `json:"charging,omitempty"`
 	SpeedMPS        *float64    `json:"speed_mps"`
 	HeadingDeg      *float64    `json:"heading_deg"`
 	MotionState     *string     `json:"motion_state"`
@@ -62,6 +64,7 @@ type wsLocation struct {
 	TS             time.Time `json:"ts"`
 	LastSeenAt     time.Time `json:"last_seen_at"`
 	BatteryPct     *float64  `json:"battery_pct"`
+	Charging       *bool     `json:"charging,omitempty"`
 	SpeedMPS       *float64  `json:"speed_mps"`
 	HeadingDeg     *float64  `json:"heading_deg"`
 	MotionState    *string   `json:"motion_state"`
@@ -81,6 +84,7 @@ type wsPresence struct {
 	UserID     string    `json:"user_id"`
 	TS         time.Time `json:"ts"`
 	BatteryPct *float64  `json:"battery_pct,omitempty"`
+	Charging   *bool     `json:"charging,omitempty"`
 	CircleID   string    `json:"circle_id,omitempty"`
 }
 
@@ -334,7 +338,7 @@ func (s *Server) circleMembersSnapshot(ctx context.Context, circleIDs []string, 
 		SELECT u.id, u.email, u.name, u.role,
 		       u.avatar_data IS NOT NULL, u.avatar_version, u.avatar_updated_at,
 		       mp.lat, mp.lon, mp.ts, mp.battery_pct, mp.speed_mps, mp.motion_state, mp.accuracy_meters, mp.heading_deg,
-		       d.last_seen
+		       d.last_seen, mp.charging
 		FROM users u
 		LEFT JOIN member_positions mp ON mp.user_id = u.id AND NOT e2ee_keeps_data_on_phone(u.id)
 		LEFT JOIN (
@@ -368,9 +372,10 @@ func (s *Server) circleMembersSnapshot(ctx context.Context, circleIDs []string, 
 			motion          *string
 			accuracy        *float64
 			lastSeenAt      *time.Time
+			charging        *bool
 		)
 		if err := rows.Scan(&id, &email, &name, &role, &hasAvatar, &avatarVersion, &avatarUpdatedAt,
-			&lat, &lon, &ts, &battery, &speed, &motion, &accuracy, &heading, &lastSeenAt); err != nil {
+			&lat, &lon, &ts, &battery, &speed, &motion, &accuracy, &heading, &lastSeenAt, &charging); err != nil {
 			return nil, err
 		}
 		m := wsMember{
@@ -384,6 +389,7 @@ func (s *Server) circleMembersSnapshot(ctx context.Context, circleIDs []string, 
 			Lon:             lon,
 			TS:              ts,
 			BatteryPct:      battery,
+			Charging:        charging,
 			SpeedMPS:        speed,
 			HeadingDeg:      heading,
 			MotionState:     motion,
@@ -422,6 +428,7 @@ func (s *Server) circleMembersSnapshot(ctx context.Context, circleIDs []string, 
 func (m *wsMember) redactLocation() {
 	m.Lat, m.Lon, m.TS, m.BatteryPct, m.SpeedMPS, m.HeadingDeg, m.MotionState, m.AccuracyMeters, m.LastSeenAt =
 		nil, nil, nil, nil, nil, nil, nil, nil, nil
+	m.Charging = nil
 	m.PlacePresence = nil
 }
 
@@ -471,7 +478,7 @@ func (s *Server) broadcastLocation(ownerID string, loc wsLocation) {
 // broadcastLocation, it resolves the family under a background context so a
 // client disconnect cannot cancel the broadcast; callers should invoke it in a
 // goroutine.
-func (s *Server) broadcastPresence(ownerID string, ts time.Time, batteryPct *float64) {
+func (s *Server) broadcastPresence(ownerID string, ts time.Time, batteryPct *float64, charging *bool) {
 	// Nobody listening: skip the family lookup entirely, matching
 	// broadcastLocation's idle fast path.
 	if !s.hub.hasAny() && !s.hub.hasAdminClients() {
@@ -489,7 +496,7 @@ func (s *Server) broadcastPresence(ownerID string, ts time.Time, batteryPct *flo
 		slog.Warn("presence broadcast: resolve own circles failed", "err", err, "user_id", ownerID)
 		return
 	}
-	p := wsPresence{Type: "presence", UserID: ownerID, TS: ts, BatteryPct: batteryPct}
+	p := wsPresence{Type: "presence", UserID: ownerID, TS: ts, BatteryPct: batteryPct, Charging: charging}
 	msg, err := json.Marshal(p)
 	if err != nil {
 		slog.Warn("presence broadcast: marshal failed", "err", err)

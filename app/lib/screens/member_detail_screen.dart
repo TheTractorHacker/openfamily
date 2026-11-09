@@ -220,9 +220,12 @@ class _Header extends StatelessWidget {
   Widget build(BuildContext context) {
     final ColorScheme cs = Theme.of(context).colorScheme;
     final int b = member.batteryPercent;
+    final bool charging = member.showsCharging;
     final Color bc = b <= 0
         ? AppColors.statusGrey
-        : b <= 20
+        : charging
+            ? AppColors.statusGreen
+            : b <= 20
             ? AppColors.statusRed
             : b <= 50
                 ? AppColors.statusOrange
@@ -262,10 +265,17 @@ class _Header extends StatelessWidget {
                   ],
                   const SizedBox(height: AppSpace.sm),
                   DsStatusChip(
-                    label: b > 0 ? 'Battery $b%' : 'Battery unknown',
+                    key: const Key('member_detail_battery'),
+                    label: b <= 0
+                        ? 'Battery unknown'
+                        : charging
+                            ? 'Battery $b% · Charging'
+                            : 'Battery $b%',
                     icon: b <= 0
                         ? Icons.battery_unknown
-                        : b <= 20
+                        : charging
+                            ? Icons.battery_charging_full
+                            : b <= 20
                             ? Icons.battery_1_bar
                             : b <= 50
                                 ? Icons.battery_3_bar

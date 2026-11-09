@@ -30,7 +30,7 @@ const (
 // compactMemberFields is what `view=compact` keeps: the map and people list,
 // without email, phone, TOTP state or account timestamps.
 var compactMemberFields = []string{
-	"id", "name", "role", "lat", "lon", "ts", "battery_pct", "speed_mps", "heading_deg",
+	"id", "name", "role", "lat", "lon", "ts", "battery_pct", "charging", "speed_mps", "heading_deg",
 	"motion_state", "accuracy_meters", "last_seen_at", "place_presence",
 	"has_avatar", "avatar_version", "circle_ids", "sharing_circle_ids",
 }

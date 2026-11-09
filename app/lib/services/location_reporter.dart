@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart'
 import 'package:geolocator/geolocator.dart';
 
 import 'api_client.dart';
+import 'battery_report.dart';
 import 'device_service.dart';
 import 'diagnostics/diagnostics_reporter.dart';
 import 'e2ee/private_runtime.dart';
@@ -119,6 +120,9 @@ class LocationReporter {
 
   DateTime? _batteryReadAt;
   int? _batteryCache;
+
+  /// Charging state read with [_batteryCache]; null when unknown.
+  bool? _chargingCache;
   DateTime? _lastDrainAt;
   static const Duration _drainEvery = Duration(seconds: 10);
 
@@ -156,12 +160,8 @@ class LocationReporter {
     } catch (_) {
       _batteryCache = null; // battery_plus is unsupported on web.
     }
-    bool charging = false;
-    try {
-      final BatteryState st = await _battery.batteryState;
-      charging = st == BatteryState.charging || st == BatteryState.full;
-    } catch (_) {}
-    _cadence.setBattery(_batteryCache, charging: charging);
+    _chargingCache = await readCharging(_battery);
+    _cadence.setBattery(_batteryCache, charging: _chargingCache == true);
   }
 
   /// Syncs external inputs (SOS, persisted boost from the other isolate,
@@ -240,8 +240,10 @@ class LocationReporter {
       } catch (_) {
         batteryPct = null;
       }
+      final bool? charging =
+          batteryPct == null ? null : await readCharging(_battery);
       final Map<String, dynamic> body = <String, dynamic>{'device_id': deviceId};
-      if (batteryPct != null) body['battery_pct'] = batteryPct;
+      addBatteryFields(body, batteryPct, charging);
       await ApiClient.post('/devices/heartbeat', body: body);
     } on SessionExpiredException {
       // The app root handles the redirect; stop reporting for this session.
@@ -351,6 +353,7 @@ class LocationReporter {
     Position position, {
     required String? deviceId,
     int? batteryPct,
+    bool? charging,
   }) {
     final Map<String, dynamic> body = <String, dynamic>{
       'device_id': deviceId,
@@ -360,7 +363,7 @@ class LocationReporter {
       'motion_state': '',
       'source': 'foreground',
     };
-    if (batteryPct != null) body['battery_pct'] = batteryPct;
+    addBatteryFields(body, batteryPct, charging);
     if (position.accuracy > 0) body['accuracy_meters'] = position.accuracy;
     // Altitude is valid below sea level (negative), so send any finite value.
     if (position.altitude.isFinite) {
@@ -414,7 +417,10 @@ class LocationReporter {
       _pendingPosition = position;
       if (replaced != null) {
         unawaited(LocationOutbox.enqueue(
-          buildBody(replaced, deviceId: _deviceId, batteryPct: _batteryCache),
+          buildBody(replaced,
+              deviceId: _deviceId,
+              batteryPct: _batteryCache,
+              charging: _chargingCache),
         ));
       }
       return;
@@ -438,7 +444,10 @@ class LocationReporter {
         buildBody(position, deviceId: _deviceId, batteryPct: null);
     try {
       await _refreshBattery(DateTime.now().toUtc());
-      body = buildBody(position, deviceId: _deviceId, batteryPct: _batteryCache);
+      body = buildBody(position,
+          deviceId: _deviceId,
+          batteryPct: _batteryCache,
+          charging: _chargingCache);
 
       // Private (end-to-end encrypted) circles get a sealed copy; the plaintext
       // report below is sent only when a standard circle exists. With no private

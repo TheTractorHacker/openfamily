@@ -20,13 +20,20 @@ additive; old clients keep working.
 ```json
 {"type":"location","user_id":"<uuid>","lat":1.0,"lon":2.0,
  "ts":"2026-01-01T12:00:00Z","last_seen_at":"2026-01-01T12:00:01Z",
- "battery_pct":80,"speed_mps":13.4,"heading_deg":271.5,
+ "battery_pct":80,"charging":true,"speed_mps":13.4,"heading_deg":271.5,
  "motion_state":"driving","accuracy_meters":6.0,"circle_id":"<uuid, optional>"}
 ```
 
 - `ts`: GPS fix time (use for interpolation); `last_seen_at`: server receipt.
 - `speed_mps`, `heading_deg` (degrees clockwise from north), `accuracy_meters`,
   `battery_pct`, `motion_state`: nullable (null/absent when unknown).
+- `charging` (optional, since 0.26.14): the phone was charging at this fix.
+  Omitted when unknown (older apps); a fix that carries `battery_pct` without
+  `charging` means "unknown", so clients clear any earlier value. Also in
+  `presence` frames (with `battery_pct`), the members snapshot and
+  `GET /family/members` (including `view=compact`). Apps send it on
+  `POST /locations`, `/locations/batch` and `/devices/heartbeat` next to
+  `battery_pct`; Private circles carry it in the sealed fix as `chg`.
 - `heading_deg` is also in the members snapshot (WS `members` frame and
   `GET /family/members`), nullable.
 - `place_presence` (members snapshot and `GET /family/members` only, not `location`

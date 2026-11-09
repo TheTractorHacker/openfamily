@@ -830,3 +830,28 @@ func TestTrustedServerDefaultIsOnlyARecommendation(t *testing.T) {
 		t.Fatal("exposed true without the ingest token")
 	}
 }
+
+// The sealed fix's optional "chg" flag (apps from 0.26.14) reaches the server
+// lane's last position; a fix without it (older apps) stays "unknown".
+func TestServerIngestCarriesCharging(t *testing.T) {
+	e := readyEnv(t)
+	now := time.Now()
+	p := e.point("fix", e.b, now.Add(time.Second), 52.5, 13.4) // newer than the setup's last position
+	p["bat"], p["chg"] = 9.0, true
+	if c, m, raw := e.ingest(p); c != 200 || m["stored"].(float64) != 1 {
+		t.Fatalf("ingest: %d %s", c, raw)
+	}
+	var chg *bool
+	_ = e.pool.QueryRow(context.Background(), `SELECT charging FROM member_positions WHERE user_id = $1`, e.ids["B"]).Scan(&chg)
+	if chg == nil || !*chg {
+		t.Fatalf("member_positions.charging=%v, want true", chg)
+	}
+	if c, m, raw := e.ingest(e.point("fix", e.b, now.Add(2*time.Second), 52.6, 13.5)); c != 200 || m["stored"].(float64) != 1 {
+		t.Fatalf("old fix: %d %s", c, raw)
+	}
+	chg = nil
+	_ = e.pool.QueryRow(context.Background(), `SELECT charging FROM member_positions WHERE user_id = $1`, e.ids["B"]).Scan(&chg)
+	if chg != nil {
+		t.Fatalf("fix without chg left charging=%v, want NULL", *chg)
+	}
+}

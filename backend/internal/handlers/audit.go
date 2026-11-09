@@ -81,6 +81,7 @@ func (s *Server) adminLocationDenied(ctx context.Context, adminID, familyID, det
 func redactAdminLocation(m *models.MemberWithLocation) {
 	m.Lat, m.Lon, m.TS, m.BatteryPct, m.SpeedMPS, m.HeadingDeg, m.MotionState, m.AccuracyMeters, m.LastSeenAt =
 		nil, nil, nil, nil, nil, nil, nil, nil, nil
+	m.Charging = nil
 }
 
 // clientIP extracts the client IP from r.RemoteAddr, stripping any port.

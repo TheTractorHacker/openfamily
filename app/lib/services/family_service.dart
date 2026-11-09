@@ -175,6 +175,10 @@ class FamilyService {
     for (final String k in const <String>['lat', 'lon', 'ts', 'accuracy_meters', 'battery_pct', 'speed_mps', 'heading_deg', 'motion_state', 'last_seen_at']) {
       if (frame.containsKey(k)) row[k] = frame[k];
     }
+    // Charging travels with the battery reading (absent = unknown).
+    if (frame.containsKey('battery_pct') || frame.containsKey('charging')) {
+      row['charging'] = frame['charging'] == true;
+    }
     _rosterWriteTimer ??= Timer(const Duration(seconds: 30), () {
       _rosterWriteTimer = null;
       final String? key = _rosterKey;

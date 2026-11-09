@@ -588,6 +588,8 @@ class PrivateRuntime {
         if (loc['speed_mps'] != null) 'spd': loc['speed_mps'],
         if (loc['heading_deg'] != null) 'hdg': loc['heading_deg'],
         if (loc['battery_pct'] != null) 'bat': loc['battery_pct'],
+        // Optional since 0.26.14; older receivers ignore unknown keys.
+        if (loc['charging'] is bool) 'chg': loc['charging'],
         if (loc['motion_state'] != null && loc['motion_state'] != '') 'mo': loc['motion_state'],
       };
 
@@ -624,7 +626,7 @@ class PrivateRuntime {
       l.add(<String, dynamic>{
         'ts': loc['ts'], 'lat': loc['lat'], 'lon': loc['lon'], 'accuracy_meters': loc['accuracy_meters'],
         'altitude_meters': loc['altitude_meters'], 'speed_mps': loc['speed_mps'], 'heading_deg': loc['heading_deg'],
-        'battery_pct': loc['battery_pct'], 'motion_state': loc['motion_state'],
+        'battery_pct': loc['battery_pct'], 'charging': loc['charging'], 'motion_state': loc['motion_state'],
         if (circles != null) 'for': circles,
       });
       final int cut = clock.now().subtract(const Duration(hours: 12)).millisecondsSinceEpoch;
@@ -780,7 +782,7 @@ class PrivateRuntime {
       await kv.set(_lastFixKey, jsonEncode(<String, dynamic>{
         'ts': ts.toIso8601String(), 'lat': loc['lat'], 'lon': loc['lon'], 'accuracy_meters': loc['accuracy_meters'],
         'altitude_meters': loc['altitude_meters'], 'speed_mps': loc['speed_mps'], 'heading_deg': loc['heading_deg'],
-        'battery_pct': loc['battery_pct'], 'motion_state': loc['motion_state'],
+        'battery_pct': loc['battery_pct'], 'charging': loc['charging'], 'motion_state': loc['motion_state'],
       }));
     } catch (_) {}
   }
@@ -1562,7 +1564,8 @@ class PrivateRuntime {
       final LastPosition pos = LastPosition(
           circleId: newest.circleId, userId: newest.userId, tsMs: newest.ts.millisecondsSinceEpoch,
           lat: (b['lat'] as num).toDouble(), lon: (b['lon'] as num).toDouble(), acc: (b['acc'] as num?)?.toDouble(),
-          bat: b['bat'] as num?, spd: b['spd'] as num?, hdg: b['hdg'] as num?, mo: b['mo'] as String?);
+          bat: b['bat'] as num?, spd: b['spd'] as num?, hdg: b['hdg'] as num?, mo: b['mo'] as String?,
+          chg: b['chg'] is bool ? b['chg'] as bool : null);
       lastPositions.note(pos);
       onMemberFrame?.call(pos.toFrame(heardAt: clock.now()));
     }

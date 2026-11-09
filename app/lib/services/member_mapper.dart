@@ -15,6 +15,7 @@ Member memberFromJson(Map<String, dynamic> json) {
   final num? lon = json['lon'] as num?;
   final dynamic ts = json['ts'];
   final num? batteryPct = json['battery_pct'] as num?;
+  final bool charging = json['charging'] == true;
   final num? speedMps = json['speed_mps'] as num?;
   final String? motion = json['motion_state'] as String?;
   final num? accuracy = json['accuracy_meters'] as num?;
@@ -46,9 +47,11 @@ Member memberFromJson(Map<String, dynamic> json) {
       position: position,
       lastSeen: effectiveLastSeen,
       batteryPct: batteryPct,
+      charging: charging,
       accuracy: accuracy,
     ),
     batteryPercent: (batteryPct ?? 0).round(),
+    charging: charging,
     address: _addressFrom(
       position: position,
       lastSeen: effectiveLastSeen,
@@ -118,6 +121,12 @@ Member memberFromLocationUpdate(Member existing, Map<String, dynamic> json) {
   final num? lon = json['lon'] as num?;
   final dynamic ts = json['ts'];
   final num? batteryPct = json['battery_pct'] as num?;
+  // The charging flag belongs to the fix like the battery level: a frame that
+  // carries a battery reading without the flag (older app) means "unknown",
+  // a frame without either keeps what we knew.
+  final bool charging = batteryPct != null || json.containsKey('charging')
+      ? json['charging'] == true
+      : existing.charging;
   final num? speedMps = json['speed_mps'] as num?;
   final String? motion = json['motion_state'] as String?;
   final num? accuracy = json['accuracy_meters'] as num?;
@@ -155,10 +164,12 @@ Member memberFromLocationUpdate(Member existing, Map<String, dynamic> json) {
       position: position,
       lastSeen: timestamp,
       batteryPct: effectiveBattery,
+      charging: charging,
       accuracy: accuracy,
     ),
     batteryPercent:
         batteryPct != null ? batteryPct.round() : existing.batteryPercent,
+    charging: charging,
     address: _addressFrom(
       position: position,
       lastSeen: timestamp,
@@ -198,6 +209,9 @@ Member memberFromPresenceUpdate(Member existing, Map<String, dynamic> json) {
     status: MemberStatus.normal,
     batteryPercent:
         batteryPct != null ? batteryPct.round() : existing.batteryPercent,
+    charging: batteryPct != null || json.containsKey('charging')
+        ? json['charging'] == true
+        : existing.charging,
     address: _addressFrom(
       position: existing.position,
       lastSeen: ts,
@@ -223,6 +237,7 @@ MemberStatus _statusFrom({
   required LatLng? position,
   required DateTime? lastSeen,
   required num? batteryPct,
+  bool charging = false,
   required num? accuracy,
 }) {
   if (position == null) return MemberStatus.stopped;
@@ -230,7 +245,10 @@ MemberStatus _statusFrom({
       DateTime.now().toUtc().difference(lastSeen) > kStaleAfter) {
     return MemberStatus.stopped;
   }
-  if ((batteryPct ?? 100) < kLowBatteryThreshold) return MemberStatus.warning;
+  // A phone on the charger is not a low-battery concern.
+  if (!charging && (batteryPct ?? 100) < kLowBatteryThreshold) {
+    return MemberStatus.warning;
+  }
   if ((accuracy ?? 0) > kGpsIssueAccuracyMeters) return MemberStatus.gpsIssue;
   return MemberStatus.normal;
 }

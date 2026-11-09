@@ -711,7 +711,7 @@ func (w *world) cycleOK(b *bridge) {
 // fix seals a live fix of `by` for alice's circle at epoch 1.
 func (w *world) fix(by *tdev, seq uint64, ageSec int, lat, lon float64) fakeItem {
 	ts := uint64(w.nowT.Add(-time.Duration(ageSec) * time.Second).UnixMilli())
-	return w.of.sealItem(w.key1, 1, by, "fix", seq, ts, map[string]any{"lat": lat, "lon": lon, "acc": 8.5, "alt": 31.0, "spd": 1.5, "bat": 50.0, "mo": "walk"})
+	return w.of.sealItem(w.key1, 1, by, "fix", seq, ts, map[string]any{"lat": lat, "lon": lon, "acc": 8.5, "alt": 31.0, "spd": 1.5, "bat": 50.0, "chg": true, "mo": "walk"})
 }
 
 func (w *world) history(by *tdev, seq uint64, pts ...[]any) fakeItem {

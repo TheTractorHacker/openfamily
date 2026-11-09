@@ -59,7 +59,7 @@ See [docs/design/E2EE.md](../design/E2EE.md) and [PRIVACY.md](../../PRIVACY.md).
 | Route | Scope | Notes |
 |---|---|---|
 | `GET /ping` | any | token name, scopes, circles with `state` |
-| `GET /members` | `presence` | `members[]`: `id`, `name`, `state` (`home`, `not_home`, place name, `unknown`, `unavailable_private_circle`, `sharing_off`), `place`, `battery_pct`, `speed_mps`, `last_seen`, `location` (lat, lon, accuracy_m; `location` scope), `driving` (`driving` scope), `sos_active` / `crash_active` (`events` scope), `location_available`, `unavailable_reason` |
+| `GET /members` | `presence` | `members[]`: `id`, `name`, `state` (`home`, `not_home`, place name, `unknown`, `unavailable_private_circle`, `sharing_off`), `place`, `battery_pct`, `charging` (omitted when unknown), `speed_mps`, `last_seen`, `location` (lat, lon, accuracy_m; `location` scope), `driving` (`driving` scope), `sos_active` / `crash_active` (`events` scope), `location_available`, `unavailable_reason` |
 | `GET /places` | `places` | zones of readable circles (id, name, type, lat, lon, radius_m) |
 | `GET /events?after=<id>&limit=` | `events` | the pull side of the webhook (same filtering). Without `after` it only returns `next_after`; history is never dumped |
 

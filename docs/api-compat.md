@@ -105,6 +105,7 @@ requests. See [API wire efficiency](developers/api-efficiency.md).
 | --- | --- | --- |
 | Private (end-to-end encrypted) circle, app below 0.15.0 | reports a version | `GET /circles` appends "(update the app to open this private circle)" to the circle name (the only field every version renders) and sets `update_required`; every client gets `min_app_version` on a private circle |
 | All circles private, app below 0.16.0 posts a plaintext location | reports a version | the existing 409 `e2ee_private_circle` carries "Update Orbitly to share location..." |
+| Charging flag (feature `member_charging`, 0.26.14) | apps below 0.26.14 never send `charging`; older servers ignore it | the field is optional everywhere: a report without it stores "unknown" (NULL) and responses omit it; ingest decoding is not strict, so a new app talking to an older server is unaffected |
 | Owner-approval key-log entry (action 12, feature `owner_approval`) | any client that does not send `GET /e2ee/log?owner_approval=1` (apps below 0.27, bridges) | the entry is served redacted (hash chain still verifiable), because older verifiers reject unknown action codes; the self-approval itself is an ordinary approval entry |
 
 Findings from the audit of v0.10.0 to v0.20.1 (field-level): no JSON field

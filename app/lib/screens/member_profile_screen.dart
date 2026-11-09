@@ -102,7 +102,9 @@ class MemberProfileScreen extends StatelessWidget {
                       ),
                       label: 'Battery',
                       value: member.batteryPercent > 0
-                          ? '${member.batteryPercent}%'
+                          ? member.showsCharging
+                              ? '${member.batteryPercent}% · Charging'
+                              : '${member.batteryPercent}%'
                           : 'Offline',
                     ),
                     _DetailRow(
@@ -180,6 +182,7 @@ class MemberProfileScreen extends StatelessWidget {
 
   IconData _batteryIcon() {
     if (member.batteryPercent <= 0) return Icons.battery_unknown;
+    if (member.showsCharging) return Icons.battery_charging_full;
     if (member.batteryPercent <= 20) return Icons.battery_1_bar;
     if (member.batteryPercent <= 50) return Icons.battery_3_bar;
     if (member.batteryPercent <= 80) return Icons.battery_5_bar;
@@ -188,6 +191,7 @@ class MemberProfileScreen extends StatelessWidget {
 
   Color _batteryColor() {
     if (member.batteryPercent <= 0) return AppColors.statusGrey;
+    if (member.showsCharging) return AppColors.statusGreen;
     if (member.batteryPercent <= 20) return AppColors.statusRed;
     if (member.batteryPercent <= 50) return AppColors.statusOrange;
     return AppColors.statusGreen;

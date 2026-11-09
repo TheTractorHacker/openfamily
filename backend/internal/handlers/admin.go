@@ -87,7 +87,7 @@ func (s *Server) AdminListFamilyMembers(w http.ResponseWriter, r *http.Request) 
 		       u.avatar_data IS NOT NULL, u.avatar_version, u.avatar_updated_at,
 		       mp.lat, mp.lon, mp.ts, mp.battery_pct, mp.speed_mps, mp.motion_state, mp.accuracy_meters,
 		       d.last_seen,
-		       e2ee_keeps_data_on_phone(u.id)
+		       e2ee_keeps_data_on_phone(u.id), mp.charging
 		FROM users u
 		LEFT JOIN member_positions mp ON mp.user_id = u.id AND NOT e2ee_keeps_data_on_phone(u.id)
 		LEFT JOIN (
@@ -108,7 +108,7 @@ func (s *Server) AdminListFamilyMembers(w http.ResponseWriter, r *http.Request) 
 		if err := rows.Scan(&m.ID, &m.Email, &m.Name, &m.Role, &m.TOTPEnabled, &m.CreatedAt, &m.UpdatedAt,
 			&m.HasAvatar, &m.AvatarVersion, &m.AvatarUpdatedAt,
 			&m.Lat, &m.Lon, &m.TS, &m.BatteryPct, &m.SpeedMPS, &m.MotionState, &m.AccuracyMeters,
-			&m.LastSeenAt, &m.KeepsDataOnPhone); err != nil {
+			&m.LastSeenAt, &m.KeepsDataOnPhone, &m.Charging); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to scan member")
 			return
 		}
@@ -178,7 +178,7 @@ func (s *Server) AdminListMembers(w http.ResponseWriter, r *http.Request) {
 		       mp.lat, mp.lon, mp.ts, mp.battery_pct, mp.speed_mps, mp.motion_state, mp.accuracy_meters,
 		       d.last_seen,
 		       u.family_id, f.name,
-		       e2ee_keeps_data_on_phone(u.id)
+		       e2ee_keeps_data_on_phone(u.id), mp.charging
 		FROM users u
 		LEFT JOIN member_positions mp ON mp.user_id = u.id AND NOT e2ee_keeps_data_on_phone(u.id)
 		LEFT JOIN (
@@ -201,7 +201,7 @@ func (s *Server) AdminListMembers(w http.ResponseWriter, r *http.Request) {
 			&m.HasAvatar, &m.AvatarVersion, &m.AvatarUpdatedAt,
 			&m.Lat, &m.Lon, &m.TS, &m.BatteryPct, &m.SpeedMPS, &m.MotionState, &m.AccuracyMeters,
 			&m.LastSeenAt,
-			&m.FamilyID, &familyName, &m.KeepsDataOnPhone); err != nil {
+			&m.FamilyID, &familyName, &m.KeepsDataOnPhone, &m.Charging); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to scan member")
 			return
 		}

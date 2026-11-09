@@ -86,6 +86,7 @@ type haMember struct {
 	Reason            string      `json:"unavailable_reason,omitempty"`
 	Place             *haPlaceRef `json:"place"`
 	BatteryPct        *float64    `json:"battery_pct"`
+	Charging          *bool       `json:"charging,omitempty"` // omitted when the phone did not say
 	SpeedMPS          *float64    `json:"speed_mps"`
 	LastSeen          *time.Time  `json:"last_seen"`
 	Location          *haLocation `json:"location,omitempty"`
@@ -220,7 +221,7 @@ func (s *Server) HAMembers(w http.ResponseWriter, r *http.Request) {
 		m.LocationAvailable = true
 		p := pos[uid]
 		if p != nil {
-			m.BatteryPct, m.SpeedMPS, m.LastSeen = p.battery, p.speed, p.ts
+			m.BatteryPct, m.Charging, m.SpeedMPS, m.LastSeen = p.battery, p.charging, p.speed, p.ts
 			if integ.has(haScopeLocation) {
 				m.Location = &haLocation{Lat: p.lat, Lon: p.lon, AccuracyM: p.acc}
 			}
@@ -264,6 +265,7 @@ type haPos struct {
 	acc, battery, speed *float64
 	ts                  *time.Time
 	motion              *string
+	charging            *bool
 }
 
 func (s *Server) haPositions(ctx context.Context, userIDs []string) (map[string]*haPos, error) {
@@ -272,7 +274,7 @@ func (s *Server) haPositions(ctx context.Context, userIDs []string) (map[string]
 		return out, nil
 	}
 	rows, err := s.Pool.Query(ctx, `
-		SELECT user_id::text, lat, lon, accuracy_meters, battery_pct, speed_mps, ts, motion_state
+		SELECT user_id::text, lat, lon, accuracy_meters, battery_pct, speed_mps, ts, motion_state, charging
 		FROM member_positions WHERE user_id = ANY($1::uuid[]) AND NOT e2ee_keeps_data_on_phone(user_id)`, userIDs)
 	if err != nil {
 		return nil, err
@@ -281,7 +283,7 @@ func (s *Server) haPositions(ctx context.Context, userIDs []string) (map[string]
 	for rows.Next() {
 		var uid string
 		var p haPos
-		if err := rows.Scan(&uid, &p.lat, &p.lon, &p.acc, &p.battery, &p.speed, &p.ts, &p.motion); err != nil {
+		if err := rows.Scan(&uid, &p.lat, &p.lon, &p.acc, &p.battery, &p.speed, &p.ts, &p.motion, &p.charging); err != nil {
 			return nil, err
 		}
 		out[uid] = &p

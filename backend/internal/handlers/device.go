@@ -338,6 +338,7 @@ func (s *Server) HeartbeatDevice(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		DeviceID   string   `json:"device_id"`
 		BatteryPct *float64 `json:"battery_pct,omitempty"`
+		Charging   *bool    `json:"charging,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -375,7 +376,7 @@ func (s *Server) HeartbeatDevice(w http.ResponseWriter, r *http.Request) {
 
 	// Best-effort liveness fan-out: family members see the member stay fresh
 	// without any position change.
-	go s.broadcastPresence(claims.UserID, time.Now(), req.BatteryPct)
+	go s.broadcastPresence(claims.UserID, time.Now(), req.BatteryPct, req.Charging)
 
 	w.WriteHeader(http.StatusNoContent)
 }

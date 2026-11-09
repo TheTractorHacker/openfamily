@@ -116,6 +116,7 @@ class Member {
     required this.status,
     required this.batteryPercent,
     required this.address,
+    this.charging = false,
     this.hasAvatar = false,
     this.avatarUpdatedAt,
     this.avatarVersion = 0,
@@ -155,6 +156,14 @@ class Member {
 
   /// Battery percentage (0–100).
   final int batteryPercent;
+
+  /// Whether the member's phone was charging at its last report (backend
+  /// `charging`). False when unknown: older apps and servers never send it.
+  final bool charging;
+
+  /// True when the battery level is known and the phone is charging: the
+  /// condition every battery indicator uses to show the bolt.
+  bool get showsCharging => charging && batteryPercent > 0;
 
   /// Human-readable current address / place label.
   final String address;
@@ -253,6 +262,7 @@ class Member {
     LatLng? position,
     MemberStatus? status,
     int? batteryPercent,
+    bool? charging,
     String? address,
     String? name,
     MovementType? movement,
@@ -272,6 +282,7 @@ class Member {
       position: position ?? this.position,
       status: status ?? this.status,
       batteryPercent: batteryPercent ?? this.batteryPercent,
+      charging: charging ?? this.charging,
       address: address ?? this.address,
       hasAvatar: hasAvatar,
       avatarUpdatedAt: avatarUpdatedAt,
@@ -307,6 +318,7 @@ class Member {
       position: position,
       status: status,
       batteryPercent: batteryPercent,
+      charging: charging,
       address: address,
       hasAvatar: hasAvatar,
       avatarUpdatedAt: hasAvatar ? avatarUpdatedAt : null,

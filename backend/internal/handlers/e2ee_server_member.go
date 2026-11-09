@@ -526,9 +526,9 @@ func (s *Server) E2EEPurgeServerCopies(w http.ResponseWriter, r *http.Request) {
 		}
 		tag, err := tx.Exec(ctx, `
 			UPDATE member_positions mp SET lat = n.lat, lon = n.lon, ts = n.ts, device_id = n.device_id,
-			       accuracy_meters = n.acc, speed_mps = n.spd, battery_pct = n.bat, heading_deg = NULL, motion_state = NULL
+			       accuracy_meters = n.acc, speed_mps = n.spd, battery_pct = n.bat, charging = n.chg, heading_deg = NULL, motion_state = NULL
 			FROM (SELECT ST_Y(l.geom) AS lat, ST_X(l.geom) AS lon, l.ts, l.device_id, l.accuracy_meters AS acc,
-			             l.speed_mps AS spd, l.battery_pct AS bat
+			             l.speed_mps AS spd, l.battery_pct AS bat, l.charging AS chg
 			      FROM locations l JOIN devices d ON d.id = l.device_id
 			      WHERE d.user_id = $1 AND (l.e2ee_circle_id IS NULL OR e2ee_member_server_ok(l.e2ee_circle_id, d.user_id))
 			      ORDER BY l.ts DESC LIMIT 1) n
@@ -617,6 +617,7 @@ type serverIngestPoint struct {
 	Alt            *float64 `json:"alt,omitempty"`
 	Spd            *float64 `json:"spd,omitempty"`
 	Bat            *float64 `json:"bat,omitempty"`
+	Chg            *bool    `json:"chg,omitempty"`
 }
 
 type serverIngestReq struct {
@@ -757,10 +758,10 @@ func (s *Server) E2EEServerIngest(w http.ResponseWriter, r *http.Request) {
 			userDevice[p.UserID] = dv
 		}
 		tag, err := tx.Exec(ctx, `
-			INSERT INTO locations (device_id, ts, geom, accuracy_meters, altitude_meters, speed_mps, battery_pct, source, e2ee_circle_id)
-			VALUES ($1, $2, ST_SetSRID(ST_MakePoint($3, $4), 4326), $5, $6, $7, $8, $9, $10)
+			INSERT INTO locations (device_id, ts, geom, accuracy_meters, altitude_meters, speed_mps, battery_pct, source, e2ee_circle_id, charging)
+			VALUES ($1, $2, ST_SetSRID(ST_MakePoint($3, $4), 4326), $5, $6, $7, $8, $9, $10, $11)
 			ON CONFLICT (device_id, ts) DO NOTHING`,
-			dv, ts, *p.Lon, *p.Lat, finiteOrNil(p.Acc), finiteOrNil(p.Alt), finiteOrNil(p.Spd), finiteOrNil(p.Bat), serverSource, req.CircleID)
+			dv, ts, *p.Lon, *p.Lat, finiteOrNil(p.Acc), finiteOrNil(p.Alt), finiteOrNil(p.Spd), finiteOrNil(p.Bat), serverSource, req.CircleID, p.Chg)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to store location")
 			return
@@ -783,13 +784,13 @@ func (s *Server) E2EEServerIngest(w http.ResponseWriter, r *http.Request) {
 	for uid, lf := range newest {
 		dv := userDevice[uid]
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO member_positions (user_id, lat, lon, ts, battery_pct, speed_mps, accuracy_meters, device_id, updated_at)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8, now())
+			INSERT INTO member_positions (user_id, lat, lon, ts, battery_pct, speed_mps, accuracy_meters, device_id, charging, updated_at)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9, now())
 			ON CONFLICT (user_id) DO UPDATE SET lat = EXCLUDED.lat, lon = EXCLUDED.lon, ts = EXCLUDED.ts,
 			  battery_pct = EXCLUDED.battery_pct, speed_mps = EXCLUDED.speed_mps, accuracy_meters = EXCLUDED.accuracy_meters,
-			  device_id = EXCLUDED.device_id, updated_at = now()
+			  device_id = EXCLUDED.device_id, charging = EXCLUDED.charging, updated_at = now()
 			WHERE member_positions.ts < EXCLUDED.ts`,
-			uid, *lf.p.Lat, *lf.p.Lon, lf.ts, finiteOrNil(lf.p.Bat), finiteOrNil(lf.p.Spd), finiteOrNil(lf.p.Acc), dv); err != nil {
+			uid, *lf.p.Lat, *lf.p.Lon, lf.ts, finiteOrNil(lf.p.Bat), finiteOrNil(lf.p.Spd), finiteOrNil(lf.p.Acc), dv, lf.p.Chg); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to store member position")
 			return
 		}
@@ -810,10 +811,10 @@ func (s *Server) E2EEServerIngest(w http.ResponseWriter, r *http.Request) {
 			defer cancel()
 			s.evaluateGeofences(evalCtx, uid, lon, lat, ts, finiteOrNil(p.Acc))
 		})
-		s.noteBattery(uid, finiteOrNil(p.Bat))
+		s.noteBattery(uid, finiteOrNil(p.Bat), p.Chg)
 		postCommitRunner.Submit(func() {
 			s.broadcastLocation(uid, wsLocation{Type: "location", UserID: uid, Lat: lat, Lon: lon, TS: ts,
-				LastSeenAt: time.Now().UTC(), BatteryPct: finiteOrNil(p.Bat), SpeedMPS: finiteOrNil(p.Spd), AccuracyMeters: finiteOrNil(p.Acc)})
+				LastSeenAt: time.Now().UTC(), BatteryPct: finiteOrNil(p.Bat), Charging: p.Chg, SpeedMPS: finiteOrNil(p.Spd), AccuracyMeters: finiteOrNil(p.Acc)})
 		})
 	}
 	if stored > 0 && (s.viewAudit == nil || s.viewAudit.Allow("e2eeserveraudit:"+req.CircleID, 1, time.Hour)) {

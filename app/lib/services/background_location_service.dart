@@ -12,6 +12,7 @@ import 'package:geolocator/geolocator.dart'
 import 'package:http/http.dart' as http;
 
 import 'background_credential_store.dart';
+import 'battery_report.dart';
 import 'fix_quality.dart';
 import 'ios_location_profile.dart';
 import 'live_boost.dart';
@@ -69,10 +70,11 @@ Future<void> onHeartbeatTick() async {
     if (credentials == null) return;
 
     final int? batteryPct = await _readBattery();
+    final bool? charging = batteryPct == null ? null : await readCharging();
     final Map<String, dynamic> body = <String, dynamic>{
       'device_id': credentials.deviceId,
     };
-    if (batteryPct != null) body['battery_pct'] = batteryPct;
+    addBatteryFields(body, batteryPct, charging);
 
     final bool ok = await _report(credentials, '/devices/heartbeat', body);
     if (!ok) return;
@@ -106,7 +108,7 @@ DateTime? _lastSentTs;
 DateTime? _lastDrainAt;
 DateTime? _batteryReadAt;
 int? _batteryCache;
-bool _chargingCache = false;
+bool? _chargingCache; // null: unknown
 DateTime? _boostReadAt;
 DateTime? _presenceReadAt;
 bool _presenceCache = false;
@@ -160,15 +162,8 @@ Future<void> _refreshBatteryIfStale(DateTime now) async {
   if (at != null && now.difference(at) < const Duration(seconds: 30)) return;
   _batteryReadAt = now;
   _batteryCache = await _readBattery();
-  try {
-    final BatteryState st =
-        await Battery().batteryState.timeout(const Duration(seconds: 5));
-    _chargingCache =
-        st == BatteryState.charging || st == BatteryState.full;
-  } catch (_) {
-    _chargingCache = false;
-  }
-  _cadence.setBattery(_batteryCache, charging: _chargingCache);
+  _chargingCache = await readCharging();
+  _cadence.setBattery(_batteryCache, charging: _chargingCache == true);
 }
 
 /// Picks up a boost persisted by the other isolate (e.g. the direct-push
@@ -251,7 +246,8 @@ Future<void> onLocationUpdate(LocationDto location) async {
     if (credentials == null) return;
 
     final Map<String, dynamic> body =
-        _buildBody(location, credentials.deviceId, _batteryCache);
+        _buildBody(location, credentials.deviceId, _batteryCache,
+            charging: _chargingCache);
 
     // Private circles: seal a copy for each of them; send the plaintext report
     // only when a standard circle exists (returns true when no circle is private).
@@ -490,8 +486,9 @@ Future<int?> _readBattery() async {
 Map<String, dynamic> _buildBody(
   LocationDto location,
   String deviceId,
-  int? batteryPct,
-) {
+  int? batteryPct, {
+  bool? charging,
+}) {
   final Map<String, dynamic> body = <String, dynamic>{
     'device_id': deviceId,
     'ts': DateTime.fromMillisecondsSinceEpoch(
@@ -503,7 +500,7 @@ Map<String, dynamic> _buildBody(
     'motion_state': location.motionState,
     'source': 'background',
   };
-  if (batteryPct != null) body['battery_pct'] = batteryPct;
+  addBatteryFields(body, batteryPct, charging);
   if (location.accuracy > 0) body['accuracy_meters'] = location.accuracy;
   // Altitude is valid below sea level (negative), so send any finite value.
   if (location.altitude.isFinite) body['altitude_meters'] = location.altitude;

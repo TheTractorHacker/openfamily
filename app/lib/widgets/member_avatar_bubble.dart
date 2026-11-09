@@ -103,6 +103,12 @@ class MemberAvatarBubble extends StatelessWidget {
                               bottom: -2,
                               child: _MovementGlyphBadge(member: member),
                             ),
+                          if (member.showsCharging)
+                            const Positioned(
+                              left: -2,
+                              bottom: -2,
+                              child: ChargingBadge(),
+                            ),
                         ],
                       ),
                     ),
@@ -134,6 +140,9 @@ class MemberAvatarBubble extends StatelessWidget {
       if (member.hasDrivingSpeed) {
         sb.write(' ${liveSpeedLabel(member) ?? ''}');
       }
+    }
+    if (member.showsCharging) {
+      sb.write(' · Charging, ${member.batteryPercent}%');
     }
     return sb.toString();
   }
@@ -500,6 +509,39 @@ const Color _badgeBorder = Color(0x22000000);
 const Color _speedingFill = Color(0xFFFFF2DD);
 const Color _speedingInk = Color(0xFF9A5800);
 const Color _speedingBorder = Color(0xFFF6E0B8);
+
+/// Small circular bolt on the avatar ring (bottom-left, opposite the movement
+/// glyph): the member's phone is charging. Same chip style as the movement
+/// glyph so the pin stays calm.
+class ChargingBadge extends StatelessWidget {
+  const ChargingBadge({super.key, this.size = 20});
+
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      key: const Key('member_charging_badge'),
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: _badgeFill,
+        border: Border.all(color: _badgeBorder),
+        boxShadow: PerfProfile.current.reduceEffects
+            ? null
+            : const [BoxShadow(color: Color(0x22000000), blurRadius: 3)],
+      ),
+      child: Center(
+        child: Icon(
+          Icons.bolt,
+          size: size * 0.7,
+          color: AppColors.statusGreen,
+        ),
+      ),
+    );
+  }
+}
 
 /// Small circular glyph on the avatar ring — movement icon only, so the face
 /// stays fully visible. Speeding uses the warning fill rather than a wide card.

@@ -44,7 +44,8 @@ The server stores what is needed to run your circle:
 - **Devices:** the phone's platform and name, an app version, a push-notification
   address, when it was last online and its battery level.
 - **Location (if you share it):** precise coordinates, time, accuracy, speed,
-  movement type (walking, driving, still) and battery level, from your phone, also
+  movement type (walking, driving, still), battery level and whether the phone
+  is charging, from your phone, also
   while the app is in the background if you allow "Always" or "Allow all the
   time". The newest position of each person is kept so a person who is offline
   still shows on the map.

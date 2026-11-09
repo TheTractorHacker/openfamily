@@ -134,7 +134,7 @@ func TestServerModeReadsOnlyAfterEveryMemberConsented(t *testing.T) {
 		byUser[p["user_id"].(string)] = p
 	}
 	a := byUser[w.phone.user]
-	if a == nil || a["sender_device_id"] != w.phone.id || a["kind"] != "fix" || a["lat"].(float64) != 52.52 || a["bat"].(float64) != 50 {
+	if a == nil || a["sender_device_id"] != w.phone.id || a["kind"] != "fix" || a["lat"].(float64) != 52.52 || a["bat"].(float64) != 50 || a["chg"] != true {
 		t.Fatalf("alice point %v", a)
 	}
 	if ing.posts[0]["server_device_id"] != w.id.f.DeviceID || ing.posts[0]["circle_id"] != w.of.circle {

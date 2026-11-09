@@ -82,6 +82,9 @@ type MemberWithLocation struct {
 	Lon             *float64   `json:"lon,omitempty"`
 	TS              *time.Time `json:"ts,omitempty"`
 	BatteryPct      *float64   `json:"battery_pct,omitempty"`
+	// Charging is whether the phone was charging at its last report; nil when
+	// the app did not say (older apps). Shared exactly like BatteryPct.
+	Charging        *bool      `json:"charging,omitempty"`
 	SpeedMPS        *float64   `json:"speed_mps,omitempty"`
 	HeadingDeg      *float64   `json:"heading_deg,omitempty"`
 	MotionState     *string    `json:"motion_state,omitempty"`
@@ -141,6 +144,7 @@ type Location struct {
 	SpeedMPS       *float64  `json:"speed_mps,omitempty"`
 	HeadingDeg     *float64  `json:"heading_deg,omitempty"`
 	BatteryPct     *float64  `json:"battery_pct,omitempty"`
+	Charging       *bool     `json:"charging,omitempty"`
 	MotionState    string    `json:"motion_state,omitempty"`
 	Source         string    `json:"source,omitempty"`
 }

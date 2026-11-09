@@ -17,6 +17,7 @@ class LastPosition {
     this.spd,
     this.hdg,
     this.mo,
+    this.chg,
   });
   final String circleId;
   final String userId;
@@ -25,6 +26,10 @@ class LastPosition {
   final double? acc;
   final num? bat, spd, hdg;
   final String? mo;
+
+  /// The phone was charging (sealed `chg`, apps from 0.26.14); null when the
+  /// sender did not say.
+  final bool? chg;
 
   DateTime get at => DateTime.fromMillisecondsSinceEpoch(tsMs, isUtc: true);
 
@@ -43,9 +48,10 @@ class LastPosition {
         'speed_mps': spd,
         'heading_deg': hdg,
         'motion_state': mo,
+        if (chg != null) 'charging': chg,
       };
 
-  List<dynamic> toJson() => <dynamic>[circleId, userId, tsMs, lat, lon, acc, bat, spd, hdg, mo];
+  List<dynamic> toJson() => <dynamic>[circleId, userId, tsMs, lat, lon, acc, bat, spd, hdg, mo, if (chg != null) chg];
 
   static LastPosition? fromJson(Object? j) {
     if (j is! List || j.length < 5) return null;
@@ -63,6 +69,7 @@ class LastPosition {
         spd: j.length > 7 ? j[7] as num? : null,
         hdg: j.length > 8 ? j[8] as num? : null,
         mo: j.length > 9 ? j[9] as String? : null,
+        chg: j.length > 10 && j[10] is bool ? j[10] as bool : null,
       );
     } catch (_) {
       return null;

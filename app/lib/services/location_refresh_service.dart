@@ -5,6 +5,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'api_client.dart';
+import 'battery_report.dart';
 import 'device_service.dart';
 import 'e2ee/private_runtime.dart';
 import 'location_sharing_service.dart';
@@ -62,6 +63,7 @@ typedef RefreshSharingEnabled = Future<bool> Function();
 typedef RefreshGetPosition = Future<Position> Function();
 typedef RefreshGetDeviceId = Future<String> Function();
 typedef RefreshGetBattery = Future<int?> Function();
+typedef RefreshGetCharging = Future<bool?> Function();
 typedef RefreshPost = Future<dynamic> Function(
   String path,
   Map<String, dynamic> body,
@@ -82,13 +84,18 @@ class LocationRefreshHandler {
     required this.post,
     required this.wasProcessed,
     required this.markProcessed,
+    RefreshGetCharging? getCharging,
     DateTime Function()? now,
-  }) : now = now ?? (() => DateTime.now().toUtc());
+  })  : getCharging = getCharging ?? (() async => null),
+        now = now ?? (() => DateTime.now().toUtc());
 
   final RefreshSharingEnabled sharingEnabled;
   final RefreshGetPosition getPosition;
   final RefreshGetDeviceId getDeviceId;
   final RefreshGetBattery getBattery;
+
+  /// Charging state sent with the battery level; null when unknown.
+  final RefreshGetCharging getCharging;
   final RefreshPost post;
   final RefreshWasProcessed wasProcessed;
   final RefreshMarkProcessed markProcessed;
@@ -106,11 +113,17 @@ class LocationRefreshHandler {
 
     String deviceId;
     int? batteryPct;
+    bool? charging;
     try {
       deviceId = await getDeviceId();
       batteryPct = await getBattery();
     } catch (_) {
       return LocationRefreshResult.failed;
+    }
+    try {
+      charging = batteryPct == null ? null : await getCharging();
+    } catch (_) {
+      charging = null;
     }
 
     try {
@@ -127,7 +140,7 @@ class LocationRefreshHandler {
       };
       if (position.speed >= 0) body['speed_mps'] = position.speed;
       if (position.heading >= 0) body['heading_deg'] = position.heading;
-      if (batteryPct != null) body['battery_pct'] = batteryPct;
+      addBatteryFields(body, batteryPct, charging);
       await post('/locations', body);
       return LocationRefreshResult.locationSent;
     } catch (_) {
@@ -137,7 +150,7 @@ class LocationRefreshHandler {
         final Map<String, dynamic> body = <String, dynamic>{
           'device_id': deviceId,
         };
-        if (batteryPct != null) body['battery_pct'] = batteryPct;
+        addBatteryFields(body, batteryPct, charging);
         await post('/devices/heartbeat', body);
         return LocationRefreshResult.heartbeatSent;
       } catch (_) {
@@ -175,6 +188,7 @@ class LocationRefreshService {
         return null;
       }
     },
+    getCharging: readCharging,
     post: (String path, Map<String, dynamic> body) async {
       // A location a member asked for follows the same rule as every fix: sealed
       // for Private circles, plaintext only for standard ones.

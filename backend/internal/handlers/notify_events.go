@@ -139,8 +139,14 @@ func (t *batteryTracker) crossed(user string, pct float64) bool {
 
 // noteBattery is called after a live location is stored. It is cheap (a map
 // lookup) on every fix and only does work when the battery newly drops low.
-func (s *Server) noteBattery(ownerID string, pct *float64) {
+// A phone that reports it is charging never triggers the alert (the person is
+// already plugged in); the tracker is left as is, so unplugging while still
+// low alerts then.
+func (s *Server) noteBattery(ownerID string, pct *float64, charging *bool) {
 	if pct == nil || *pct <= 0 { // 0 means "unknown" from some devices
+		return
+	}
+	if charging != nil && *charging {
 		return
 	}
 	v := *pct

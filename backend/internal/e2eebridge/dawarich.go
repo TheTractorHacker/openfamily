@@ -33,6 +33,7 @@ type point struct {
 	lat, lon  float64
 	acc, alt  *float64
 	spd, batt *float64
+	chg       *bool // phone was charging (server mode only; Dawarich has no field for it)
 }
 
 func (p point) feature() map[string]any {

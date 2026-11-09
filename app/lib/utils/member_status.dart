@@ -93,8 +93,9 @@ String? memberUpdatedLabel(Member m) {
 }
 
 /// "Battery 18%" when known and low, otherwise null (only low battery
-/// deserves attention in the list).
+/// deserves attention in the list). A charging phone is never flagged.
 String? memberBatteryAlert(Member m) {
+  if (m.charging) return null;
   if (m.batteryPercent > 0 && m.batteryPercent <= 20) {
     return 'Battery ${m.batteryPercent}%';
   }

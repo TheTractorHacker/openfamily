@@ -157,7 +157,8 @@ the background isolate still need on-device testing.
 Each user can choose which alerts they get about each other member they share
 a circle with: arrivals, departures, low battery, driving/speeding, mute-all,
 and optional quiet hours (`GET/PUT/DELETE /members/{id}/notification-prefs`,
-table `notification_prefs`). A user can only read and edit their own settings,
+table `notification_prefs`). The low-battery alert is not sent while the
+member's phone reports that it is charging (apps from 0.26.14). A user can only read and edit their own settings,
 and only about members of circles they share (anything else is 404).
 
 - Geofence arrival/departure pushes honour the settings when the event's

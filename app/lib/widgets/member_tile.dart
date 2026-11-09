@@ -114,10 +114,19 @@ class MemberTile extends StatelessWidget {
 
     if (member.batteryPercent > 0) {
       chips.add(
-        DsStatusChip(
-          icon: _batteryIcon(),
-          color: _batteryColor(),
-          label: '${member.batteryPercent}%',
+        Semantics(
+          label: member.showsCharging
+              ? 'Battery ${member.batteryPercent}%, charging'
+              : 'Battery ${member.batteryPercent}%',
+          excludeSemantics: true,
+          child: DsStatusChip(
+            key: member.showsCharging
+                ? const Key('member_tile_battery_charging')
+                : null,
+            icon: _batteryIcon(),
+            color: _batteryColor(),
+            label: '${member.batteryPercent}%',
+          ),
         ),
       );
     } else if (member.status == MemberStatus.stopped) {
@@ -158,6 +167,7 @@ class MemberTile extends StatelessWidget {
   }
 
   IconData _batteryIcon() {
+    if (member.showsCharging) return Icons.battery_charging_full;
     if (member.batteryPercent <= 20) return Icons.battery_1_bar;
     if (member.batteryPercent <= 50) return Icons.battery_3_bar;
     if (member.batteryPercent <= 80) return Icons.battery_5_bar;
@@ -165,6 +175,7 @@ class MemberTile extends StatelessWidget {
   }
 
   Color _batteryColor() {
+    if (member.showsCharging) return AppColors.statusGreen;
     if (member.batteryPercent <= 20) return AppColors.statusRed;
     if (member.batteryPercent <= 50) return AppColors.statusOrange;
     return AppColors.statusGreen;

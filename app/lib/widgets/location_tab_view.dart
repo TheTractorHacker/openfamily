@@ -1354,7 +1354,8 @@ class _AvatarWithBattery extends StatelessWidget {
   Widget build(BuildContext context) {
     final int pct = member.batteryPercent;
     final ColorScheme cs = Theme.of(context).colorScheme;
-    final bool low = pct > 0 && pct <= 20;
+    final bool charging = member.showsCharging;
+    final bool low = pct > 0 && pct <= 20 && !charging;
     return SizedBox(
       width: 52,
       height: 52,
@@ -1383,11 +1384,20 @@ class _AvatarWithBattery extends StatelessWidget {
                       mainAxisSize: MainAxisSize.min,
                       children: <Widget>[
                         Icon(
-                          low
-                              ? Icons.battery_alert_rounded
-                              : Icons.battery_full_rounded,
+                          charging
+                              ? Icons.bolt
+                              : low
+                                  ? Icons.battery_alert_rounded
+                                  : Icons.battery_full_rounded,
+                          key: charging
+                              ? const Key('person_row_charging')
+                              : null,
                           size: 11,
-                          color: low ? AppColors.statusRed : cs.onSurface,
+                          color: charging
+                              ? AppColors.statusGreen
+                              : low
+                                  ? AppColors.statusRed
+                                  : cs.onSurface,
                         ),
                         const SizedBox(width: 2),
                         Text(
@@ -1461,7 +1471,7 @@ class _PersonRow extends StatelessWidget {
           selected: selected,
           wash: false,
           semanticLabel:
-              '${member.name}. $status.${battery == null ? '' : ' $battery.'}',
+              '${member.name}. $status.${battery == null ? '' : ' $battery.'}${member.showsCharging ? ' Charging.' : ''}',
           leading: _AvatarWithBattery(member: member),
           onTap: onTap,
           trailing: Column(

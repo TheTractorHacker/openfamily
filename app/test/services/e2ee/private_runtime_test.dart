@@ -172,6 +172,23 @@ void main() {
       expect(a.frames, isEmpty);
     });
 
+    test('the charging flag rides in the sealed fix and comes out on the map frame', () async {
+      await a.runtime.routeFix(<String, dynamic>{...loc(52.52, 13.4), 'charging': true});
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(await a.runtime.flush(), 1);
+      await b.runtime.catchUp(priv);
+      expect(b.frames.single['battery_pct'], 77);
+      expect(b.frames.single['charging'], isTrue);
+      // A fix from an app that does not send it (older build) carries no flag at all.
+      clock.t = clock.t.add(const Duration(minutes: 1));
+      await a.runtime.routeFix(loc(52.53, 13.41));
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      await a.runtime.flush();
+      await b.runtime.catchUp(priv);
+      expect(b.frames.last['lat'], 52.53);
+      expect(b.frames.last.containsKey('charging'), isFalse);
+    });
+
     test('live socket frame path and history store', () async {
       await a.runtime.routeFix(loc(10, 20, at: clock.t));
       await Future<void>.delayed(const Duration(milliseconds: 100));

@@ -154,6 +154,9 @@ func (s *serverSink) flush(ctx context.Context, pts []point, hw map[string]int64
 				if p.batt != nil {
 					m["bat"] = *p.batt
 				}
+				if p.chg != nil {
+					m["chg"] = *p.chg
+				}
 				in[j] = m
 			}
 			var res ingestResp
