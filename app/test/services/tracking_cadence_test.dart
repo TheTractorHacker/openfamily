@@ -75,25 +75,63 @@ void main() {
       expect(c.profile(at(50)).tier, CadenceTier.driving);
     });
 
-    test('leaves drive only after 60 s below 1 m/s, back to slow profile', () {
+    test('foreground: leaves drive only after 60 s below 1 m/s', () {
+      final TrackingCadence c = TrackingCadence();
+      c.onFix(now: at(0), speedMps: 15);
+      c.onFix(now: at(1), speedMps: 15);
+      expect(c.isDriving, isTrue);
+      for (int s = 2; s <= 50; s++) {
+        c.onFix(now: at(s), speedMps: 0);
+      }
+      expect(c.isDriving, isTrue);
+      for (int s = 51; s <= 80; s++) {
+        c.onFix(now: at(s), speedMps: 0);
+      }
+      expect(c.isDriving, isFalse);
+    });
+
+    test('background: a 2 minute jam keeps 1 Hz, drive ends after 3 min, '
+        'back to the 60 s profile', () {
       final TrackingCadence c = TrackingCadence()..setBackground(true);
       c.onFix(now: at(0), speedMps: 15);
       c.onFix(now: at(1), speedMps: 15);
       expect(c.isDriving, isTrue);
-      for (int s = 2; s <= 80; s++) {
+      for (int s = 2; s <= 130; s++) {
+        c.onFix(now: at(s), speedMps: 0);
+      }
+      // A long red light / traffic jam: still driving, still 1 Hz. Leaving
+      // drive here used to hand the native side a slow request that activity
+      // recognition (STILL) turned into one fix per 15 minutes.
+      expect(c.profile(at(130)).tier, CadenceTier.driving);
+      expect(c.profile(at(130)).gpsInterval, const Duration(seconds: 1));
+      for (int s = 131; s <= 200; s++) {
         c.onFix(now: at(s), speedMps: 0);
       }
       expect(c.isDriving, isFalse);
-      final CadenceProfile p = c.profile(at(80));
+      final CadenceProfile p = c.profile(at(200));
       // After the hold the walking evidence also drains (30 s) -> slow.
-      for (int s = 81; s <= 120; s++) {
+      for (int s = 201; s <= 240; s++) {
         c.onFix(now: at(s), speedMps: 0);
       }
-      final CadenceProfile after = c.profile(at(120));
+      final CadenceProfile after = c.profile(at(240));
       expect(after.tier, CadenceTier.stationary);
       expect(after.gpsInterval, const Duration(seconds: 60));
       expect(p.tier == CadenceTier.walking || p.tier == CadenceTier.stationary,
           isTrue);
+    });
+
+    test('background: moving again during the jam stays in drive', () {
+      final TrackingCadence c = TrackingCadence()..setBackground(true);
+      c.onFix(now: at(0), speedMps: 15);
+      for (int s = 1; s <= 150; s++) {
+        c.onFix(now: at(s), speedMps: 0);
+      }
+      c.onFix(now: at(151), speedMps: 12);
+      for (int s = 152; s <= 300; s++) {
+        c.onFix(now: at(s), speedMps: 0);
+      }
+      // The hold restarted at 151 s: 149 s below is not enough.
+      expect(c.profile(at(300)).tier, CadenceTier.driving);
     });
 
     test('slow crawl 1-3 m/s (hysteresis band) keeps drive mode', () {
@@ -226,6 +264,21 @@ void main() {
       a.markApplied(c.profile(t0), t0);
       c.startBoost(const Duration(seconds: 60), at(2));
       expect(a.next(c.profile(at(2)), at(2)), isNotNull);
+    });
+
+    test('entering drive from a slow request bypasses the debounce', () {
+      final TrackingCadence c = TrackingCadence()..setBackground(true);
+      final ProfileApplier a = ProfileApplier(c.config);
+      // The slow request was applied 5 s ago (e.g. drive just ended at a light).
+      a.markApplied(c.profile(t0), at(0));
+      c.onFix(now: at(5), speedMps: 20);
+      final CadenceProfile drive = c.profile(at(5));
+      expect(drive.tier, CadenceTier.driving);
+      expect(a.next(drive, at(5)), isNotNull);
+      // Slowing down again is still debounced.
+      a.markApplied(drive, at(5));
+      expect(a.next((TrackingCadence()..setBackground(true)).profile(at(10)), at(10)),
+          isNull);
     });
 
     test('post-gate-only differences never restart the GPS source', () {

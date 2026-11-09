@@ -34,8 +34,12 @@ driving > walking > stationary.
 
 Exits (hysteresis):
 
-- driving ends after smoothed speed stays below 1 m/s for 60 s (red lights and
-  traffic keep drive mode; speeds between 1 and 3 m/s never end it);
+- driving ends after smoothed speed stays below 1 m/s for 60 s in the
+  foreground and 3 min in the background (red lights and traffic keep drive
+  mode; speeds between 1 and 3 m/s never end it). The background hold is longer
+  because the slow request it falls back to becomes the native 15 min STILL
+  profile as soon as activity recognition says still, and only a later
+  movement transition undoes that;
 - walking ends after 30 s with speed below 0.4 m/s and no moving motion state;
 - boost ends at its TTL (capped at 120 s); each `"live": true` response
   extends it by 10 s;
@@ -56,11 +60,14 @@ All numbers are constants in `CadenceConfig`.
   `BackgroundLocator.updateLocationRequest(intervalMs, distanceFilter,
   highAccuracy)`, which re-requests location updates inside the running
   foreground service (no service restart). Fast requests (<= 10 s) always run
-  as requested; slow requests keep the native STILL low-power profile when
-  activity recognition says the device is still. If the call is unavailable
+  as requested, also when a STILL transition arrives while they are active (a
+  long red light used to drop a driving phone to one fix per 15 minutes); slow
+  requests keep the native STILL low-power profile when activity recognition
+  says the device is still. If the call is unavailable
   (older native build) the isolate falls back to a full re-registration.
 - Debounce: a GPS-request change is applied at most every 20 s
-  (`minApplyGap`). Speeding up for boost or SOS bypasses the debounce. A
+  (`minApplyGap`). Speeding up for boost, SOS or drive mode bypasses the
+  debounce. A
   non-stationary profile is re-sent every 5 min in case native state was reset.
 - The service keeps using the existing foreground notification while driving.
 
@@ -72,6 +79,16 @@ ships through `POST /locations/batch` (drains are throttled to every 10 s).
 While the app is open and its own reporter is alive (it marks a shared
 timestamp every 5 s), the background isolate skips fast-tier posts so the
 backend does not receive two 1 Hz streams.
+
+Private circles: each fix is sealed on the phone before anything leaves it
+(`PrivateRuntime.routeFix`). One seal runs at a time; at most 10 fixes wait,
+and beyond that the oldest waiting fix is skipped, so on a phone whose store is
+slower than 1 Hz the newest position is never more than a few seals late (the
+skipped count is `PrivateRuntime.sealSkipped`). The sealed queue is uploaded
+2 to 5 s after a seal, one upload at a time (a call during an upload makes it
+go round once more). Already sealed items go first; fixes parked because a
+circle key is missing are retried from the upload at most every 30 s, and a
+key that arrives seals them at once.
 
 ## Fix quality and speed
 

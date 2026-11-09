@@ -444,11 +444,20 @@ class IsolateHolderService : MethodChannel.MethodCallHandler, LocationUpdateList
      * filter — one cheap periodic fix keeps the server's stationary-dedup
      * path fed so liveness never goes quiet. Moving profile: the user's
      * configured request. No-op when the requested state is already active.
+     *
+     * A fast request (<= [FAST_REQUEST_MS]: drive mode, live boost, SOS) is
+     * never swapped for the stationary profile, exactly as in
+     * [updateLocationRequest]: a STILL transition at a red light or in a
+     * traffic jam used to drop a driving phone to one fix per 15 minutes until
+     * the next movement transition. The Dart cadence leaves drive mode on its
+     * own (speed below 1 m/s for 60 s) and then asks for the slow request,
+     * which does go stationary because [activityMoving] is recorded here.
      */
     @Synchronized
     private fun applyMotionProfileInternal(moving: Boolean) {
         activityMoving = moving
         val base = activeRequest ?: return
+        if (!moving && base.interval <= FAST_REQUEST_MS) return
         if (moving == !isStillProfile) return
 
         val profile = if (moving) {
