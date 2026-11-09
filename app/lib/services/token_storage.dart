@@ -116,6 +116,61 @@ class TokenStorage {
     Duration(milliseconds: 600),
   ];
 
+  /// Short hashes of refresh tokens this phone has already used up, kept across restarts (and shared by every
+  /// isolate through the plain preferences file). A refresh token is single-use, and the server treats a used one
+  /// coming back as theft and revokes the whole session. Production incident: an update restarted the app while an
+  /// older copy of the refresh token was still in one store; it was presented before the live one and signed the
+  /// owner out. A token this phone replaced or used is therefore never presented again.
+  static const String _spentKey = 'wb_spent_refresh';
+  static const int _spentMax = 24;
+
+  /// Adds the persisted spent tokens to the in-memory rejected set. Never throws.
+  static Future<void> _loadSpent() async {
+    try {
+      final SharedPreferences prefs = await SharedPreferences.getInstance();
+      await prefs.reload();
+      _rejected.addAll(prefs.getStringList(_spentKey) ?? const <String>[]);
+    } catch (_) {}
+  }
+
+  /// Remembers that [refresh] has been used (or replaced) and must never be presented again. Never throws.
+  static Future<void> markSpent(String refresh) async {
+    if (refresh.isEmpty) return;
+    final String h = SessionDiary.shortHash(refresh);
+    _rejected.add(h);
+    try {
+      final SharedPreferences prefs = await SharedPreferences.getInstance();
+      await prefs.reload();
+      final List<String> list = List<String>.of(prefs.getStringList(_spentKey) ?? const <String>[]);
+      if (list.contains(h)) return;
+      list.add(h);
+      while (list.length > _spentMax) {
+        list.removeAt(0);
+      }
+      await prefs.setStringList(_spentKey, list);
+      _diary.record('spent', 'refresh=$h');
+    } catch (_) {}
+  }
+
+  /// Marks every stored refresh token that was issued strictly BEFORE [newRefresh] as spent: it was replaced by
+  /// this save. Tokens with an unknown or equal issue time are left alone (never mark a live token).
+  static Future<void> _spendReplaced(String newRefresh) async {
+    try {
+      final DateTime? newIat = StoredSession(source: 'N', access: null, refresh: newRefresh).refreshIssuedAt;
+      if (newIat == null) return;
+      final List<StoredSession> held = <StoredSession>[
+        ...await readAllStores(),
+        if (_mem != null) _mem!,
+      ];
+      for (final StoredSession h in held) {
+        final String? r = h.refresh;
+        if (r == null || r.isEmpty || r == newRefresh) continue;
+        final DateTime? iat = h.refreshIssuedAt;
+        if (iat != null && iat.isBefore(newIat)) await markSpent(r);
+      }
+    } catch (_) {}
+  }
+
   static Future<String?> _safeRead(FlutterSecureStorage s, String key, [String store = '?']) async {
     try {
       return await s.read(key: key);
@@ -192,6 +247,7 @@ class TokenStorage {
     // A refresh token is single-use: if the new one is not what we can read
     // back, the next refresh replays a spent token. Write and verify both
     // stores; one verified copy keeps the session, none is a loud failure.
+    await _spendReplaced(refresh);
     final bool okA =
         await _writeVerified(_storage, _accessKey, _refreshKey, access, refresh);
     final bool okB = await _writeVerified(
@@ -294,6 +350,7 @@ class TokenStorage {
   /// All stored sessions ordered best-first: not-known-rejected before
   /// rejected, then newest refresh `iat`, then store A before B.
   static Future<List<StoredSession>> _ranked() async {
+    await _loadSpent();
     final List<StoredSession> all = await readAllStores();
     final List<StoredSession> ranked = List<StoredSession>.of(all);
     ranked.sort((StoredSession x, StoredSession y) {

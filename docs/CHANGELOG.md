@@ -18,6 +18,12 @@ refused and retried unchanged forever, and the map showed 0 mph at one spot. The
 sizes their handlers already allowed (batches of locations, and encrypted chat photos). Server only: update the server,
 no app update needed. The server catches up on its own once it is running this version.
 
+## v0.26.18 (2026-11-09)
+
+App-only release (the server needs no change). Install over the current app.
+
+- **Fixed: being signed out after an app update.** The server logs showed the cause: after an update the app offered an older, already used copy of its sign-in token before the live one, and the server read that as token theft and signed the whole session out (token ages of 4 hours matched your sign-outs). The app now remembers every sign-in token it has used or replaced, across restarts, and never offers one again. Older copies left in any of its storage places are ignored. If you still get signed out, open Settings, Diagnostics and share the lines that mention `signout` or `spent`; they say why.
+
 ## v0.26.17 (2026-11-09)
 
 App-only release (the server needs no change). Install over the current app.

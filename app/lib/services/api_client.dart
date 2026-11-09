@@ -1062,6 +1062,8 @@ class ApiClient {
             access: data['access_token'] as String,
             refresh: data['refresh_token'] as String,
           );
+          // The server spent the token we presented: no store may ever offer it again.
+          await TokenStorage.markSpent(refreshToken);
           return _RefreshResult.ok;
         }
         // Only the server's definitive "invalid refresh token" (401) counts
