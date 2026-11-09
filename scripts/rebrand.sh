@@ -29,6 +29,9 @@ exec python3 -I - <<'PY'
 import os, re, subprocess, sys
 
 MODE = os.environ['MODE']
+# The GitHub repository is still TheTractorHacker/openfamily. Flip to True once the owner has renamed it to
+# TheTractorHacker/orbitly; until then links to the old name are correct and are neither rewritten nor flagged.
+REPO_RENAMED = False
 
 # Paths (fnmatch-free prefix/suffix rules) that must never be rewritten and are exempt from --verify.
 DENY_PREFIX = (
@@ -92,7 +95,8 @@ def rewrite(line, doc=False):
     if PROTECT.search(line):
         return line
     line = WORD.sub('Orbitly', line)
-    line = URL.sub('TheTractorHacker/orbitly', line)
+    if REPO_RENAMED:
+        line = URL.sub('TheTractorHacker/orbitly', line)
     line = ASSET.sub('orbitly-', line)
     line = BRANDDIR.sub('assets/brand/', line)
     line = BRANDFILE.sub(r'\1orbitly-', line)

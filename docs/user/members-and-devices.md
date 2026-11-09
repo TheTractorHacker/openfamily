@@ -18,6 +18,16 @@ approves the new phone in **Encryption keys**, after comparing safety numbers.
 
 ![Security: sessions, password, two-step sign-in](../images/app/security.png)
 
+## Encryption keys
+
+**Settings, Security, Encryption keys** shows, at the top, whether this phone's keys are safe, then the two
+everyday actions: **Recovery phrase** (24 words to get your circles back) and **Link another phone**. Below
+that is one row per circle with its status (Private or Normal); tap a circle to see its members, compare
+safety numbers and approve a new phone. The technical details (fingerprint, where the key is stored, a check
+of the server record) are under **Advanced**.
+
+![Encryption keys: key status, recovery phrase, link another phone, the circle list and Advanced](../images/app/encryption-keys.png)
+
 ## Owner approval (when you are the only admin)
 
 If you created a Private circle, are its only admin and set your own phone up

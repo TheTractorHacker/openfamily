@@ -41,7 +41,7 @@ function clientFieldErrors(input: {
   }
   const base = input.publicBaseUrl.trim()
   if (base && !/^https:\/\/[^/\s]+/i.test(base)) {
-    errors.public_base_url = 'Use an https address, for example https://openfamily.example.com.'
+    errors.public_base_url = 'Use an https address, for example https://orbitly.example.com.'
   }
   return errors
 }
@@ -293,7 +293,7 @@ export function TwilioSettingsCard() {
             inputMode="url"
             value={publicBaseUrl}
             onChange={(event) => setPublicBaseUrl(event.target.value)}
-            placeholder="https://openfamily.example.com"
+            placeholder="https://orbitly.example.com"
             autoComplete="off"
             spellCheck={false}
             disabled={saving || clearing}

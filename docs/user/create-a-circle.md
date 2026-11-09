@@ -4,9 +4,9 @@ A **circle** is a group of people who share their location with each other:
 your family, friends, a carpool, the grandparents. You can be in several circles and
 choose in each one whether you share.
 
-![Create or join a family](../images/app/create-or-join.png)
+![Create a new circle or join one](../images/app/create-or-join.png)
 
-1. After signing in choose **Create a new family**.
+1. After signing in choose **Create a new circle**.
 2. Give it a name, for example "The Rivera Family". The name is only for
    your people.
 

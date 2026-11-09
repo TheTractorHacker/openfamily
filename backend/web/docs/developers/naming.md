@@ -36,8 +36,11 @@ admin Builds page work with both. Obtainium filters that matched
 
 ## GitHub repository
 
-The repository is renamed from `TheTractorHacker/openfamily` to
-`TheTractorHacker/orbitly`; GitHub redirects the old address. The only place
+The repository is still `TheTractorHacker/openfamily`. It is planned to be
+renamed to `TheTractorHacker/orbitly`; GitHub then redirects the old address,
+so links to the old name keep working. Until the rename, documentation and
+source links use the current name (`scripts/rebrand.sh` has `REPO_RENAMED =
+False`, so it does not rewrite them). The only place
 that holds the URL in code is `app/lib/brand.dart` and `web/src/lib/brand.ts`
 (the `APK_GITHUB_REPO` default and the docs also name it). CI guards accept
 both names until the rename is done.

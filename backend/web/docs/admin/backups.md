@@ -1,6 +1,6 @@
 # Backups and restore
 
-Your family's data lives in one Docker volume. Back it up before you need it.
+Your circles' data lives in one Docker volume (`pgdata`). Back it up before you need it.
 
 ## Quick backup
 
@@ -15,10 +15,12 @@ missing or older than 48 hours.
 
 ## Scheduled, encrypted off-site backups
 
-Turn on the `backup` compose profile and enter an S3-compatible bucket (AWS,
-Backblaze B2, Wasabi, Cloudflare R2, MinIO) in **Settings, Backups**. Copies are
-encrypted on your server before upload and old ones are removed by a retention
-rule. **Back up now** and **Test S3** buttons are on the same card.
+Orbitly can also back up on a schedule by itself, to a local folder and/or an
+S3-compatible bucket (AWS, Backblaze B2, Wasabi, Cloudflare R2, MinIO). Copies
+are encrypted on your server before upload and old ones are removed by a
+retention rule. You configure it in the admin web under **Settings, Backups**,
+which also has **Back up now** and **Test S3** buttons. How to turn it on for
+your installation and every option: [Backup and restore](../backup-restore.md#s3-and-scheduled-backups).
 
 ## Restore
 
@@ -28,7 +30,10 @@ rule. **Back up now** and **Test S3** buttons are on the same card.
 
 ## Do not forget
 
-- Back up your `.env` (it holds the secrets that unlock sealed settings).
+- Back up your `.env` (it holds the secrets that unlock sealed settings). On a
+  rented server keep `OPENFAMILY_DATA_KEY` in a password manager too.
+- Back up the `server_device` volume (the server's own key). Losing it only
+  means the server must be approved again on a phone.
 - Turn on disk encryption on the machine.
 - Keep the Android signing key safe if you build your own app.
 

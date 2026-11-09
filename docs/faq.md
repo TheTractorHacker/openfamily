@@ -13,7 +13,7 @@ chat and send an SOS. It runs on a server you control. See [Getting started](use
 
 **Does it cost money?** The software is free and open source (AGPL-3.0). You pay for whatever runs the server, if anything.
 
-**Is there an iPhone app? A watch app?** Orbitly has Android and iPhone apps. Wear OS and Apple Watch apps are coming; they are not available yet.
+**Is there an iPhone app? A watch app?** Orbitly has Android and iPhone apps, and a companion watch app for Wear OS 3+ and Apple Watch (watchOS 9+; the Apple Watch app has not yet been tried on a real watch). See [Orbitly on your watch](user/watch.md).
 
 ## Privacy
 

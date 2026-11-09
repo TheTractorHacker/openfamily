@@ -32,7 +32,7 @@ ask() { # $1 = var name, $2 = prompt, $3 = default
 
 SITE_ADDRESS="${SITE_ADDRESS:-}"
 PLATFORM_ADMIN_EMAIL="${PLATFORM_ADMIN_EMAIL:-}"
-ask SITE_ADDRESS "Public address (domain such as openfamily.example.com, or :80 for plain HTTP on a trusted network)" ":80"
+ask SITE_ADDRESS "Public address (domain such as orbitly.example.com, or :80 for plain HTTP on a trusted network)" ":80"
 ask PLATFORM_ADMIN_EMAIL "Platform admin email (creates the first admin account)" ""
 
 # Where does the server run? Never guessed: an unanswered question stays empty and

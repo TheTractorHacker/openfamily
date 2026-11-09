@@ -35,8 +35,8 @@ Complete inventory
 Source offer (AGPL-3.0 section 13)
   Users who interact with a running instance over a network are entitled to
   the Corresponding Source of the version that instance runs: the public
-  repository https://github.com/TheTractorHacker/orbitly (formerly
-  https://github.com/TheTractorHacker/openfamily, which redirects) at the tag or commit
+  repository https://github.com/TheTractorHacker/openfamily (to be renamed
+  https://github.com/TheTractorHacker/orbitly; GitHub redirects the old address) at the tag or commit
   the instance reports. Operators who modify the code must publish their
   modified source and offer it to their users. See docs/LICENSE_COMPLIANCE.md
   for the status of an in-product source link.

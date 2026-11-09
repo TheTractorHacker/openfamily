@@ -17,6 +17,7 @@ import 'package:openfamily/screens/circle_detail_screen.dart';
 import 'package:openfamily/screens/circles_screen.dart';
 import 'package:openfamily/screens/create_circle_screen.dart';
 import 'package:openfamily/screens/create_or_join_circle_screen.dart';
+import 'package:openfamily/screens/encryption_keys_screen.dart';
 import 'package:openfamily/screens/family_driving_report_screen.dart';
 import 'package:openfamily/screens/invite_screen.dart';
 import 'package:openfamily/screens/login_screen.dart';
@@ -29,16 +30,27 @@ import 'package:openfamily/screens/security_screen.dart';
 import 'package:openfamily/screens/settings_screen.dart';
 import 'package:openfamily/screens/sos_screen.dart';
 import 'package:openfamily/screens/welcome_screen.dart';
+import 'package:openfamily/services/app_compat.dart';
+import 'package:openfamily/services/attention_service.dart';
 import 'package:openfamily/services/chat_service.dart';
+import 'package:openfamily/services/circle_service.dart';
+import 'package:openfamily/services/delivery_status.dart';
 import 'package:openfamily/services/e2ee/e2ee_crypto.dart';
+import 'package:openfamily/services/e2ee/e2ee_service.dart';
+import 'package:openfamily/services/e2ee/e2ee_trust.dart';
+import 'package:openfamily/services/e2ee/e2ee_vault.dart';
 import 'package:openfamily/services/e2ee/processing_controller.dart'
     show ProcessingMember, ProcessingSnapshot;
+import 'package:openfamily/services/offline/server_reachability.dart';
 import 'package:openfamily/services/speed_units.dart';
 import 'package:openfamily/theme/app_theme.dart';
+import 'package:openfamily/widgets/attention_center.dart';
+import 'package:openfamily/widgets/server_prompts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../screens/alert_screens_test.dart' show FakeDialer;
 import '../screens/circles_screens_test.dart' show FakeCircleService;
+import '../support/fake_e2ee_server.dart';
 import '../support/fake_processing_controller.dart';
 import '../support/fake_security_api.dart';
 import '../support/trip_report_fixtures.dart';
@@ -99,6 +111,7 @@ void _shoot(
   String name,
   Widget Function() screen, {
   bool dark = false,
+  Future<void> Function()? before,
   Future<void> Function(WidgetTester)? after,
 }) {
   final String file = dark ? '$name-dark' : name;
@@ -106,6 +119,7 @@ void _shoot(
     t.view.physicalSize = const Size(780, 1688);
     t.view.devicePixelRatio = 2;
     addTearDown(t.view.reset);
+    if (before != null) await t.runAsync(before);
     await t.pumpWidget(
       _app(screen(), dark ? buildDarkTheme() : buildLightTheme()),
     );
@@ -296,6 +310,105 @@ ProcessingSnapshot docsProcessing() {
   );
 }
 
+// Encryption keys: a real E2eeService against the in-memory fake server, so
+// the screen shows real fingerprints and safety numbers (all made up).
+const String _kMaria = '11111111-1111-4111-8111-111111111111';
+const String _kCarlos = '22222222-2222-4222-8222-222222222222';
+const String _kSofia = '33333333-3333-4333-8333-333333333333';
+const String _kCircle = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+
+class _StrongBoxVault extends MemoryVault {
+  @override
+  Future<KeystoreStatus> status() async =>
+      const KeystoreStatus(level: KeystoreLevel.strongBox);
+}
+
+class _KeysCircles implements CircleService {
+  @override
+  Future<String> myUserId() async => _kMaria;
+  @override
+  Future<List<CircleMember>> listMembers(String id) async => const <CircleMember>[
+        CircleMember(userId: _kMaria, name: 'Maria', role: 'admin', sharingEnabled: true),
+        CircleMember(userId: _kCarlos, name: 'Carlos', role: 'member', sharingEnabled: true),
+        CircleMember(userId: _kSofia, name: 'Sofia', role: 'member', sharingEnabled: true),
+      ];
+  @override
+  Future<List<CircleInvite>> listInvites(String id) async => <CircleInvite>[];
+  @override
+  Future<List<Circle>> listCircles() async => const <Circle>[
+        Circle(id: _kCircle, name: docsCircleName, role: 'admin', sharingEnabled: true, memberCount: 3, e2eeMode: 'private'),
+      ];
+  @override
+  dynamic noSuchMethod(Invocation i) => throw UnimplementedError('${i.memberName}');
+}
+
+E2eeService? _keysService;
+
+Future<void> _setUpKeys() async {
+  final FakeE2eeServer server = FakeE2eeServer()
+    ..names.addAll(<String, String>{_kMaria: 'Maria', _kCarlos: 'Carlos', _kSofia: 'Sofia'});
+  server.circle(_kCircle, members: <String>[_kMaria, _kCarlos, _kSofia], admin: _kMaria);
+  E2eeService svc(String user, E2eeVault vault) => E2eeService(
+        api: server.client(user),
+        vault: vault,
+        trust: TrustStore(MemoryTrustKv()),
+        userIdProvider: () async => user,
+      );
+  final E2eeService maria = svc(_kMaria, _StrongBoxVault());
+  await maria.registerThisDevice();
+  await svc(_kCarlos, MemoryVault()).registerThisDevice();
+  await svc(_kSofia, MemoryVault()).registerThisDevice();
+  await maria.enableCircle(_kCircle);
+  _keysService = maria;
+}
+
+Future<void> _settleAsync(WidgetTester t) async {
+  for (int i = 0; i < 3; i++) {
+    await t.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 300)));
+    await t.pump(const Duration(milliseconds: 100));
+  }
+}
+
+// Attention icon: an AppBar with the icon, then the sheet opened by a tap.
+AttentionService? _attention;
+
+Widget _attentionHost() {
+  const Circle rivera = Circle(
+    id: 'c1',
+    name: docsCircleName,
+    role: 'member',
+    sharingEnabled: true,
+    memberCount: 4,
+    isPrimary: true,
+    e2eeMode: 'private',
+    serverAssist: true,
+  );
+  AppCompat.debugReset();
+  DeliveryHints.clear();
+  ServerChoiceStore.debugReset();
+  _attention?.dispose();
+  final AttentionService svc =
+      AttentionService(reachability: ServerReachability(probe: () async => true));
+  _attention = svc;
+  AppCompat.state.value = const CompatState(status: CompatStatus.recommended);
+  DeliveryHints.circleById[rivera.id] = rivera;
+  DeliveryHints.put(CircleDelivery(
+    circleId: rivera.id,
+    summary: 'ok',
+    members: const <MemberDelivery>[
+      MemberDelivery(userId: 'me', name: 'Maria', you: true, reason: DeliveryReason.ok),
+    ],
+    at: DateTime.now(),
+  ));
+  return Scaffold(
+    appBar: AppBar(
+      title: const Text('Safety'),
+      actions: <Widget>[AttentionButton(service: svc)],
+    ),
+    body: const SizedBox.expand(),
+  );
+}
+
 void main() {
   setUpAll(loadDocsFonts);
   setUp(() {
@@ -394,4 +507,18 @@ void main() {
     ),
   );
   _shoot('driving-report', _drivingReport);
+  _shoot(
+    'encryption-keys',
+    () => EncryptionKeysScreen(service: _keysService, circles: _KeysCircles()),
+    before: _setUpKeys,
+    after: _settleAsync,
+  );
+  _shoot(
+    'attention',
+    _attentionHost,
+    after: (WidgetTester t) async {
+      await t.tap(find.byKey(const Key('attention-button')));
+      await t.pumpAndSettle();
+    },
+  );
 }

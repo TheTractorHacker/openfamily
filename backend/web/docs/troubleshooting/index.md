@@ -68,5 +68,5 @@ Run `docker compose run --rm api validate-config`. It prints what is wrong witho
 
 ## Still stuck
 
-Open an issue at https://github.com/TheTractorHacker/orbitly/issues with the server version and the last lines of `docker compose logs api`.
+Open an issue at https://github.com/TheTractorHacker/openfamily/issues with the server version and the last lines of `docker compose logs api`.
 More answers: [FAQ](../faq.md), [Admin troubleshooting](../admin/troubleshooting.md).

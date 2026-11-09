@@ -53,6 +53,6 @@ a database TLS setting ([Self-hosting](../self-hosting.md#database-tls)).
 
 ## Still stuck
 
-Open an issue at https://github.com/TheTractorHacker/orbitly/issues with the
+Open an issue at https://github.com/TheTractorHacker/openfamily/issues with the
 server version (admin web footer) and the last lines of `docker compose logs api`.
 Remove addresses and secrets first.

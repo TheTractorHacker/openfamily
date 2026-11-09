@@ -20,6 +20,8 @@ A sheet called **Needs your attention** with one card per item. Each card says w
 one sentence, why it matters in another, and has one button that fixes it. Some cards also have
 **Not now** (or **Keep on my phone**) and an **(i)** button with more detail.
 
+![The amber attention icon with the number 2, and the Needs your attention sheet with an app update and a "Use the server" question](../images/app/attention.png)
+
 Things that can show up:
 
 - **An app update**, required or available, and which circles need a newer app. **How to update**

@@ -30,7 +30,7 @@ Doing it by hand instead: copy `.env.example` to `.env` and set
 |---|---|---|
 | *(none)* | `api`, `postgres` | Always. The API is published on `127.0.0.1:8080` only. |
 | `proxy` | `caddy` | You want HTTPS on a domain without bringing your own reverse proxy. |
-| `push` | `ntfy` | You want Android push (UnifiedPush) hosted by you. |
+| `push` | `ntfy` | Optional: UnifiedPush for phones that sleep deeply. Android alerts work without it ([Push](push.md)). |
 
 Enable with `COMPOSE_PROFILES=proxy,push` in `.env` or
 `docker compose --profile proxy up -d`. Without `proxy`, put your own TLS
@@ -73,9 +73,9 @@ code rollback. There is no in-app updater and no Docker socket access. Schedule
 
 For scheduled backups without host cron, optional S3-compatible off-site copies
 (AWS S3, Backblaze B2, Wasabi, Cloudflare R2, MinIO), client-side age
-encryption and retention, enable the `backup` compose profile; the admin System
+encryption and retention, use the built-in backup service; the admin System
 page then shows the last backup per destination and has a *Back up now* button.
-See [S3 and scheduled backups](backup-restore.md#s3-and-scheduled-backups).
+How to turn it on: [S3 and scheduled backups](backup-restore.md#s3-and-scheduled-backups).
 
 Validate your configuration before starting (non-zero exit on errors; secret
 values are never printed):

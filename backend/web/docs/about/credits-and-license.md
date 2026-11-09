@@ -31,8 +31,9 @@ additions belong to their respective contributors. See [NOTICE](../../NOTICE).
 
 Everyone who uses an Orbitly server over a network may get the source of the
 version it runs. The public source is
-<https://github.com/TheTractorHacker/orbitly> (the address the old
-`TheTractorHacker/openfamily` name redirects to). Check out the tag that your
+<https://github.com/TheTractorHacker/openfamily> (it will move to
+`TheTractorHacker/orbitly` when the repository is renamed; GitHub then
+redirects the old address). Check out the tag that your
 server reports under Settings, About. If you run a **modified** version, you
 must publish your modified source and point your users to it: change the links
 in `app/lib/brand.dart` and `web/src/lib/brand.ts` before you build.

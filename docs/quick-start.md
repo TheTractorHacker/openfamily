@@ -13,14 +13,15 @@ a phone. The long version of every step is linked, so you can start here and dig
 On the server, with Docker and Docker Compose v2 installed:
 
 ```bash
-git clone https://github.com/TheTractorHacker/orbitly.git
+git clone https://github.com/TheTractorHacker/openfamily.git orbitly
 cd orbitly
-./scripts/setup.sh          # asks for your address and admin email, writes .env
+./scripts/setup.sh          # asks for your address, admin email and home/cloud, writes .env
 docker compose up -d --build
 curl http://localhost:8080/healthz   # {"status":"ok"}
 ```
 
 Answer `:80` to the address question for a first test on your own network, or your domain name for the internet.
+Answer **home** if the server is hardware you own, **cloud** for a rented server (you can change it later in the admin web).
 The admin password is shown once: save it in a password manager.
 More detail: [Install the server](admin/install.md). For a domain and HTTPS: [HTTPS and your own domain](admin/https-and-domain.md).
 
@@ -33,7 +34,7 @@ Registration is closed, so only people with an invite code can join later. Detai
 
 1. Install the app on your phone ([Android](android-install-and-updates.md); on iPhone your admin gives you the install link).
 2. Enter your server address, tap **Connect**, then create an account with the **same email** as the admin.
-3. Choose **Create a new family** (a circle can be a family, friends, a team) and give it a name.
+3. Choose **Create a new circle** (a circle can be a family, friends, a team) and give it a name.
    See [Create a circle](user/create-a-circle.md).
 
 New circles are **Normal**: your server keeps locations, so the map, history and driving reports just work.
@@ -52,7 +53,7 @@ Only a server administrator can approve. More: [Server setup](server-setup.md).
 ## 5. Invite your people
 
 In the app open the circle, tap **Invite**, then **Create invite code**, and send the code or link by message.
-They install the app, enter your server address, choose **Join a family** and type the code.
+They install the app, enter your server address, choose **Join a circle** and type the code.
 See [Invite and join](user/invite-and-join.md).
 
 ## 6. Make it reliable on every phone

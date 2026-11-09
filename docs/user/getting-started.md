@@ -3,8 +3,13 @@
 Orbitly is a private way for your people (family, friends, a team) to see where
 everyone is, get arrival and departure alerts, chat, and send an SOS. It runs
 on a small server that your circle (or the person who looks after your tech)
-controls, so your locations are not sold or stored by a company. Orbitly was
-published as OpenFamily before the rename. Apps for Wear OS and Apple Watch are coming.
+controls, so your locations are not sold or stored by a company. There are
+apps for Android and iPhone, and a companion app for Wear OS and Apple Watch
+([Orbitly on your watch](watch.md)).
+
+> **Formerly OpenFamily.** Orbitly is the new name of the app and server that
+> were published as OpenFamily. Nothing changes for you: your server, account
+> and circles keep working.
 
 ![The Orbitly welcome screen with Create account and Sign in buttons](../images/app/welcome.png)
 

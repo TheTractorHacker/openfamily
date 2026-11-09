@@ -21,12 +21,14 @@ NAS that runs Docker, a Raspberry Pi 4 or newer, or a rented VPS.
 1. **Get the code.**
 
    ```bash
-   git clone https://github.com/TheTractorHacker/orbitly.git
+   git clone https://github.com/TheTractorHacker/openfamily.git orbitly
    cd orbitly
    ```
 
 2. **Create your settings.** The setup script writes a `.env` file with
-   random passwords and asks two questions: your address and the admin email.
+   random passwords and asks three questions: your address, the admin email,
+   and whether the server runs on hardware you own (**home**) or a rented
+   server (**cloud**, see [Deployment profile](deployment-profile.md)).
 
    ```bash
    ./scripts/setup.sh
@@ -35,7 +37,8 @@ NAS that runs Docker, a Raspberry Pi 4 or newer, or a rented VPS.
    Answer `:80` for a first test on your own network, or your domain name
    (for example `family.example.com`) for the internet. It never overwrites an
    existing `.env`. The admin password is shown once; save it in a password
-   manager.
+   manager. For **cloud** it also writes `OPENFAMILY_DATA_KEY`: copy that line
+   to a password manager too.
 
 3. **Start the server.**
 
@@ -63,7 +66,8 @@ NAS that runs Docker, a Raspberry Pi 4 or newer, or a rented VPS.
 | --- | --- |
 | Settings | `.env` next to `docker-compose.yml` |
 | Family data | Docker volume `pgdata` (Postgres) |
-| Backups | `./backups/` after you run `scripts/backup.sh` |
+| The server's own key | Docker volume `server_device` |
+| Backups | `./backups/` after you run `scripts/backup.sh`, see [Backups](backups.md) |
 | Logs | `docker compose logs -f api` |
 
 ## Stop, start, remove

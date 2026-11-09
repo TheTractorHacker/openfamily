@@ -60,7 +60,7 @@ own server's address.
 
 Cloud and security-minded operators can keep the key in a separate container, away from the database. Set
 `E2EE_SERVER_INGEST_TOKEN` (or `OPENFAMILY_SERVER_DEVICE=sidecar`) and follow the commands under
-**Details** on the Server setup card, or [the sidecar README](https://github.com/TheTractorHacker/orbitly/blob/main/backend/cmd/e2ee-bridge/README.md). The
+**Details** on the Server setup card, or [the sidecar README](https://github.com/TheTractorHacker/openfamily/blob/main/backend/cmd/e2ee-bridge/README.md). The
 built-in device is then switched off (`OPENFAMILY_SERVER_DEVICE=auto` decides; `builtin`, `sidecar` and `off`
 force it).
 

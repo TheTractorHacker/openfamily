@@ -51,8 +51,10 @@ mislead. The renders are truthful in content (same screens, same layout logic, f
 - never add features to a caption that the screen does not show; the map screen is not
   rendered here (it needs tiles) so a real capture of the map is the most important one to add.
 
-The existing Play listing images (`assets/google-play/upload/`) were made on a Mac with the
-older tool `app/tool/store_assets_capture_test.dart`; they stay valid.
+The older Play listing images in `assets/google-play/upload/` were made on a Mac with the
+older tool `app/tool/store_assets_capture_test.dart`. They still show OpenFamily (the name before the rename)
+and the pre-redesign screens, so replace them with the output of `scripts/store-assets.sh` (or real
+captures) before the next listing update.
 
 ## Capturing real screenshots
 

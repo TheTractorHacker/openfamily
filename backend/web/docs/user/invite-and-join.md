@@ -16,7 +16,7 @@ public place.
 ## Joining
 
 1. Install the app and enter your server address.
-2. Choose **Join a family** and type the code, or just open the invite link on
+2. Choose **Join a circle** and type the code, or just open the invite link on
    your phone.
 3. **Before you join** the app shows how the circle handles privacy, so you
    know what you are agreeing to. Read it; see [Privacy modes explained](privacy-modes.md).

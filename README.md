@@ -31,11 +31,11 @@ to a Go API you host with Docker, on a VPS, a Synology NAS, or a machine on
 your LAN. There is no vendor cloud, no analytics SDK, and no Google Play
 Services requirement on Android.
 
-> **Formerly OpenFamily.** Orbitly is the new name of the project that was
-> published as Orbitly. Upgrading works as before: nothing to migrate, your
-> data, accounts and app installs stay. Some internal names (the Android
-> package `app.openfamily`, database and Docker names, `OPENFAMILY_*` settings)
-> intentionally keep the old spelling, see
+> **Formerly OpenFamily.** Orbitly is the new name of this project. If you
+> already run it, just [update](#updating): nothing to migrate, your data,
+> accounts and app installs stay. Some internal names (the Android package
+> `app.openfamily`, the repository address, database and Docker names,
+> `OPENFAMILY_*` settings) keep the old spelling on purpose, see
 > [Naming](docs/developers/naming.md).
 
 ![Orbitly: Your people, in orbit](assets/brand/orbitly-social-card.png)
@@ -64,10 +64,13 @@ what is new in your server version). Screenshots are generated, see
 ## Table of contents
 
 - [Documentation](#documentation)
+- [Quick start](#quick-start)
+- [Who can read your locations (encryption in plain words)](#who-can-read-your-locations)
+- [Backups](#backups)
+- [Updating](#updating)
 - [Why self-host this](#why-self-host-this)
 - [Features](#features)
 - [Compared to](#compared-to)
-- [Quick start](#quick-start)
 - [Family setup](#family-setup)
 - [Mobile apps](#mobile-apps)
 - [Web admin panel](#web-admin-panel)
@@ -80,6 +83,107 @@ what is new in your server version). Screenshots are generated, see
 - [Roadmap](#roadmap)
 - [Contributing](#contributing)
 - [License](#license)
+
+## Quick start
+
+You need a computer that stays on (a small home server, a NAS with Docker, a
+Raspberry Pi 4 or newer, or a rented VPS) with **Docker** and **Docker Compose
+v2**, and a phone.
+
+```bash
+git clone https://github.com/TheTractorHacker/openfamily.git orbitly
+cd orbitly
+./scripts/setup.sh                   # asks three questions, writes .env
+docker compose up -d --build         # first build takes a few minutes
+curl http://localhost:8080/healthz   # {"status":"ok"}
+```
+
+`setup.sh` asks for your address (a domain such as `orbitly.example.com`, or
+`:80` for a first test on your own network), the admin email, and whether the
+server runs on hardware you own (**home**) or a rented server (**cloud**). It
+writes `.env` with random passwords, never overwrites an existing `.env`, and
+prints the admin password once: save it in a password manager. A domain turns
+on Caddy with automatic HTTPS; with `:80` the API listens on
+`http://localhost:8080` only.
+
+Then:
+
+1. Open `http://localhost:8080/admin/` (or `https://your-domain/admin/`) and
+   sign in. Registration is closed: people join with an invite code.
+2. Install the app on your phone (Android: the admin web **Builds** page or
+   the GitHub releases, see
+   [Installing on Android](docs/android-install-and-updates.md)), enter your
+   server address and create an account with the same email.
+3. Create a circle, then approve your server once when the phone shows
+   **"Your server wants to join"** (compare the code with **Settings, Server
+   setup** in the admin web).
+4. Invite your people from the circle's **Invite** button.
+
+The same steps with screenshots: [Quick start (5 minutes)](docs/quick-start.md).
+Before you put the server on the internet, read the
+[hardening checklist](docs/self-hosting.md).
+
+## Who can read your locations
+
+Orbitly runs on your server, so no company sees your locations. On top of that,
+each circle chooses how much even **your own server** may see:
+
+- **Normal** (the default for new circles): phones send positions to your
+  server, which draws the map, keeps history, notices arrivals and builds
+  driving reports. Whoever runs the server could in principle read them, which
+  is why you run it yourself. Whether a server admin may look at members on
+  the admin map is a separate switch that is **off by default**, and every
+  look is logged where the circle can see it.
+- **Private** (end-to-end encrypted): each phone locks its positions with a
+  key that never leaves the circle's phones. The server stores and passes on
+  only locked data it cannot read, so a stolen database or a curious operator
+  sees nothing useful. Chat in a Private circle is end-to-end encrypted too.
+- **Server processing** (inside a Private circle, each person decides for
+  themselves): you can let the server read **your own** positions so history,
+  driving reports and alerts work without extra battery use on your phone.
+  Nobody can switch this on for you, and you can turn it off again at any time.
+
+Phones check each other's keys with safety numbers, and a new phone or the
+server only joins a Private circle after someone approves it on a phone they
+already trust. More: [Concepts](docs/concepts.md),
+[Privacy modes explained](docs/user/privacy-modes.md), and the full design in
+[docs/design/E2EE.md](docs/design/E2EE.md).
+
+## Backups
+
+Everything that matters lives in the Postgres volume (`pgdata`), plus your
+`.env` (it holds the secrets) and the `server_device` volume (the server's own
+key; losing it only means approving the server again). Back them up before you
+need them:
+
+```bash
+./scripts/backup.sh                               # database dump into ./backups/
+./scripts/verify-backup.sh backups/<file>.dump    # restore into a scratch database and compare
+./scripts/restore.sh backups/<file>.dump          # DESTRUCTIVE: asks you to type RESTORE
+```
+
+Copy backups off the machine and encrypt them. Orbitly can also make
+scheduled, encrypted backups to a local folder or any S3-compatible bucket
+(AWS S3, Backblaze B2, Wasabi, Cloudflare R2, MinIO) with retention and a
+**Back up now** button in the admin web. How to set that up, restore drills
+and what to keep where: [docs/backup-restore.md](docs/backup-restore.md)
+(short version: [Backups and restore](docs/admin/backups.md)).
+
+## Updating
+
+The server never updates itself, and nothing in the stack has access to the
+Docker socket. From the Orbitly folder on the host:
+
+```bash
+./scripts/upgrade.sh
+```
+
+It refuses to run with uncommitted changes, backs up the database to
+`./backups`, pulls, rebuilds, waits for `/healthz`, and rolls the code back
+(printing the restore command) if the new version does not come up. Read
+[What is new](docs/CHANGELOG.md) first. The server keeps working with the last
+five app versions, so phones do not have to update on the same day. More:
+[Updating the server](docs/admin/updates.md).
 
 ## Why self-host this
 
@@ -100,8 +204,8 @@ monetize the result. Orbitly is the opposite posture:
 - **iOS push is honest.** Apple requires APNs. Payloads carry no coordinates;
   the app fetches the real content from *your* server over TLS.
 
-This is a family app, not a fleet tracker. It is built for a handful of people
-who share a home, not for vehicles, tools, or public sharing.
+This is for small circles of people (a family, friends, a carpool), not a
+fleet tracker: it is not built for vehicles, tools, or public sharing.
 
 ## Features
 
@@ -212,70 +316,16 @@ On-site write-up: [foleyit.com/compare](https://foleyit.com/compare/).
 | Android without Google | UnifiedPush / ntfy | FCM | MQTT | Optional | N/A |
 | Built for | Families | Families (cloud) | Recorders | Fleets | Personal timeline |
 
-## Quick start
-
-### Prerequisites
-
-- Docker and Docker Compose
-- Go 1.25+ only if you run the API outside Docker
-- Flutter 3.x only if you build the app yourself
-
-### 1. Start the stack
-
-```bash
-./scripts/setup.sh && docker compose up -d
-```
-
-`setup.sh` writes `.env` with random database, JWT and admin passwords (it never
-overwrites an existing `.env`) and asks for your domain and admin email. A
-domain turns on the `proxy` profile (Caddy with automatic HTTPS); with `:80`
-the API listens on `http://localhost:8080` only. Optional pieces are compose
-profiles: `proxy` (Caddy) and `push` (ntfy). See
-[docs/self-hosting.md](docs/self-hosting.md).
-
-Existing deployments should retain their current `DATABASE_URL`,
-`POSTGRES_USER`, and `POSTGRES_DB` values during the upgrade. The Orbitly
-database defaults are for fresh installations and do not rename stored data.
-
-```bash
-curl http://localhost:8080/healthz   # or https://your-domain/healthz
-# {"status":"ok"}
-```
-
-### 2. Create an account
-
-```bash
-curl -X POST http://localhost:8080/auth/register \
-  -H 'Content-Type: application/json' \
-  -d '{"email":"alice@example.com","password":"supersecret1","name":"Alice"}'
-
-curl -X POST http://localhost:8080/auth/login \
-  -H 'Content-Type: application/json' \
-  -d '{"email":"alice@example.com","password":"supersecret1"}'
-```
-
-For a managed server (invite-only registration and the admin panel), set
-`PLATFORM_ADMIN_EMAIL` and `PLATFORM_ADMIN_PASSWORD` in `.env` before the
-first start. See [Web admin panel](#web-admin-panel).
-
-### 3. Point the app at your server
-
-Install the APK from the admin panel's **APK** page, or run from source
-(see [Mobile apps](#mobile-apps)). On first launch, enter the server URL
-if it was not baked in at build time.
-
-Public internet deployments: follow [docs/self-hosting.md](docs/self-hosting.md)
-before you invite anyone.
-
 ## Family setup
 
 1. Install the Android APK (admin **Builds** page or the latest GitHub Release).
 2. Enter your server URL (for example `https://orbitly.example.com`).
-3. Create or join a family (invite code if the operator closed registration).
+3. Create or join a circle (invite code if the operator closed registration).
 4. Allow **Always** location and notifications. On Android, grant the battery
    exemption under Settings → Background updates.
-5. Install [ntfy](https://ntfy.sh/) so SOS, geofence, and check-in alerts
-   arrive when Orbitly is closed.
+5. Alerts on Android need nothing extra: the app keeps its own connection to
+   your server. If phones sleep deeply, add [ntfy](https://ntfy.sh/) as
+   described in [docs/push.md](docs/push.md).
 
 Privacy details: [PRIVACY.md](PRIVACY.md) ([on the site](https://foleyit.com/privacy/)).
 Operator hardening: [docs/self-hosting.md](docs/self-hosting.md)
@@ -340,9 +390,11 @@ builds on Gradle 8).
 
 ### Push
 
-- **Android:** install [ntfy](https://ntfy.sh/) (or another UnifiedPush
-  distributor). The API advertises `NTFY_BASE_URL` on `GET /config` so the
-  generic APK can register without a rebuild.
+- **Android:** built in, nothing to install: the app keeps one connection to
+  your server and shows alerts as notifications. Optionally add
+  [ntfy](https://ntfy.sh/) (or another UnifiedPush distributor) for phones
+  that sleep deeply; the API advertises `NTFY_BASE_URL` on `GET /config` so the
+  generic APK can register without a rebuild. See [docs/push.md](docs/push.md).
 - **iOS:** APNs. Requires an Apple Developer account and an auth key — see
   [Configuration](#configuration). Payloads do not include coordinates.
   Invite links can open the iPhone app when the server sets `IOS_TEAM_ID`
@@ -380,7 +432,7 @@ Setting `PLATFORM_ADMIN_EMAIL` **closes open registration**.
    **APK** — download the Android APK.
    **Settings** — your account (name, password, photo), this server, and
    the running server version (upgrade with `./scripts/upgrade.sh`, see
-   [Updating the server](#updating-the-server)).
+   [Updating](#updating)).
 
 ### Invite codes
 
@@ -431,23 +483,6 @@ users have to uninstall before they can install a newly signed APK.
 One generic APK works for every deployment because of the runtime server URL
 screen.
 
-### Updating the server
-
-The server does not update itself and nothing in the stack has access to the
-Docker socket. Upgrade from a shell on the host:
-
-```bash
-./scripts/upgrade.sh
-```
-
-It refuses to run with uncommitted changes, backs up the database to
-`./backups`, pulls, rebuilds, waits for `/healthz`, and rolls the code back
-(printing the restore command) if the new version does not come up. See
-[docs/self-hosting.md](docs/self-hosting.md#upgrades-and-backups). Scheduled, encrypted
-backups to any S3-compatible bucket (AWS S3, Backblaze B2, Wasabi, Cloudflare R2, MinIO),
-with retention, a *Back up now* button and an S3/encryption/schedule settings form in the admin
-System page, are an opt-in compose profile: see [docs/backup-restore.md](docs/backup-restore.md#s3-and-scheduled-backups).
-
 ## Self-hosting map tiles
 
 For a fully private map, host your own tiles. The simplest option is
@@ -493,13 +528,13 @@ For a fully private map, host your own tiles. The simplest option is
    ```
 
 4. **Storage:** the `pgdata` volume holds all data. Put it on a volume with
-   snapshots, and schedule `pg_dump`.
+   snapshots, and set up [backups](#backups).
 5. **Remote access:** do **not** expose ports publicly if you can avoid it.
    Use Tailscale or WireGuard, then set
-   `SITE_ADDRESS=openfamily.<your-tailnet>.ts.net` so Caddy gets a real
+   `SITE_ADDRESS=orbitly.<your-tailnet>.ts.net` so Caddy gets a real
    certificate. For a public domain, set `SITE_ADDRESS=orbitly.example.com`
    and open 80/443.
-6. **ntfy / UnifiedPush:** set `PUSH_ADDRESS` and `NTFY_BASE_URL` so Android
+6. **ntfy / UnifiedPush (optional):** set `PUSH_ADDRESS` and `NTFY_BASE_URL` so Android
    push works over TLS. `PUSH_ADDRESS` alone does not enable TLS — add a
    Caddy site block for ntfy (commented example in `caddy/Caddyfile`).
    Install the [ntfy Android app](https://ntfy.sh/) on family devices.
@@ -584,20 +619,23 @@ For a fully private map, host your own tiles. The simplest option is
   does not encrypt those credentials or stop opted-in background reporting.
   `android:allowBackup="false"` keeps them off cloud backup.
 - **End-to-end encryption of location is opt-in per circle** ("Private
-circle", see `docs/design/E2EE.md`). In a normal circle the server must read
-  coordinates to evaluate geofences, build history, and fan out the live map;
-  that is a deliberate tradeoff. For Private circles the admin web has a
+  circle", see [Who can read your locations](#who-can-read-your-locations) and
+  [docs/design/E2EE.md](docs/design/E2EE.md)). In a Normal circle the server must
+  read coordinates to evaluate geofences, build history, and fan out the live
+  map; that is a deliberate tradeoff. For Private circles the admin web has a
   "Private circles" page that decrypts in your browser after one of your phones
   approves it, and `backend/cmd/e2ee-bridge` (run it off the server host, see
   its README) forwards Private-circle points to your own Dawarich. Whoever runs
   a viewer or bridge can read those circles.
-- **Optional trusted-server mode** (`docker compose --profile e2ee-server`, off
-  by default): the Orbitly server becomes an approved member device of a
-  Private circle so the admin map, history, trips, place alerts and the built-in
-  Dawarich sync work for it again. Every member must allow it on their phone, the
-  circle then shows "Server can read", and the server keeps plaintext copies; it
-  does not protect against a compromised server host. See the "Trusted-server
-  mode" section of `docs/design/E2EE.md`.
+- **Server processing** (built in): the server creates its own device key on
+  first start (`server_device` volume) and, once a server administrator approves
+  it on a phone, reads the data of exactly those Private-circle members who
+  chose **Use the server**, so history, trips, place alerts and the admin map
+  work for them. It does not protect against a compromised server host. See
+  [docs/server-setup.md](docs/server-setup.md) and
+  [docs/design/PRIVACY_PROCESSING.md](docs/design/PRIVACY_PROCESSING.md). The
+  older separate container (`docker compose --profile e2ee-server`) remains
+  available for operators who want the key away from the database.
 
 ## API reference
 

@@ -1,6 +1,6 @@
 # Third-party licenses
 
-OpenFamily is licensed under the GNU Affero General Public License v3.0 (see
+Orbitly (formerly OpenFamily) is licensed under the GNU Affero General Public License v3.0 (see
 [LICENSE](../LICENSE)). This file inventories the third-party components that
 are built into, or shipped with, the project and the license each one is
 distributed under. See [NOTICE](../NOTICE) for upstream attribution and the

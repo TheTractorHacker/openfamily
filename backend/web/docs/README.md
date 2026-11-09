@@ -54,5 +54,4 @@ and shows what is new in your server version.
 ## About
 
 [Credits and license](about/credits-and-license.md): Orbitly is a substantially extended fork of
-OpenFamily by wheresfrank and contributors (AGPL-3.0), and where to get the source. It was published as
-OpenFamily before the rename. Apps for Wear OS and Apple Watch are coming.
+OpenFamily by wheresfrank and contributors (AGPL-3.0), and where to get the source.
