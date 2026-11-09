@@ -10,6 +10,16 @@ for the **last 5 minor versions** of the app (see
 [API compatibility](api-compat.md)), so you can update the server first and
 the phones afterwards.
 
+## v0.26.11 (2026-11-09)
+
+Server first, out of the box. Works with every app from 0.22 on; update the server first, then the phones.
+
+- **Server processing is on by default.** A new circle is created **Private, with your server (recommended)** when the server can take part: one tap on Create makes the circle Private, switches server assistance on, makes the server the default for members and signs your own server choice. If the server key still needs your approval, "Your server wants to join" opens right there. Members who join a circle whose default is the server are switched on automatically by their own phone, with a notice, and can switch it off per circle in **Settings > Server & data > Server processing**. This now also applies to servers set to "rented"; a server admin can untick "Apply automatically" under admin web > Settings > Default for new members to ask first. Circles whose admin had already chosen the server as default will switch members who never chose the next time they open the app. Nobody is ever opted in by anyone else: a person's own phone signs it, and opting out is final. For kids, teens and anyone who must not hide their data, tick **Everyone must use the server** (each member consents once on their own phone or leaves). New guide: [Server processing](user/server-processing.md). The Encryption keys row now says the real state ("On for you", "Phone only for you", "Required in this circle: needs your OK").
+- **Settings in the admin web are dedicated pages** (General, Server setup, Privacy and processing, Security, Notifications, Backups, Integrations, Updates and about, Account, Appearance) with their own addresses, a left navigation, working Back and Forward, and a warning before leaving unsaved changes.
+- **No false "cannot reach healthz".** The Custom domain and HTTPS checks look at the server and its certificate locally first. Opening your own public address from inside a home network often fails (no NAT loopback) even though it works in a browser; that is now shown as an amber hint with what to do, not a failure.
+- **Backups are on by default.** `docker compose up -d` now starts the backup service (nightly to `./backups`, 7 daily, 4 weekly and 6 monthly, plus a first backup right away). Manage it under Settings > Backups; add encryption or S3 there. Opt out with `BACKUP_REPLICAS=0`. Existing servers: make sure `./backups` is writable by uid 1000 (or set `BACKUP_UID`/`BACKUP_GID`), then run `docker compose up -d`. Backups are not encrypted until you add a key.
+- **Documentation:** Orbitly wording throughout, a README that starts with a quick start, plain-words privacy and backup sections, and fresh screenshots (attention icon, Encryption keys). Repository links point at the existing `openfamily` repository until it is renamed (this fixes the APK builds page default and the source links).
+
 ## v0.26.10 (2026-11-09)
 
 - **Encryption keys screen spacing.** The Owner approval card and the groups below it were glued to the line above and to each other; they now have normal gaps.
