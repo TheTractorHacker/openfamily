@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'map_start_camera.dart';
 import 'api_client.dart';
 import 'background_location_service.dart';
 import 'biometric_service.dart';
@@ -120,6 +121,8 @@ class AuthService {
     await TokenStorage.clear(reason: 'logout');
     // Family-scoped caches must never outlive the account.
     PlaceService.invalidateCache();
+    // Where this phone was last: the next account's map must not open there.
+    await OwnPositionCache.clear();
     // No family names may linger on the home-screen widget after sign-out.
     await HomeWidgetService.clear();
     // Nor on a paired watch.

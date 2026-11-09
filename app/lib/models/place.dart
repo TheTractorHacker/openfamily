@@ -112,3 +112,16 @@ class Place {
     );
   }
 }
+
+/// The places that may label a member of the viewed circle: whole-family
+/// places plus the places of THAT circle. Before, every place this phone knew
+/// (other circles' places, Private circles' sealed places) could name where a
+/// member is, so the owner saw "At <place>" labels the rest of the circle
+/// never saw. [scope] null or 'all' (no single circle) keeps them all.
+List<Place> placesForScope(List<Place> places, String? scope) {
+  if (scope == null || scope == 'all') return places;
+  return <Place>[
+    for (final Place p in places)
+      if (p.circleId == null || p.circleId == scope) p,
+  ];
+}

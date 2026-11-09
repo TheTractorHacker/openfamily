@@ -5,6 +5,7 @@ import '../e2ee/e2ee_api.dart';
 import '../e2ee/e2ee_crypto.dart';
 import '../e2ee/e2ee_models.dart';
 import '../e2ee/private_channel.dart';
+import '../notification_prefs_service.dart';
 import 'chat_store.dart';
 import 'chat_wire.dart';
 
@@ -72,6 +73,13 @@ class ChatEngine {
   /// Local notification (title, body). Text is shown only here, after decrypting.
   Future<void> Function(String title, String body)? notify;
 
+  /// The account's "Show names in notifications" choice (the same one the
+  /// server applies to its chat pushes). Off: no sender and no text.
+  Future<bool> Function()? showNames;
+
+  /// Display name of a circle, for the notification title.
+  String Function(String circleId)? circleName;
+
   /// True while the chat of [circleId] is on screen (no notification then).
   bool Function(String circleId)? isViewing;
 
@@ -128,8 +136,15 @@ class ChatEngine {
     onChange?.call(change, change.message == null ? '' : await _name(r.circleId, change.message!.author), me);
     if (change.kind == ChatChangeKind.added && r.userId != me && _now().difference(r.ts) < const Duration(minutes: 30)) {
       if (!(isViewing?.call(r.circleId) ?? false)) {
-        final String text = e.text.isEmpty ? 'sent a photo' : e.text;
-        await notify?.call(name, text);
+        final bool show = await (showNames?.call() ?? Future<bool>.value(false));
+        final ({String title, String body}) copy = chatNotificationCopy(
+          showNames: show,
+          circleName: circleName?.call(r.circleId) ?? '',
+          senderName: name,
+          text: e.text,
+          photo: e.text.isEmpty || e.attachment != null,
+        );
+        await notify?.call(copy.title, copy.body);
       }
     }
     return change;

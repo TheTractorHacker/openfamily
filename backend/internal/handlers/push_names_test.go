@@ -32,8 +32,40 @@ func TestCrashAndChatCopyHonourShow(t *testing.T) {
 	if ti, bo := chatPushCopy(false, "Fam", msg); strings.Contains(ti+bo, "Henry") || strings.Contains(ti+bo, "secret") {
 		t.Fatalf("chat leaks: %q %q", ti, bo)
 	}
-	if _, bo := chatPushCopy(true, "Fam", msg); bo != "Henry: secret plan" {
-		t.Fatalf("chat body %q", bo)
+	if ti, bo := chatPushCopy(true, "Fam", msg); ti != "Henry in Fam" || bo != "secret plan" {
+		t.Fatalf("chat copy %q %q", ti, bo)
+	}
+}
+
+// The chat push follows "Show names in notifications" exactly like the other
+// pushes: the sender's first name in the title when on, nothing about who or
+// what when off (photos included).
+func TestChatPushCopyFollowsShowNames(t *testing.T) {
+	cases := []struct {
+		name        string
+		show        bool
+		msg         chatMessageOut
+		title, body string
+	}{
+		{"off text", false, chatMessageOut{SenderName: "Henry Smith", Body: "hi"}, "New message in Fam", ""},
+		{"off photo", false, chatMessageOut{SenderName: "Henry Smith", HasImage: true}, "New message in Fam", ""},
+		{"on text", true, chatMessageOut{SenderName: "Henry Smith", Body: " hi there "}, "Henry in Fam", "hi there"},
+		{"on photo", true, chatMessageOut{SenderName: "Henry Smith", HasImage: true}, "Henry in Fam", "Sent a photo"},
+		{"on photo caption", true, chatMessageOut{SenderName: "Henry", HasImage: true, Body: "look"}, "Henry in Fam", "Sent a photo: look"},
+		{"on no name", true, chatMessageOut{SenderName: " ", Body: "x"}, "A family member in Fam", "x"},
+	}
+	for _, c := range cases {
+		ti, bo := chatPushCopy(c.show, "Fam", c.msg)
+		if ti != c.title || bo != c.body {
+			t.Errorf("%s: got %q / %q, want %q / %q", c.name, ti, bo, c.title, c.body)
+		}
+	}
+	if ti, _ := chatPushCopy(false, "", chatMessageOut{Body: "x"}); ti != "New message in your circle" {
+		t.Errorf("empty circle name: %q", ti)
+	}
+	long := strings.Repeat("é", chatPushPreview+10)
+	if _, bo := chatPushCopy(true, "Fam", chatMessageOut{SenderName: "A", Body: long}); len([]rune(bo)) != chatPushPreview+1 {
+		t.Errorf("preview not truncated to %d runes: %d", chatPushPreview, len([]rune(bo)))
 	}
 }
 

@@ -1014,7 +1014,12 @@ class _LocationTabViewState extends State<LocationTabView> {
                 onRetry: _reloadPlaces,
               );
             }
-            final List<Place> places = snap.data ?? const <Place>[];
+            // Only this circle's places (and whole-family ones), as every
+            // other member of the circle sees them.
+            final List<Place> places = placesForScope(
+              snap.data ?? const <Place>[],
+              widget.selectedCircleId,
+            );
             if (places.isEmpty) {
               return DsEmptyState(
                 icon: Icons.place_outlined,

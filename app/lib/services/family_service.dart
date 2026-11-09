@@ -645,7 +645,7 @@ class FamilyService {
     if (index < 0) return false;
     _members[index] = applyPlaceAddress(
       memberFromLocationUpdate(_members[index], map),
-      _places,
+      placesForScope(_places, _circleId),
     );
     _servedFromCache = false; // a live frame means the server is talking again
     _noteLiveLocation(map, id);
@@ -663,7 +663,7 @@ class FamilyService {
     if (index < 0) return false;
     final Member updated = applyPlaceAddress(
       memberFromPresenceUpdate(_members[index], map),
-      _places,
+      placesForScope(_places, _circleId),
     );
     if (identical(updated, _members[index])) return false;
     _members[index] = updated;
@@ -731,7 +731,7 @@ class FamilyService {
     }).toList();
 
     _members = reconciled
-        .map((Member m) => applyPlaceAddress(m, _places))
+        .map((Member m) => applyPlaceAddress(m, placesForScope(_places, _circleId)))
         .toList();
     // Private circles carry no server positions: put the last known one back at once (from memory, so the roster
     // never flashes "No location yet" between a snapshot and the async replay), then replay for the rest.
@@ -745,7 +745,7 @@ class FamilyService {
     if (m.position != null || m.id.isEmpty) return m;
     final LastPosition? p = PrivateRuntime.instance.lastKnown(m.id, circleId: (_circleId == null || _circleId == 'all') ? null : _circleId);
     if (p == null) return m;
-    return applyPlaceAddress(memberFromLocationUpdate(m, p.toFrame()), _places);
+    return applyPlaceAddress(memberFromLocationUpdate(m, p.toFrame()), placesForScope(_places, _circleId));
   }
 
   bool _avatarMetadataChanged(Member before, Member after) {
@@ -856,3 +856,4 @@ class FamilyService {
     MemberAvatarCache.instance.clear();
   }
 }
+

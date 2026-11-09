@@ -74,7 +74,18 @@ Future<void> onHeartbeatTick() async {
     };
     if (batteryPct != null) body['battery_pct'] = batteryPct;
 
-    await _report(credentials, '/devices/heartbeat', body);
+    final bool ok = await _report(credentials, '/devices/heartbeat', body);
+    if (!ok) return;
+    // The server answers again: deliver what queued up while it did not, so
+    // a backlog never waits for the next moving fix or for the app to open.
+    await LocationOutbox.drain(
+      send: (List<Map<String, dynamic>> batch) =>
+          _sendLocationBatch(credentials, batch),
+    );
+    // Private circles: upload sealed fixes still in the queue (and seal the
+    // parked ones whose key has arrived) from the background too.
+    final PrivateRuntime? rt = _privateRuntime;
+    if (rt != null) await rt.flush();
   } catch (_) {
     // Never throw from the background callback.
   }

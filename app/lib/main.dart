@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'screens/login_screen.dart';
+import 'services/map_start_camera.dart';
 import 'services/e2ee/e2ee_vault.dart';
 import 'screens/app_shell.dart';
 import 'screens/join_circle_screen.dart';
@@ -77,6 +78,8 @@ Future<void> main() async {
       // Reads the phone's RAM (one small platform call, in parallel with the
       // stored settings) so caches are sized before the first screen builds.
       PerfProfile.init(),
+      // Your last known position: the map opens on it at once.
+      OwnPositionCache.load(),
     ]),
   );
   UnitsSync.install();

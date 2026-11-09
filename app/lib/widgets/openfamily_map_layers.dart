@@ -9,6 +9,18 @@ import '../services/map_style_service.dart';
 import '../services/tile_config.dart';
 import '../services/perf/perf_profile.dart';
 
+/// Zoom offset of the vector base map (see [OpenFamilyTileLayer]): tiles of
+/// zoom z-1 for a map at zoom z, as MapLibre / Mapbox GL draw these styles.
+final TileOffset kVectorTileOffset = TileOffset.mapbox;
+
+/// Tiles needed to cover a [viewport] (logical px) at a whole map [zoom] with
+/// a tile zoom [offset] (0 = 256 px tiles, -1 = 512 px tiles). Used by the
+/// perf test to show what the offset saves.
+int tilesForViewport(Size viewport, {required int offset}) {
+  final double tile = 256.0 * (1 << -offset);
+  return (viewport.width / tile).ceil() * (viewport.height / tile).ceil();
+}
+
 /// Shared base-map layer for every FlutterMap in the app: crisp vector tiles
 /// (OpenFreeMap by default, light/dark following the app theme), with
 /// automatic fallback to the raster [TileConfig] URLs if the style cannot load.
@@ -94,6 +106,12 @@ class _OpenFamilyTileLayerState extends State<OpenFamilyTileLayer> {
           theme: style.theme,
           sprites: style.sprites,
           layerMode: VectorTileLayerMode.vector,
+          // Style-JSON vector tiles (OpenFreeMap / OpenMapTiles, any MapLibre
+          // style) are made to be drawn at 512 px, one zoom level below the
+          // map. Loading them at the 256 px default fetched, parsed and drew
+          // four times as many tiles for the same screen, which is what made
+          // zooming out (a new, bigger set of tiles per level) slow.
+          tileOffset: kVectorTileOffset,
           // Bounded disk cache (default 50 MB, 25 MB in reduced-data mode).
           fileCacheMaximumSizeInBytes:
               low ? profile.tileDiskCacheBytes ~/ 2 : profile.tileDiskCacheBytes,

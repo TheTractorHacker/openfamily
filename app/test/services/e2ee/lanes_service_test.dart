@@ -52,6 +52,7 @@ class Dev {
         directory: StateSenderDirectory(client));
     runtime.lanesService.logTtl = Duration.zero;
     runtime.notify = (String t, String b) async {};
+    runtime.chatNotify = (String t, String b) async {};
   }
   final String user;
   final MemoryVault vault;

@@ -123,6 +123,10 @@
             android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED"/>
+                <!-- Also after an app update: Android stops the service when
+                     the package is replaced (protected broadcast, delivered
+                     only to this app). -->
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
             </intent-filter>
         </receiver>
         <!-- background_locator_2: foreground service hosting the background isolate. -->

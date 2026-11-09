@@ -104,7 +104,8 @@ func TestChatPhotoAndSeen(t *testing.T) {
 		}
 	}
 	fp.mu.Lock()
-	if len(fp.sent) != 1 || !strings.Contains(fp.sent[0].Title, "sent a photo") {
+	// Sender in the title, "Sent a photo" in the body (names on in this test).
+	if len(fp.sent) != 1 || !strings.Contains(fp.sent[0].Title, " in ") || fp.sent[0].Body != "Sent a photo" {
 		t.Fatalf("push = %+v", fp.sent)
 	}
 	fp.mu.Unlock()

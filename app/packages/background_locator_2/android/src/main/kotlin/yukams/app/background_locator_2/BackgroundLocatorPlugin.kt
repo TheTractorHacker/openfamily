@@ -241,12 +241,14 @@ class BackgroundLocatorPlugin
                 // save setting to use it when device reboots
 
                 PreferencesManager.saveSettings(context!!, args!!)
+                PreferencesManager.setTrackingWanted(context!!, true)
 
                 registerLocator(context!!,
                         args,
                         result)
             }
             Keys.METHOD_PLUGIN_UN_REGISTER_LOCATION_UPDATE -> {
+                PreferencesManager.setTrackingWanted(context!!, false)
                 unRegisterPlugin(context!!, result)
             }
             Keys.METHOD_PLUGIN_UPDATE_LOCATION_REQUEST -> {
