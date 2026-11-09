@@ -152,17 +152,28 @@ class _LinkDeviceScreenState extends State<LinkDeviceScreen> {
             onPressed: _busy
                 ? null
                 : () async {
+                    bool serverKey = false;
+                    try {
+                      serverKey = await _svc.accountHoldsServerKey();
+                    } catch (_) {
+                      serverKey = false; // offline: the reset itself will say so
+                    }
+                    if (!context.mounted) return;
                     final bool ok = await showDsConfirm(context,
                         title: 'Reset your encryption keys?',
-                        message: 'Your old keys are revoked. Encrypted data you could not read yet stays unreadable to you. Members must approve your new key.',
+                        message: resetConfirmMessage(serverKey: serverKey),
                         confirmLabel: 'Reset keys',
                         destructive: true);
                     if (!ok) return;
                     await _guard(() async {
-                      await _svc.registerThisDevice(reset: true, label: 'Reset');
+                      final KeyResetResult r = await _svc.resetThisDevice();
                       if (!mounted) return;
+                      final String? note = resetDoneMessage(r);
+                      // ignore: use_build_context_synchronously
+                      final ScaffoldMessengerState messenger = ScaffoldMessenger.of(context);
                       // ignore: use_build_context_synchronously
                       Navigator.of(context).pop();
+                      if (note != null) messenger.showSnackBar(SnackBar(content: Text(note)));
                     });
                   },
           ),
@@ -170,4 +181,21 @@ class _LinkDeviceScreenState extends State<LinkDeviceScreen> {
       ),
     );
   }
+}
+
+/// The reset confirmation. [serverKey]: this account holds the key the server uses (it approved the server), so
+/// the reset removes that key too.
+String resetConfirmMessage({required bool serverKey}) {
+  const String base = 'Your old keys are revoked. Encrypted data you could not read yet stays unreadable to you. '
+      'Members must approve your new key.';
+  if (!serverKey) return base;
+  return '$base\n\nThis also removes the key your Orbitly server uses. The server makes a new key right away and '
+      'this phone approves it for you, so you are not asked to approve the server again.';
+}
+
+/// What to tell the person after a reset; null when there is nothing about the server to say.
+String? resetDoneMessage(KeyResetResult r) {
+  if (!r.serverKeyRevoked) return null;
+  if (r.serverRejoined) return 'Keys reset. This phone approved your server\'s new key.';
+  return 'Keys reset. Your server has a new key: approve it under "Your server wants to join".';
 }

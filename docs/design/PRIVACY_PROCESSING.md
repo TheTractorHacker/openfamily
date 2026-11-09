@@ -709,6 +709,16 @@ defaults and adds one component; it changes **no** wire format, signature, key l
   usual register action after comparing the 4 groups). The API validates through the unchanged `POST /e2ee/devices`.
   A push "Your server wants to join" goes to platform admins a few minutes after start and daily until approved;
   the app also shows a card when opened.
+* **Owner key reset (v0.26.15).** A reset (`POST /e2ee/devices` with `reset: true`) revokes every key of the
+  account, so the built-in device's `server` key goes too when that account owns it. After the commit the handler
+  calls `ServerDevice.NoteRevoked(id)` for each revoked `server` key; the device ignores any id that is not its own
+  registered key, otherwise it stops its loop and asks the API once: when the pin answers `server_key_revoked` it
+  replaces the key at once (the generic self-repair needs three such answers ~30 s apart). The new key records
+  `replaces` (old device id, public) and the join request carries it. The resetting phone
+  (`E2eeService.resetThisDevice`) remembered its account's active `server` keys before the reset and, for up to
+  20 s, approves the waiting key with the normal register signature only when: it gets the request (platform
+  admin), `replaces` names one of those keys, the key is new, `kind` is `server` and the binding names its own
+  account. Otherwise it signs nothing and the usual prompt stays. Signature checks on the server are unchanged.
 * Security properties kept: the server device receives SK only, never CK; it reads only members whose own signed
   lane is `server` (verified against the key log); DB triggers unchanged; a CK handed to it is a security alarm and
   stops the loop. **Accepted trade-off:** its private key now lives on the server's own disk next to the database, so

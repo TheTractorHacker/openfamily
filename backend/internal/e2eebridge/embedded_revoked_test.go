@@ -2,6 +2,9 @@ package e2eebridge
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -9,7 +12,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // The API answers 404 "no active server key" once the server key was revoked (for example when
@@ -60,5 +65,87 @@ func TestRevokedServerKeyIsReplaced(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(filepath.Dir(matches[0]), fileKeys)); err == nil {
 		t.Fatal("circle keys were archived")
+	}
+}
+
+// NoteRevoked: the API process itself just revoked this key (an owner key reset). One "revoked"
+// answer then replaces the key at once; the new key names the old one; an id that is not this
+// device's key is ignored.
+func TestNoteRevokedReplacesAtOnce(t *testing.T) {
+	var pins atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		pins.Add(1)
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"code":"server_key_revoked","error":"no active server key with that id"}`))
+	}))
+	defer srv.Close()
+	e, err := OpenEmbedded(EmbeddedOptions{Dir: t.TempDir(), BaseURL: srv.URL, Token: "t0ken-t0ken-t0ken-t0ken-t0ken-t0ken-xx", Log: slog.Default(),
+		MintAccess: func(context.Context, string) (string, error) { return "x", nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldID := e.id.f.DeviceID
+	e.id.f.UserID, e.id.f.RegisteredAt = "75e5320a-7604-4b93-832b-e641eb025ca5", "2026-11-07T22:14:20Z"
+	if err := e.st.saveIdentity(e.id); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { defer close(done); e.Run(ctx) }()
+	defer func() { cancel(); <-done }()
+
+	// The first answer alone does not replace the key; the loop then waits 30 s.
+	waitFor(t, 5*time.Second, func() bool { return pins.Load() >= 1 })
+	time.Sleep(200 * time.Millisecond)
+	if in := e.Info(); in.DeviceID != oldID {
+		t.Fatalf("replaced after one answer without a hint: %+v", in)
+	}
+	// Another id (another account's key, or an older key): ignored.
+	before := pins.Load()
+	e.NoteRevoked("00000000-0000-4000-8000-000000000000")
+	time.Sleep(300 * time.Millisecond)
+	if in := e.Info(); in.DeviceID != oldID || pins.Load() != before {
+		t.Fatalf("a foreign id woke the device: %+v pins=%d", in, pins.Load())
+	}
+	// Our own key: replaced after the next answer, without the 30 s waits.
+	e.NoteRevoked(oldID)
+	waitFor(t, 5*time.Second, func() bool { return e.Info().DeviceID != oldID })
+	in := e.Info()
+	if in.State != StateWaitingApproval || in.Registered {
+		t.Fatalf("new key not waiting: %+v", in)
+	}
+	jr, err := e.JoinRequestFor("75e5320a-7604-4b93-832b-e641eb025ca5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if jr.Replaces != oldID || jr.Kind != "server" || jr.DeviceID == oldID {
+		t.Fatalf("join request: %+v", jr)
+	}
+	// Public data only.
+	b, _ := json.Marshal(jr)
+	e.mu.Lock()
+	seed := e.id.edPriv.Seed()
+	e.mu.Unlock()
+	for _, bad := range []string{base64.StdEncoding.EncodeToString(seed), base64.RawURLEncoding.EncodeToString(seed), hex.EncodeToString(seed), `"seed"`} {
+		if strings.Contains(string(b), bad) {
+			t.Fatalf("join request carries secret material: %s", b)
+		}
+	}
+	// A late hint for the OLD key does nothing to the new one.
+	e.NoteRevoked(oldID)
+	time.Sleep(200 * time.Millisecond)
+	if e.Info().DeviceID != in.DeviceID {
+		t.Fatal("a stale hint replaced the new key")
+	}
+}
+
+func waitFor(t *testing.T, d time.Duration, ok func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(d)
+	for !ok() {
+		if time.Now().After(deadline) {
+			t.Fatal("timed out")
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }

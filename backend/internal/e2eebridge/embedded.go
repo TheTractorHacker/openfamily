@@ -72,6 +72,10 @@ type JoinRequest struct {
 	Digits      string `json:"digits"`
 	// Code is the same string `enroll` prints, so the existing "Approve a viewer or bridge" screen accepts it too.
 	Code string `json:"request_code"`
+	// Replaces is the device id of the server key this one replaced after it was revoked
+	// (empty for the first key). The phone that made an owner key reset approves the new key
+	// without a prompt only when this names a server key its own reset revoked.
+	Replaces string `json:"replaces,omitempty"`
 }
 
 // EmbeddedOptions wires the device to its host process.
@@ -100,13 +104,20 @@ type Embedded struct {
 	st  *store
 	log *slog.Logger
 
-	mu     sync.Mutex
-	id     *identity
+	mu sync.Mutex
+	id *identity
 
 	goneCount int // consecutive "key revoked" answers (Run loop only)
-	state  EmbeddedState
-	detail string
-	pass   bool
+	// revokedHint is the device id the API process itself just revoked (an owner key reset,
+	// [Embedded.NoteRevoked]). With it, ONE "key revoked" answer from the API is enough to
+	// replace the key, so the owner's phone that made the reset can approve the new one at once.
+	revokedHint string
+	restartNow  bool               // NoteRevoked stopped the loop: run the next check at once
+	cancelRun   context.CancelFunc // stops the current bridge loop (nil between loops)
+	wake        chan struct{}      // cuts the Run loop's waits short
+	state       EmbeddedState
+	detail      string
+	pass        bool
 }
 
 // OpenEmbedded opens (creating once) the server's own device key.
@@ -131,7 +142,8 @@ func OpenEmbedded(opt EmbeddedOptions) (*Embedded, error) {
 	if err != nil {
 		return nil, err
 	}
-	e := &Embedded{opt: opt, st: st, log: opt.Log.With("component", "server-device"), state: StateWaitingApproval, pass: len(pass) > 0}
+	e := &Embedded{opt: opt, st: st, log: opt.Log.With("component", "server-device"), state: StateWaitingApproval, pass: len(pass) > 0,
+		wake: make(chan struct{}, 1)}
 	id, err := st.loadIdentity()
 	if errors.Is(err, errNotFound) {
 		id, err = st.createIdentity("Orbitly server")
@@ -206,7 +218,8 @@ func (e *Embedded) JoinRequestFor(userID string) (JoinRequest, error) {
 	}
 	return JoinRequest{DeviceID: e.id.f.DeviceID, UserID: userID, Ed25519Pub: std(e.id.edPub), X25519Pub: std(e.id.xPub),
 		Binding: std(ed25519.Sign(e.id.edPriv, msg)), Kind: "server", Name: e.id.f.Name,
-		Fingerprint: e.id.f.Fingerprint, Short: e2ee.ShortFingerprint(e.id.fp), Digits: e2ee.DigitGroups(e.id.fp), Code: code}, nil
+		Fingerprint: e.id.f.Fingerprint, Short: e2ee.ShortFingerprint(e.id.fp), Digits: e2ee.DigitGroups(e.id.fp), Code: code,
+		Replaces: e.id.f.Replaces}, nil
 }
 
 func (e *Embedded) client(userID string) *apiClient {
@@ -279,21 +292,76 @@ func (e *Embedded) Run(ctx context.Context) {
 		ready := e.id != nil && e.id.f.RegisteredAt != "" && e.id.f.RevokedAt == ""
 		e.mu.Unlock()
 		if !ready {
-			if sleepCtx(ctx, 3*time.Second) != nil {
+			if e.pause(ctx, 3*time.Second) != nil {
 				return
 			}
 			continue
 		}
-		code := e.runOnce(ctx)
-		switch code {
-		case exitOK:
+		rctx, cancel := context.WithCancel(ctx)
+		e.mu.Lock()
+		e.cancelRun = cancel
+		e.mu.Unlock()
+		code := e.runOnce(rctx)
+		e.mu.Lock()
+		e.cancelRun = nil
+		restart := e.restartNow
+		e.restartNow = false
+		e.mu.Unlock()
+		cancel()
+		if ctx.Err() != nil {
 			return
+		}
+		switch code {
 		case exitAlarm, exitLog:
 			return // state already says stopped
 		}
-		if sleepCtx(ctx, 30*time.Second) != nil {
+		if restart {
+			continue // NoteRevoked stopped the loop: check the key now (once)
+		}
+		if code == exitOK {
 			return
 		}
+		if e.pause(ctx, 30*time.Second) != nil {
+			return
+		}
+	}
+}
+
+// pause waits d, or less when [Embedded.NoteRevoked] wakes the loop.
+func (e *Embedded) pause(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-e.wake:
+		return nil
+	case <-t.C:
+		return nil
+	}
+}
+
+// NoteRevoked tells the device that the API process itself has just revoked deviceID (the
+// owner reset their keys, which revokes every key of their account, this server's included).
+// It only speeds up the self-repair: the loop stops, asks the API once, and replaces the key
+// when the API confirms it is revoked (instead of after three answers about 90 s apart). An id
+// that is not this device's current, registered key is ignored. Nothing is approved here: the
+// new key still needs a phone's signature (see docs/user/server-processing.md).
+func (e *Embedded) NoteRevoked(deviceID string) {
+	e.mu.Lock()
+	if e.id == nil || deviceID == "" || e.id.f.DeviceID != deviceID || e.id.f.RegisteredAt == "" || e.id.f.RevokedAt != "" {
+		e.mu.Unlock()
+		return
+	}
+	e.revokedHint, e.restartNow = deviceID, true
+	cancel := e.cancelRun
+	e.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	select {
+	case e.wake <- struct{}{}:
+	default:
 	}
 }
 
@@ -333,7 +401,7 @@ func (e *Embedded) replaceRevokedKey() {
 	}
 	id, err := e.st.createIdentity("Orbitly server")
 	if err == nil {
-		id.f.Kind = "server"
+		id.f.Kind, id.f.Replaces = "server", old.f.DeviceID
 		err = e.st.saveIdentity(id)
 	}
 	if err != nil {
@@ -342,6 +410,7 @@ func (e *Embedded) replaceRevokedKey() {
 		return
 	}
 	e.id = id
+	e.revokedHint = ""
 	e.state, e.detail = StateWaitingApproval, ""
 	e.log.Warn("the server key was revoked; made a new one and waiting for an admin phone to approve it",
 		"old", old.f.DeviceID[:8], "new", id.f.DeviceID[:8])
@@ -349,7 +418,7 @@ func (e *Embedded) replaceRevokedKey() {
 
 func (e *Embedded) runOnce(ctx context.Context) int {
 	e.mu.Lock()
-	id := e.id
+	id, hintBefore := e.id, e.revokedHint
 	e.mu.Unlock()
 	cfg := &config{Mode: "server", Ingest: ingestCfg{URL: e.opt.BaseURL, token: e.opt.Token}, PollSeconds: int(e.opt.Poll / time.Second)}
 	api := e.client(id.f.UserID)
@@ -367,7 +436,12 @@ func (e *Embedded) runOnce(ctx context.Context) int {
 		if err := ss.pin(ctx); err != nil {
 			if errors.Is(err, errServerKeyGone) {
 				// Only after several answers in a row (about 90 s): one odd answer never replaces a key.
-				if e.goneCount++; e.goneCount >= 3 {
+				// Unless this process revoked the key itself a moment ago (an owner key reset): then the
+				// API's answer only confirms what we already know.
+				e.mu.Lock()
+				hinted := e.revokedHint != "" && e.revokedHint == id.f.DeviceID
+				e.mu.Unlock()
+				if e.goneCount++; e.goneCount >= 3 || hinted {
 					e.goneCount = 0
 					e.replaceRevokedKey()
 				} else {
@@ -379,6 +453,13 @@ func (e *Embedded) runOnce(ctx context.Context) int {
 			e.log.Warn("could not register the server key with the API yet", "err", err)
 			return exitError
 		}
+		// The API still knows the key as active: a stale hint must not shorten a later check
+		// (a hint that arrived while we asked is kept).
+		e.mu.Lock()
+		if e.revokedHint == hintBefore {
+			e.revokedHint = ""
+		}
+		e.mu.Unlock()
 	}
 	e.set(StateIdle, "")
 	b.quiet = true

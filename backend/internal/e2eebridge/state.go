@@ -39,7 +39,11 @@ type identityFile struct {
 	// user carried (e2ee.PinApprover). It is the root of trust for our own account.
 	ApproverEdPub string `json:"approver_ed25519_pub,omitempty"`
 	RevokedAt     string `json:"revoked_at,omitempty"`
-	Secret        box    `json:"secret"`
+	// Replaces is the device id of the revoked key this one replaced (the built-in server
+	// device's self-repair). Public; the owner's phone uses it to approve the new key right
+	// after its own key reset revoked the old one.
+	Replaces string `json:"replaces,omitempty"`
+	Secret   box    `json:"secret"`
 }
 
 type identitySecret struct {

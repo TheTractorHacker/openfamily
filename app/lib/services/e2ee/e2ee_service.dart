@@ -143,6 +143,20 @@ class LogSync {
   final LogHead? head;
 }
 
+/// What [E2eeService.resetThisDevice] did.
+class KeyResetResult {
+  const KeyResetResult(this.key, {this.serverKeyRevoked = false, this.serverRejoined = false});
+
+  /// This phone's new key.
+  final DeviceKey key;
+
+  /// The reset also revoked the key the server uses (it belonged to this account).
+  final bool serverKeyRevoked;
+
+  /// This phone approved the server's new key, so nobody is asked "Your server wants to join".
+  final bool serverRejoined;
+}
+
 class E2eeService {
   E2eeService({
     required this.api,
@@ -463,6 +477,75 @@ class E2eeService {
       'actor_device_id': me.deviceId,
       'log_signature': E2ee.b64(sig),
     });
+  }
+
+  /// Whether this account holds an active `server` key (the person who approved the server). A key reset
+  /// revokes it too; the reset screen says so.
+  Future<bool> accountHoldsServerKey() async => (await api.myKeys()).any((DeviceKey k) => k.isActive && k.kind == 'server');
+
+  /// "Reset my keys": registers this phone as a new root key that revokes every older key of the account. When
+  /// that includes the key the built-in server uses (a `server` key of THIS account), the server makes a new key
+  /// at once and this phone, which just signed the reset, approves it ([rejoinServerAfterReset]), so the owner is
+  /// not asked "Your server wants to join" again. [serverWait] bounds how long it waits for the server's new key.
+  Future<KeyResetResult> resetThisDevice({
+    String label = 'Reset',
+    Duration serverWait = const Duration(seconds: 20),
+    Duration step = const Duration(seconds: 1),
+  }) async {
+    final Set<String> oldServerKeys = <String>{
+      for (final DeviceKey k in await api.myKeys())
+        if (k.isActive && k.kind == 'server') k.deviceId,
+    };
+    final DeviceKey key = await registerThisDevice(reset: true, label: label);
+    // Nothing was revoked (this phone's key was still active): the server key is untouched.
+    if (key.registrationAction != E2ee.actReset || oldServerKeys.isEmpty) return KeyResetResult(key);
+    bool rejoined;
+    try {
+      rejoined = await rejoinServerAfterReset(oldServerKeys, timeout: serverWait, step: step);
+    } catch (_) {
+      rejoined = false; // offline or refused: the usual "Your server wants to join" step stays
+    }
+    return KeyResetResult(key, serverKeyRevoked: true, serverRejoined: rejoined);
+  }
+
+  /// Approves the built-in server's NEW key right after this phone reset the account's keys, without asking.
+  /// It signs only when ALL of these hold, and returns false (nothing signed) otherwise:
+  ///   * [revokedServerKeyIds] is not empty: the ids of the `server` keys of THIS account that were active just
+  ///     before the reset (from this account's own key list), so the reset revoked them;
+  ///   * the server offers THIS account the join request (only a server administrator gets one);
+  ///   * the server says the waiting key replaces one of [revokedServerKeyIds], and it is not one of them;
+  ///   * the request is for kind `server` and its binding signature names this account ([inspectLinkRequest]).
+  /// The signature is this phone's own register action, the same one "Approve" makes after the code check; the
+  /// server's private key never leaves the server. Gives up after [timeout].
+  Future<bool> rejoinServerAfterReset(Set<String> revokedServerKeyIds,
+      {Duration timeout = const Duration(seconds: 20), Duration step = const Duration(seconds: 1)}) async {
+    if (revokedServerKeyIds.isEmpty) return false;
+    final LocalIdentity me = await requireIdentity();
+    final DateTime end = DateTime.now().add(timeout);
+    while (true) {
+      final ServerJoinInfo j = await api.serverJoin();
+      if (!j.builtin || !j.canApprove) return false;
+      if (j.waiting && j.requestCode.isNotEmpty) {
+        if (!revokedServerKeyIds.contains(j.replaces) || revokedServerKeyIds.contains(j.deviceId)) return false;
+        final LinkRequestInfo info;
+        try {
+          info = await inspectLinkRequest(j.requestCode);
+        } catch (_) {
+          return false; // another account's request, a forged binding or a malformed code
+        }
+        if (info.kind != 'server' || info.deviceId != j.deviceId) return false;
+        final Uint8List sig = await E2ee.sign(me.edSeed,
+            E2ee.logActionMessage(E2ee.actRegister, me.userId, me.deviceId, subjectId: info.deviceId, ref: info.fingerprint));
+        await api.approveServerJoin(<String, dynamic>{
+          'device_id': info.deviceId,
+          'actor_device_id': me.deviceId,
+          'log_signature': E2ee.b64(sig),
+        });
+        return true;
+      }
+      if (!DateTime.now().isBefore(end)) return false;
+      await Future<void>.delayed(step);
+    }
   }
 
   LinkApproval parseApproval(String code) {

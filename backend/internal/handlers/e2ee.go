@@ -386,9 +386,29 @@ func (s *Server) E2EERegisterDevice(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "log signature does not verify")
 		return
 	}
+	// The server keys of this account that the reset revokes (the built-in server device
+	// replaces its key at once and waits for this new phone to approve it; nothing else).
+	var revokedServerKeys []string
 	if root && action == e2ee.ActReset && active > 0 {
-		if _, err := tx.Exec(ctx, `UPDATE device_keys SET revoked_at = now(), revoked_reason = 'revoked'
-			WHERE user_id = $1 AND revoked_at IS NULL`, uid); err != nil {
+		rows, err := tx.Query(ctx, `UPDATE device_keys SET revoked_at = now(), revoked_reason = 'revoked'
+			WHERE user_id = $1 AND revoked_at IS NULL RETURNING device_id::text, kind`, uid)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to register key")
+			return
+		}
+		for rows.Next() {
+			var id, kind string
+			if err := rows.Scan(&id, &kind); err != nil {
+				rows.Close()
+				writeError(w, http.StatusInternalServerError, "failed to register key")
+				return
+			}
+			if kind == "server" {
+				revokedServerKeys = append(revokedServerKeys, id)
+			}
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to register key")
 			return
 		}
@@ -414,6 +434,12 @@ func (s *Server) E2EERegisterDevice(w http.ResponseWriter, r *http.Request) {
 	if err := tx.Commit(ctx); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to register key")
 		return
+	}
+	// Only after the commit: the device then reads the revocation back from the API before it acts.
+	if s.ServerDevice != nil {
+		for _, id := range revokedServerKeys {
+			s.ServerDevice.NoteRevoked(id)
+		}
 	}
 	name := "e2ee.device_registered"
 	if action == e2ee.ActReset {

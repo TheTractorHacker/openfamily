@@ -13,6 +13,9 @@ type ServerDeviceHost interface {
 	Info() e2eebridge.EmbeddedInfo
 	JoinRequestFor(userID string) (e2eebridge.JoinRequest, error)
 	Approve(ctx context.Context, userID, actorDeviceID, logSignature string) error
+	// NoteRevoked: this process just revoked deviceID (an owner key reset). Ignored unless it
+	// is the device's own registered key; never approves anything.
+	NoteRevoked(deviceID string)
 }
 
 func (s *Server) isPlatformAdmin(ctx context.Context, uid string) bool {
