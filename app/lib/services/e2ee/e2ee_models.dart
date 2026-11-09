@@ -410,7 +410,13 @@ class ServerProfile {
     this.builtin = false,
     this.memberDefaultLane = 'phone',
     this.autoApply = false,
+    this.followCircleDefault = false,
   });
+
+  /// Section 24: no administrator saved a member default, so a circle whose admin-signed policy says "server by
+  /// default" (`default_for_new = server`) also puts its members on the server (their OWN phone signs, with a notice).
+  /// An older server sends nothing: false, so nothing changes.
+  final bool followCircleDefault;
 
   /// Section 23: the admin's member default ('server' | 'phone') and whether members' own phones sign it on next open.
   /// An older server sends none: read as phone, no auto-apply, so nothing changes for anyone.
@@ -456,6 +462,7 @@ class ServerProfile {
       builtin: j['builtin'] == true,
       memberDefaultLane: (j['member_defaults'] is Map && (j['member_defaults'] as Map)['default_lane'] == 'server') ? 'server' : 'phone',
       autoApply: j['member_defaults'] is Map && (j['member_defaults'] as Map)['auto_apply'] == true && (j['member_defaults'] as Map)['default_lane'] == 'server',
+      followCircleDefault: j['member_defaults'] is Map && (j['member_defaults'] as Map)['follow_circle_default'] == true,
     );
   }
 }

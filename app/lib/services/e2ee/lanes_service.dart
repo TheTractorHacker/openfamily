@@ -609,8 +609,11 @@ class LanesService {
   /// `required_server`, I am not a child account, this phone holds the server key, and my member never signed a
   /// pref in this circle (the key log is the judge: a signed phone pref, or a server pref voided later, both
   /// count) and never declined here. The signature is the member's own and shows in the key log. Safe to call often.
-  Future<AutoApplyOutcome> autoApplyIfDue(String circleId, {required bool autoApply}) async {
-    if (!autoApply) return AutoApplyOutcome.disabled;
+  ///
+  /// [followCircleDefault] (section 24): no server administrator saved a member default, so the circle admin's
+  /// VERIFIED signed policy `default_for_new = server` counts like [autoApply] for this circle.
+  Future<AutoApplyOutcome> autoApplyIfDue(String circleId, {required bool autoApply, bool followCircleDefault = false}) async {
+    if (!autoApply && !followCircleDefault) return AutoApplyOutcome.disabled;
     final LocalIdentity? me = await service.identity();
     if (me == null) return AutoApplyOutcome.notYet;
     if (await store.autoRecord(circleId) != null) return AutoApplyOutcome.alreadyHandled;
@@ -621,6 +624,7 @@ class LanesService {
       return AutoApplyOutcome.notAvailable;
     }
     if (cl.policy.memberOptOut == E2ee.optOutRequiredServer) return AutoApplyOutcome.consentRequired;
+    if (!autoApply && cl.policy.defaultForNew != E2ee.lineServer) return AutoApplyOutcome.disabled;
     for (final CircleE2eeMember m in st.members) {
       if (m.userId == me.userId && m.role == 'child') return AutoApplyOutcome.child;
     }

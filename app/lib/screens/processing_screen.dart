@@ -312,7 +312,7 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
                                   icon: const Icon(Icons.notifications_active_outlined),
                                   onPressed: () async {
                                     await Clipboard.setData(ClipboardData(
-                                        text: 'Hi ${m.name}, please open Orbitly > Settings > Where my data is processed and choose how our circle "${widget.circle.name}" should handle your data.'));
+                                        text: 'Hi ${m.name}, please open Orbitly > Settings > Server processing and choose how our circle "${widget.circle.name}" should handle your data.'));
                                     if (context.mounted) {
                                       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Reminder copied. Paste it in a message.')));
                                     }

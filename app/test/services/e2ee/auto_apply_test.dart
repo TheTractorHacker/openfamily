@@ -166,6 +166,47 @@ void main() {
     expect(PrivateRuntime.autoApplied.value, n);
   });
 
+  // Section 24: with no administrator choice saved, the circle admin's signed "server by default" counts too.
+  test('a circle whose admin signed "server by default" puts members on the server by their own phone', () async {
+    await alice.lanes.publishPolicy(priv, serverAssist: true, defaultForNew: E2ee.lineServer);
+    expect(await bob.lanes.autoApplyIfDue(priv, autoApply: false), AutoApplyOutcome.disabled, reason: 'not following circle defaults');
+    expect(prefsOf(uB), 0);
+    expect(await bob.lanes.autoApplyIfDue(priv, autoApply: false, followCircleDefault: true), AutoApplyOutcome.applied);
+    expect((await bob.lanes.refresh(priv, force: true)).status, LaneStatus.serverAssisted);
+    expect(prefsOf(uB), 1, reason: 'one entry, signed by Bob\'s own phone');
+    // Opting out stays final, exactly as with the server-wide setting.
+    await bob.lanes.keepOnPhone(priv);
+    expect(await bob.lanes.autoApplyIfDue(priv, autoApply: false, followCircleDefault: true), AutoApplyOutcome.alreadyHandled);
+    expect((await bob.lanes.refresh(priv, force: true)).status, LaneStatus.phoneOnly);
+  });
+
+  test('a circle whose default is "Phone only" is not auto-signed by the circle default', () async {
+    await alice.lanes.publishPolicy(priv, serverAssist: true, defaultForNew: E2ee.linePhone);
+    expect(await bob.lanes.autoApplyIfDue(priv, autoApply: false, followCircleDefault: true), AutoApplyOutcome.disabled);
+    expect(prefsOf(uB), 0);
+    // required_server keeps its explicit consent, also with the circle default.
+    await alice.lanes.publishPolicy(priv, serverAssist: true, defaultForNew: E2ee.lineServer, memberOptOut: E2ee.optOutRequiredServer);
+    expect(await carol.lanes.autoApplyIfDue(priv, autoApply: false, followCircleDefault: true), AutoApplyOutcome.consentRequired);
+    expect(prefsOf(uC), 0);
+  });
+
+  test('the app-open path follows the circle default only when the server says so', () async {
+    await alice.lanes.publishPolicy(priv, serverAssist: true, defaultForNew: E2ee.lineServer);
+    server.serverProfileValue = ServerProfile.fromJson(<String, dynamic>{
+      'profile_effective': 'cloud',
+      'member_defaults': <String, dynamic>{'default_lane': 'phone', 'auto_apply': false, 'follow_circle_default': false},
+    });
+    expect(server.serverProfileValue.followCircleDefault, isFalse);
+    await carol.runtime.onAppActive(<Circle>[circleOf(priv)]);
+    expect((await carol.lanes.refresh(priv, force: true)).status, LaneStatus.phoneOnly, reason: 'an administrator saved "no auto-apply"');
+    server.serverProfileValue = ServerProfile.fromJson(<String, dynamic>{
+      'profile_effective': 'cloud',
+      'member_defaults': <String, dynamic>{'default_lane': 'phone', 'auto_apply': false, 'follow_circle_default': true},
+    });
+    await bob.runtime.onAppActive(<Circle>[circleOf(priv)]);
+    expect((await bob.lanes.refresh(priv, force: true)).status, LaneStatus.serverAssisted);
+  });
+
   testWidgets('the first-time notice names the choice; "Keep on my phone" runs the undo, OK only dismisses', (t) async {
     final List<String> kept = <String>[], dismissed = <String>[];
     List<AutoNotice> shown = const <AutoNotice>[AutoNotice('c1', 'Family')];

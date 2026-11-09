@@ -105,7 +105,9 @@ class AddServerFlow {
   }
 
   /// Step 3. Returns the fresh snapshot. [LanesNotReady] and StateError carry plain messages for the sheet.
-  Future<ProcessingSnapshot> confirm(String circleId, AddServerPlan plan) async {
+  /// [memberOptOut]: only used when this admin turns the server on (allowed, or required_server for a circle
+  /// that must use the server, for example children's phones).
+  Future<ProcessingSnapshot> confirm(String circleId, AddServerPlan plan, {int memberOptOut = E2ee.optOutAllowed}) async {
     if (plan.state == AddServerState.approveServer) {
       // The person compared the code: sign the server's key, wait until the server has pinned it, then continue as usual.
       await controller.approveServerJoin();
@@ -118,17 +120,15 @@ class AddServerFlow {
       if (next.state != AddServerState.ready) {
         throw StateError('The server is joining, but is not ready yet. Wait a moment and tap OK again.');
       }
-      return confirm(circleId, next);
+      return confirm(circleId, next, memberOptOut: memberOptOut);
     }
     if (plan.state != AddServerState.ready) throw StateError('The server cannot be added yet.');
     ProcessingSnapshot s = plan.snapshot;
     if (plan.adminTurnsOn) {
-      // The default shown to NEW members follows the profile: server only on a home server that has its key.
-      // Server by default when the server recommends it (home profile or admin choice); never consent.
-      await controller.setPolicy(circleId,
-          assist: true,
-          defaultForNew: plan.profile.serverRecommended ? E2ee.lineServer : E2ee.linePhone,
-          memberOptOut: E2ee.optOutAllowed);
+      // Section 24: members are on the server by default. The circle default is the server lane whatever the
+      // profile; each member's OWN phone then signs it (with a notice) unless a server administrator saved
+      // "no auto-apply", and anyone can opt out. The admin can change the default on the policy screen. Never consent.
+      await controller.setPolicy(circleId, assist: true, defaultForNew: E2ee.lineServer, memberOptOut: memberOptOut);
       s = await controller.load(circleId, force: true);
     }
     final String? fp = s.serverKeyFingerprint;

@@ -6,6 +6,8 @@ import '../services/e2ee/e2ee_app.dart';
 import '../services/e2ee/e2ee_models.dart';
 import '../services/e2ee/e2ee_service.dart';
 import '../services/e2ee/e2ee_trust.dart';
+import '../services/e2ee/lanes_store.dart' show LaneStatus;
+import '../services/e2ee/private_runtime.dart';
 import '../theme/app_theme.dart';
 import '../widgets/ds/ds.dart';
 import '../widgets/trusted_server_prompt.dart';
@@ -85,11 +87,38 @@ class _OwnerStepUpDialogState extends State<_OwnerStepUpDialog> {
 
 /// One circle's encryption: status, new-key duty, requests from new/replacement
 /// keys ("Waiting for approval"), and every member's verification state.
+/// This phone's VERIFIED lane facts for one circle (null when unknown): what the "Server processing" row says.
+typedef LaneFactsReader = Future<({LaneStatus status, bool assist})?> Function(String circleId);
+
+Future<({LaneStatus status, bool assist})?> _storedLaneFacts(String circleId) async {
+  final PrivateRuntime? rt = PrivateRuntime.existing; // never creates a runtime (tests, signed out)
+  if (rt == null) return null;
+  return (status: await rt.lanesService.store.status(circleId), assist: (await rt.lanesService.store.policy(circleId)).assist);
+}
+
+/// The real state for the "Server processing" row, from the lane facts this phone verified.
+String processingRowSubtitle({required bool legacy, ({LaneStatus status, bool assist})? facts}) {
+  if (legacy) return 'Old mode: the server can read it';
+  if (facts == null) return 'See where your data is processed';
+  switch (facts.status) {
+    case LaneStatus.serverAssisted:
+      return 'On for you';
+    case LaneStatus.consentRequired:
+      return 'Required in this circle: needs your OK';
+    case LaneStatus.verificationFailed:
+      return 'Phone only (could not be confirmed)';
+    case LaneStatus.phoneOnly:
+      return facts.assist ? 'Phone only for you (you can switch it on)' : 'Phone only (off for this circle)';
+  }
+}
+
 class EncryptionCircleScreen extends StatefulWidget {
-  const EncryptionCircleScreen({super.key, required this.circle, this.service, this.promptStore = const TrustedServerPromptStore()});
+  const EncryptionCircleScreen(
+      {super.key, required this.circle, this.service, this.promptStore = const TrustedServerPromptStore(), this.laneFacts = _storedLaneFacts});
   final Circle circle;
   final E2eeService? service;
   final TrustedServerPromptStore promptStore;
+  final LaneFactsReader laneFacts;
 
   @override
   State<EncryptionCircleScreen> createState() => _EncryptionCircleScreenState();
@@ -102,6 +131,7 @@ class _EncryptionCircleScreenState extends State<EncryptionCircleScreen> {
   Map<String, TrustAssessment> _trust = <String, TrustAssessment>{};
   String _me = '';
   List<E2eeAlarm> _laneAlarms = <E2eeAlarm>[];
+  ({LaneStatus status, bool assist})? _laneFacts;
   bool _loading = true;
   bool _busy = false;
   String? _error;
@@ -130,6 +160,12 @@ class _EncryptionCircleScreenState extends State<EncryptionCircleScreen> {
       for (final CircleE2eeMember m in st.members) {
         t[m.userId] = await _svc.trust.assess(m.userId, m.devices.map((DeviceKey d) => d.fingerprint));
       }
+      ({LaneStatus status, bool assist})? facts;
+      if (st.isPrivate) {
+        try {
+          facts = await widget.laneFacts(widget.circle.id);
+        } catch (_) {}
+      }
       List<E2eeAlarm> la = <E2eeAlarm>[];
       try {
         la = (await _svc.laneAlarmList()).where((E2eeAlarm a) => a.circleId == widget.circle.id).toList();
@@ -148,6 +184,7 @@ class _EncryptionCircleScreenState extends State<EncryptionCircleScreen> {
       if (!mounted) return;
       setState(() {
         _laneAlarms = la;
+        _laneFacts = facts;
         _showTrustPrompt = prompt;
         _state = st;
         _pending = p;
@@ -449,7 +486,7 @@ class _EncryptionCircleScreenState extends State<EncryptionCircleScreen> {
                 key: const Key('processing-row'),
                 leading: DsListRow.iconTile(context, Icons.dns_outlined),
                 title: 'Server processing',
-                subtitle: widget.circle.e2eeServerMember ? 'Old mode: the server can read it' : 'Server or phone only',
+                subtitle: processingRowSubtitle(legacy: widget.circle.e2eeServerMember, facts: _laneFacts),
                 info: 'Where your data is processed. Includes "Don\'t send my data to the server".',
                 chevron: true,
                 onTap: _busy

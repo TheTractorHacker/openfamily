@@ -1470,8 +1470,18 @@ func TestInvitePreviewShowsOnlyThePrivacySetup(t *testing.T) {
 	}
 	var m map[string]any
 	_ = json.Unmarshal(rec.Body.Bytes(), &m)
-	if m["private"] != true || m["server_assist"] != true || m["member_opt_out"] != "allowed" || m["default_for_new"] != "server" || m["legacy"] != false || m["auto_apply"] != false || len(m) != 6 {
+	if m["private"] != true || m["server_assist"] != true || m["member_opt_out"] != "allowed" || m["default_for_new"] != "server" || m["legacy"] != false || m["auto_apply"] != true || len(m) != 6 {
+		// Section 24: nothing saved by an administrator, and the circle admin signed "server by default".
 		t.Fatalf("preview: %v", m)
+	}
+	// An administrator who saved "no auto-apply" wins over the circle's default.
+	e.sql(`UPDATE server_profile SET member_default_lane = 'server', member_auto_apply = FALSE WHERE id = 1`)
+	recOff := httptest.NewRecorder()
+	e.rt.ServeHTTP(recOff, httptest.NewRequest("GET", "/invites/"+code+"/preview", nil))
+	var mOff map[string]any
+	_ = json.Unmarshal(recOff.Body.Bytes(), &mOff)
+	if mOff["auto_apply"] != false {
+		t.Fatalf("preview with the administrator's auto-apply off: %v", mOff)
 	}
 	// Section 23: with the admin's auto-apply on, the preview says new members are put on the server by default.
 	e.sql(`UPDATE server_profile SET member_default_lane = 'server', member_auto_apply = TRUE WHERE id = 1`)

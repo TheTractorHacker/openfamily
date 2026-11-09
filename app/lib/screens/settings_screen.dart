@@ -635,13 +635,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     chevron: true,
                     onTap: _changeServer,
                   )),
-                  ('where my data is processed phone only server', DsListRow(
+                  ('server processing where my data is processed phone only opt out switch off', DsListRow(
                     key: const Key('settings-processing'),
                     leading: DsListRow.iconTile(context, Icons.smartphone),
-                    title: 'Where my data is processed',
-                    subtitle: 'Server or this phone only',
-                    info: 'Choose, circle by circle, whether the server may process your location (trips, history) '
-                        'or whether only your phone does. Your data is encrypted either way.',
+                    title: 'Server processing',
+                    subtitle: 'On by default. Switch it off per circle',
+                    info: 'Where your data is processed, circle by circle: by the server (maps, history, trips, driving '
+                        'reports) or only by your phone. Switch it off for a circle to keep your data on your phone. '
+                        'Locations stay end-to-end encrypted between phones either way.',
                     chevron: true,
                     onTap: () => push(const MyProcessingScreen()),
                   )),

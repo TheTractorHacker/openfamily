@@ -56,14 +56,14 @@ void main() {
     expect(find.byKey(const Key('add-server-success')), findsOneWidget);
   });
 
-  testWidgets('admin, cloud: the default for new members stays the phone and the text warns about the host', (t) async {
+  testWidgets('admin, cloud: the text warns about the host; members are still on the server by default (section 24)', (t) async {
     final FakeProcessingController c = ctl(prof: profile(eff: 'cloud', lane: 'phone'));
     await pump(t, c);
     expect(find.textContaining('rented from a company'), findsOneWidget);
     await tap(t, 'add-server-next');
     await tap(t, 'add-server-same');
     await tap(t, 'add-server-ok');
-    expect(c.calls.where((String x) => x.startsWith('policy')), <String>['policy:true:phone:allowed']);
+    expect(c.calls.where((String x) => x.startsWith('policy')), <String>['policy:true:server:allowed']);
   });
 
   testWidgets('unknown profile (older server) gets the careful wording', (t) async {

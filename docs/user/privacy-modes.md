@@ -43,11 +43,12 @@ Everyone else in the circle stays phone-to-phone.
 
 ![Server processing: who is Server-assisted and who is phone-only](../images/app/processing.png)
 
-### Server-assisted by default (when your server owner turns it on)
+### Server-assisted by default
 
-On a server whose owner chose **Home** (hardware the family owns), people in a Private circle that has server help
-on are put on the server **by default**, so maps, history and driving reports work without everyone finding a
-setting. It works like this:
+People in a Private circle that has server help on are put on the server **by default** when the circle admin made
+the server the default (new circles do this) or the server owner chose **Home**, so maps, history and driving
+reports work without everyone finding a setting. The full guide: [Server processing](server-processing.md). It
+works like this:
 
 - When you next open the app, **your own phone** signs "use the server" for you. It is the same signature as tapping
   **Use the server**, and it shows in the circle's key log. The server cannot do it for you.
@@ -57,7 +58,7 @@ setting. It works like this:
 - From then on the server can read your location, trips and driving data (the server owner and anyone who backs up or
   steals the server can too). Anything it stored stays until you delete it; backups cannot be deleted.
 - Not done for you: circles that **require** server processing (you are asked to consent), child accounts, and
-  servers set to **Cloud** (the app asks you instead).
+  servers whose owner turned automatic switching off (the app asks you instead).
 
 ## Who decides what
 
@@ -101,12 +102,12 @@ see [Safety](safety-and-check-ins.md).
 
 ## Which should I pick?
 
-* **Normal (recommended).** Your server keeps locations so maps, history and driving reports just work.
-* **Private.** Only phones can read locations; the server keeps nothing readable. Inside a Private circle
-  each person then chooses **Use the server (recommended)** (reports, history and maps work for you) or
-  **Keep on my phone** (shared privately, encrypted from phone to phone; no reports unless you turn on phone
-  reports, which uses more battery). Nobody else can choose for you, except that on a **Home** server with
-  auto-apply your own phone switches you to the server by default and tells you (see above). You can change your
-  mind any time.
+* **Private, with your server (recommended, the default when your server can take part).** End-to-end
+  encrypted between phones; your server joins as its own device so maps, history and driving reports just work.
+  Everyone's own phone switches them to the server by default and tells them; each person can choose **Keep on
+  my phone** (shared privately, encrypted from phone to phone; no reports unless you turn on phone reports, which
+  uses more battery). Nobody else can choose for you. See [Server processing](server-processing.md).
+* **Private, phones only.** Only phones can read locations; the server keeps nothing readable.
+* **Normal, no end-to-end encryption.** Your server keeps readable locations for everyone.
 * If a Private circle shows people missing because their app is old, a circle admin can **switch the circle
   to normal mode** so everyone shows up again. The server then keeps readable locations for that circle.

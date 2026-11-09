@@ -1182,15 +1182,17 @@ class PrivateRuntime {
   /// member's OWN phone signs the server lane once (never over an earlier choice). Offline or an older server: nothing happens.
   Future<void> _autoApplyAll(Set<String> privs) async {
     if (privs.isEmpty) return;
-    bool auto = false;
+    bool auto = false, follow = false;
     try {
-      auto = (await api.serverProfile()).autoApply;
+      final ServerProfile p = await api.serverProfile();
+      auto = p.autoApply;
+      follow = p.followCircleDefault; // section 24: the circle admin's signed "server by default" counts too
     } catch (_) {}
-    if (!auto) return;
+    if (!auto && !follow) return;
     await _declareCaps(); // the server only accepts a lane pref from a phone that declared it can read the server line
     for (final String id in privs) {
       try {
-        if (await lanesService.autoApplyIfDue(id, autoApply: true) == AutoApplyOutcome.applied) {
+        if (await lanesService.autoApplyIfDue(id, autoApply: auto, followCircleDefault: follow) == AutoApplyOutcome.applied) {
           autoApplied.value++;
           unawaited(lanesService.maintain(id).catchError((Object _) => lanesService.refresh(id)));
         }
