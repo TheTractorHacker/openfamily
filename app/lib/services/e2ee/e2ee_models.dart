@@ -470,7 +470,7 @@ class ServerProfile {
 /// "Your server wants to join": the built-in server device waiting for a phone to approve its key
 /// (GET /e2ee/server-join).
 class ServerJoinInfo {
-  const ServerJoinInfo({this.builtin = false, this.waiting = false, this.canApprove = false, this.requestCode = '', this.deviceId = '', this.short = '', this.digits = '', this.state = ''});
+  const ServerJoinInfo({this.builtin = false, this.waiting = false, this.canApprove = false, this.requestCode = '', this.deviceId = '', this.short = '', this.digits = '', this.state = '', this.replaces = ''});
   final bool builtin;
   final bool waiting;
   final bool canApprove;
@@ -479,6 +479,9 @@ class ServerJoinInfo {
   final String short;
   final String digits;
   final String state;
+
+  /// The device id of the revoked server key this waiting key replaces ('' for a first key or an older server).
+  final String replaces;
 
   static const ServerJoinInfo none = ServerJoinInfo();
 
@@ -494,6 +497,7 @@ class ServerJoinInfo {
       short: (req['short'] as String?) ?? (j['short'] as String?) ?? '',
       digits: (req['digits'] as String?) ?? (j['digits'] as String?) ?? '',
       state: (j['state'] as String?) ?? '',
+      replaces: (req['replaces'] as String?) ?? '',
     );
   }
 }

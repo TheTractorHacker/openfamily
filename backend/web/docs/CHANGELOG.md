@@ -18,6 +18,10 @@ refused and retried unchanged forever, and the map showed 0 mph at one spot. The
 sizes their handlers already allowed (batches of locations, and encrypted chat photos). Server only: update the server,
 no app update needed. The server catches up on its own once it is running this version.
 
+## v0.26.16 (2026-11-09)
+
+- **Resetting your keys no longer leaves the server waiting for approval.** When the person who approved the server resets their encryption keys (Reset my keys), the reset also removes the server's key, because it belongs to their account. The server now makes its new key right away and the phone that made the reset approves it with its own signature, so there is no second "Your server wants to join" step. The reset confirmation says this before you confirm. If the phone is offline or the server is slow, the usual approval step stays. Members' server-processing choices are signed for one server key, so they still need to be signed again for the new key, as before. Server: the reset handler tells the built-in server device which of its keys it revoked, and the join request names the key it replaces (`replaces`). Update the server first, then the app; an older app keeps showing the approval step.
+
 ## v0.26.14 (2026-11-09)
 
 - **See who is charging.** When someone's phone is on the charger, a small green bolt shows on their bubble on the map, and the battery in the People list and on their card shows a charging icon. A charging phone no longer counts as "low battery": no orange warning and no low-battery alert. Works in Private circles too (end-to-end encrypted, like the battery level). It is shared the same way as battery level, so pausing or turning off sharing hides both. Needs the new app on the phone that is charging; older apps keep showing the percentage only. Server: migration 390 adds an optional `charging` column; the API, WebSocket frames and Home Assistant `/members` carry `charging` when known. Update the server first, then the phones. The watch apps do not show it yet.

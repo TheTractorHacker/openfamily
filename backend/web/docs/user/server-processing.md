@@ -105,6 +105,32 @@ holds stay until you delete them: use **Delete all copies of this circle** on th
 To stop using end-to-end encryption altogether, an admin can switch the circle to Normal in the circle settings.
 The server then keeps readable locations for everyone in that circle.
 
+## If you reset your encryption keys
+
+**Reset my keys** (Encryption keys > Link another phone > *No other phone and no recovery phrase?*) revokes every
+key of your account. If you are the person who approved the server, the server's own key belongs to your account,
+so the reset **removes the server's key too**. The reset confirmation says so before you tap **Reset keys**.
+
+What happens next, with nothing for you to do:
+
+1. The server notices the reset at once, makes a **new key** and waits for a phone to approve it. Its private key
+   never leaves the server.
+2. Your phone, which has just made the reset and holds your new key, **approves the server's new key by itself**,
+   the same signature as tapping **Approve**. It does that only when the server says the new key replaces the key
+   your reset removed, the request is for a server key of your own account, and you are a server administrator.
+   You do not get "Your server wants to join" again.
+3. As with any reset, members must approve your new key in each Private circle. The server's new key counts as
+   approved wherever your new phone is approved.
+
+If your phone was offline or the server took longer than about 20 seconds, the reset still finishes and the app
+says the server has a new key: approve it under **Your server wants to join** as on the first start (compare the
+code first).
+
+What the reset does not restore: every member's choice to use the server is signed for one specific server key.
+Choices signed for the old key no longer count, so the server cannot process anyone's data until their phone signs
+the choice again for the new key, the same as whenever the server's key is replaced. Your own choice was signed
+with your old phone key, so after the reset the app offers it to you again.
+
 ## Related
 
 * [Privacy modes explained](privacy-modes.md)
