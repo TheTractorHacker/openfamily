@@ -58,6 +58,10 @@ func TestBodyLimitRouteOverrides(t *testing.T) {
 		{"PUT", "/api/profile/avatar", AvatarBodyLimit},
 		{"POST", "/locations/batch", BatchBodyLimit},
 		{"POST", "/locations", DefaultBodyLimit},
+		{"POST", "/internal/e2ee/ingest", E2EEBatchBodyLimit},
+		{"POST", "/circles/3c0fd4e8-2622-4c80-add8-3d46f28031b1/e2ee/batch", E2EEBatchBodyLimit},
+		{"POST", "/circles/3c0fd4e8-2622-4c80-add8-3d46f28031b1/e2ee/blobs", E2EEBlobBodyLimit},
+		{"GET", "/circles/3c0fd4e8-2622-4c80-add8-3d46f28031b1/e2ee/batch", DefaultBodyLimit},
 	}
 	for _, c := range cases {
 		r := httptest.NewRequest(c.method, c.path, nil)
