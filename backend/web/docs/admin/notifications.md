@@ -29,7 +29,7 @@ bundle id in `.env` as described in [Push notifications](../push.md) and
 
 If you add an SMS provider (Twilio, Telnyx, Plivo or Amazon SNS), an SOS also
 texts the sender's own emergency contacts, with a temporary link and no
-coordinates. Set the provider in `.env` or in **Settings, SMS** in the admin
+coordinates. Set the provider in `.env` or in **Settings > Notifications** in the admin
 web, and set `PUBLIC_BASE_URL=https://family.example.com`. Messages never claim
 emergency services were called. Register your number where your country
 requires it. Details: [SMS providers](../sms.md) and [Safety](../safety.md).

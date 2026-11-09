@@ -12,7 +12,7 @@ test('retention summary', () => {
 })
 
 test('an unencrypted destination is flagged red', () => {
-  assert.equal(describeEncryption('none').tone, 'red')
+  assert.equal(describeEncryption('none').tone, 'orange')
   assert.equal(describeEncryption('age-x25519').tone, 'green')
   assert.equal(describeEncryption(undefined).tone, 'grey')
 })
@@ -34,6 +34,8 @@ test('request in flight and labels', () => {
 test('warnings expose the command to run', () => {
   assert.equal(splitWarning('No backup has been recorded. Enable the scheduled backup service (docker compose --profile backup up -d) or run ./scripts/backup.sh daily.').command, 'docker compose --profile backup up -d')
   assert.equal(splitWarning('The backup service has stopped reporting. Check: docker compose --profile backup ps backup').command, 'docker compose --profile backup ps backup')
+  assert.equal(splitWarning('Start it on the server (docker compose up -d), then press Back up now.').command, 'docker compose up -d')
+  assert.equal(splitWarning('The backup service has stopped reporting. Check: docker compose ps backup').command, 'docker compose ps backup')
   assert.equal(splitWarning('Run ./scripts/backup.sh now').command, './scripts/backup.sh')
   assert.equal(splitWarning('The last successful backup is more than 36 hours old.').command, undefined)
 })

@@ -5,6 +5,7 @@
 // is shown read-only ("Set by environment").
 
 import React from 'react'
+import { useUnsavedChanges } from '../lib/unsaved'
 import { ApiError, getBackupSettings, putBackupSettings, testBackupS3 } from '../lib/api'
 import { generateAgeKeyPair, type AgeKeyPair } from '../lib/age'
 import { credsBindingChanged, cronToDaily, dailyToCron, parseRecipients, REENTER_CREDENTIALS, validateForm } from '../lib/backups'
@@ -128,6 +129,7 @@ export function BackupSettings({ onChanged }: { onChanged?: () => void }) {
 
   const pinned = React.useMemo(() => new Set(resp?.pinned ?? []), [resp])
   const credPinned = resp?.credentials.pinned ?? false
+  useUnsavedChanges(!!form && initial !== '' && JSON.stringify([form, keyId, secret, credMode]) !== initial, 'Backup settings')
 
   if (loadError) return <Alert tone="danger" title="Couldn’t load backup settings">{loadError}</Alert>
   if (!resp || !form) {

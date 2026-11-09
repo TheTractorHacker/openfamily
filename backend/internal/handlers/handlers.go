@@ -108,6 +108,15 @@ type Server struct {
 	// for the admin domain status card; the API never changes it.
 	SiteAddress string
 
+	// LocalBaseURL is where the API reaches its own listener (e.g.
+	// "http://127.0.0.1:8080"); the domain card's authoritative "is the server
+	// up" check. Empty = http://127.0.0.1:8080.
+	LocalBaseURL string
+	// LocalProxyAddr is the built-in HTTPS proxy on the internal network
+	// (config: LOCAL_PROXY_ADDR, default "caddy:443"). Used to check the
+	// domain's certificate without going out through the router.
+	LocalProxyAddr string
+
 	// AllowedOrigin is the single cross-origin origin allowed for the WebSocket
 	// stream (empty = same-origin only). It mirrors config.AllowedOrigin.
 	AllowedOrigin string

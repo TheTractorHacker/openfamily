@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"net/http"
 	"os"
@@ -62,13 +63,24 @@ func (d *DirStore) path(key string) (string, error) {
 	return filepath.Join(d.Dir, key), nil
 }
 
+// explain turns "permission denied" on the backup folder into the fix. The
+// usual cause: Docker created ./backups as root because it did not exist.
+func (d *DirStore) explain(err error) error {
+	if !errors.Is(err, fs.ErrPermission) {
+		return err
+	}
+	return fmt.Errorf("the backup folder %s is not writable by the backup service (user %d): on the server run "+
+		"`mkdir -p backups && sudo chown %d:%d backups` next to docker-compose.yml, or set BACKUP_UID/BACKUP_GID in .env "+
+		"to the folder's owner, then docker compose up -d", d.Dir, os.Getuid(), os.Getuid(), os.Getgid())
+}
+
 func (d *DirStore) PutFile(ctx context.Context, key, filePath string) error {
 	dst, err := d.path(key)
 	if err != nil {
 		return err
 	}
 	if err := os.MkdirAll(d.Dir, 0o700); err != nil {
-		return err
+		return d.explain(err)
 	}
 	in, err := os.Open(filePath)
 	if err != nil {
@@ -78,7 +90,7 @@ func (d *DirStore) PutFile(ctx context.Context, key, filePath string) error {
 	tmp := dst + ".partial"
 	out, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
-		return err
+		return d.explain(err)
 	}
 	if _, err := io.Copy(out, in); err != nil {
 		out.Close()

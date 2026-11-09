@@ -1,4 +1,5 @@
 import React from 'react'
+import { useUnsavedChanges } from '../lib/unsaved'
 import {
   ApiError,
   clearDawarich,
@@ -56,6 +57,14 @@ export function DawarichSettingsCard() {
       .catch((e) => setMessage({ tone: 'error', text: messageFromError(e, 'Could not load Dawarich settings.') }))
       .finally(() => setLoading(false))
   }, [hydrate])
+
+  const dawarichDirty =
+    !!settings &&
+    (apiKey !== '' ||
+      localUrl !== settings.local_url ||
+      sendUnmapped !== settings.send_unmapped ||
+      (settings.base_url ? baseUrl !== settings.base_url || enabled !== settings.enabled : baseUrl.trim() !== ''))
+  useUnsavedChanges(dawarichDirty, 'Dawarich')
 
   const run = async (kind: NonNullable<typeof busy>, fn: () => Promise<string | void>) => {
     if (busy) return

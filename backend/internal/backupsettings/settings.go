@@ -73,8 +73,10 @@ func (s Settings) Binding() string {
 var ErrBinding = errors.New("re-enter the access key and secret because the endpoint changed")
 
 // Defaults are used for every field neither the environment nor the UI set.
+// Local backups are on out of the box (the compose file mounts ./backups and
+// tells the service via BACKUP_DEFAULT_LOCAL_DIR); S3 stays off until set up.
 func Defaults() Settings {
-	return Settings{Prefix: "openfamily", Schedule: "15 3 * * *", Timezone: "UTC",
+	return Settings{Prefix: "openfamily", Schedule: "15 3 * * *", Timezone: "UTC", LocalEnabled: true,
 		KeepDaily: 7, KeepWeekly: 4, KeepMonthly: 6, StaleHours: 36, AgeRecipients: []string{}}
 }
 

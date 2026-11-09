@@ -2,6 +2,7 @@
 // its own saving / saved / error state and an "Unsaved changes" hint.
 
 import React from 'react'
+import { useUnsavedChanges } from '../lib/unsaved'
 import {
   ApiError,
   getMemberDefaults,
@@ -47,6 +48,7 @@ export function SessionSecurityCard() {
   }, [])
 
   const dirty = !!saved && !!form && (saved.session_idle_days !== form.session_idle_days || saved.max_sessions_per_user !== form.max_sessions_per_user)
+  useUnsavedChanges(dirty, 'Sign-in sessions')
   const invalid = !!form && (form.session_idle_days < 1 || form.session_idle_days > 365 || form.max_sessions_per_user < 1 || form.max_sessions_per_user > 500)
 
   const save = async () => {
@@ -119,6 +121,7 @@ export function MemberDefaultsCard() {
   }, [])
 
   const dirty = !!saved && !!form && (saved.default_lane !== form.default_lane || saved.auto_apply !== form.auto_apply)
+  useUnsavedChanges(dirty, 'Default for new members')
   const save = async () => {
     if (!form) return
     setState('saving')

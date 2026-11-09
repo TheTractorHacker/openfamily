@@ -1,4 +1,5 @@
 import React from 'react'
+import { useUnsavedChanges } from '../lib/unsaved'
 import { ApiError, getThemeSettings, updateThemeSettings } from '../lib/api'
 import { Button, Card } from '../components/primitives'
 
@@ -40,6 +41,7 @@ export function ThemeAccentCard() {
   const valid = HEX.test(color)
   const effective = color.toUpperCase() === BUILT_IN ? '' : color.toUpperCase()
   const dirty = valid && effective !== saved
+  useUnsavedChanges(dirty, 'App accent color')
 
   async function save(e: React.FormEvent) {
     e.preventDefault()

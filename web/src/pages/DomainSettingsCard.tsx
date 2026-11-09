@@ -25,8 +25,16 @@ function CheckRow({ label, check }: { label: string; check?: DomainCheck }) {
   let mark = '—'
   if (check.status === 'ok') mark = '✓'
   else if (check.status === 'fail') mark = '✕'
+  else if (check.status === 'unverified') mark = '?'
 
-  const tone = check.status === 'ok' ? 'wb-domain-check-ok' : check.status === 'fail' ? 'wb-domain-check-fail' : ''
+  const tone =
+    check.status === 'ok'
+      ? 'wb-domain-check-ok'
+      : check.status === 'fail'
+        ? 'wb-domain-check-fail'
+        : check.status === 'unverified'
+          ? 'wb-domain-check-unverified'
+          : ''
 
   return (
     <div className="wb-domain-check">
@@ -126,10 +134,22 @@ export function DomainSettingsCard() {
             </p>
           )}
 
-          {custom && (
-            <div className="wb-domain-checks">
-              <CheckRow label="DNS:" check={status?.dns} />
-              <CheckRow label="HTTPS:" check={status?.https} />
+          <div className="wb-domain-checks">
+            <CheckRow label="Server:" check={status?.local} />
+            {custom && status?.proxy?.status !== 'skipped' && <CheckRow label="HTTPS on this machine:" check={status?.proxy} />}
+            {custom && <CheckRow label="DNS:" check={status?.dns} />}
+          </div>
+          {custom && status?.https && (
+            <div className="wb-domain-outside">
+              <h4 className="wb-settings-section-title">Reachable from outside? (a hint)</h4>
+              <p className="wb-settings-section-help">
+                The server tries to open its own public address. From inside a home network this often cannot work even
+                when everything is fine, so the real test is a phone on mobile data.
+              </p>
+              <CheckRow label="From the server:" check={status.https} />
+              {status.proxy?.status === 'skipped' && status.proxy.detail && (
+                <p className="wb-help">{status.proxy.detail}</p>
+              )}
             </div>
           )}
         </>

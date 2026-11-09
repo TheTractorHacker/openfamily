@@ -34,7 +34,7 @@ fetch_backup() { # $1 store  $2 which  $3 out file
   load_backup_env
   if ! docker image inspect "$image" >/dev/null 2>&1; then
     echo "Building the backup image (once)..." >&2
-    docker compose --profile backup build backup >&2 || { echo "error: cannot build the backup image" >&2; return 1; }
+    docker compose build backup >&2 || { echo "error: cannot build the backup image" >&2; return 1; }
   fi
   local outdir; outdir="$(dirname "$out")"
   local -a args=(run --rm --user "$(id -u):$(id -g)" -v "$outdir:/out")
@@ -52,8 +52,9 @@ fetch_backup() { # $1 store  $2 which  $3 out file
     [ -r "$BACKUP_AGE_PASSPHRASE_FILE" ] || { echo "error: cannot read BACKUP_AGE_PASSPHRASE_FILE" >&2; return 2; }
     args+=(-v "$(readlink -f "$BACKUP_AGE_PASSPHRASE_FILE"):/run/age/passphrase:ro" -e BACKUP_AGE_PASSPHRASE_FILE=/run/age/passphrase)
   else
-    echo "error: set BACKUP_AGE_IDENTITY_FILE (age private key file) or BACKUP_AGE_PASSPHRASE_FILE to decrypt" >&2
-    return 2
+    # Unencrypted backups (the default until a key is added) need no key; an
+    # encrypted one fails in `fetch` with a clear message.
+    echo "note: no BACKUP_AGE_IDENTITY_FILE / BACKUP_AGE_PASSPHRASE_FILE set; this only works for unencrypted backups" >&2
   fi
   if [ "$store" = "local" ]; then
     args+=(-v "$(readlink -f "${BACKUP_LOCAL_PATH:-./backups}"):/backups:ro" -e BACKUP_LOCAL_DIR=/backups)

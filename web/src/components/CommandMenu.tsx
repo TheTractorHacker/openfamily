@@ -7,22 +7,30 @@ import React from 'react'
 import { listAllMembers, listFamilies } from '../lib/api'
 import { routesFor, type RouteDef, type RouteKey } from '../lib/routes'
 import { useMe } from '../lib/me'
+import { settingsHash, settingsPagesFor } from '../lib/settingsPages'
 import type { AdminMember, Family } from '../lib/types'
 import { Kbd, Spinner } from './primitives'
 import './CommandMenu.css'
 
 interface CommandMenuProps {
-  onNavigate: (key: RouteKey) => void
+  /** Opens a location hash, e.g. #/families or #/settings/backups. */
+  onOpen: (hash: string) => void
+}
+
+interface PageHit {
+  id: string
+  label: string
+  meta: string
+  hash: string
 }
 
 type Result =
   | { kind: 'family'; family: Family }
   | { kind: 'member'; member: AdminMember }
-  | { kind: 'page'; route: RouteDef }
+  | { kind: 'page'; page: PageHit }
 
 /** Extra search words so settings topics lead to their page. */
 const PAGE_WORDS: Partial<Record<RouteKey, string>> = {
-  settings: 'sessions security privacy processing retention notifications sms twilio map style units theme accent integrations dawarich home assistant updates domain account password',
   audit: 'sessions revoke sign out log',
   fleet: 'devices battery permissions push health',
   system: 'backup database migration health',
@@ -30,7 +38,18 @@ const PAGE_WORDS: Partial<Record<RouteKey, string>> = {
   documents: 'help docs guide manual',
 }
 
-export function CommandMenu({ onNavigate }: CommandMenuProps) {
+function pageHits(isPlatformAdmin: boolean, q: string): PageHit[] {
+  if (!q) return []
+  const pages: PageHit[] = routesFor(isPlatformAdmin)
+    .filter((r: RouteDef) => `${r.label} ${PAGE_WORDS[r.key] ?? ''}`.toLowerCase().includes(q))
+    .map((r) => ({ id: r.key, label: r.label, meta: 'Page', hash: r.hash }))
+  const settings: PageHit[] = settingsPagesFor(isPlatformAdmin)
+    .filter((p) => `${p.label} ${p.keywords ?? ''} settings`.toLowerCase().includes(q))
+    .map((p) => ({ id: `settings-${p.key}`, label: p.label, meta: 'Settings', hash: settingsHash(p.key) }))
+  return [...pages, ...settings]
+}
+
+export function CommandMenu({ onOpen }: CommandMenuProps) {
   const { isPlatformAdmin } = useMe()
   const [open, setOpen] = React.useState(false)
   const [query, setQuery] = React.useState('')
@@ -97,11 +116,9 @@ export function CommandMenu({ onNavigate }: CommandMenuProps) {
     ? members.filter((m) => `${m.name} ${m.email}`.toLowerCase().includes(q))
     : members
 
-  const filteredPages = q
-    ? routesFor(isPlatformAdmin).filter((r) => `${r.label} ${PAGE_WORDS[r.key] ?? ''}`.toLowerCase().includes(q))
-    : []
+  const filteredPages = pageHits(isPlatformAdmin, q)
   const results: Result[] = [
-    ...filteredPages.map((route) => ({ kind: 'page' as const, route })),
+    ...filteredPages.map((page) => ({ kind: 'page' as const, page })),
     ...filteredFamilies.map((family) => ({ kind: 'family' as const, family })),
     ...filteredMembers.map((member) => ({ kind: 'member' as const, member })),
   ]
@@ -112,7 +129,7 @@ export function CommandMenu({ onNavigate }: CommandMenuProps) {
   }, [q, loaded])
 
   const select = (r: Result) => {
-    onNavigate(r.kind === 'page' ? r.route.key : r.kind === 'family' ? 'families' : 'dashboard')
+    onOpen(r.kind === 'page' ? r.page.hash : r.kind === 'family' ? '#/families' : '#/dashboard')
     setOpen(false)
     setQuery('')
   }
@@ -180,7 +197,7 @@ export function CommandMenu({ onNavigate }: CommandMenuProps) {
               {filteredPages.length > 0 && <div className="wb-cmd-group">Pages and settings</div>}
               {filteredPages.map((r, i) => (
                 <button
-                  key={r.key}
+                  key={r.id}
                   id={`wb-cmd-opt-${i}`}
                   type="button"
                   className="wb-cmd-item"
@@ -188,10 +205,10 @@ export function CommandMenu({ onNavigate }: CommandMenuProps) {
                   aria-selected={activeIndex === i}
                   data-active={activeIndex === i}
                   onMouseEnter={() => setActiveIndex(i)}
-                  onClick={() => select({ kind: 'page', route: r })}
+                  onClick={() => select({ kind: 'page', page: r })}
                 >
                   <span className="wb-cmd-item-name">{r.label}</span>
-                  <span className="wb-cmd-item-meta">Page</span>
+                  <span className="wb-cmd-item-meta">{r.meta}</span>
                 </button>
               ))}
               {hasFamilies && <div className="wb-cmd-group">Groups</div>}

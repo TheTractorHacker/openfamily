@@ -4,6 +4,34 @@ The family database (Postgres + TimescaleDB, volume `pgdata`) holds location
 history, so backups are as sensitive as the live data. Encrypt any copy that
 leaves the host.
 
+## Out of the box
+
+`docker compose up -d` starts the `backup` service together with the server
+(no profile, no host cron). With no configuration at all it takes a first
+backup right after it starts for the first time (`BACKUP_RUN_ON_START=first`),
+then one every night at 03:15 UTC, writes them to `./backups` on the host and
+keeps 7 daily, 4 weekly and 6 monthly copies. Local backups are **not
+encrypted** until you add an age public key (admin panel: **Settings >
+Backups > Change settings > Generate key pair**, or `BACKUP_AGE_RECIPIENT`);
+S3 uploads always require encryption. Everything is managed under **Settings >
+Backups** in the admin panel; **System health** shows the last backup.
+
+- **Opt out:** `BACKUP_REPLICAS=0` in `.env`, then `docker compose up -d`.
+- **Disk use:** each backup is one compressed `pg_dump` of the database (check
+  `ls -lh backups` after the first one); with the default retention up to 17
+  copies are kept. The dump is staged in RAM (`BACKUP_WORK_SIZE`, 4g limit).
+- **Folder permissions:** the service runs as `BACKUP_UID:BACKUP_GID` (default
+  1000:1000) and must be able to write `./backups` (`BACKUP_LOCAL_PATH`).
+  `scripts/setup.sh` creates it with the right owner. On an older install, run
+  `mkdir -p backups` (as uid 1000, or `sudo chown 1000:1000 backups`) before
+  `docker compose up -d`; otherwise the first backup fails with a message that
+  says exactly this.
+- **Existing servers:** `git pull` (or `./scripts/upgrade.sh`), then
+  `docker compose up -d`. The first start builds the backup image (a few
+  minutes) and takes one backup right away. If you already ran the service
+  with `--profile backup`, nothing changes except that it now also starts
+  without the profile; settings saved in the panel are kept.
+
 ## Scripts
 
 | Script | Purpose |
@@ -55,10 +83,11 @@ once per quarter (run `verify-backup.sh` on a production dump).
 
 ## S3 and scheduled backups
 
-The optional `backup` compose service (profile `backup`) replaces host cron and
-adds off-site copies. Every night it streams `pg_dump` through
-[age](https://age-encryption.org) encryption, writes the result to a local
-directory and/or any S3-compatible bucket (AWS S3, Backblaze B2, Wasabi,
+The `backup` compose service (started by default, see
+[Out of the box](#out-of-the-box)) replaces host cron and adds off-site copies.
+Every night it streams `pg_dump` through [age](https://age-encryption.org)
+encryption (once a key is set), writes the result to a local directory and/or
+any S3-compatible bucket (AWS S3, Backblaze B2, Wasabi,
 Cloudflare R2, MinIO, ...), uploads a SHA-256 manifest next to it, applies
 retention, and records every run in the database so the admin **System** page
 shows the truth. `scripts/backup.sh` keeps working unchanged; you can use
@@ -66,7 +95,7 @@ either or both.
 
 ```
 postgres --pg_dump--> age encrypt (public key) --> /work (RAM, ciphertext only)
-                                                   |--> ./backups   (optional)
+                                                   |--> ./backups   (default)
                                                    '--> s3://bucket/prefix/openfamily-<UTC>.dump.age
                                                         s3://bucket/prefix/openfamily-<UTC>.manifest.json  (written last)
 ```
@@ -92,14 +121,14 @@ Properties:
 
 ### Quick start 1: in the admin panel (recommended)
 
-1. Start the service once (it needs no S3 settings to start):
-   `docker compose --profile backup up -d --build backup`. Add `backup` to
-   `COMPOSE_PROFILES` in `.env` so it survives `docker compose up -d`.
-2. Open **System health > Backups > Settings**.
+1. The service already runs (`docker compose up -d` starts it; it needs no S3
+   settings to start).
+2. Open **Settings > Backups** and press **Change settings**.
 3. **Destinations:** switch on *S3-compatible storage* and fill endpoint
    (empty for AWS), region, bucket, folder, and the access key id and secret.
    The secret is write-only: after saving, the page only shows *Set ...ABCD* with
-   *Replace* and *Clear*. Switch on *Local disk* as well if you want copies on this machine.
+   *Replace* and *Clear*. *Local disk* is on by default; switch it off if you
+   want copies only in the bucket.
 4. **Encryption:** press *Generate key pair*. The pair is created in your
    browser; the page shows the private key once with *Copy* and *Download*, you
    confirm you stored it, and only the public key is filled in. The server never
@@ -178,8 +207,8 @@ addresses are converted to IPv4 before any check.
    BACKUP_S3_PREFIX=openfamily
    BACKUP_S3_ACCESS_KEY_ID=...
    BACKUP_S3_SECRET_ACCESS_KEY=...
-   # optional: also keep copies on this machine
-   BACKUP_LOCAL_DIR=/backups
+   # copies on this machine are on by default; BACKUP_LOCAL_DIR pins the folder
+   # BACKUP_LOCAL_DIR=/backups
    ```
 
    `chmod 600 .env`. To keep the secret out of the process environment, put it
@@ -188,14 +217,13 @@ addresses are converted to IPv4 before any check.
 4. **Start it and test the connection:**
 
    ```sh
-   docker compose --profile backup up -d --build backup
-   docker compose --profile backup run --rm backup test-s3     # writes, reads and deletes a probe object
-   docker compose --profile backup run --rm backup run         # first backup now
+   docker compose up -d --build backup
+   docker compose run --rm backup test-s3     # writes, reads and deletes a probe object
+   docker compose run --rm backup run         # first backup now
    ```
 
-   Or use the **Backups** card on the admin System page (*Test S3 connection*,
-   *Back up now*). Add `backup` to `COMPOSE_PROFILES` in `.env` so it survives
-   `docker compose up -d`.
+   Or use **Settings > Backups** in the admin panel (*Test S3 connection*,
+   *Back up now*).
 5. **Do a restore drill now** (below). An untested backup is a hope, not a backup.
 
 ### Configuration reference
@@ -208,6 +236,8 @@ in the UI.
 |---|---|---|
 | `BACKUP_SCHEDULE` | `15 3 * * *` | 5-field cron (`min hour dom month dow`; `*`, lists, ranges, `*/n`). |
 | `BACKUP_TZ` | `UTC` | IANA time zone the schedule is evaluated in (DST-aware). A time skipped by a DST jump is skipped; missed runs while the service was down are **not** replayed (set `BACKUP_RUN_ON_START=true` to take one on every start). |
+| `BACKUP_RUN_ON_START` | `first` | `first`: one backup at start-up while none has ever succeeded. `true`: on every start. `false`: never. |
+| `BACKUP_REPLICAS` | `1` | `0` turns the backup service off. |
 | `BACKUP_AGE_RECIPIENT` | | age public key(s), comma separated (several = any of them can decrypt; use for key rotation or a second custodian). |
 | `BACKUP_AGE_PASSPHRASE_FILE` | | Alternative: age passphrase mode (min. 12 chars) from a file. Weaker, see "Encryption and keys". |
 | `BACKUP_S3_ENDPOINT` | AWS | Host or `https://host[:port]`. Empty = AWS S3. |
@@ -217,7 +247,7 @@ in the UI.
 | `BACKUP_S3_PATH_STYLE` | `false` | `true` for MinIO and some self-hosted stores. |
 | `BACKUP_S3_STORAGE_CLASS` | | e.g. `STANDARD_IA`, `GLACIER_IR` (AWS). Leave empty for B2/Wasabi/R2/MinIO. |
 | `BACKUP_S3_INSECURE` | `false` | Allow plain HTTP. Only for a MinIO on a private network. |
-| `BACKUP_LOCAL_DIR` / `BACKUP_LOCAL_PATH` | | In-container dir (use `/backups`) / host dir (default `./backups`). The container runs as `BACKUP_UID:BACKUP_GID` (default 1000:1000); it must be able to write the host dir. |
+| `BACKUP_LOCAL_DIR` / `BACKUP_LOCAL_PATH` | `/backups` (UI switch) / `./backups` | In-container dir (use `/backups`; setting it locks the panel's *Local disk* switch on) / host dir. The container runs as `BACKUP_UID:BACKUP_GID` (default 1000:1000); it must be able to write the host dir. |
 | `BACKUP_KEEP_DAILY` / `_WEEKLY` / `_MONTHLY` | `7` / `4` / `6` | Retention. `0` disables a tier; all three `0` keeps everything. |
 | `BACKUP_RETENTION_DRY_RUN` | `false` | Log what would be deleted, delete nothing. |
 | `BACKUP_S3_ALLOW_PRIVATE` | `true` for env endpoints | Allow loopback/LAN endpoints. Link-local/metadata addresses are always refused. |
@@ -324,12 +354,12 @@ only touches objects named `openfamily-<UTC timestamp>.dump[.age]` plus their
 manifest, **never deletes the newest complete backup**, ignores everything else
 in the prefix (including backups made by `scripts/backup.sh`), and only prunes
 a destination after a successful backup to it. Preview with
-`docker compose --profile backup run --rm backup prune --dry-run` or
+`docker compose run --rm backup prune --dry-run` or
 `BACKUP_RETENTION_DRY_RUN=true`.
 
 ### Admin panel and System page
 
-System health has a **Backups** card: configured destinations (bucket and
+**Settings > Backups** shows configured destinations (bucket and
 host, never keys), encryption mode, last success / failure, size and duration,
 next scheduled run, retention, and recent runs. *Back up now* and *Test S3
 connection* are platform-admin only, rate limited (4 and 10 per hour per
@@ -339,7 +369,9 @@ admin), allow one request at a time, and are audit logged
 credentials, the age key or the dump tools, so nothing sensitive can appear in
 an API response. Warnings appear as banners when there is no backup, the last
 success is older than `BACKUP_STALE_HOURS`, the latest attempt failed, or the
-service stopped reporting.
+service stopped reporting. The **System health** checklist has a *Backups* row
+with the time, destination and encryption of the last backup, linking to
+Settings > Backups.
 
 ### Restore and restore drill
 

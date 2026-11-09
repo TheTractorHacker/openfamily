@@ -1,4 +1,5 @@
 import React from 'react'
+import { useUnsavedChanges } from '../lib/unsaved'
 import { ApiError, getMapStyleSettings, saveMapStyleSettings, testMapStyle } from '../lib/api'
 import { Button, Card } from '../components/primitives'
 import type { MapStyleSettings } from '../lib/types'
@@ -25,6 +26,8 @@ export function MapStyleCard() {
       live = false
     }
   }, [])
+
+  useUnsavedChanges(!!cur && value.trim() !== cur.map_style_url, 'Map style')
 
   const run = async (kind: 'save' | 'test') => {
     setBusy(kind)

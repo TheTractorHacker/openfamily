@@ -16,6 +16,10 @@ func ResolveConfig(getenv func(string) string, st *backupsettings.Stored) (*Conf
 	overlay := map[string]string{}
 	if st != nil && st.Exists {
 		overlay = backupsettings.Overlay(st.Settings, st.Creds)
+	} else if d := strings.TrimSpace(getenv("BACKUP_DEFAULT_LOCAL_DIR")); d != "" && backupsettings.Defaults().LocalEnabled {
+		// Nothing saved in the admin UI yet: back up to the default local
+		// folder out of the box. Not a pin; the UI can switch it off.
+		overlay["BACKUP_LOCAL_DIR"] = d
 	}
 	envCreds := false
 	for _, k := range []string{"BACKUP_S3_ACCESS_KEY_ID", "BACKUP_S3_ACCESS_KEY_ID_FILE", "BACKUP_S3_SECRET_ACCESS_KEY", "BACKUP_S3_SECRET_ACCESS_KEY_FILE"} {

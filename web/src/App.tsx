@@ -28,6 +28,7 @@ import { EncryptionKeysPage } from './pages/EncryptionKeysPage'
 import { ROUTES, DEFAULT_ROUTE, routeFromHash, type RouteKey } from './lib/routes'
 import { clearTokens, getEmail, isAuthenticated, subscribeAuth } from './lib/auth'
 import { useMe } from './lib/me'
+import { confirmLeave } from './lib/unsaved'
 import { useServerVersion } from './lib/serverVersion'
 import { AccessDenied, Spinner } from './components/primitives'
 import { AboutFooter } from './components/AboutFooter'
@@ -58,23 +59,39 @@ export default function App() {
   const adminMfaRequired = me?.admin_mfa_required === true
   const serverVersion = useServerVersion()
 
-  // Hash-based routing.
-  const [route, setRoute] = React.useState<RouteKey>(() =>
-    routeFromHash(typeof window !== 'undefined' ? window.location.hash : ''),
-  )
+  // Hash-based routing. The full hash is state so sub-pages (#/settings/backups)
+  // re-render; leaving a page with unsaved changes asks first, also for the
+  // browser's Back and Forward buttons.
+  const [hash, setHash] = React.useState<string>(() => (typeof window !== 'undefined' ? window.location.hash : ''))
+  const route: RouteKey = routeFromHash(hash)
+  const lastHash = React.useRef(hash)
   React.useEffect(() => {
-    const onHash = () => setRoute(routeFromHash(window.location.hash))
+    const onHash = () => {
+      const next = window.location.hash
+      if (next === lastHash.current) return
+      if (!confirmLeave()) {
+        // Put the old address back without adding a reload or a second prompt.
+        window.history.pushState(null, '', lastHash.current || `#/${DEFAULT_ROUTE}`)
+        return
+      }
+      lastHash.current = next
+      setHash(next)
+    }
     window.addEventListener('hashchange', onHash)
     // Ensure a sensible default hash on first load.
     if (!window.location.hash) window.location.hash = `#/${DEFAULT_ROUTE}`
     return () => window.removeEventListener('hashchange', onHash)
   }, [])
 
-  const navigate = React.useCallback((key: RouteKey) => {
-    const hash = `#/${key}`
-    if (window.location.hash !== hash) window.location.hash = hash
-    setRoute(key)
+  /** Opens a location hash after the unsaved-changes check. */
+  const open = React.useCallback((next: string) => {
+    if (window.location.hash === next) return
+    if (!confirmLeave()) return
+    lastHash.current = next
+    window.location.hash = next
+    setHash(next)
   }, [])
+  const navigate = React.useCallback((key: RouteKey) => open(`#/${key}`), [open])
 
   const logout = React.useCallback(() => {
     clearTokens()
@@ -92,7 +109,7 @@ export default function App() {
         <Sidebar active={route} onNavigate={navigate} footer={<AboutFooter version={serverVersion} />} />
       </div>
       <div className="wb-shell-topbar">
-        <TopBar active={route} onLogout={logout} email={email} onNavigate={navigate} />
+        <TopBar active={route} onLogout={logout} email={email} onOpen={open} />
       </div>
       <main className="wb-shell-content" id="wb-content">
         {meLoading ? (
@@ -112,7 +129,7 @@ export default function App() {
             }
           >
             <div key={route} className="wb-route">
-              {renderPage(route, email, logout, isPlatformAdmin, adminMfaRequired)}
+              {renderPage(route, hash, open, email, logout, isPlatformAdmin, adminMfaRequired)}
             </div>
           </React.Suspense>
         )}
@@ -123,6 +140,8 @@ export default function App() {
 
 function renderPage(
   route: RouteKey,
+  hash: string,
+  open: (hash: string) => void,
   email: string | null,
   logout: () => void,
   isPlatformAdmin: boolean,
@@ -174,13 +193,13 @@ function renderPage(
     case 'fleet':
       return <FleetPage />
     case 'system':
-      return <SystemPage />
+      return <SystemPage onOpen={open} />
     case 'builds':
       return <BuildsPage />
     case 'documents':
       return <DocsPage />
     case 'settings':
-      return <SettingsPage email={email} onLogout={logout} />
+      return <SettingsPage hash={hash} onOpen={open} email={email} onLogout={logout} />
     default:
       return <DashboardPage />
   }

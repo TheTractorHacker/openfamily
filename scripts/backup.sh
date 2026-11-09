@@ -7,7 +7,7 @@
 #        BACKUP_PASSPHRASE_FILE=path  encrypt at rest (AES-256, PBKDF2) -> .dump.enc.
 #                      Backups contain location history: encrypt anything that leaves the host.
 # For scheduled and/or S3 backups use the `backup` compose service instead
-# (docker compose --profile backup up -d); see docs/backup-restore.md.
+# (started by a plain docker compose up -d); see docs/backup-restore.md.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."

@@ -11,7 +11,7 @@ Tell the server whether it runs on hardware **your family owns** (a box at home)
 Every circle admin and member still chooses on their own phone. Nobody, including
 you, can consent for another person.
 
-Set it in the admin web under **Settings, Deployment profile**, or seed a fresh
+Set it in the admin web under **Settings > Privacy & processing**, or seed a fresh
 install with `DEPLOYMENT_PROFILE=home` in `.env`. The choice in Settings wins.
 
 Related: [Privacy modes explained](../user/privacy-modes.md),
