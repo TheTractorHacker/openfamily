@@ -10,6 +10,17 @@ for the **last 5 minor versions** of the app (see
 [API compatibility](api-compat.md)), so you can update the server first and
 the phones afterwards.
 
+## v0.26.13 (2026-11-09)
+
+App-only release (the server needs no change). Install over the current app.
+
+- **Places reach every member of a Private circle.** Places saved before the circle's key changed (a new or replaced phone, or Private mode turned off and on) could only be opened on phones that already had them, so other members saw no places. The app now seals them again under the current key when it opens, and the Places screen shows places that only this phone has, with a **Share places with the circle** button. A received place no longer overwrites the stored list.
+- **Map opens where you are.** It starts on your last known position, even on a cold start, then moves to a fresh fix. It frames your circle only when your own position is unknown. It no longer opens on a default city or a days-old point, and it never moves once you have touched it.
+- **Background updates while your phone is still.** On Android a phone lying still kept sending nothing until the app was opened. It now reports every few minutes. Tracking restarts by itself after an app update, the offline queue is sent on the regular heartbeat, and restart after a reboot only happens if sharing is on.
+- **Faster zooming out.** The map loads tiles at the size they were designed for: about 4x fewer tiles per screen. Recenter and cluster animations are shorter.
+- **Place labels match your circle.** People are labelled only with places of the circle you are viewing (and family-wide places), and the Places list in the map sheet is scoped the same way.
+- **Chat notifications follow "Show names in notifications".** On: "Henry in Family" with the start of the message. Off: only "New message in Family". This applies to normal and encrypted chat, and encrypted chat notifications now also appear when the app is in the background.
+
 ## v0.26.12 (2026-11-09)
 
 - **Open Private circles from any browser.** An admin is no longer tied to one computer. Pair one web viewer with your phone once (the existing "Approve a viewer or bridge"), choose a vault passphrase, and from then on unlock from any browser with your password (and 2FA) plus that passphrase. The key is sealed in the browser and the server cannot open it, it exists only in the open tab, locks after 30 minutes idle, on reload and on sign-out, and your phones are notified when a new browser unlocks. Revoking the web key from a phone ends access in every browser at once. Members on the server already show on the admin map without any key. Admins only; switch it off in Settings > Security or with `E2EE_VIEWER_VAULT=off`. **Server operators:** a new file `viewer-vault-pepper` is created in the `server_device` volume; back it up separately from the database backups (lose it and admins set web access up again once). Needs this server version (migration 380); no new phone app needed. See [Web access from any browser](admin/web-access-anywhere.md).

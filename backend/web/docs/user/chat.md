@@ -11,8 +11,12 @@ Every circle has a chat for its members only, end-to-end encrypted in Private ci
 - **Long-press** your own message to edit or delete it. Circle admins can
   delete any message.
 - You can send a photo; location data inside it is removed.
-- Notifications say only "New message in <circle>", not the text, unless your
-  server admin enabled verbose notifications.
+- Notifications follow **Settings > Notifications > Show names in
+  notifications** (or a server with verbose notifications): with it on they
+  show who wrote ("Henry in Family") and the start of the message; with it
+  off they say only "New message in <circle>". The same rule applies to the
+  encrypted chat of a Private circle, whose notification your phone writes
+  itself after decrypting the message.
 
 ![Chat in dark mode](../images/app/chat-dark.png)
 
