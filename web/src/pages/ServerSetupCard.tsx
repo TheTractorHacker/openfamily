@@ -1,4 +1,5 @@
 import React from 'react'
+import { useUnsavedChanges } from '../lib/unsaved'
 import {
   ApiError,
   dismissServerSetup,
@@ -100,6 +101,7 @@ export function ProfileChooser({
   }
   const dirty = pick !== state.profile
   const canSave = !!pick && dirty && (pick !== 'home' || confirmHome)
+  useUnsavedChanges(dirty, 'Where does this server run?')
   return (
     <div className="wb-ss-profile">
       <label className="wb-ss-choice">

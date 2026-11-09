@@ -1,5 +1,10 @@
 # Orbitly. Basic install:   ./scripts/setup.sh && docker compose up -d
 #
+# Always started: api, postgres and backup (nightly database backups to
+# ./backups, kept 7 daily / 4 weekly / 6 monthly; manage them in the admin
+# panel under Settings > Backups; add encryption and S3 there or in .env).
+# Opt out of the backup service with BACKUP_REPLICAS=0 in .env.
+#
 # Optional components are compose profiles (enable with --profile or the
 # COMPOSE_PROFILES variable in .env):
 #   proxy  Caddy reverse proxy with automatic HTTPS (set SITE_ADDRESS)
@@ -9,11 +14,6 @@
 #          ALL consent (admin map, history, Dawarich sync, place alerts work again).
 #          The server then holds plaintext for those circles. Read
 #          docs/design/E2EE.md ("Trusted-server mode") before enabling.
-#   backup  scheduled, encrypted backups of the database to a local directory
-#          and/or any S3-compatible bucket (AWS S3, Backblaze B2, Wasabi,
-#          Cloudflare R2, MinIO) with retention, shown on the admin System
-#          page. No host cron needed. Configure the BACKUP_* variables in .env
-#          (see .env.example) and read docs/backup-restore.md first.
 # e.g.  COMPOSE_PROFILES=proxy,push   or   docker compose --profile proxy up -d
 #
 # Without the proxy profile the API is published on 127.0.0.1:${API_PORT:-8080}
@@ -286,16 +286,19 @@ services:
           cpus: "0.5"
           memory: 256M
 
-  # OPT-IN scheduled backups (profile "backup"): daily pg_dump streamed through
-  # age encryption to ./backups and/or an S3-compatible bucket, with retention.
-  # The API never sees the S3 credentials; the admin "Back up now" button only
-  # queues a request this service picks up. Start with:
-  #   docker compose --profile backup up -d backup
-  # Needs BACKUP_AGE_RECIPIENT (public key) or BACKUP_AGE_PASSPHRASE_FILE, plus
-  # BACKUP_S3_* and/or BACKUP_LOCAL_DIR=/backups. The PRIVATE key never belongs here.
+  # Scheduled backups, ON BY DEFAULT: a nightly pg_dump (03:15 UTC) to ./backups
+  # with retention (7 daily, 4 weekly, 6 monthly), plus a first backup right
+  # after the service starts for the first time. Add age encryption (a public
+  # key generated in the admin panel, Settings > Backups) and/or an
+  # S3-compatible bucket there or with the BACKUP_* variables below; the
+  # PRIVATE key never belongs on the server. The API never sees the S3
+  # credentials; the admin "Back up now" button only queues a request this
+  # service picks up. See docs/backup-restore.md.
+  # Opt out: BACKUP_REPLICAS=0 in .env, then docker compose up -d.
+  # The container runs as BACKUP_UID:BACKUP_GID (default 1000:1000) and must be
+  # able to write BACKUP_LOCAL_PATH (default ./backups; scripts/setup.sh creates it).
   backup:
     <<: *hardening
-    profiles: ["backup"]
     build:
       context: .
       dockerfile: backend/Dockerfile
@@ -323,7 +326,10 @@ services:
       # here pins the setting (read-only in the UI). Built-in defaults apply otherwise.
       BACKUP_SETTINGS_KEY: ${BACKUP_SETTINGS_KEY:-${JWT_SECRET}}
       BACKUP_POLL_SECONDS: ${BACKUP_POLL_SECONDS:-}
-      BACKUP_RUN_ON_START: ${BACKUP_RUN_ON_START:-false}
+      # first = take one backup at start-up while none has ever succeeded.
+      BACKUP_RUN_ON_START: ${BACKUP_RUN_ON_START:-first}
+      # Local backups go here unless the admin UI or BACKUP_LOCAL_DIR say otherwise.
+      BACKUP_DEFAULT_LOCAL_DIR: /backups
       BACKUP_LOCAL_DIR: ${BACKUP_LOCAL_DIR:-}
       BACKUP_KEEP_DAILY: ${BACKUP_KEEP_DAILY:-}
       BACKUP_KEEP_WEEKLY: ${BACKUP_KEEP_WEEKLY:-}
@@ -350,6 +356,8 @@ services:
       # deploy/backup/ and reference /run/backup-secrets/<name>.
       - ${BACKUP_SECRETS_DIR:-./deploy/backup}:/run/backup-secrets:ro
     deploy:
+      # 0 turns the backup service off (BACKUP_REPLICAS=0 in .env).
+      replicas: ${BACKUP_REPLICAS:-1}
       resources:
         limits:
           cpus: "1.0"

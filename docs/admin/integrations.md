@@ -21,8 +21,8 @@ examples: [Home Assistant](../integrations/home-assistant.md).
 ## Dawarich
 
 [Dawarich](https://dawarich.app) is a self-hosted location history viewer.
-Orbitly can push points to it, one way. Configure it under **Settings,
-Dawarich**: address, API key, per-member mapping. Deleting points in Orbitly
+Orbitly can push points to it, one way. Configure it under **Settings >
+Integrations**: address, API key, per-member mapping. Deleting points in Orbitly
 does not delete them in Dawarich. In Private circles the Dawarich bridge is an
 approved device that members must allow. Design notes: [Dawarich](../design/DAWARICH.md).
 

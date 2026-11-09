@@ -262,7 +262,7 @@ func (s *Server) checkDisk() SystemCheck {
 }
 
 func (s *Server) checkBackup(ctx context.Context, now time.Time) SystemCheck {
-	c := SystemCheck{ID: "backup", Group: "Backups", Title: "Backups", Link: "#backups", LinkLabel: "Back up now"}
+	c := SystemCheck{ID: "backup", Group: "Backups", Title: "Backups", Link: "#/settings/backups", LinkLabel: "Open Backups"}
 	var last *time.Time
 	var enc bool
 	var dest *string
@@ -275,13 +275,14 @@ func (s *Server) checkBackup(ctx context.Context, now time.Time) SystemCheck {
 	var hb *time.Time
 	var schedule *string
 	agentErr := s.Pool.QueryRow(ctx, `SELECT heartbeat_at, config->>'schedule' FROM backup_agent WHERE id = 1`).Scan(&hb, &schedule)
-	agentUp := agentErr == nil && hb != nil && now.Sub(*hb) < 10*time.Minute
+	agentSeen := agentErr == nil && hb != nil
+	agentUp := agentSeen && now.Sub(*hb) < 10*time.Minute
 	scheduled := agentUp && schedule != nil && strings.TrimSpace(*schedule) != ""
 
 	hb2 := backupHealth(last, nil, now, s.backupStaleAfter(ctx))
 	where := ""
 	if dest != nil && *dest != "" {
-		where = " to " + *dest
+		where = " to " + backupDestLabel(*dest)
 	}
 	encText := "not encrypted"
 	if enc {
@@ -289,27 +290,56 @@ func (s *Server) checkBackup(ctx context.Context, now time.Time) SystemCheck {
 	}
 	sched := "Schedule is off."
 	if scheduled {
-		sched = "Schedule is on."
+		sched = "Runs every night."
 	} else if !agentUp {
 		sched = "The backup service is not running."
 	}
+	const optOut = " To run without the backup service, set BACKUP_REPLICAS=0 in .env (and keep your own backups)."
 	switch hb2.Status {
 	case "missing":
-		c.Status, c.Summary = checkFail, "No backup has ever been recorded. "+sched
-		c.Hint = "Start the backup service (docker compose --profile backup up -d backup), then press Back up now. Without a backup, a lost disk means lost data."
+		c.Status = checkFail
+		switch {
+		case agentUp:
+			c.Summary = "No backup yet. The backup service is running; the first backup is taken shortly after it starts, then every night."
+			c.Status = checkWarn
+			c.Hint = "Press Back up now on Settings > Backups to take one right away. If it fails, the reason is shown there."
+		case agentSeen:
+			c.Summary = "No backup has ever been recorded, and the backup service stopped reporting " + humanAge(now.Sub(*hb)) + " ago."
+			c.Hint = "On the server, in the folder with docker-compose.yml, run docker compose up -d (it starts the backup service), then check docker compose logs backup." + optOut
+		default:
+			c.Summary = "No backup has ever been recorded. The backup service has not started on this server yet."
+			c.Hint = "Backups are part of the normal install: on the server, in the folder with docker-compose.yml, run docker compose up -d. " +
+				"It starts the backup service, which takes a first backup a minute later and then one every night." + optOut
+		}
 	case "stale":
 		c.Status = checkWarn
 		c.Summary = fmt.Sprintf("Last backup %s ago%s, %s. %s", humanAge(now.Sub(*last)), where, encText, sched)
-		c.Hint = fmt.Sprintf("The newest backup is older than %d hours. Press Back up now and check that the backup service is running.", hb2.StaleAfterHours)
+		c.Hint = fmt.Sprintf("The newest backup is older than %d hours. Press Back up now and check that the backup service is running (docker compose ps backup).", hb2.StaleAfterHours)
 	default:
 		c.Status = checkOK
 		c.Summary = fmt.Sprintf("Last backup %s ago%s, %s. %s", humanAge(now.Sub(*last)), where, encText, sched)
-		if !scheduled {
+		switch {
+		case !scheduled && !agentUp:
 			c.Status = checkWarn
-			c.Hint = "Backups only run when you press the button. Turn on a schedule in the Backups section below when you are ready."
+			c.Hint = "The backup service is not running, so no new backups are taken. Run docker compose up -d on the server." + optOut
+		case !scheduled:
+			c.Status = checkWarn
+			c.Hint = "Backups only run when you press the button. Turn on a schedule on Settings > Backups."
+		case !enc:
+			c.Hint = "Fine while backups stay on this server. Before copying them elsewhere or adding S3, generate an encryption key on Settings > Backups."
 		}
 	}
 	return c
+}
+
+func backupDestLabel(d string) string {
+	switch d {
+	case "local":
+		return "this server's disk"
+	case "s3":
+		return "S3"
+	}
+	return d
 }
 
 func (s *Server) checkPush(ctx context.Context, dbOK bool) []SystemCheck {
@@ -444,7 +474,7 @@ func (s *Server) checkQueues(ctx context.Context, now time.Time) SystemCheck {
 	case backupReq > 0:
 		c.Status = checkWarn
 		c.Summary += " A backup request has waited over 15 minutes."
-		c.Hint = "The backup service may be stopped: docker compose --profile backup ps backup"
+		c.Hint = "The backup service may be stopped: docker compose ps backup (start it with docker compose up -d)."
 	default:
 		c.Status = checkOK
 	}
@@ -489,6 +519,8 @@ type tlsResult struct {
 	at     time.Time
 	expiry time.Time
 	err    error
+	// dialErr: nothing answered at that address (try the next one).
+	dialErr bool
 }
 
 // checkTLS looks at how the admin reached this server and, for a public domain,
@@ -503,10 +535,16 @@ func (s *Server) checkTLS(r *http.Request) SystemCheck {
 	}
 	proto := r.Header.Get("X-Forwarded-Proto")
 	viaHTTPS := r.TLS != nil || proto == "https"
-	res := lookupCert(host)
+	res := lookupCert(host, s.localProxyAddr(), net.JoinHostPort(host, "443"))
 	switch {
+	case res.err != nil && res.dialErr:
+		// Nothing answered, neither the built-in proxy nor the public address.
+		// With your own reverse proxy on a home network that is expected.
+		c.Status, c.Summary = checkInfo, "The server could not read the certificate for "+host+" itself."
+		c.Hint = "That alone is not a problem: a home router often does not let the server open its own public address (no NAT loopback). " +
+			"Open https://" + host + " in a browser or on a phone using mobile data; if it loads without a warning, HTTPS works."
 	case res.err != nil:
-		c.Status, c.Summary = checkWarn, "Could not read the certificate for "+host+" from here."
+		c.Status, c.Summary = checkWarn, "The certificate for "+host+" is not trusted."
 		c.Hint = "Open https://" + host + " in a browser. If it shows a warning, check that the domain points to this server and ports 80 and 443 are open."
 	default:
 		days := int(time.Until(res.expiry).Hours() / 24)
@@ -544,15 +582,35 @@ func siteHost(addr string) string {
 	return a
 }
 
-func lookupCert(host string) tlsResult {
+// lookupCert reads the certificate served for host. It tries the given
+// addresses in order (the built-in proxy on this machine first, then the
+// public address) so a router without NAT loopback does not make a working
+// certificate look unreadable. Results are cached for 10 minutes.
+func lookupCert(host string, addrs ...string) tlsResult {
 	tlsCacheMu.Lock()
 	defer tlsCacheMu.Unlock()
 	if c, ok := tlsCache[host]; ok && time.Since(c.at) < 10*time.Minute {
 		return c
 	}
+	if len(addrs) == 0 {
+		addrs = []string{net.JoinHostPort(host, "443")}
+	}
+	var res tlsResult
+	for _, addr := range addrs {
+		res = certVia(host, addr)
+		if res.err == nil || !res.dialErr {
+			break
+		}
+	}
+	tlsCache[host] = res
+	return res
+}
+
+// certVia dials addr with SNI host and reads the leaf certificate's expiry.
+var certVia = func(host, addr string) tlsResult {
 	res := tlsResult{at: time.Now()}
 	d := &net.Dialer{Timeout: 3 * time.Second}
-	conn, err := tls.DialWithDialer(d, "tcp", net.JoinHostPort(host, "443"), &tls.Config{ServerName: host, MinVersion: tls.VersionTLS12})
+	conn, err := tls.DialWithDialer(d, "tcp", addr, &tls.Config{ServerName: host, MinVersion: tls.VersionTLS12})
 	if err != nil {
 		// An expired certificate fails verification; retry without it to read the date.
 		var cv *tls.CertificateVerificationError
@@ -563,14 +621,16 @@ func lookupCert(host string) tlsResult {
 			}
 		} else {
 			res.err = err
+			var opErr *net.OpError
+			var dnsErr *net.DNSError
+			res.dialErr = errors.As(err, &opErr) || errors.As(err, &dnsErr) || errors.Is(err, context.DeadlineExceeded)
 		}
-	} else {
-		if cs := conn.ConnectionState(); len(cs.PeerCertificates) > 0 {
-			res.expiry = cs.PeerCertificates[0].NotAfter
-		}
-		conn.Close()
+		return res
 	}
-	tlsCache[host] = res
+	if cs := conn.ConnectionState(); len(cs.PeerCertificates) > 0 {
+		res.expiry = cs.PeerCertificates[0].NotAfter
+	}
+	conn.Close()
 	return res
 }
 

@@ -27,6 +27,9 @@ type Agent struct {
 	Getenv func(string) string
 	Key    []byte
 
+	// hasSuccess overrides DB.HasSuccess in tests.
+	hasSuccess func(context.Context) bool
+
 	settingsAt  time.Time // UpdatedAt of the settings version currently applied
 	settingsErr string
 
@@ -89,7 +92,7 @@ func (a *Agent) Serve(ctx context.Context) error {
 		}
 	}()
 	a.reload(ctx)
-	if r.Cfg.RunOnStart {
+	if a.shouldRunOnStart(ctx) {
 		a.runBackup(ctx, "schedule")
 	}
 	t := time.NewTicker(a.poll())
@@ -107,6 +110,27 @@ func (a *Agent) Serve(ctx context.Context) error {
 		}
 		a.serveRequests(ctx)
 	}
+}
+
+// shouldRunOnStart: always with BACKUP_RUN_ON_START=true; with "first" only
+// while no backup has ever succeeded and a destination is configured.
+func (a *Agent) shouldRunOnStart(ctx context.Context) bool {
+	cfg := a.Runner.Cfg
+	if cfg.RunOnStart {
+		return true
+	}
+	if !cfg.RunOnFirstStart || !cfg.HasDestination() {
+		return false
+	}
+	if a.hasSuccess != nil {
+		return !a.hasSuccess(ctx)
+	}
+	if a.DB == nil || a.DB.Pool == nil {
+		return false
+	}
+	c, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	return !a.DB.HasSuccess(c)
 }
 
 func (a *Agent) runBackup(ctx context.Context, trigger string) (string, error) {
@@ -277,7 +301,7 @@ func (a *Agent) reload(ctx context.Context) {
 		if err != nil {
 			return err
 		}
-		cfg.DatabaseURL, cfg.WorkDir, cfg.Version, cfg.RunOnStart = r.Cfg.DatabaseURL, r.Cfg.WorkDir, r.Cfg.Version, r.Cfg.RunOnStart
+		cfg.DatabaseURL, cfg.WorkDir, cfg.Version, cfg.RunOnStart, cfg.RunOnFirstStart = r.Cfg.DatabaseURL, r.Cfg.WorkDir, r.Cfg.Version, r.Cfg.RunOnStart, r.Cfg.RunOnFirstStart
 		cr, err := ParseCron(cfg.Schedule)
 		if err != nil {
 			return err

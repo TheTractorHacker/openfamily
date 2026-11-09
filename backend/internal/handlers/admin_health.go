@@ -92,7 +92,7 @@ func (s *Server) AdminHealth(w http.ResponseWriter, r *http.Request) {
 
 	switch out.Backup.Status {
 	case "missing":
-		out.Warnings = append(out.Warnings, "No backup has been recorded. Enable the scheduled backup service (docker compose --profile backup up -d) or run ./scripts/backup.sh daily.")
+		out.Warnings = append(out.Warnings, "No backup has been recorded. The backup service starts with the server: run docker compose up -d on the server, then press Back up now in Settings > Backups.")
 	case "stale":
 		out.Warnings = append(out.Warnings, fmt.Sprintf("The last successful backup is more than %d hours old.", out.Backup.StaleAfterHours))
 	}
@@ -119,7 +119,7 @@ func (s *Server) AdminHealth(w http.ResponseWriter, r *http.Request) {
 	}
 	var hb time.Time
 	if err := s.Pool.QueryRow(ctx, `SELECT heartbeat_at FROM backup_agent WHERE id = 1`).Scan(&hb); err == nil && time.Since(hb) > 10*time.Minute {
-		out.Warnings = append(out.Warnings, "The backup service has stopped reporting. Check: docker compose --profile backup ps backup")
+		out.Warnings = append(out.Warnings, "The backup service has stopped reporting. Check: docker compose ps backup")
 	}
 	if out.Migration.Dirty {
 		out.Warnings = append(out.Warnings, "The last database migration did not finish cleanly.")

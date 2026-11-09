@@ -97,7 +97,7 @@ func TestAdminBackupRunQueuesAuditsAndRateLimits(t *testing.T) {
 
 	// No agent -> 503 with a helpful message, nothing queued.
 	code, _, raw := e.do("A", "POST", "/api/admin/backups/run", nil)
-	if code != http.StatusServiceUnavailable || !strings.Contains(string(raw), "--profile backup") {
+	if code != http.StatusServiceUnavailable || !strings.Contains(string(raw), "docker compose up -d") {
 		t.Fatalf("no agent: %d %s", code, raw)
 	}
 	e.agent(false, false) // stale heartbeat counts as not running

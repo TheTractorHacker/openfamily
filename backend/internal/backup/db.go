@@ -21,6 +21,16 @@ func (d *DBRecorder) RecordRun(ctx context.Context, r RunRecord) error {
 	return err
 }
 
+// HasSuccess reports whether any backup has ever succeeded. On error it
+// answers true so a database hiccup never triggers an unplanned dump.
+func (d *DBRecorder) HasSuccess(ctx context.Context) bool {
+	var ok bool
+	if err := d.Pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM backup_runs WHERE status = 'success')`).Scan(&ok); err != nil {
+		return true
+	}
+	return ok
+}
+
 func (d *DBRecorder) SchemaVersion(ctx context.Context) int64 {
 	var v int64
 	if err := d.Pool.QueryRow(ctx, `SELECT version FROM schema_migrations LIMIT 1`).Scan(&v); err != nil {

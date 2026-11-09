@@ -183,6 +183,8 @@ func main() {
 	srv.LocationLimit = sms.NewLimiter()
 	srv.AllowedOrigin = cfg.AllowedOrigin
 	srv.SiteAddress = cfg.SiteAddress
+	srv.LocalBaseURL, _ = loopbackBase(cfg)
+	srv.LocalProxyAddr = os.Getenv("LOCAL_PROXY_ADDR")
 	srv.APKDir = cfg.APKDir
 	srv.APKGitHubRepo = cfg.APKGitHubRepo
 	srv.APKGitHubToken = cfg.APKGitHubToken

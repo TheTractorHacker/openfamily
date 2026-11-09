@@ -2,7 +2,7 @@
 
 People update phones slowly. The server therefore keeps working for the **last
 five minor versions** of the app (for example 0.18 to 0.22). Open the admin web
-**Settings, App versions** to see:
+**Settings > Updates & about** to see:
 
 ![Server version, supported window and who runs what](../images/web/app-versions-light.png)
 

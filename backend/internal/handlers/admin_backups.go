@@ -204,7 +204,7 @@ func (s *Server) enqueueBackupRequest(w http.ResponseWriter, r *http.Request, ki
 	var cfg json.RawMessage
 	err := s.Pool.QueryRow(ctx, `SELECT heartbeat_at, config FROM backup_agent WHERE id = 1`).Scan(&hb, &cfg)
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && time.Since(hb) > backupAgentAlive) {
-		writeError(w, http.StatusServiceUnavailable, "The backup service is not running. Start it with: docker compose --profile backup up -d backup")
+		writeError(w, http.StatusServiceUnavailable, "The backup service is not running. Start it on the server with: docker compose up -d")
 		return
 	}
 	if err != nil {

@@ -15,10 +15,10 @@ Your first sign-in to the admin web: registration is closed, turn on two-step si
 
 ![Families page](../images/web/families-light.png)
 
-5. Open **Settings** and check:
-   - **Deployment profile**: home or cloud ([explained here](deployment-profile.md)).
-   - **Backups**: see [Backups](backups.md).
-   - **App versions**: see [App versions](app-versions.md).
+5. Open **Settings** (each area has its own page in the left column) and check:
+   - **Privacy & processing**: home or cloud ([explained here](deployment-profile.md)).
+   - **Backups**: on by default; see [Backups](backups.md).
+   - **Updates & about**: app versions, see [App versions](app-versions.md).
 6. Give your family the install instructions: [Installing on Android](../android-install-and-updates.md).
 
 ## What a server admin can and cannot see
@@ -39,7 +39,7 @@ unreadable by the server unless members opt in. See
 | Places, Circles, Sharing | Saved places, circle settings, share links |
 | Activity, Alerts, Audit | What happened, SOS and check-ins, who looked at what |
 | Fleet | Which phones are reporting and which have gone silent |
-| System | Version, database, warnings, last backup |
+| System health | Version, database, warnings, last backup |
 | Builds | Download the Android app from your own server |
 | Documents | These guides, offline, plus what is new in your server version |
-| Settings | Map style, SMS, domain, integrations, app versions |
+| Settings | One page per area: General (domain, units, map style), Server setup, Privacy & processing, Security, Notifications (SMS), Backups, Integrations, Updates & about, Account, Appearance |

@@ -1,7 +1,8 @@
-// Backups card for the System page: destinations (never credentials), last
+// Backups card (Settings > Backups): destinations (never credentials), last
 // success / failure, schedule, retention, plus "Back up now" and "Test S3
-// connection". Both buttons only queue a request for the optional `backup`
-// compose service, which owns the S3 credentials and dump tools.
+// connection". Both buttons only queue a request for the `backup` compose
+// service (started by a plain `docker compose up -d`), which owns the S3
+// credentials and dump tools.
 
 import React from 'react'
 import { ApiError, getAdminBackups, runBackupNow, testBackupS3 } from '../lib/api'
@@ -21,7 +22,8 @@ import { formatBytes, formatRelativeTime } from '../lib/format'
 import { BackupSettings } from './BackupSettings'
 import './BackupsCard.css'
 
-const SETUP_COMMAND = 'docker compose --profile backup up -d backup'
+const SETUP_COMMAND = 'docker compose up -d'
+const OPT_OUT_LINE = 'BACKUP_REPLICAS=0'
 const DOCS_URL = `${REPO_URL}/blob/main/docs/backup-restore.md`
 
 function errMessage(e: unknown): string {
@@ -38,7 +40,7 @@ function when(iso: string | null | undefined) {
   )
 }
 
-export function BackupsCard({ onChanged }: { onChanged?: () => void }) {
+export function BackupsCard({ onChanged, title = 'Backups' }: { onChanged?: () => void; title?: string }) {
   const q = useAsync(getAdminBackups, [])
   const [busy, setBusy] = React.useState<'backup' | 'test_s3' | null>(null)
   const [editing, setEditing] = React.useState(false)
@@ -82,7 +84,7 @@ export function BackupsCard({ onChanged }: { onChanged?: () => void }) {
   const actions = (
     <>
       <Button variant={editing ? 'primary' : 'secondary'} size="sm" aria-expanded={editing} onClick={() => setEditing(!editing)}>
-        {editing ? 'Hide settings' : 'Settings'}
+        {editing ? 'Close settings' : 'Change settings'}
       </Button>
       {hasS3 && !editing && (
         <Button
@@ -108,8 +110,8 @@ export function BackupsCard({ onChanged }: { onChanged?: () => void }) {
 
   return (
     <Section
-      title="Backups"
-      description="Scheduled, encrypted database backups to local disk and/or an S3-compatible bucket."
+      title={title}
+      description="Every night the server backs up its database to this machine's disk, and optionally to an S3-compatible bucket."
       actions={d ? actions : undefined}
     >
       {q.loading && !d ? (
@@ -124,14 +126,15 @@ export function BackupsCard({ onChanged }: { onChanged?: () => void }) {
         <div className="wb-bk">
           {!agent && (
             <Alert
-              tone="info"
-              title="Scheduled backups are not set up"
+              tone="warning"
+              title="The backup service has not started yet"
               action={<CopyCommand command={SETUP_COMMAND} />}
             >
-              Enable the <code>backup</code> profile to back up daily without host cron, with optional S3 upload and
-              retention. Configure it in <code>.env</code> first;{' '}
+              Backups are part of the normal install. On the server, in the folder with <code>docker-compose.yml</code>,
+              run the command shown here: it starts the backup service next to the server, and the first backup runs right
+              after it starts.{' '}
               <a href={DOCS_URL} target="_blank" rel="noreferrer">
-                read the guide
+                Read the guide
               </a>
               .
             </Alert>
@@ -146,17 +149,20 @@ export function BackupsCard({ onChanged }: { onChanged?: () => void }) {
               unavailable until it is started again.
             </Alert>
           )}
+          {agent && cfg.encryption === 'none' && (
+            <Alert tone="info" title="Backups are not encrypted yet">
+              That is fine while they stay on this server (the database itself is not encrypted on disk either). Before
+              you copy backups anywhere else or turn on S3, press <em>Change settings</em> and{' '}
+              <em>Generate key pair</em> under Encryption, and keep the private key somewhere safe.
+            </Alert>
+          )}
           <Alert tone="info" title="Where backups are stored">
             Local copies go to the <code>backups</code> folder next to <code>docker-compose.yml</code> on the server
             (<code>BACKUP_LOCAL_PATH</code> in <code>.env</code> moves it; inside the container it is <code>/backups</code>).
-            Files are named by date and end in <code>.age</code> when encrypted. Without the backup service,{' '}
-            <code>./scripts/backup.sh</code> writes to the same folder. S3 copies go to the bucket you configure under Settings.
+            Files are named by date and end in <code>.age</code> when encrypted; by default the newest 7 daily, 4 weekly
+            and 6 monthly are kept. S3 copies go to the bucket you configure under Settings. To turn the backup service
+            off, put <code>{OPT_OUT_LINE}</code> in <code>.env</code> and run <code>docker compose up -d</code> again.
           </Alert>
-          {!agent && (
-            <p className="wb-help" role="note">
-              “Back up now” needs the backup service. Turn it on with the command above; scheduled backups stay off until you do.
-            </p>
-          )}
           {actionError && (
             <Alert tone="danger" title="Couldn’t queue the request">
               {actionError}
@@ -211,7 +217,7 @@ export function BackupsCard({ onChanged }: { onChanged?: () => void }) {
                         ))}
                       </ul>
                     ) : (
-                      <span className="wb-kv-note">{agent ? 'None configured' : 'Local disk via ./scripts/backup.sh only'}</span>
+                      <span className="wb-kv-note">{agent ? 'None: turn on Local disk or S3 under Change settings' : 'Waiting for the backup service'}</span>
                     ),
                 },
                 { label: 'Encryption', value: agent ? <Badge tone={enc.tone}>{enc.text}</Badge> : <span className="wb-kv-note">—</span> },

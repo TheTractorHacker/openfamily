@@ -213,7 +213,8 @@ export interface DawarichUser {
 
 /** One live DNS or HTTPS check for the admin domain status card. */
 export interface DomainCheck {
-  status: 'ok' | 'fail' | 'skipped'
+  /** unverified: the check could not confirm it, which is not a failure. */
+  status: 'ok' | 'fail' | 'skipped' | 'unverified'
   detail?: string
   addresses?: string[]
 }
@@ -224,7 +225,12 @@ export interface DomainStatus {
   hostname?: string
   custom_domain: boolean
   public_base_url: string
+  /** The server's own listener answers: the authoritative "is it up". */
+  local?: DomainCheck
+  /** HTTPS for the domain through the built-in proxy on this machine. */
+  proxy?: DomainCheck
   dns?: DomainCheck
+  /** The public URL opened from the server itself: a hint only. */
   https?: DomainCheck
 }
 

@@ -1,6 +1,7 @@
 // System health — a checklist of OK / Warning / Problem rows, each with a plain
-// fix hint, then the backups card and the recent warnings and errors.
-// Read-only apart from the backup buttons; no secrets are shown.
+// fix hint, then the recent warnings and errors. Read-only; no secrets are
+// shown. Backups are managed on Settings > Backups; the Backups row here shows
+// the last backup and links there.
 
 import React from 'react'
 import { ApiError, getAdminHealth, getSystemChecks } from '../lib/api'
@@ -10,7 +11,6 @@ import { AccessDenied, Badge, Button, Card, EmptyState, ErrorState } from '../co
 import { Alert, PageHeader, Section } from '../components/patterns'
 import { formatRelativeTime } from '../lib/format'
 import { browserSkewSeconds, groupChecks, overallBanner, STATUS_LABEL, STATUS_TONE } from '../lib/systemChecks'
-import { BackupsCard } from './BackupsCard'
 import './pages.css'
 import './SystemPage.css'
 
@@ -26,7 +26,7 @@ function scrollToId(id: string) {
   document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
-export function SystemPage() {
+export function SystemPage({ onOpen }: { onOpen?: (hash: string) => void }) {
   const [data, setData] = React.useState<Loaded | null>(null)
   const [error, setError] = React.useState<{ status: number; message: string } | null>(null)
   const [loading, setLoading] = React.useState(true)
@@ -107,10 +107,7 @@ export function SystemPage() {
               {error.message} Showing the information from {data.at.toLocaleTimeString()}.
             </Alert>
           )}
-          <Checklist checks={data.checks} />
-          <div id="backups">
-            <BackupsCard onChanged={() => void load()} />
-          </div>
+          <Checklist checks={data.checks} onOpen={onOpen} />
           <div id="recent-errors">
             <RecentErrors health={data.health} />
           </div>
@@ -135,7 +132,7 @@ function SystemSkeleton() {
   )
 }
 
-function Checklist({ checks }: { checks: SystemChecks }) {
+function Checklist({ checks, onOpen }: { checks: SystemChecks; onOpen?: (hash: string) => void }) {
   const list: SystemCheck[] = [...checks.checks]
   // The browser knows its own clock; the server cannot. Flag a big gap.
   const skew = browserSkewSeconds(checks.generated_at, Date.now())
@@ -170,7 +167,7 @@ function Checklist({ checks }: { checks: SystemChecks }) {
           <Card padded={false}>
             <ul className="wb-sys-checks">
               {g.checks.map((c) => (
-                <CheckRow key={c.id} c={c} />
+                <CheckRow key={c.id} c={c} onOpen={onOpen} />
               ))}
             </ul>
           </Card>
@@ -180,7 +177,7 @@ function Checklist({ checks }: { checks: SystemChecks }) {
   )
 }
 
-function CheckRow({ c }: { c: SystemCheck }) {
+function CheckRow({ c, onOpen }: { c: SystemCheck; onOpen?: (hash: string) => void }) {
   const needsFix = (c.status === 'fail' || c.status === 'warn') && c.hint
   return (
     <li className={`wb-sys-check wb-sys-check-${c.status}`}>
@@ -197,10 +194,23 @@ function CheckRow({ c }: { c: SystemCheck }) {
             <strong>How to fix:</strong> {c.hint}
           </div>
         )}
-        {!needsFix && c.status === 'info' && c.hint && <div className="wb-sys-check-hint wb-sys-check-hint-soft">{c.hint}</div>}
+        {!needsFix && (c.status === 'info' || c.status === 'ok') && c.hint && (
+          <div className="wb-sys-check-hint wb-sys-check-hint-soft">{c.hint}</div>
+        )}
         {c.link && (
           <div className="wb-sys-check-link">
-            {c.link.startsWith('#') ? (
+            {c.link.startsWith('#/') ? (
+              <a
+                href={c.link}
+                onClick={(e) => {
+                  if (!onOpen || e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return
+                  e.preventDefault()
+                  onOpen(c.link!)
+                }}
+              >
+                {c.link_label || 'Details'}
+              </a>
+            ) : c.link.startsWith('#') ? (
               <button type="button" className="wb-sys-linkbtn" onClick={() => scrollToId(c.link!.slice(1))}>
                 {c.link_label || 'Details'}
               </button>

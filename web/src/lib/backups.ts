@@ -1,16 +1,16 @@
-// Pure helpers for the System page "Backups" card (kept free of React so they
+// Pure helpers for the Settings > Backups card (kept free of React so they
 // can be unit tested with node --test).
 
 import type { AdminBackups, BackupConfigSummary, BackupRun } from './types'
 
-export function describeEncryption(e: BackupConfigSummary['encryption'] | undefined): { text: string; tone: 'green' | 'red' | 'grey' } {
+export function describeEncryption(e: BackupConfigSummary['encryption'] | undefined): { text: string; tone: 'green' | 'orange' | 'grey' } {
   switch (e) {
     case 'age-x25519':
       return { text: 'Encrypted (age public key)', tone: 'green' }
     case 'age-scrypt':
       return { text: 'Encrypted (age passphrase)', tone: 'green' }
     case 'none':
-      return { text: 'Not encrypted', tone: 'red' }
+      return { text: 'Not encrypted', tone: 'orange' }
     default:
       return { text: 'Unknown', tone: 'grey' }
   }
@@ -53,7 +53,7 @@ export function runSummary(r: BackupRun, size: (n: number) => string): string {
 
 /** Splits a server warning into its prose and an embedded runnable command, if any. */
 export function splitWarning(w: string): { message: string; command?: string } {
-  const m = w.match(/(docker compose --profile backup [\w -]+?)(?=\)|\.\s|$)|(\.\/scripts\/[\w.-]+)/)
+  const m = w.match(/(docker compose (?:--profile backup )?(?:up|ps|logs|restart)[\w -]*?)(?=\)|\.\s|$)|(\.\/scripts\/[\w.-]+)/)
   return m ? { message: w, command: m[1] ?? m[2] } : { message: w }
 }
 

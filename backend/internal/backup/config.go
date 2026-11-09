@@ -54,7 +54,11 @@ type Config struct {
 	DatabaseURL      string
 	WorkDir          string
 	RunOnStart       bool
-	Version          string
+	// RunOnFirstStart takes a backup at start-up only when none has ever
+	// succeeded (BACKUP_RUN_ON_START=first, the compose default), so a fresh
+	// install has a backup within minutes instead of at the first 03:15.
+	RunOnFirstStart bool
+	Version         string
 
 	// EnvPublic / EnvSecrets describe which settings the real environment pins
 	// (values only for non-secret ones). Filled by ResolveConfig.
@@ -142,8 +146,13 @@ func LoadConfig(getenv func(string) string) (*Config, error) {
 		Schedule:         strings.TrimSpace(getenv("BACKUP_SCHEDULE")),
 		DatabaseURL:      getenv("DATABASE_URL"),
 		WorkDir:          strings.TrimSpace(getenv("BACKUP_WORK_DIR")),
-		RunOnStart:       envBool(getenv, "BACKUP_RUN_ON_START", false),
 		Version:          getenv("GIT_COMMIT"),
+	}
+	switch strings.ToLower(strings.TrimSpace(getenv("BACKUP_RUN_ON_START"))) {
+	case "first", "first-run", "once":
+		c.RunOnFirstStart = true
+	default:
+		c.RunOnStart = envBool(getenv, "BACKUP_RUN_ON_START", false)
 	}
 	if c.Schedule == "" {
 		c.Schedule = "15 3 * * *"

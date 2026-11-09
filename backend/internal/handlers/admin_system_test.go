@@ -188,6 +188,15 @@ func TestAdminSystemChecksOnFreshDatabase(t *testing.T) {
 	if by["backup"].Status != checkFail || !strings.Contains(by["backup"].Summary, "ever been recorded") {
 		t.Errorf("no backup recorded must be a failure: %+v", by["backup"])
 	}
+	// Backups are part of the default install: the fix is a plain
+	// `docker compose up -d` (no profile), the opt-out is explained, and the
+	// row links to Settings > Backups.
+	if h := by["backup"].Hint; !strings.Contains(h, "docker compose up -d") || strings.Contains(h, "--profile") || !strings.Contains(h, "BACKUP_REPLICAS=0") {
+		t.Errorf("backup hint: %q", h)
+	}
+	if by["backup"].Link != "#/settings/backups" {
+		t.Errorf("backup link: %q", by["backup"].Link)
+	}
 	if by["server_key"].Status != checkInfo {
 		t.Errorf("no built-in key in tests: %+v", by["server_key"])
 	}
@@ -199,8 +208,14 @@ func TestAdminSystemChecksOnFreshDatabase(t *testing.T) {
 		t.Errorf("counts %v do not add up to %d checks", out.Counts, len(out.Checks))
 	}
 
-	// A recent backup with a running, scheduled agent turns the row green.
+	// A running agent without a backup yet (fresh install, first run under
+	// way) is a warning, not a failure.
 	e.agent(true, false)
+	if c := e.srv.checkBackup(ctx, time.Now()); c.Status != checkWarn || !strings.Contains(c.Summary, "No backup yet") {
+		t.Errorf("fresh install with running agent: %+v", c)
+	}
+
+	// A recent backup with a running, scheduled agent turns the row green.
 	if _, err := e.pool.Exec(ctx, `INSERT INTO backup_runs (taken_at, status, destination, encrypted, size_bytes) VALUES (now(), 'success', 'local', true, 1000)`); err != nil {
 		t.Skipf("backup_runs shape differs: %v", err)
 	}
@@ -211,9 +226,16 @@ func TestAdminSystemChecksOnFreshDatabase(t *testing.T) {
 	_, _, raw = e.do("A", "GET", "/api/admin/system/checks", nil)
 	_ = json.Unmarshal(raw, &out)
 	for _, c := range out.Checks {
-		if c.ID == "backup" && (c.Status != checkOK || !strings.Contains(c.Summary, "encrypted") || !strings.Contains(c.Summary, "Schedule is on")) {
+		if c.ID == "backup" && (c.Status != checkOK || !strings.Contains(c.Summary, "encrypted") || !strings.Contains(c.Summary, "Runs every night")) {
 			t.Errorf("healthy backup: %+v", c)
 		}
+	}
+
+	// An unencrypted local backup is fine (green) but says how to encrypt.
+	_, _ = e.pool.Exec(ctx, `DELETE FROM backup_runs`)
+	_, _ = e.pool.Exec(ctx, `INSERT INTO backup_runs (taken_at, status, destination, encrypted, size_bytes) VALUES (now(), 'success', 'local', false, 1000)`)
+	if c := e.srv.checkBackup(ctx, time.Now()); c.Status != checkOK || !strings.Contains(c.Summary, "not encrypted") || !strings.Contains(c.Hint, "encryption key") {
+		t.Errorf("unencrypted local backup: %+v", c)
 	}
 
 	// A dirty migration is a failure with a fix hint.

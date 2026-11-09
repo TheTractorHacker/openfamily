@@ -1,4 +1,5 @@
 import React from 'react'
+import { useUnsavedChanges } from '../lib/unsaved'
 import { ApiError, clearSmsSettings, getSmsSettings, updateSmsSettings } from '../lib/api'
 import type { SmsSettings } from '../lib/types'
 import { Badge, Button, Card } from '../components/primitives'
@@ -109,15 +110,7 @@ export function TwilioSettingsCard() {
     )
   }, [accountSid, authToken, from, publicBaseUrl, settings])
 
-  React.useEffect(() => {
-    if (!dirty) return
-    const onBeforeUnload = (event: BeforeUnloadEvent) => {
-      event.preventDefault()
-      event.returnValue = ''
-    }
-    window.addEventListener('beforeunload', onBeforeUnload)
-    return () => window.removeEventListener('beforeunload', onBeforeUnload)
-  }, [dirty])
+  useUnsavedChanges(dirty, 'Text messages (SMS)')
 
   const focusField = (key: keyof FieldErrors) => {
     const refs = {

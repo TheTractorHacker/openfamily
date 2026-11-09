@@ -14,11 +14,11 @@ interface TopBarProps {
   onLogout: () => void
   /** Email shown in the account chip. */
   email?: string | null
-  /** Navigate to a route (used by the ⌘K command menu). */
-  onNavigate: (key: RouteKey) => void
+  /** Open a location hash (used by the ⌘K command menu). */
+  onOpen: (hash: string) => void
 }
 
-export function TopBar({ active, actions, onLogout, email, onNavigate }: TopBarProps) {
+export function TopBar({ active, actions, onLogout, email, onOpen }: TopBarProps) {
   const route = ROUTES.find((r) => r.key === active)
   const { isPlatformAdmin } = useMe()
   const [menuOpen, setMenuOpen] = React.useState(false)
@@ -52,7 +52,7 @@ export function TopBar({ active, actions, onLogout, email, onNavigate }: TopBarP
 
       {/* The ⌘K search corpus comes from the server-wide admin endpoints, so
           it is only offered to platform admins. */}
-      {isPlatformAdmin && <CommandMenu onNavigate={onNavigate} />}
+      {isPlatformAdmin && <CommandMenu onOpen={onOpen} />}
 
       <div className="wb-topbar-right">
         {actions}
