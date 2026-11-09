@@ -16,6 +16,7 @@ import 'private_channel_test.dart' show FakeServer, FakeClock;
 
 const String uA = '11111111-1111-4111-8111-111111111111';
 const String uB = '22222222-2222-4222-8222-222222222222';
+const String uC = '33333333-3333-4333-8333-333333333333';
 const String priv = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 const String std = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
 
@@ -208,6 +209,77 @@ void main() {
       // Catch-up of the same items again does not notify twice.
       await b.runtime.catchUp(priv);
       expect(b.notes.length, 1);
+    });
+
+    test('a place sealed before the key changed reaches a member who only holds the new key once it is re-shared',
+        () async {
+      // Prod case: the admin's places were sealed under an old key (or their sealed copies were deleted when
+      // Private mode was turned off); the other member's phone joined later and only holds the newest key.
+      const SealedPlace home = SealedPlace(id: 'p1', name: 'Home', lat: 40, lon: -75, radiusMeters: 100);
+      await a.runtime.savePlace(priv, home);
+      await a.runtime.flush();
+      e2eeServer.circles[priv]!.members.add(uC);
+      final Device c = Device(e2eeServer, channel, uC, clock);
+      await c.service.registerThisDevice();
+      clock.t = clock.t.add(const Duration(minutes: 1));
+      await a.service.bumpEpoch(priv); // forward secrecy: the newcomer gets the NEW key only
+      await c.service.syncCircleKeys(priv);
+      await c.runtime.setCircles(<Circle>[circleOf(priv, isPrivate: true)]);
+      expect(await c.service.heldEpochs(priv), <int>[2]);
+      await c.runtime.catchUp(priv);
+      expect(c.runtime.places(priv), isEmpty, reason: 'the old item cannot be opened with the new key (the bug)');
+
+      expect(await a.runtime.placesNeedSharing(priv), isTrue);
+      expect(await a.runtime.circlesWithUnsharedPlaces(), <String>{priv});
+      expect(await a.runtime.sharePlacesIfDue(), 1);
+      await a.runtime.flush();
+      await c.runtime.catchUp(priv);
+      expect(c.runtime.places(priv).single.name, 'Home');
+      // Shared under the current key: nothing more to do, and the next app open does not send it again.
+      expect(await a.runtime.placesNeedSharing(priv), isFalse);
+      final int before = channel.items.length;
+      expect(await a.runtime.sharePlacesIfDue(), 0);
+      expect(channel.items.length, before);
+      // The ciphertext on the server is not plaintext.
+      expect(channel.items.any((WireItem i) => utf8.decode(i.ciphertext, allowMalformed: true).contains('Home')), isFalse);
+    });
+
+    test('a re-share keeps the signed time: it never undoes a newer edit or a deletion made elsewhere', () async {
+      const SealedPlace home = SealedPlace(id: 'p1', name: 'Home', lat: 40, lon: -75, radiusMeters: 100);
+      const SealedPlace gym = SealedPlace(id: 'p2', name: 'Gym', lat: 41, lon: -75, radiusMeters: 100);
+      await a.runtime.savePlace(priv, home);
+      await a.runtime.savePlace(priv, gym);
+      await a.runtime.flush();
+      await b.runtime.catchUp(priv);
+      // Bob renames Home and deletes Gym; Alice's phone has not caught up yet.
+      clock.t = clock.t.add(const Duration(minutes: 5));
+      await b.runtime.savePlace(priv, const SealedPlace(id: 'p1', name: 'Home (new)', lat: 40, lon: -75, radiusMeters: 100));
+      await b.runtime.deletePlace(priv, gym);
+      await b.runtime.flush();
+      clock.t = clock.t.add(const Duration(minutes: 5));
+      expect(await a.runtime.sharePlaces(priv), 2); // stale book: old Home and Gym
+      await a.runtime.flush();
+      await b.runtime.catchUp(priv);
+      expect(b.runtime.places(priv).map((SealedPlace p) => p.name).toList(), <String>['Home (new)']);
+    });
+
+    test('places persisted by an older build (no signed time) load, and a received place does not drop them', () async {
+      a.kv.data['book/$priv'] = jsonEncode(<String, dynamic>{
+        'places': <Map<String, dynamic>>[
+          const SealedPlace(id: 'old1', name: 'School', lat: 40, lon: -75, radiusMeters: 100).toJson(),
+        ],
+      });
+      // Bob adds a place; Alice's phone receives it before anything else loaded her book.
+      await b.runtime.savePlace(priv, const SealedPlace(id: 'p9', name: 'Work', lat: 42, lon: -75, radiusMeters: 100));
+      await b.runtime.flush();
+      await a.runtime.catchUp(priv);
+      expect(a.runtime.places(priv).map((SealedPlace p) => p.name).toList(), <String>['School', 'Work']);
+      // The legacy place gets a real signed time when it is shared, and Bob receives it.
+      expect(await a.runtime.sharePlaces(priv), 2);
+      await a.runtime.flush();
+      await b.runtime.catchUp(priv);
+      expect(b.runtime.places(priv).map((SealedPlace p) => p.name).toList(), <String>['School', 'Work']);
+      expect(a.kv.data['book/$priv'], contains('"ts":'));
     });
 
     test('old events replayed during catch-up stay silent', () async {

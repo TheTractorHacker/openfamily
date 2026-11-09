@@ -132,7 +132,8 @@ class _CircleDetailScreenState extends State<CircleDetailScreen> {
         } catch (_) {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                content: Text('Private mode is on, but existing places could not be moved yet. Open Places to retry.')));
+                content: Text('Private mode is on, but existing places could not be moved yet. Open Places and tap '
+                    '"Share places with the circle" to retry.')));
           }
         }
       } else {

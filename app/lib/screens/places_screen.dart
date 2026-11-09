@@ -26,7 +26,14 @@ class PlacesSnapshot {
 /// The Places / geofences list screen. Lists saved Places with their radius
 /// and an arrive/leave alert toggle, and lets the user add a new Place.
 class PlacesScreen extends StatefulWidget {
-  const PlacesScreen({super.key, this.loader, this.updater, this.deleter});
+  const PlacesScreen({
+    super.key,
+    this.loader,
+    this.updater,
+    this.deleter,
+    this.unsharedLoader,
+    this.sharer,
+  });
 
   /// Replaces the network load (tests and screenshots). Returns the places
   /// with their alert state already applied, plus the caller's role and id.
@@ -38,6 +45,13 @@ class PlacesScreen extends StatefulWidget {
 
   /// Replaces the DELETE call (tests).
   final Future<void> Function(String placeId)? deleter;
+
+  /// Replaces [PlaceService.circlesToShare] (tests): Private circles whose
+  /// places on this phone the other members cannot read yet.
+  final Future<Set<String>> Function()? unsharedLoader;
+
+  /// Replaces [PlaceService.sharePlacesWithCircle] (tests).
+  final Future<int> Function(String circleId)? sharer;
 
   @override
   State<PlacesScreen> createState() => _PlacesScreenState();
@@ -53,6 +67,12 @@ class _PlacesScreenState extends State<PlacesScreen> {
 
   /// True while a geofence create/delete is in flight, to disable the toggle.
   bool _toggling = false;
+
+  /// Private circles whose places on this phone the others cannot read yet.
+  Set<String> _unshared = <String>{};
+
+  /// The circle whose places are being shared right now.
+  String? _sharing;
 
   /// Whether the caller can manage places (add/delete). Children cannot.
   bool get _canManage => _role != 'child';
@@ -78,6 +98,7 @@ class _PlacesScreenState extends State<PlacesScreen> {
           _userId = snap.userId;
           _places = List<Place>.of(snap.places);
         });
+        await _loadUnshared();
         return;
       }
       final List<dynamic> results = await Future.wait<dynamic>([
@@ -94,10 +115,58 @@ class _PlacesScreenState extends State<PlacesScreen> {
         _userId = family.userId;
         _places = _applyGeofences(places, geofences);
       });
+      await _loadUnshared();
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = _errorMessage(e));
     }
+  }
+
+  Future<void> _loadUnshared() async {
+    Set<String> s = <String>{};
+    try {
+      // A custom loader (tests, screenshots) without its own answer: nothing to share.
+      s = await (widget.unsharedLoader ??
+          (widget.loader != null
+              ? () async => <String>{}
+              : PlaceService.circlesToShare))();
+    } catch (_) {}
+    if (!mounted) return;
+    setState(() => _unshared = s);
+  }
+
+  String _circleLabel(String circleId) {
+    for (final Place p in _places ?? const <Place>[]) {
+      if (p.circleId == circleId && (p.circleName ?? '').isNotEmpty) {
+        return p.circleName!;
+      }
+    }
+    return 'the circle';
+  }
+
+  /// "Share places with the circle": seals this phone's places of [circleId]
+  /// again under the circle's current key, so every member's phone can read them.
+  Future<void> _sharePlaces(String circleId) async {
+    if (_sharing != null) return;
+    setState(() => _sharing = circleId);
+    String msg;
+    try {
+      final int n =
+          await (widget.sharer ?? PlaceService.sharePlacesWithCircle)(circleId);
+      msg = n == 0
+          ? 'There were no places to share.'
+          : '$n ${n == 1 ? 'place was' : 'places were'} shared with '
+              '${_circleLabel(circleId)}. They appear on the other members\' '
+              'phones the next time those phones open Orbitly.';
+    } catch (_) {
+      msg = 'Places could not be shared yet: this phone does not have the '
+          'circle\'s current key. Open the circle\'s Encryption keys, then try '
+          'again.';
+    }
+    if (!mounted) return;
+    setState(() => _sharing = null);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    await _loadUnshared();
   }
 
   /// Marks each place's [Place.alertsOn] from the geofences that belong to the
@@ -387,10 +456,18 @@ class _PlacesScreenState extends State<PlacesScreen> {
     return ListView(
       padding: const EdgeInsets.symmetric(vertical: AppSpace.sm),
       children: <Widget>[
+        for (final String c in _unshared)
+          _ShareBanner(
+            circleName: _circleLabel(c),
+            busy: _sharing == c,
+            onShare: _sharing == null ? () => _sharePlaces(c) : null,
+          ),
         const DsSectionHeader('Saved places'),
         for (int i = 0; i < places.length; i++)
           _PlaceTile(
             place: places[i],
+            notShared: places[i].circleId != null &&
+                _unshared.contains(places[i].circleId),
             onToggleAlerts: _canManage ? () => _toggleAlerts(i) : null,
             toggling: _toggling,
             onDelete: _canManage ? () => _deletePlace(places[i]) : null,
@@ -402,6 +479,50 @@ class _PlacesScreenState extends State<PlacesScreen> {
   }
 }
 
+/// Says plainly that the places of a Private circle are only on this phone
+/// for now, and offers the one action that fixes it.
+class _ShareBanner extends StatelessWidget {
+  const _ShareBanner({
+    required this.circleName,
+    required this.busy,
+    required this.onShare,
+  });
+
+  final String circleName;
+  final bool busy;
+  final VoidCallback? onShare;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: AppSpace.xl),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          DsMessage(
+            'Other members of $circleName may not see these places. The circle '
+            'is end-to-end encrypted and its key changed after the places were '
+            'shared (for example when a phone joined or was replaced), so phones '
+            'that joined since cannot open them. Share them again to fix it.',
+            tone: DsTone.info,
+          ),
+          const SizedBox(height: AppSpace.sm),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: DsBusyButton(
+              label: 'Share places with the circle',
+              icon: Icons.group_outlined,
+              busy: busy,
+              onPressed: onShare,
+            ),
+          ),
+          const SizedBox(height: AppSpace.sm),
+        ],
+      ),
+    );
+  }
+}
+
 class _PlaceTile extends StatelessWidget {
   const _PlaceTile({
     required this.place,
@@ -409,7 +530,11 @@ class _PlaceTile extends StatelessWidget {
     required this.toggling,
     required this.onDelete,
     this.onEdit,
+    this.notShared = false,
   });
+
+  /// The place is on this phone only: the circle's members cannot read it yet.
+  final bool notShared;
 
   final VoidCallback? onEdit;
 
@@ -428,7 +553,10 @@ class _PlaceTile extends StatelessWidget {
     // Words, not just colour: the alert state is part of the subtitle.
     final String? sharedWith = place.circleId == null
         ? null
-        : 'Shared with ${place.circleName ?? 'a circle'}';
+        : notShared
+            ? 'Only on this phone: not shared with '
+                '${place.circleName ?? 'the circle'} yet'
+            : 'Shared with ${place.circleName ?? 'a circle'}';
     final String subtitle =
         '$where\nArrival and departure alerts: ${place.alertsOn ? 'on' : 'off'}'
         '${sharedWith == null ? '' : '\n$sharedWith'}';

@@ -493,6 +493,9 @@ class PrivateRuntime {
   /// stay on the phones' sealed places (the single source of truth for arrivals);
   /// the server only geofences places that exist as server places.
   Set<String> _serverMember = <String>{};
+
+  /// Circles this account administers (from the last [setCircles] in this isolate).
+  Set<String> _adminOf = <String>{};
   final Map<String, String> _names = <String, String>{};
 
   /// Updates the known circle modes and persists them for the background isolate.
@@ -502,6 +505,7 @@ class PrivateRuntime {
     _all = circles.map((Circle c) => c.id).toSet();
     _private = circles.where((Circle c) => c.isPrivate).map((Circle c) => c.id).toSet();
     _serverMember = circles.where((Circle c) => c.isPrivate && c.e2eeServerMember).map((Circle c) => c.id).toSet();
+    _adminOf = circles.where((Circle c) => c.role == 'admin').map((Circle c) => c.id).toSet();
     _names
       ..clear()
       ..addEntries(circles.map((Circle c) => MapEntry<String, String>(c.id, c.name)));
@@ -995,10 +999,10 @@ class PrivateRuntime {
   Future<String?> myUserId() async => (await _me())?.userId;
 
   /// Seals an arbitrary item (check-in/SOS position, place, event).
-  Future<void> sendItem(String circleId, String purpose, Map<String, dynamic> body, {bool flushNow = true}) async {
+  Future<void> sendItem(String circleId, String purpose, Map<String, dynamic> body, {bool flushNow = true, DateTime? at}) async {
     final SenderIdentity? me = await _me();
     if (me == null) throw const ItemRejected(ItemRejection.noKey);
-    await queue.enqueue(await sealer.seal(me, circleId, purpose, body));
+    await queue.enqueue(await sealer.seal(me, circleId, purpose, body, at: at));
     if (flushNow) unawaited(flush());
   }
 
@@ -1018,6 +1022,15 @@ class PrivateRuntime {
   }
 
   String circleName(String circleId) => _names[circleId] ?? 'Private circle';
+
+  /// Whether [circleId] is the primary circle (family-wide places belong to it).
+  bool isPrimary(String circleId) => _primary == circleId;
+
+  /// Whether the server's plaintext places of [circleId] are left over from an unfinished move to sealed places
+  /// that this account may finish: a Private circle without a legacy trusted server member (whose server-side
+  /// places are legitimate), administered by this account (only an admin may delete the plaintext copies).
+  bool canFinishPlaceMove(String circleId) =>
+      _private.contains(circleId) && !_serverMember.contains(circleId) && _adminOf.contains(circleId);
 
   /// Every sealed place of every private circle, with its circle.
   Future<List<({String circleId, SealedPlace place})>> allSealedPlaces() async {
@@ -1051,8 +1064,11 @@ class PrivateRuntime {
         if (e is! Map<String, dynamic>) continue;
         final Object? c = e['circle_id'];
         if (!(c == circleId || (c == null && primary))) continue;
+        // The server's place id is kept (the server knew it anyway): a retry after a failed
+        // purge re-seals the SAME places instead of adding copies.
+        final Object? sid = e['id'];
         final SealedPlace? p = SealedPlace.fromJson(<String, dynamic>{
-          'id': E2ee.newUuid(), 'name': e['name'], 'lat': e['lat'], 'lon': e['lon'],
+          'id': sid is String && sid.isNotEmpty ? sid : E2ee.newUuid(), 'name': e['name'], 'lat': e['lat'], 'lon': e['lon'],
           'r': e['radius_meters'] ?? 100, 'type': e['type'], 'addr': e['address'] ?? '',
         });
         if (p == null) continue;
@@ -1066,8 +1082,11 @@ class PrivateRuntime {
 
   /// Creates or edits a place of a Private circle (sealed, distributed to every member).
   Future<void> savePlace(String circleId, SealedPlace p) async {
-    await sendItem(circleId, ChannelPurpose.place, p.toJson());
-    book(circleId).apply(p, clock.now().millisecondsSinceEpoch);
+    await loadBook(circleId);
+    final DateTime at = clock.now().toUtc();
+    // The book keeps the same signed time as the item, so a later re-share carries it unchanged.
+    await sendItem(circleId, ChannelPurpose.place, p.toJson(), at: at);
+    book(circleId).apply(p, at.millisecondsSinceEpoch);
     _evals[circleId]?.resetPlace(p.id);
     await _persistBook(circleId);
     onPlacesChanged?.call(circleId);
@@ -1082,8 +1101,96 @@ class PrivateRuntime {
   Future<void> _persistBook(String circleId) async {
     final PlaceBook b = book(circleId);
     await kv.set(_bookKey(circleId), jsonEncode(<String, dynamic>{
-      'places': b.places.map((SealedPlace p) => p.toJson()).toList(),
+      'places': b.allEntries
+          .map((({SealedPlace place, int tsMs}) e) => <String, dynamic>{...e.place.toJson(), 'ts': e.tsMs})
+          .toList(),
     }));
+  }
+
+  /// Signed time of a place persisted by a build that did not store it.
+  static const int _unknownPlaceTs = 1;
+
+  String _placesSharedKey(String c) => 'placespub/$c';
+
+  /// Which key a place sealed now would be readable under: the newest circle key epoch this phone holds and the
+  /// lane it seals in. Null when this phone holds no key for the circle.
+  Future<String?> _placeKeyMarker(String circleId) async {
+    final int epoch = await keys.latestEpoch(circleId);
+    if (epoch < 1) return null;
+    int line = E2ee.linePhone, gen = 0;
+    try {
+      final LaneChoice own = await lanes.ownLane(circleId);
+      if (own.line == E2ee.lineServer && own.skGen >= 1 && await lanes.serverLaneAllowed(circleId)) {
+        line = own.line;
+        gen = own.skGen;
+      }
+    } catch (_) {}
+    return '$epoch:$line:$gen';
+  }
+
+  /// True when this phone holds places of [circleId] that were not sealed under the circle's CURRENT key.
+  ///
+  /// A sealed place is readable only by phones holding the key it was sealed under. A phone that joins later (a new
+  /// member, a reset or replaced phone) gets the newest key only, and turning Private mode off deletes every sealed
+  /// item from the server: either way the places then exist only on the phones that already had them.
+  Future<bool> placesNeedSharing(String circleId) async {
+    await loadBook(circleId);
+    if (places(circleId).isEmpty) return false;
+    final String? marker = await _placeKeyMarker(circleId);
+    return marker != null && await kv.get(_placesSharedKey(circleId)) != marker;
+  }
+
+  /// Seals every place this phone holds for [circleId] again, under the current key, so every member's phone can
+  /// read them. Each place keeps its id and its original signed time: a phone that already has it (or a newer edit,
+  /// or its deletion) ignores the copy. Only members receive it, exactly like a new place. Returns how many places
+  /// were sealed. Throws [ItemRejected] (noKey) when this phone holds no key for the circle.
+  Future<int> sharePlaces(String circleId) async {
+    final SenderIdentity? me = await _me();
+    if (me == null) throw const ItemRejected(ItemRejection.noKey);
+    await loadBook(circleId);
+    final String? marker = await _placeKeyMarker(circleId);
+    if (marker == null) throw const ItemRejected(ItemRejection.noKey);
+    final PlaceBook b = book(circleId);
+    int n = 0;
+    for (final ({SealedPlace place, int tsMs}) e in b.entries) {
+      int ts = e.tsMs;
+      if (ts <= _unknownPlaceTs) {
+        ts = clock.now().millisecondsSinceEpoch;
+        b.apply(e.place, ts);
+      }
+      await queue.enqueue(await sealer.seal(me, circleId, ChannelPurpose.place, e.place.toJson(),
+          at: DateTime.fromMillisecondsSinceEpoch(ts, isUtc: true)));
+      n++;
+    }
+    await _persistBook(circleId);
+    await kv.set(_placesSharedKey(circleId), marker);
+    unawaited(flush());
+    return n;
+  }
+
+  /// [sharePlaces] for every Private circle whose key changed since this phone last shared its places. Never throws.
+  Future<int> sharePlacesIfDue() async {
+    int n = 0;
+    for (final String c in await privateCircles()) {
+      try {
+        if (await lanes.store.status(c) == LaneStatus.consentRequired) continue;
+        if (await placesNeedSharing(c)) n += await sharePlaces(c);
+      } catch (_) {
+        // no key yet / offline: the next app open tries again
+      }
+    }
+    return n;
+  }
+
+  /// Private circles in which this phone holds places the other members may not be able to read.
+  Future<Set<String>> circlesWithUnsharedPlaces() async {
+    final Set<String> out = <String>{};
+    for (final String c in await privateCircles()) {
+      try {
+        if (await placesNeedSharing(c)) out.add(c);
+      } catch (_) {}
+    }
+    return out;
   }
 
   /// Loads persisted places (call before evaluating, e.g. in the background isolate).
@@ -1094,8 +1201,10 @@ class PrivateRuntime {
     if (raw == null) return;
     try {
       for (final dynamic j in ((jsonDecode(raw) as Map<String, dynamic>)['places'] as List<dynamic>)) {
-        final SealedPlace? p = SealedPlace.fromJson(j as Map<String, dynamic>);
-        if (p != null) b.apply(p, 1);
+        final Map<String, dynamic> m = j as Map<String, dynamic>;
+        final SealedPlace? p = SealedPlace.fromJson(m);
+        final Object? ts = m['ts'];
+        if (p != null) b.apply(p, ts is int && ts > 0 ? ts : _unknownPlaceTs);
       }
     } catch (_) {}
   }
@@ -1248,6 +1357,16 @@ class PrivateRuntime {
         // offline: the next resume or socket frame retries
       }
     }
+    // After the catch-up (newer edits and deletions are in the book): places this phone holds that the circle's
+    // current key cannot open yet are sealed again, so a member who joined, or a phone that was replaced, after the
+    // key changed sees them too. A circle that just turned Private (again) always gets them: turning it off deleted
+    // the sealed copies from the server.
+    for (final String id in _newlyPrivate.intersection(privs)) {
+      try {
+        await kv.remove(_placesSharedKey(id));
+      } catch (_) {}
+    }
+    await sharePlacesIfDue();
   }
 
   // ------------------------------------------------------------ diagnostics
@@ -1472,6 +1591,8 @@ class PrivateRuntime {
       case ChannelPurpose.place:
         final SealedPlace? p = SealedPlace.fromJson(r.body);
         if (p == null) return;
+        // Load the persisted book first: persisting a book that was never loaded would drop every other place.
+        await loadBook(r.circleId);
         if (book(r.circleId).apply(p, r.ts.millisecondsSinceEpoch)) {
           _evals[r.circleId]?.resetPlace(p.id);
           await _persistBook(r.circleId);

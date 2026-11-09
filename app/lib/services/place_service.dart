@@ -23,6 +23,7 @@ class PlaceService {
   static const Duration cacheTtl = Duration(seconds: 30);
 
   static List<Place>? _cache;
+  static List<dynamic> _serverRaw = const <dynamic>[];
   static DateTime? _cachedAt;
   static Future<List<Place>>? _inFlight;
 
@@ -75,6 +76,7 @@ class PlaceService {
     if (data is! List) {
       throw const ApiException(0, 'Unexpected places response.');
     }
+    _serverRaw = data;
     final List<Place> places = data
         .map((dynamic e) => _fromBackend(e as Map<String, dynamic>))
         .whereType<Place>()
@@ -83,6 +85,50 @@ class PlaceService {
     _cache = places;
     _cachedAt = clock();
     return places;
+  }
+
+  /// Private circles whose places the other members may not be able to read yet:
+  /// this phone holds places that were not sealed under the circle's current key,
+  /// or the server still holds plaintext places of the circle (the move to the
+  /// circle's encrypted places did not finish). Uses the last [fetchPlaces].
+  static Future<Set<String>> circlesToShare() async {
+    final Set<String> out = <String>{};
+    try {
+      final PrivateRuntime rt = PrivateRuntime.instance;
+      out.addAll(await rt.circlesWithUnsharedPlaces());
+      out.addAll(await _leftoverCircles());
+    } catch (_) {}
+    return out;
+  }
+
+  static Future<Set<String>> _leftoverCircles() async {
+    final Set<String> out = <String>{};
+    for (final dynamic e in _serverRaw) {
+      if (e is! Map<String, dynamic>) continue;
+      final String? target = await _privateTarget(e['circle_id'] as String?);
+      if (target != null && PrivateRuntime.instance.canFinishPlaceMove(target)) out.add(target);
+    }
+    return out;
+  }
+
+  /// "Share places with the circle": finishes moving the circle's plaintext
+  /// places (if any are left on the server), then seals every place this phone
+  /// holds for [circleId] under the current key. Returns the number of places
+  /// shared. Throws when this phone holds no key for the circle.
+  static Future<int> sharePlacesWithCircle(String circleId) async {
+    final PrivateRuntime rt = PrivateRuntime.instance;
+    try {
+      if ((await _leftoverCircles()).contains(circleId)) {
+        await rt.migratePlaces(circleId, primary: rt.isPrimary(circleId));
+      }
+    } catch (_) {
+      // Only a circle admin may delete the server's plaintext copies; the places
+      // this phone holds are still shared below.
+    }
+    invalidateCache();
+    final int n = await rt.sharePlaces(circleId);
+    invalidateCache();
+    return n;
   }
 
   /// Places of Private circles live on the phones (sealed items), not on the server.

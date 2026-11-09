@@ -92,6 +92,15 @@ class PlaceBook {
     return true;
   }
 
+  /// The signed time of the version held for [id] (null: unknown place).
+  int? tsOf(String id) => _byId[id]?.tsMs;
+
+  /// Every live place with the signed time of the version held.
+  List<({SealedPlace place, int tsMs})> get entries => _byId.values.where((v) => !v.place.deleted).toList();
+
+  /// Every entry including tombstones (persisted, so a restart does not forget a deletion).
+  List<({SealedPlace place, int tsMs})> get allEntries => _byId.values.toList();
+
   List<SealedPlace> get places =>
       _byId.values.where((v) => !v.place.deleted).map((v) => v.place).toList()
         ..sort((SealedPlace a, SealedPlace b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
