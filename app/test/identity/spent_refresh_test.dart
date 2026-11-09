@@ -5,6 +5,7 @@ import 'dart:convert';
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:openfamily/services/session_diary.dart';
 import 'package:openfamily/services/token_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -83,5 +84,27 @@ void main() {
     });
     await TokenStorage.saveTokens(access: access, refresh: stale);
     expect(TokenStorage.isRejected(live), isFalse, reason: 'the live token must never be marked spent');
+  });
+
+  test('readRefreshToken never returns a token the phone already used (a store that cannot be cleaned)', () async {
+    FlutterSecureStorage.setMockInitialValues(<String, String>{'access_token_v2': access, 'refresh_token_v2': stale});
+    SharedPreferences.setMockInitialValues(<String, Object>{
+      'wb_api_base_url': 'https://example.test',
+      'wb_spent_refresh': <String>[SessionDiary.shortHash(stale)],
+    });
+    expect(await TokenStorage.readRefreshToken(), isNull);
+    expect(await TokenStorage.refreshCandidates(), isEmpty);
+  });
+
+  test('sign-out remembers what every store held, so a store that keeps its copy cannot resurrect the session',
+      () async {
+    FlutterSecureStorage.setMockInitialValues(<String, String>{'access_token_v2': access, 'refresh_token_v2': stale});
+    SharedPreferences.setMockInitialValues(<String, Object>{'wb_api_base_url': 'https://example.test'});
+    await TokenStorage.clear(reason: 'test');
+    // The store "ignored the delete": the same token is back in it.
+    FlutterSecureStorage.setMockInitialValues(<String, String>{'access_token_v2': access, 'refresh_token_v2': stale});
+    TokenStorage.resetForTest();
+    expect(await TokenStorage.refreshCandidates(), isEmpty);
+    expect(await TokenStorage.readRefreshToken(), isNull);
   });
 }

@@ -10,6 +10,12 @@ for the **last 5 minor versions** of the app (see
 [API compatibility](api-compat.md)), so you can update the server first and
 the phones afterwards.
 
+## v0.26.20 (2026-11-09)
+
+App-only release (the server needs no change). Install over the current app.
+
+- **Fixed: still being signed out on a phone whose secure storage is stuck.** The Diagnostics report showed what was left: on this phone one storage place kept an old sign-in token and ignored deletes, another was always empty, and the only reliable copy was a plain file that each background process kept in its own memory. A second process could then offer a token that was already used, and the server signed the whole session out. The app now re-reads that file before every read, never offers or counts a token it knows was used (even if a stuck store still holds it), and remembers every token it held at sign-out. If you are signed out once more after updating, sign in again once; it should then hold.
+
 ## v0.26.19 (2026-11-09)
 
 App-only release (the server needs no change). Install over the current app.

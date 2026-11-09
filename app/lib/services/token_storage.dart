@@ -195,6 +195,9 @@ class TokenStorage {
   static Future<StoredSession> _readPrefs() async {
     try {
       final SharedPreferences prefs = await SharedPreferences.getInstance();
+      // Every isolate caches this file in memory. Production incident: the background/push isolate read the pair
+      // from its stale cache and presented a refresh token the UI isolate had already used.
+      await prefs.reload();
       return StoredSession(
         source: 'D',
         access: prefs.getString(_prefAccessKey),
@@ -428,7 +431,9 @@ class TokenStorage {
     }
     final List<StoredSession> ranked = await _ranked();
     for (final StoredSession s in ranked) {
-      if ((s.refresh ?? '').isNotEmpty) return s.refresh;
+      // A token this phone already used is dead: a store that cannot be cleaned (a stuck Keystore file) must not
+      // make the phone believe it still has a session, nor offer that token to the server again.
+      if ((s.refresh ?? '').isNotEmpty && !isRejected(s.refresh!)) return s.refresh;
     }
     return null;
   }
@@ -457,6 +462,14 @@ class TokenStorage {
   static Future<bool> clear({String reason = 'unspecified', bool keepOfflineData = false}) async {
     _diary.record('clear', 'reason=$reason');
     StorageEventLog.instance.record('signout', store: 'tokens', detail: 'reason=$reason');
+    // A store that ignores deletes (seen on a Samsung phone) keeps its old token after this teardown. Remember
+    // every token held now as dead, so it is never offered to the server or mistaken for a session again.
+    try {
+      for (final StoredSession h in <StoredSession>[...await readAllStores(), if (_mem != null) _mem!]) {
+        final String? r = h.refresh;
+        if (r != null && r.isNotEmpty) await markSpent(r);
+      }
+    } catch (_) {}
     _mem = null;
     // Keep the lock enabled until every credential has been deleted and its
     // absence verified. If deletion fails or the process stops midway, any
