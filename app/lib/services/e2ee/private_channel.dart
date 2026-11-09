@@ -476,7 +476,11 @@ class ChannelSealer {
   }) async {
     // Chat is sealed under the phone key line ONLY, whatever this member's lane is:
     // never wrapped to the server device, never readable by the sidecar.
-    final LaneChoice choice = purpose == ChannelPurpose.chat ? LaneChoice.phone : await _choice(circleId);
+    // Places are too: they belong to the whole circle, and only phones that hold the server key can open a
+    // server-line item, so a place sealed in an admin's server lane stayed invisible to every other member
+    // (the server does not use places; it never imports them).
+    final bool phoneLineOnly = purpose == ChannelPurpose.chat || purpose == ChannelPurpose.place;
+    final LaneChoice choice = phoneLineOnly ? LaneChoice.phone : await _choice(circleId);
     final int tsMs = (at ?? clock.now()).toUtc().millisecondsSinceEpoch;
     final Uint8List bodyBytes = Uint8List.fromList(utf8.encode(jsonEncode(body)));
     if (choice.line == E2ee.lineServer) {

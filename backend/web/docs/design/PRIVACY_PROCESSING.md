@@ -222,7 +222,7 @@ Gets `CK` and `SK` wraps from the (now longer) publisher chain exactly as `CK` t
 
 ### 8.8 On-device geofencing (unchanged logic, lane-aware output)
 
-Places remain sealed items evaluated by the sender's phone. New rule: a place is sealed under the **creator's** lane. Server-side geofencing can therefore only evaluate server places and `SK`-sealed places that the sidecar imports (the sidecar still does **not** import places in this design; E2EE.md "one source of truth" stays: phones alert). A phone-only member's `Home` place is never readable by the server; an opted-in member's place is readable and can be used for server place names. An `event` is sealed under the **sender's** lane, so "Alex arrived at Home" is readable by the server only if Alex opted in.
+Places remain sealed items evaluated by the sender's phone. **Changed in v0.26.17:** a place is always sealed under the **phone** line (like chat), whatever lane its creator is in. The earlier rule (the creator's lane) hid an opted-in admin's places from every member that does not hold the server key. The paragraph below describes the older rule and is kept for history. Old rule: a place is sealed under the **creator's** lane. Server-side geofencing can therefore only evaluate server places and `SK`-sealed places that the sidecar imports (the sidecar still does **not** import places in this design; E2EE.md "one source of truth" stays: phones alert). A phone-only member's `Home` place is never readable by the server; an opted-in member's place is readable and can be used for server place names. An `event` is sealed under the **sender's** lane, so "Alex arrived at Home" is readable by the server only if Alex opted in.
 
 ### 8.9 Admin web viewer, Dawarich bridge, server device
 

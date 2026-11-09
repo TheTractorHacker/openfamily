@@ -137,6 +137,18 @@ void main() {
       expect(chat.twin, isNull);
     });
 
+    test('a place is sealed on the phone line even in the server lane, so every member can read it', () async {
+      final Phone p = await Phone.make(uA, 0xa1);
+      final Keys keys = Keys()..byEpoch[1] = Uint8List.fromList(List<int>.filled(32, 7));
+      final FakeLanes lanes = FakeLanes()..own = const LaneChoice(E2ee.lineServer, 1);
+      final FakeSk sk = FakeSk()..byGen[1] = Uint8List.fromList(List<int>.filled(32, 9));
+      final ChannelSealer s = ChannelSealer(keys: keys, kv: MemoryKv(), clock: clock, lanes: lanes, serverKeys: sk);
+      final SenderIdentity me = SenderIdentity(p.deviceId, p.edSeed, uA);
+      final WireItem place = await s.seal(me, priv, ChannelPurpose.place, <String, dynamic>{'id': 'p1', 'name': 'Home'});
+      expect(place.line, E2ee.linePhone);
+      expect(place.twin, isNull);
+    });
+
     test('a received chat item on the server line is refused by the receiver', () async {
       // The signed header of an item names its line; chat on the server line is never valid.
       final Phone p = await Phone.make(uA, 0xa1);

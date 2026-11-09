@@ -1127,20 +1127,14 @@ class PrivateRuntime {
 
   String _placesSharedKey(String c) => 'placespub/$c';
 
-  /// Which key a place sealed now would be readable under: the newest circle key epoch this phone holds and the
-  /// lane it seals in. Null when this phone holds no key for the circle.
+  /// Which key a place sealed now would be readable under: the newest circle key epoch this phone holds. Places are
+  /// always sealed on the phone line (every member holds that key), whatever lane this member is in. Null when this
+  /// phone holds no key for the circle. Places shared by an earlier build under the server lane carry a different
+  /// marker, so they are shared again once.
   Future<String?> _placeKeyMarker(String circleId) async {
     final int epoch = await keys.latestEpoch(circleId);
     if (epoch < 1) return null;
-    int line = E2ee.linePhone, gen = 0;
-    try {
-      final LaneChoice own = await lanes.ownLane(circleId);
-      if (own.line == E2ee.lineServer && own.skGen >= 1 && await lanes.serverLaneAllowed(circleId)) {
-        line = own.line;
-        gen = own.skGen;
-      }
-    } catch (_) {}
-    return '$epoch:$line:$gen';
+    return '$epoch:${E2ee.linePhone}:0';
   }
 
   /// True when this phone holds places of [circleId] that were not sealed under the circle's CURRENT key.
