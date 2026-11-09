@@ -10,6 +10,10 @@ for the **last 5 minor versions** of the app (see
 [API compatibility](api-compat.md)), so you can update the server first and
 the phones afterwards.
 
+## v0.26.12 (2026-11-09)
+
+- **Open Private circles from any browser.** An admin is no longer tied to one computer. Pair one web viewer with your phone once (the existing "Approve a viewer or bridge"), choose a vault passphrase, and from then on unlock from any browser with your password (and 2FA) plus that passphrase. The key is sealed in the browser and the server cannot open it, it exists only in the open tab, locks after 30 minutes idle, on reload and on sign-out, and your phones are notified when a new browser unlocks. Revoking the web key from a phone ends access in every browser at once. Members on the server already show on the admin map without any key. Admins only; switch it off in Settings > Security or with `E2EE_VIEWER_VAULT=off`. **Server operators:** a new file `viewer-vault-pepper` is created in the `server_device` volume; back it up separately from the database backups (lose it and admins set web access up again once). Needs this server version (migration 380); no new phone app needed. See [Web access from any browser](admin/web-access-anywhere.md).
+
 ## v0.26.11 (2026-11-09)
 
 Server first, out of the box. Works with every app from 0.22 on; update the server first, then the phones.
