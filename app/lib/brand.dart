@@ -13,7 +13,7 @@ class Brand {
       'Self-hosted location sharing for your circles.';
 
   /// This project's source (AGPL-3.0 section 13: source offer for network users).
-  static const String sourceUrl = 'https://github.com/TheTractorHacker/orbitly';
+  static const String sourceUrl = 'https://github.com/TheTractorHacker/openfamily';
 
   /// The project Orbitly is a fork of. Credit must stay visible in the app.
   static const String upstreamName = 'OpenFamily';

@@ -1,6 +1,6 @@
 # Orbitly for Home Assistant
 
-Brings your self-hosted [Orbitly](https://github.com/TheTractorHacker/orbitly) circles into Home Assistant.
+Brings your self-hosted [Orbitly](https://github.com/TheTractorHacker/openfamily) circles into Home Assistant.
 
 * a **device tracker** per family member (GPS only when the token allows it and the circle may be read by the server)
 * **sensors**: battery, speed, place (`home` / place name / `not_home`), last seen, drives and driving distance in the last 24 h
@@ -23,7 +23,7 @@ Circles in the opt-in trusted-server mode are readable by the server and behave 
 ### HACS (custom repository)
 
 1. HACS, Integrations, menu, **Custom repositories**.
-2. Repository `https://github.com/TheTractorHacker/orbitly`, category **Integration**.
+2. Repository `https://github.com/TheTractorHacker/openfamily`, category **Integration**.
 3. Install **Orbitly** and restart Home Assistant.
 
 HACS looks for `custom_components/<domain>` at the repository root of a repository it installs from. This repository keeps the
