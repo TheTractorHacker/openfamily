@@ -17,6 +17,7 @@ class CadenceConfig {
     this.driveEnterInstantSpeedMps = 8.0,
     this.driveExitSpeedMps = 1.0,
     this.driveExitHold = const Duration(seconds: 60),
+    this.backgroundDriveExitHold = const Duration(minutes: 3),
     this.walkEnterSpeedMps = 0.8,
     this.walkExitSpeedMps = 0.4,
     this.walkExitHold = const Duration(seconds: 30),
@@ -60,6 +61,15 @@ class CadenceConfig {
   /// [driveExitHold] (red lights and traffic jams keep drive mode).
   final double driveExitSpeedMps;
   final Duration driveExitHold;
+
+  /// [driveExitHold] for the background service. Longer, because leaving
+  /// drive mode there is expensive to undo: the slow request it falls back to
+  /// is turned into the 15 minute stationary request by the native side as
+  /// soon as activity recognition says STILL (a long red light, a traffic
+  /// jam), and only a later movement transition speeds it up again. A driving
+  /// phone in a pocket then went silent for minutes. Costs at most this long
+  /// of 1 Hz GPS after a trip really ended.
+  final Duration backgroundDriveExitHold;
 
   final double walkEnterSpeedMps;
   final double walkExitSpeedMps;
@@ -274,7 +284,9 @@ class TrackingCadence {
     } else if (_driving) {
       if (s < config.driveExitSpeedMps) {
         _driveBelowSince ??= now;
-        if (now.difference(_driveBelowSince!) >= config.driveExitHold) {
+        final Duration hold =
+            _background ? config.backgroundDriveExitHold : config.driveExitHold;
+        if (now.difference(_driveBelowSince!) >= hold) {
           _driving = false;
           _driveBelowSince = null;
           _fastStreak = 0;
@@ -485,7 +497,8 @@ class TrackingCadence {
 /// Decides when a changed [CadenceProfile] may be pushed to the GPS source so
 /// it never thrashes: at most one change per [CadenceConfig.minApplyGap],
 /// except that speeding up for boost / SOS / drive-from-slow is allowed
-/// immediately (the user asked for live data; waiting would defeat it).
+/// immediately (the user asked for live data, or the phone is in a moving
+/// vehicle; waiting would defeat it).
 class ProfileApplier {
   ProfileApplier(this.config);
 
@@ -509,7 +522,8 @@ class ProfileApplier {
       return null; // Only post-gate differences: just use the new profile.
     }
     final bool urgent = (desired.tier == CadenceTier.boosted ||
-            desired.tier == CadenceTier.sos) &&
+            desired.tier == CadenceTier.sos ||
+            desired.tier == CadenceTier.driving) &&
         desired.gpsInterval < cur.gpsInterval;
     final DateTime? at = _appliedAt;
     if (!urgent && at != null && now.difference(at) < config.minApplyGap) {

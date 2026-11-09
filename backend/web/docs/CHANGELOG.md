@@ -10,6 +10,17 @@ for the **last 5 minor versions** of the app (see
 [API compatibility](api-compat.md)), so you can update the server first and
 the phones afterwards.
 
+## v0.26.19 (2026-11-09)
+
+App-only release (the server needs no change). Install over the current app.
+
+- **A phone driving with Orbitly in the background keeps the others' map moving.** Three things could leave someone's dot minutes behind on a drive with the phone locked:
+  - At a long red light or in a traffic jam the phone could drop to one location every 15 minutes until it noticed it was moving again. It now stays on the once-a-second request until drive mode really ends, and in the background drive mode ends after 3 minutes standing still instead of 1.
+  - In a Private circle every location is encrypted on the phone before it is sent. While driving these were all started at once, so on a slower phone they piled up and the upload waited behind them. Now one is encrypted at a time, at most 10 wait, and when more come in the oldest waiting one is skipped, so the newest position is never late.
+  - Uploads now run one at a time and send what is already encrypted first. Locations waiting for a missing circle key are retried at most every 30 seconds instead of before every upload.
+
+  Nothing is ever sent unencrypted in a Private circle.
+
 ## v0.26.15 (2026-11-09)
 
 **Fixed: the map stopped updating while someone was driving.** A busy drive makes many location points pile up on the

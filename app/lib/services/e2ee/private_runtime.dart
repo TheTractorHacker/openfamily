@@ -609,8 +609,48 @@ class PrivateRuntime {
     }
     final UplinkMode mode = await uplinkMode();
     if (mode == UplinkMode.plaintextOnly) return true;
-    unawaited(_sealFix(locationBody));
+    _queueSeal(locationBody);
     return mode == UplinkMode.both;
+  }
+
+  /// Fixes waiting for the seal worker, oldest first.
+  final List<Map<String, dynamic>> _sealWaiting = <Map<String, dynamic>>[];
+  bool _sealRunning = false;
+
+  /// At most this many fixes wait to be sealed. While driving the background service hands over one fix per second;
+  /// every seal is several store round trips (on Android each a platform-channel call, a fresh read a reload of the
+  /// whole preferences file). They used to be started all at once, unawaited: on a phone slower than 1 Hz the
+  /// unfinished seals could pile up without bound, with the queue lock and the upload waiting behind all of them,
+  /// so the dot on the others' maps would fall further behind for the whole drive. Now one seal runs at a time and, when this limit
+  /// is reached, the OLDEST waiting fix is skipped (a 1 Hz track loses a point; the newest position is never late
+  /// by more than this many seals).
+  static const int maxSealWaiting = 10;
+
+  /// Fixes skipped by the limit above since this runtime started (diagnostics).
+  int sealSkipped = 0;
+
+  /// Fixes waiting to be sealed right now (diagnostics, tests).
+  int get sealWaiting => _sealWaiting.length + (_sealRunning ? 1 : 0);
+
+  void _queueSeal(Map<String, dynamic> loc) {
+    _sealWaiting.add(loc);
+    while (_sealWaiting.length > maxSealWaiting) {
+      _sealWaiting.removeAt(0);
+      sealSkipped++;
+    }
+    if (_sealRunning) return;
+    _sealRunning = true;
+    unawaited(_runSeals());
+  }
+
+  Future<void> _runSeals() async {
+    try {
+      while (_sealWaiting.isNotEmpty) {
+        await _sealFix(_sealWaiting.removeAt(0)); // never throws
+      }
+    } finally {
+      _sealRunning = false;
+    }
   }
 
   static const String _parkedKey = 'parked/v1';
@@ -638,28 +678,40 @@ class PrivateRuntime {
     } catch (_) {}
   }
 
+  bool _drainingParked = false;
+
   /// Seals parked fixes (oldest first). Returns how many were handled.
+  ///
+  /// One drain at a time: a fix that cannot be sealed again is parked again, and its "go and get the key" step
+  /// ([_keysThenDrain]) used to start another drain from inside this one, over and over, while the phone already
+  /// held a key. A call while a drain runs returns 0 at once.
   Future<int> drainParked() async {
-    final String? raw = await kv.getFresh(_parkedKey);
-    if (raw == null || raw.isEmpty) return 0;
-    await kv.remove(_parkedKey);
-    int n = 0;
-    List<dynamic> entries;
+    if (_drainingParked) return 0;
+    _drainingParked = true;
     try {
-      entries = jsonDecode(raw) as List<dynamic>;
-    } catch (_) {
-      return 0;
-    }
-    for (final dynamic e in entries) {
-      // One bad entry must not lose the ones behind it (the key was removed above).
+      final String? raw = await kv.getFresh(_parkedKey);
+      if (raw == null || raw.isEmpty) return 0;
+      await kv.remove(_parkedKey);
+      int n = 0;
+      List<dynamic> entries;
       try {
-        final Map<String, dynamic> m = (e as Map<dynamic, dynamic>).cast<String, dynamic>();
-        final Object? only = m['for'];
-        await _sealFix(m, only: only is List ? only.cast<String>().toSet() : null);
-        n++;
-      } catch (_) {}
+        entries = jsonDecode(raw) as List<dynamic>;
+      } catch (_) {
+        return 0;
+      }
+      for (final dynamic e in entries) {
+        // One bad entry must not lose the ones behind it (the key was removed above).
+        try {
+          final Map<String, dynamic> m = (e as Map<dynamic, dynamic>).cast<String, dynamic>();
+          final Object? only = m['for'];
+          await _sealFix(m, only: only is List ? only.cast<String>().toSet() : null);
+          n++;
+        } catch (_) {}
+      }
+      return n;
+    } finally {
+      _drainingParked = false;
     }
-    return n;
   }
 
   Future<void> _sealFix(Map<String, dynamic> loc, {bool resend = false, Set<String>? only}) async {
@@ -863,16 +915,62 @@ class PrivateRuntime {
     });
   }
 
+  Future<int>? _flushing;
+  bool _flushAgain = false;
+  DateTime? _parkedTriedAt;
+
+  /// Parked fixes are tried again from [flush] at most this often (a key that arrives seals them at once through
+  /// [_keysThenDrain]). Fixes that still cannot be sealed are parked again, so without this every upload while
+  /// driving re-sealed the whole parked list (up to 720 fixes) first.
+  static const Duration parkedRetryEvery = Duration(seconds: 30);
+
   /// Uploads the queue now (also called on app resume and when the network returns).
-  Future<int> flush() async {
+  ///
+  /// One upload at a time: a call while one runs makes it go round once more (so what was queued meanwhile is
+  /// sent too) and gets the same result, instead of posting the same batch twice in parallel.
+  Future<int> flush() {
+    final Future<int>? running = _flushing;
+    if (running != null) {
+      _flushAgain = true;
+      return running;
+    }
+    final Future<int> f = _flushRounds();
+    _flushing = f;
+    return f;
+  }
+
+  Future<int> _flushRounds() async {
+    int n = 0;
+    try {
+      do {
+        _flushAgain = false;
+        n += await _flushOnce();
+      } while (_flushAgain);
+    } finally {
+      _flushing = null;
+    }
+    return n;
+  }
+
+  Future<int> _flushOnce() async {
     // An opt-out the server has not confirmed yet is sent again here, so it does not depend on the user reopening a screen.
     unawaited(_retryOptOuts());
     try {
       final SenderIdentity? me = await _me();
       if (me == null) return 0;
+      // What is already sealed goes first: the newest position must not wait for old parked fixes.
+      int n = await queue.flush(channel, deviceFor: (_) => me.deviceId, lanes: lanes, onNeedKeySync: (String c) => unawaited(_syncKeys(c)));
       // Fixes parked for want of a key are sealed as soon as the key is here, whichever path brought it.
-      if ((await kv.getFresh(_parkedKey) ?? '').isNotEmpty) await drainParked();
-      return await queue.flush(channel, deviceFor: (_) => me.deviceId, lanes: lanes, onNeedKeySync: (String c) => unawaited(_syncKeys(c)));
+      final DateTime now = clock.now();
+      final DateTime? tried = _parkedTriedAt;
+      if ((tried == null || now.difference(tried) >= parkedRetryEvery || now.isBefore(tried)) &&
+          (await kv.getFresh(_parkedKey) ?? '').isNotEmpty) {
+        _parkedTriedAt = now;
+        if (await drainParked() > 0) {
+          n += await queue.flush(channel, deviceFor: (_) => me.deviceId, lanes: lanes, onNeedKeySync: (String c) => unawaited(_syncKeys(c)));
+        }
+      }
+      return n;
     } catch (_) {
       return 0;
     }
