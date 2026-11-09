@@ -414,7 +414,8 @@ class _EncryptionCircleScreenState extends State<EncryptionCircleScreen> {
                 ),
             ]),
           ],
-          if (st.isPrivate && admin && st.createdBy != null)
+          if (st.isPrivate && admin && st.createdBy != null) ...<Widget>[
+            const SizedBox(height: AppSpace.lg),
             DsRowGroup(children: <Widget>[
               DsToggleRow(
                 key: const Key('owner-approval-toggle'),
@@ -427,7 +428,9 @@ class _EncryptionCircleScreenState extends State<EncryptionCircleScreen> {
                 onChanged: _busy || (!st.ownerApproval && !_isCreator) ? null : _setOwnerApproval,
               ),
             ]),
-          if (st.isPrivate)
+          ],
+          if (st.isPrivate) ...<Widget>[
+            const SizedBox(height: AppSpace.lg),
             DsRowGroup(children: <Widget>[
               DsListRow(
                 leading: DsListRow.iconTile(context, Icons.devices_other),
@@ -458,6 +461,7 @@ class _EncryptionCircleScreenState extends State<EncryptionCircleScreen> {
                       },
               ),
             ]),
+          ],
           const DsSectionHeader('Members', padding: EdgeInsets.fromLTRB(0, AppSpace.xl, 0, AppSpace.xs)),
           DsRowGroup(children: <Widget>[
             for (final CircleE2eeMember m in st.members)

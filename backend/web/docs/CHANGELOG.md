@@ -10,6 +10,10 @@ for the **last 5 minor versions** of the app (see
 [API compatibility](api-compat.md)), so you can update the server first and
 the phones afterwards.
 
+## v0.26.10 (2026-11-09)
+
+- **Encryption keys screen spacing.** The Owner approval card and the groups below it were glued to the line above and to each other; they now have normal gaps.
+
 ## v0.26.9 (2026-11-08)
 
 - **Fleet health tidies itself.** Old sign-ins no longer pile up. Once someone has signed in on a newer device on the same platform, any of their older rows that has not been seen for a day is hidden automatically (checked every hour). Nothing is deleted: history and push settings stay, and a hidden row that reports again shows up again. A person's only device, and devices on other platforms, are never hidden. The manual **Hide stale** button still works. Server-only change; no new app needed.
