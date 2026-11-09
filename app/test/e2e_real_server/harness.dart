@@ -131,6 +131,9 @@ class Phone {
     final PrivateRuntime rt = PrivateRuntime(service: service, api: const ApiE2eeApi(), kv: kv);
     rt.lanesService.logTtl = Duration.zero;
     rt.notify = (String t, String b) async => notes.add(b);
+    // Chat text appears only with "Show names in notifications" on.
+    rt.chat.showNames = () async => true;
+    rt.chatNotify = (String t, String b) async => notes.add(b);
     _runtime = rt;
   }
 

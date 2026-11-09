@@ -12,6 +12,7 @@ import '../api_client.dart';
 import '../processing/fix.dart';
 import '../processing/on_device_processor.dart';
 import '../processing/processing_source.dart';
+import '../direct_push_service.dart' show LocalDirectPushNotifier;
 import '../push_service.dart';
 import '../driving/driving_settings.dart';
 import 'e2ee_api.dart';
@@ -34,6 +35,7 @@ import 'private_places.dart';
 import '../chat/chat_engine.dart';
 import '../chat/chat_store.dart';
 import '../chat_service.dart' show ChatEvents;
+import '../notification_prefs_service.dart' show NotificationNames;
 import '../perf/perf_profile.dart';
 
 /// SharedPreferences-backed [ChannelKv]. The queue, cursors, sequence numbers,
@@ -377,11 +379,14 @@ class PrivateRuntime {
     chatStore = ChatStore(kv: kv, now: clock.now);
     chat = ChatEngine(store: chatStore, directory: StateChatDirectory(api), now: clock.now)
       ..notify = (String t, String b) {
-        return notify(t, b);
+        return chatNotify(t, b);
       }
       ..isViewing = (String c) {
         return ChatEvents.viewingCircleId == c;
       }
+      // Same "Show names in notifications" rule as the server's chat pushes.
+      ..showNames = NotificationNames.load
+      ..circleName = circleName
       ..onChange = ChatEvents.handleEngineChange;
     sync = ChannelSync(api: this.channel, receiver: receiver, kv: kv, pageLimit: catchUpPageSize ?? PerfProfile.current.catchUpPageSize);
     history = PrivateHistory(
@@ -476,6 +481,14 @@ class PrivateRuntime {
 
   /// Shows a local notification (injectable for tests).
   Future<void> Function(String title, String body) notify = PushService.showForeground;
+
+  /// Shows an encrypted-chat notification (injectable for tests). Unlike
+  /// [notify] it also works with the app in the background and from the
+  /// background isolate: for encrypted chat the server sends only a
+  /// content-free wake-up, so this phone is the only one that can show the
+  /// message, and [PushService.showForeground] drops anything while the app
+  /// is not on screen. The text follows "Show names in notifications".
+  Future<void> Function(String title, String body) chatNotify = _showChatNotification;
 
   // ---------------------------------------------------------------- circles
 
@@ -1515,5 +1528,18 @@ class PrivateRuntime {
       default:
         break;
     }
+  }
+}
+
+final LocalDirectPushNotifier _chatNotifier = LocalDirectPushNotifier();
+int _chatNoteSeq = 0;
+
+Future<void> _showChatNotification(String title, String body) async {
+  try {
+    // Distinct ids so two messages do not replace each other.
+    final int id = 0x30000000 | ((DateTime.now().millisecondsSinceEpoch ~/ 1000 + _chatNoteSeq++) & 0x0fffffff);
+    await _chatNotifier.show(id: id, title: title, body: body);
+  } catch (_) {
+    // No notification plugin (tests, unsupported platform).
   }
 }

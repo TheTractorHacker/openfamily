@@ -36,7 +36,10 @@ import '../services/location_outbox.dart';
 import '../services/offline/server_reachability.dart';
 import '../services/location_service.dart';
 import '../services/location_sharing_service.dart';
+import '../services/notification_prefs_service.dart' show NotificationNames;
+import '../services/map_start_camera.dart';
 import '../services/perf/perf_monitor.dart';
+import '../services/perf/perf_profile.dart';
 import '../services/permission_service.dart';
 import '../services/place_service.dart';
 import '../services/push_service.dart';
@@ -176,6 +179,16 @@ class _MapScreenState extends State<MapScreen>
   /// Whether the map has finished its first layout (so camera moves are safe).
   bool _mapReady = false;
 
+  /// Where the map opens: your last known position, then a fresh fix, then
+  /// (only without either) the circle; never again once the user moved it.
+  final StartCamera _start = StartCamera();
+
+  /// The own position the start camera chose (applied once the map is ready).
+  LatLng? _startOwn;
+
+  /// Zoom the camera uses when it centres on you.
+  static const double _ownZoom = 15;
+
   // Camera animation controller for smooth recentering.
   AnimationController? _cameraAnim;
 
@@ -250,6 +263,7 @@ class _MapScreenState extends State<MapScreen>
     _connectivitySub =
         Connectivity().onConnectivityChanged.listen(_onConnectivityChanged);
     ServerReachability.instance.onRecovered.add(_onServerBack);
+    _initStartCamera();
     _load();
     unawaited(BubbleStore.instance.refresh());
     unawaited(InboxStore.instance.refresh());
@@ -266,9 +280,57 @@ class _MapScreenState extends State<MapScreen>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       PushService.sync();
+      // Encrypted chat notifications are written on the phone with the
+      // account's "Show names in notifications" choice: keep a copy.
+      unawaited(NotificationNames.refresh());
       unawaited(_refreshServerFeatures());
       _suggestBatteryOptimization();
     });
+  }
+
+  /// Opens on the last known own position (read from disk before the first
+  /// frame), then asks the phone for a fresh fix without ever prompting.
+  void _initStartCamera() {
+    final LatLng? cached = OwnPositionCache.value;
+    if (cached != null) {
+      _offerOwn(cached, fresh: false);
+    } else {
+      // Not preloaded (tests, a very early open): read it now.
+      unawaited(OwnPositionCache.load().then((_) {
+        final LatLng? p = OwnPositionCache.value;
+        if (p != null && mounted) _offerOwn(p, fresh: false);
+      }));
+    }
+    unawaited(_freshOwnFix());
+  }
+
+  Future<void> _freshOwnFix() async {
+    final LatLng? p =
+        await LocationService.currentPosition(askPermission: false);
+    if (p == null || !mounted) return;
+    unawaited(OwnPositionCache.save(p));
+    _offerOwn(p, fresh: true);
+  }
+
+  /// Centres on your own position when the start policy allows it.
+  void _offerOwn(LatLng p, {required bool fresh}) {
+    final bool hadOwn = _startOwn != null;
+    if (!_start.offerOwn(p, fresh: fresh)) return;
+    _startOwn = p;
+    if (!_mapReady) return; // onMapReady applies it.
+    if (hadOwn || _start.placedBy == StartSource.freshOwn) {
+      _animateTo(p, _ownZoom);
+    } else {
+      _mapController.move(_aboveSheet(p, _ownZoom), _ownZoom);
+    }
+  }
+
+  /// Frames the circle only while no own position is known and the user has
+  /// not moved the map.
+  void _autoPlaceMembers() {
+    if (!_mapReady) return;
+    final List<LatLng>? pts = _start.membersToFit(_roster.value);
+    if (pts != null) _fitPoints(pts);
   }
 
   @override
@@ -320,6 +382,23 @@ class _MapScreenState extends State<MapScreen>
     if (_hub.update(live)) _ensureTicker();
     _roster.value = live;
     _checkFollowed(live);
+    _noteOwnPosition(live);
+    _autoPlaceMembers();
+  }
+
+  /// Your own member's position (your last report) is remembered on disk for
+  /// the next cold start and, until a fresh fix exists, is where the map opens.
+  void _noteOwnPosition(List<Member> live) {
+    final String? uid = _userId;
+    if (uid == null) return;
+    for (final Member m in live) {
+      if (m.id != uid) continue;
+      final LatLng? p = m.position;
+      if (p == null) return;
+      unawaited(OwnPositionCache.save(p, at: m.fixTime ?? m.lastSeen));
+      _offerOwn(p, fresh: false);
+      return;
+    }
   }
 
   void _ensureTicker() {
@@ -340,6 +419,7 @@ class _MapScreenState extends State<MapScreen>
   /// Centers on [m] and locks the camera to their smoothed position.
   void _followMember(Member m) {
     if (!_mapReady) return;
+    _start.takeOver();
     if ((_hub.sampleOf(m.id)?.position ?? m.position) == null) return;
     _cameraAnim?.dispose();
     _cameraAnim = null;
@@ -483,7 +563,8 @@ class _MapScreenState extends State<MapScreen>
         _hasFamily = true;
         _loading = false;
       });
-      if (_mapReady) _fitToMembers();
+      // No fit here: _publishRoster already placed the camera if it may move
+      // (a reload after Circles / Join / server-back must not yank it).
       await _familyService.start();
     } on ApiException catch (e) {
       if (!mounted) return;
@@ -736,7 +817,7 @@ class _MapScreenState extends State<MapScreen>
 
     final AnimationController controller = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 600),
+      duration: cameraAnimDuration(PerfProfile.current.animationScale),
     );
     _cameraAnim = controller;
 
@@ -759,6 +840,7 @@ class _MapScreenState extends State<MapScreen>
   /// (which always carries the freshest GPS fix); falls back to the live device
   /// position when the caller has no backend location yet.
   Future<void> _centerOnUser() async {
+    _start.takeOver();
     _stopFollow();
     final String? uid = _userId;
     if (uid != null) {
@@ -776,6 +858,7 @@ class _MapScreenState extends State<MapScreen>
 
   /// Expands a tapped cluster so its members fan out and become tappable.
   void _expandCluster(String clusterId, LatLng centroid) {
+    _start.takeOver();
     _stopFollow();
     setState(() => _expandedClusters.add(clusterId));
     _animateTo(centroid, _expandZoom);
@@ -791,6 +874,7 @@ class _MapScreenState extends State<MapScreen>
     final double? prev = _lastZoom;
     _lastZoom = camera.zoom;
     _camera = camera;
+    if (hasGesture) _start.takeOver();
     // Any user pan / pinch / fling takes the camera back. Programmatic moves
     // (the follow lock itself) report hasGesture == false.
     if (hasGesture && _follow.targetId != null) _breakFollowLock();
@@ -837,18 +921,19 @@ class _MapScreenState extends State<MapScreen>
     return (236 * textScale).clamp(0.0, size.height * 0.5);
   }
 
-  /// Frames all members of the current family.
+  /// Frames the members of the circle the user just picked (recent,
+  /// plausible positions only: never a days-old or 0,0 point).
   void _fitToMembers() {
-    final List<Member> members =
-        _liveMembers().where((Member m) => m.position != null).toList();
-    if (members.isEmpty) return;
-    if (members.length == 1) {
-      _mapController.move(_aboveSheet(members.first.position!, 15), 15);
+    _fitPoints(StartCamera.fitPoints(_liveMembers()));
+  }
+
+  void _fitPoints(List<LatLng> points) {
+    if (points.isEmpty) return;
+    if (points.length == 1) {
+      _mapController.move(_aboveSheet(points.first, _ownZoom), _ownZoom);
       return;
     }
-    final LatLngBounds bounds = LatLngBounds.fromPoints(
-      members.map((Member m) => m.position!).toList(),
-    );
+    final LatLngBounds bounds = LatLngBounds.fromPoints(points);
     _mapController.fitCamera(
       CameraFit.bounds(
         bounds: bounds,
@@ -920,11 +1005,13 @@ class _MapScreenState extends State<MapScreen>
   /// (see [FamilyService.setCircle]).
   void _selectCircle(String id) {
     if (!_selection.select(id)) return;
-    _applySelection();
+    _applySelection(userPicked: true);
   }
 
   /// Pushes the current selection to the family service and the header.
-  void _applySelection() {
+  /// Only a circle the user picked re-frames the map; an automatic fallback
+  /// (expired / removed circle) leaves the camera to the start policy.
+  void _applySelection({bool userPicked = false}) {
     if (!mounted) return;
     setState(() {
       _familyName = _selection.nameOr(_familyName);
@@ -932,8 +1019,9 @@ class _MapScreenState extends State<MapScreen>
       _error = null;
     });
     final String? scope = _selection.effectiveId;
+    if (userPicked) _start.takeOver();
     unawaited(_familyService.setCircle(scope).then((_) {
-      if (mounted && _mapReady) _fitToMembers();
+      if (mounted && _mapReady && userPicked) _fitToMembers();
     }));
   }
 
@@ -1144,8 +1232,10 @@ class _MapScreenState extends State<MapScreen>
       map: FlutterMap(
         mapController: _mapController,
         options: MapOptions(
-          initialCenter: const LatLng(37.7749, -122.4194),
-          initialZoom: 13,
+          // Your last known position when there is one; otherwise a neutral
+          // world view (no made-up city) until a fix or the circle arrives.
+          initialCenter: _startOwn ?? const LatLng(20, 0),
+          initialZoom: _startOwn != null ? _ownZoom : 3,
           minZoom: 3,
           maxZoom: 18,
           interactionOptions: const InteractionOptions(
@@ -1155,7 +1245,13 @@ class _MapScreenState extends State<MapScreen>
             _camera = _mapController.camera;
             _lastZoom = _mapController.camera.zoom;
             _mapReady = true;
-            _fitToMembers();
+            final LatLng? own = _startOwn;
+            if (own != null) {
+              // Re-apply with the sheet offset (unknown before layout).
+              _mapController.move(_aboveSheet(own, _ownZoom), _ownZoom);
+            } else {
+              _autoPlaceMembers();
+            }
           },
           onPositionChanged: (camera, hasGesture) =>
               _onCameraChanged(camera, hasGesture),
@@ -1241,6 +1337,15 @@ class _MapScreenState extends State<MapScreen>
     );
   }
 }
+
+/// Length of a programmatic camera move (recenter, cluster expand). Every
+/// frame of it re-places the markers and asks the base map for a new set of
+/// tiles, so it is kept short (was a fixed 600 ms); low-end phones scale it
+/// down further with their animation scale.
+@visibleForTesting
+Duration cameraAnimDuration(double animationScale) => Duration(
+      milliseconds: (400 * animationScale.clamp(0.3, 1.0)).round(),
+    );
 
 /// Whether to draw the blue accuracy/range circle around this member: when
 /// we have a live accuracy value, or the member is in the approximate

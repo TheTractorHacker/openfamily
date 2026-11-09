@@ -17,6 +17,10 @@ enum LocationRefreshResult {
   locationSent,
   heartbeatSent,
   failed,
+
+  /// A Private-circle wake-up was handled (anything to show was raised as a
+  /// local notification by the runtime; the raw push is never shown).
+  wakeHandled,
 }
 
 class LocationRefreshCommand {
@@ -190,7 +194,7 @@ class LocationRefreshService {
     // fetch what is waiting, decrypt it here and raise any local notification.
     final String? wake = _wakeCircle(body);
     if (wake != null) {
-      return PrivateRuntime.instance.catchUp(wake).then((_) => LocationRefreshResult.notCommand,
+      return PrivateRuntime.instance.catchUp(wake).then((_) => LocationRefreshResult.wakeHandled,
           onError: (Object _) => LocationRefreshResult.failed);
     }
     return _handler.handle(body);

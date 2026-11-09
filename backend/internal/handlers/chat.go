@@ -552,21 +552,29 @@ func (s *Server) pushChatMessage(ctx context.Context, msg chatMessageOut) {
 	}
 }
 
-// chatPushCopy is the push copy for one recipient: just the circle name unless
-// they opted in to names (or VERBOSE_PUSH), in which case it also carries the
-// sender and a short preview.
+// chatPushCopy is the push copy for one recipient. It follows the
+// recipient's "Show names in notifications" choice (or VERBOSE_PUSH) like
+// every other push: on, the TITLE names the sender ("Henry in Fam") and the
+// body is a short preview; off, it says only "New message in <circle>" with
+// no name and no text. The app writes encrypted-chat notifications with the
+// same rule (chatNotificationCopy in notification_prefs_service.dart).
 func chatPushCopy(show bool, circleName string, msg chatMessageOut) (title, body string) {
-	title = "New message in " + circleName
+	circle := strings.TrimSpace(circleName)
+	if circle == "" {
+		circle = "your circle"
+	}
 	if !show {
-		return title, ""
+		return "New message in " + circle, ""
 	}
-	switch {
-	case msg.HasImage && msg.Body == "":
-		return msg.SenderName + " sent a photo", circleName
-	case msg.HasImage:
-		return msg.SenderName + " sent a photo", truncateRunes(msg.Body, chatPushPreview)
+	title = firstName(msg.SenderName) + " in " + circle
+	preview := truncateRunes(strings.TrimSpace(msg.Body), chatPushPreview)
+	if msg.HasImage {
+		if preview == "" {
+			return title, "Sent a photo"
+		}
+		return title, "Sent a photo: " + preview
 	}
-	return title, msg.SenderName + ": " + truncateRunes(msg.Body, chatPushPreview)
+	return title, preview
 }
 
 func truncateRunes(s string, n int) string {

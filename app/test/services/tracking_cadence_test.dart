@@ -271,7 +271,8 @@ void main() {
       final CadenceProfile p = c.profile(at(600));
       expect(p.tier, CadenceTier.idle);
       expect(p.gpsInterval, const Duration(minutes: 3));
-      expect(p.distanceFilterM, 30);
+      // No displacement filter: a still phone keeps reporting every 3 min.
+      expect(p.distanceFilterM, 0);
       expect(p.highAccuracy, isFalse);
       expect(p.gpsInterval, greaterThan(Duration.zero));
       // The slow profile is still bounded: a post is allowed every 10 s.

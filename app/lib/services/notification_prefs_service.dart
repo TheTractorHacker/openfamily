@@ -1,3 +1,5 @@
+import 'package:shared_preferences/shared_preferences.dart';
+
 import 'api_client.dart';
 
 /// What the signed-in user wants to hear about one family member. SOS alerts
@@ -111,4 +113,82 @@ class ApiNotificationPrefsService implements NotificationPrefsService {
     );
     return NotificationPrefs.fromJson(r as Map<String, dynamic>);
   }
+}
+
+/// This phone's copy of the account's "Show names in notifications" choice
+/// (`show_names` in `/me/notifications`). The server applies it to the pushes
+/// it writes; notifications the PHONE writes (end-to-end encrypted chat, whose
+/// text only the phone can read) need it locally, including in the background
+/// isolate, so it is kept in shared preferences. Off until known (fails
+/// closed like the server).
+class NotificationNames {
+  NotificationNames._();
+
+  static const String _key = 'notif.show_names.v1';
+
+  /// The last known value (sync, for widgets that already ran [load]).
+  static bool cached = false;
+
+  /// Reads the stored value (fresh from disk: the background isolate may
+  /// read it long after the app changed it).
+  static Future<bool> load() async {
+    try {
+      final SharedPreferences prefs = await SharedPreferences.getInstance();
+      await prefs.reload();
+      cached = prefs.getBool(_key) ?? false;
+    } catch (_) {}
+    return cached;
+  }
+
+  /// Stores a value the server confirmed (settings screen load / save).
+  static Future<void> remember(bool show) async {
+    cached = show;
+    try {
+      final SharedPreferences prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_key, show);
+    } catch (_) {}
+  }
+
+  /// Fetches the account's choice from the server and stores it. Never
+  /// throws; keeps the stored value when offline.
+  static Future<void> refresh() async {
+    try {
+      final dynamic d = await ApiClient.get('/me/notifications');
+      if (d is Map<String, dynamic>) await remember(d['show_names'] == true);
+    } catch (_) {}
+  }
+}
+
+/// The text of a chat notification, the same rule on the server (Go
+/// `chatPushCopy`) and on the phone (encrypted chat): with names on, the
+/// title names the sender and the body carries a short preview; with names
+/// off, it says only that a message is waiting in [circleName].
+({String title, String body}) chatNotificationCopy({
+  required bool showNames,
+  required String circleName,
+  required String senderName,
+  required String text,
+  bool photo = false,
+}) {
+  final String circle = circleName.trim().isEmpty ? 'your circle' : circleName.trim();
+  if (!showNames) return (title: 'New message in $circle', body: '');
+  final String first = _firstName(senderName);
+  final String title = '$first in $circle';
+  final String preview = _truncate(text.trim(), 120);
+  if (photo) {
+    return (title: title, body: preview.isEmpty ? 'Sent a photo' : 'Sent a photo: $preview');
+  }
+  return (title: title, body: preview);
+}
+
+String _firstName(String full) {
+  final String t = full.trim();
+  if (t.isEmpty) return 'A family member';
+  return t.split(RegExp(r'\s+')).first;
+}
+
+String _truncate(String s, int n) {
+  final List<int> runes = s.runes.toList();
+  if (runes.length <= n) return s;
+  return '${String.fromCharCodes(runes.take(n))}…';
 }

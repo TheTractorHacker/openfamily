@@ -153,6 +153,31 @@ class PreferencesManager {
             return result
         }
 
+        private const val KEY_TRACKING_WANTED = "tracking_wanted"
+
+        /** Whether the app asked for tracking (register) and has not stopped it
+         *  (unregister). Read by the boot / app-update receiver so it restarts
+         *  tracking only for a user who is sharing. */
+        @JvmStatic
+        fun setTrackingWanted(context: Context, wanted: Boolean) {
+            context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+                    .edit()
+                    .putBoolean(KEY_TRACKING_WANTED, wanted)
+                    .apply()
+        }
+
+        /** Installs from before the flag existed fall back to the old rule
+         *  (restart whenever a registration was ever saved). */
+        @JvmStatic
+        fun isTrackingWanted(context: Context): Boolean {
+            val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            if (prefs.contains(KEY_TRACKING_WANTED)) {
+                return prefs.getBoolean(KEY_TRACKING_WANTED, false)
+            }
+            return prefs.getLong(Keys.ARG_CALLBACK_DISPATCHER, 0) != 0L &&
+                    prefs.getLong(Keys.ARG_CALLBACK, 0) != 0L
+        }
+
         @JvmStatic
         fun getLocationClient(context: Context): LocationClient {
             val sharedPreferences =

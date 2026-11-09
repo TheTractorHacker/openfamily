@@ -42,7 +42,7 @@ class CadenceConfig {
     this.idleAfter = const Duration(minutes: 10),
     this.idleRadiusM = 60,
     this.idleGpsInterval = const Duration(minutes: 3),
-    this.idleDistanceFilterM = 30,
+    this.idleDistanceFilterM = 0,
     this.idleMinPost = const Duration(seconds: 10),
   });
 
@@ -115,9 +115,12 @@ class CadenceConfig {
   /// restarts the idle timer (and so leaves the idle tier at once).
   final double idleRadiusM;
 
-  /// Idle tier request: slow, balanced-power, but with a displacement filter
-  /// so leaving the spot still produces a fix without waiting a full interval.
-  /// Reporting never stops: the 10 minute heartbeat also keeps running.
+  /// Idle tier request: slow and balanced-power. No displacement filter: on
+  /// Android the fused provider's minimum distance SUPPRESSES fixes closer
+  /// than it (it never delivers one early), so a 30 m filter meant a phone
+  /// lying still sent no position at all until the app was opened. With 0 a
+  /// still phone still reports every [idleGpsInterval] (iOS maps the idle
+  /// tier to its own request and ignores this value).
   final Duration idleGpsInterval;
   final double idleDistanceFilterM;
   final Duration idleMinPost;

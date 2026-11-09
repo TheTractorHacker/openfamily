@@ -78,6 +78,7 @@ class BenchPhone {
         service: service, api: server.client(user), kv: kv, clock: clock, channel: channel,
         directory: StateSenderDirectory(server.client(user)), opener: opener);
     runtime.notify = (String t, String b) async {};
+    runtime.chatNotify = (String t, String b) async {};
     runtime.onMemberFrame = frames.add;
   }
   final String user;

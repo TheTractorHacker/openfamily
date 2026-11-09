@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../services/api_client.dart';
+import '../services/notification_prefs_service.dart' show NotificationNames;
 import '../services/security_format.dart';
 import '../widgets/ds/ds.dart';
 import '../widgets/reliability_alert_sections.dart';
@@ -51,9 +54,10 @@ const _Pref _showNames = _Pref(
     'show_names',
     Icons.badge_outlined,
     'Show names in notifications',
-    'Notifications say who arrived, left, drove or checked in, for example '
-        '"Henry arrived at Home". Names then pass through the push provider '
-        '(Google, Apple or your ntfy server). Leave this off for maximum '
+    'Notifications say who arrived, left, drove, checked in or sent a chat '
+        'message, for example "Henry arrived at Home". Names then pass '
+        'through the push provider (Google, Apple or your ntfy server). '
+        'Leave this off for maximum '
         'privacy: notifications say "A family member" instead.');
 
 class _NotificationSettingsScreenState
@@ -82,6 +86,9 @@ class _NotificationSettingsScreenState
             // Opt-in: off unless the server says it was switched on.
             _showNames.key: (d as Map<String, dynamic>)['show_names'] == true,
           });
+      // The phone writes encrypted-chat notifications itself: keep its copy
+      // of the choice in step with the server.
+      unawaited(NotificationNames.remember(_prefs![_showNames.key] ?? false));
     } on SessionExpiredException {
       return;
     } catch (e) {
@@ -99,6 +106,7 @@ class _NotificationSettingsScreenState
     try {
       await ApiClient.putJson('/me/notifications',
           body: <String, Object?>{key: value});
+      if (key == _showNames.key) await NotificationNames.remember(value);
     } on SessionExpiredException {
       return;
     } catch (e) {

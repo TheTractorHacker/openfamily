@@ -256,6 +256,7 @@ void main() {
           service: svc, api: server.client(user), kv: kv, clock: clock, channel: channel, directory: StateSenderDirectory(server.client(user)));
       rt.lanesService.logTtl = Duration.zero;
       rt.notify = (String t, String b) async {};
+      rt.chatNotify = (String t, String b) async {};
       // On-device reports are opt-in (default off); these tests exercise the switched-on path, unbatched.
       await OnDeviceReportsSetting.set(kv, true);
       rt.onDeviceBatchEvery = Duration.zero;

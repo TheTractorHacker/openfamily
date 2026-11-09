@@ -49,6 +49,8 @@ class Dev {
         service: svc, api: server.client(user), kv: kv, clock: clock, channel: channel,
         directory: StateSenderDirectory(server.client(user)));
     runtime.notify = (String t, String b) async => notes.add('$t: $b');
+    runtime.chatNotify = (String t, String b) async => notes.add('$t: $b');
+    runtime.chat.showNames = () async => showNames;
     chat = EncryptedChatService(runtime, blobs: blobs, now: clock.now);
   }
   final String user;
@@ -57,6 +59,9 @@ class Dev {
   late final PrivateRuntime runtime;
   late final EncryptedChatService chat;
   final List<String> notes = <String>[];
+
+  /// This phone's "Show names in notifications" choice.
+  bool showNames = true;
 
   Future<List<ChatMessage>> list() async => (await chat.messages(priv)).messages;
   Future<void> sync() async {
@@ -155,7 +160,7 @@ void main() {
       expect(got.single.body, 'dinner at 7? the secret word is pineapple');
       expect(got.single.senderName, 'Alice');
       expect(got.single.encrypted, isTrue);
-      expect(b.notes, <String>['Alice: dinner at 7? the secret word is pineapple']);
+      expect(b.notes, <String>['Alice in Family: dinner at 7? the secret word is pineapple']);
       // The relay saw ciphertext only.
       for (final WireItem i in channel.items) {
         expect(i.purpose, ChannelPurpose.chat);
@@ -168,6 +173,15 @@ void main() {
       expect(mine.id, got.single.id);
       // Nothing is persisted in plaintext outside the chat store of each phone.
       expect(a.kv.data['queue/v1'] ?? '', isNot(contains('pineapple')));
+    });
+
+    test('"Show names in notifications" off: the local chat notification names nobody and shows no text', () async {
+      b.showNames = false;
+      await a.chat.send(priv, 'the secret word is pineapple');
+      await a.sync();
+      await b.sync();
+      expect((await b.list()).single.body, 'the secret word is pineapple');
+      expect(b.notes, <String>['New message in Family: ']);
     });
 
     test('idempotent send: the same client id twice makes one message', () async {
