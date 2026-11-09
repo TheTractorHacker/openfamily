@@ -10,6 +10,10 @@ for the **last 5 minor versions** of the app (see
 [API compatibility](api-compat.md)), so you can update the server first and
 the phones afterwards.
 
+## v0.26.14 (2026-11-09)
+
+- **See who is charging.** When someone's phone is on the charger, a small green bolt shows on their bubble on the map, and the battery in the People list and on their card shows a charging icon. A charging phone no longer counts as "low battery": no orange warning and no low-battery alert. Works in Private circles too (end-to-end encrypted, like the battery level). It is shared the same way as battery level, so pausing or turning off sharing hides both. Needs the new app on the phone that is charging; older apps keep showing the percentage only. Server: migration 390 adds an optional `charging` column; the API, WebSocket frames and Home Assistant `/members` carry `charging` when known. Update the server first, then the phones. The watch apps do not show it yet.
+
 ## v0.26.13 (2026-11-09)
 
 App-only release (the server needs no change). Install over the current app.
