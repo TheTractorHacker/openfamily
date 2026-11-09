@@ -1,20 +1,27 @@
 # Server setup: adding your own server to a circle
 
-This page is for the person who runs the Orbitly server for their family. It takes about five minutes
-and has three steps: **pick where the server runs, approve on your phone, install the apps and invite family**.
-The server keeps **history, driving reports, trips and the map** for everyone by default; privacy-conscious
-members choose "Keep on my phone".
+This page is for the person who runs the Orbitly server for their family. It takes about five minutes.
+The short version: **the server joins itself, you tap approve once, and everyone is on the server by default
+and can opt out.**
+
+* Circles are **Private** (end-to-end encrypted between the phones) and your server takes part as its own
+  device, so it keeps **history, driving reports, trips and the map** for everyone.
+* Each person's own phone switches server processing on for them, with a notice. Anyone who prefers taps
+  **Keep on my phone** (or later Settings > Server processing). Nobody can switch another person on.
+* The steps: pick where the server runs, approve the server on your phone, install the apps and create your
+  circle. What members see and how they opt out: [Server processing](user/server-processing.md).
 
 ## 1. Tell the server where it runs
 
 Open the admin panel, **Settings > Server setup**, and choose:
 
-* **At home**: a NAS, mini PC or Raspberry Pi that you own and that sits in your house. The app then offers
-  "Add server" first, because only you can touch the disk.
+* **At home**: a NAS, mini PC or Raspberry Pi that you own and that sits in your house. Only you can touch the disk.
 * **Rented**: a VPS or hosted server. The company running the machine could read what the server can read. The
-  app keeps location on the phones unless somebody deliberately adds the server.
+  app says so whenever someone adds the server, and the steps below (disk and data-key protection) matter more.
 
-If you do not choose, the server behaves as **rented** (the careful side). In `.env` the same choice is
+New circles use the server by default in both cases (the circle creator can pick "Private, phones only" or
+"Normal" instead, and each member can opt out). If you do not choose, the server uses the **rented** wording
+(the careful side). In `.env` the same choice is
 `DEPLOYMENT_PROFILE=home` or `cloud` (`./scripts/setup.sh` asks). The setting in the admin panel wins once made.
 The choice changes advice and defaults only. Nobody is added to anything by it.
 
@@ -45,9 +52,9 @@ to join"**; if you do not get it, the same prompt shows at the top of the app wh
 code is **the same**, then tap **Yes, it matches - approve**. If it differs, stop and check that you are on your
 own server's address.
 
-* Only a server administrator can approve. Approving does not switch anyone on: the circle admin taps
-  **Let the server do the processing (recommended)** and every member then taps **Use the server** (or
-  **Keep on my phone**) on their own phone.
+* Only a server administrator can approve. Approving signs nothing for anyone: it lets the server's key take
+  part. If you have not approved it yet when you create your first circle, the app opens this same step right
+  there, so you approve and create in one go.
 * The card finishes by itself and turns into a green **Server is processing**.
 * **Where the key lives (accepted trade-off):** the server's private key is now on the server's own disk
   volume, next to the database. Someone who can read the whole machine can read what the server can read
@@ -64,17 +71,25 @@ Cloud and security-minded operators can keep the key in a separate container, aw
 built-in device is then switched off (`OPENFAMILY_SERVER_DEVICE=auto` decides; `builtin`, `sidecar` and `off`
 force it).
 
-## 3. Use the server (what each person does)
+## 3. Create your circle: everyone is on the server by default
 
-In the app, **Use the server (recommended)** shows four groups of characters. The admin panel shows the same
-four groups and a QR code. If they are **the same**, tap OK. Each person decides for themselves and can switch
-back at any time ("Keep on my phone"; their copies on the server are then deleted if they ask).
+In the app, create a circle. **Private, with your server (recommended)** is already selected: one tap on
+**Create** makes the circle Private, switches server processing on and makes the server the default for
+everyone who joins. (Tick **Everyone must use the server** for a circle with children's phones, where nobody
+should be able to keep their data from the server; each member then confirms it once on their own phone.)
 
-* **Use the server**: the server keeps your locations so maps, history and driving reports just work.
+When someone joins and opens the app, **their own phone** switches server processing on for them and shows a
+notice. They have nothing to do. Each person decides for themselves and can switch back at any time:
+
+* **Use the server** (the default): the server keeps your locations so maps, history and driving reports just work.
 * **Keep on my phone**: your location is shared privately, encrypted from phone to phone. You get no reports
-  unless you turn on phone reports (uses more battery).
+  unless you turn on phone reports (uses more battery). Their copies on the server are deleted if they ask.
+
+Want people to be asked instead of switched on? In the admin panel, **Settings > Default for new members**,
+untick **Apply automatically**. The guide for members: [Server processing](user/server-processing.md).
 
 ## 4. Install the apps and invite family
 
-Android: open `https://YOUR-SERVER/app.apk` on the phone. In the app create a circle, tap Invite and share the
-code. Everyone enters it when they join.
+Android: open `https://YOUR-SERVER/app.apk` on the phone. In your circle tap Invite and share the code.
+Everyone enters it when they join; before joining the app tells them the circle uses the server by default
+and that they can opt out.

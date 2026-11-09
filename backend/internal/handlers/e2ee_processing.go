@@ -1247,7 +1247,8 @@ func (s *Server) InvitePreview(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, map[string]any{"private": private, "server_assist": assist, "member_opt_out": optOut, "default_for_new": def, "legacy": legacy,
 		// Section 23: the admin's member default. Advice only; the joiner's own phone signs.
-		"auto_apply": assist && s.memberDefaults(r.Context()).AutoApply})
+		// Section 24: or the circle admin's signed "server by default" while no administrator saved a choice.
+		"auto_apply": assist && s.memberDefaults(r.Context()).AppliesTo(def == "server")})
 }
 
 

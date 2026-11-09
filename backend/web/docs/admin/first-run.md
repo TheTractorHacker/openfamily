@@ -9,8 +9,12 @@ Your first sign-in to the admin web: registration is closed, turn on two-step si
 
 2. **Turn on two-step sign-in** for your admin account in the app (Settings,
    Security). You can require this for every admin with `REQUIRE_ADMIN_MFA=true`.
-3. In the app: create your account with the same email, then
-   [create a circle](../user/create-a-circle.md) and [invite your family](../user/invite-and-join.md).
+3. In the app: create your account with the same email. Your phone shows **"Your server wants to join"**:
+   compare the short code with the admin web (Settings > Server setup) and tap approve once
+   ([Server setup](../server-setup.md)). Then [create a circle](../user/create-a-circle.md): **Private, with
+   your server** is preselected, so the circle is end-to-end encrypted and everyone who joins is on the server
+   by default and can opt out ([Server processing](../user/server-processing.md)). Then
+   [invite your family](../user/invite-and-join.md).
 4. In the admin web look at **Families**, **Users** and **System**:
 
 ![Families page](../images/web/families-light.png)
@@ -25,8 +29,8 @@ Your first sign-in to the admin web: registration is closed, turn on two-step si
 
 By default a server admin sees accounts, circles, devices and audit logs, but
 **not where anyone is** (`ADMIN_LOCATION_ACCESS=false`). If you turn it on,
-every look is written to an audit log the circle can read. Private circles are
-unreadable by the server unless members opt in. See
+every look is written to an audit log the circle can read. In a Private circle the
+server can read only the members who use server processing (the default; each member can opt out). See
 [Privacy modes explained](../user/privacy-modes.md) and
 [Operator privacy controls](../privacy-controls.md).
 

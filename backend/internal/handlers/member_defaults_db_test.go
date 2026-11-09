@@ -40,6 +40,10 @@ func TestMemberDefaultsAPI(t *testing.T) {
 	if md["default_lane"] != "server" || md["auto_apply"] != true {
 		t.Fatalf("app view: %v", app)
 	}
+	// Section 24: nothing saved by an administrator, so the circle's own signed default also counts.
+	if md["follow_circle_default"] != true || m["follow_circle_default"] != true {
+		t.Fatalf("follow_circle_default while derived: %v / %v", app, m)
+	}
 
 	// Validation.
 	e.mustCode("A", "PUT", "/api/admin/settings/member-defaults", map[string]any{}, 400)
@@ -50,6 +54,12 @@ func TestMemberDefaultsAPI(t *testing.T) {
 	m = e.mustCode("A", "PUT", "/api/admin/settings/member-defaults", map[string]any{"auto_apply": false}, 200)
 	if m["auto_apply"] != false || m["default_lane"] != "server" || m["source"] != "admin" {
 		t.Fatalf("saved: %v", m)
+	}
+	// An administrator's saved choice is final: circles' own defaults no longer switch members on.
+	_, app, _ = e.do("B", "GET", "/e2ee/server-device", nil)
+	md, _ = app["member_defaults"].(map[string]any)
+	if md["follow_circle_default"] != false || md["auto_apply"] != false {
+		t.Fatalf("app view after an admin choice: %v", app)
 	}
 	m = e.mustCode("A", "PUT", "/api/admin/settings/member-defaults", map[string]any{"default_lane": "phone"}, 200)
 	if m["default_lane"] != "phone" || m["auto_apply"] != false {

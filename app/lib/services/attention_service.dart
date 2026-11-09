@@ -519,8 +519,8 @@ class AttentionService extends ChangeNotifier implements ValueListenable<List<At
             severity: AttentionSeverity.info,
             title: 'Let the server help in ${c.name}?',
             why: 'It is private, so the server cannot show maps, history or driving reports yet.',
-            info: 'One tap lets your server join. Each other member then opens the app and taps "Use the server"; '
-                'nobody is switched on for them.',
+            info: 'One tap lets your server join. Everyone else\'s own phone then switches it on for them the next time '
+                'they open the app and shows them a notice; each person can switch it off for themselves.',
             action: 'Let the server do it',
             secondary: 'Not now',
             circle: c,

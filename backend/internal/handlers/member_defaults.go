@@ -25,6 +25,22 @@ type MemberDefaults struct {
 	Source string `json:"source"`
 }
 
+// AppliesTo says whether members' own phones switch themselves to the server in a
+// circle whose admin-signed policy has default_for_new = server (circleDefaultServer)
+// or not. An administrator's saved choice is final; otherwise the profile-derived
+// auto-apply OR the circle admin's signed "server by default" turns it on
+// (section 24). The member's own phone still signs; this is advice only.
+func (d MemberDefaults) AppliesTo(circleDefaultServer bool) bool {
+	if d.Source == "admin" {
+		return d.AutoApply
+	}
+	return d.AutoApply || circleDefaultServer
+}
+
+// FollowCircleDefault: no administrator choice is saved, so the circle's own signed
+// default_for_new = server also means "members are on the server by default".
+func (d MemberDefaults) FollowCircleDefault() bool { return d.Source != "admin" }
+
 // memberDefaults returns the stored choice, else the one the deployment
 // profile implies (home: server + auto-apply; cloud or unset: phone, prompt only).
 func (s *Server) memberDefaults(ctx context.Context) MemberDefaults {
@@ -59,14 +75,15 @@ func (s *Server) memberDefaultsJSON(ctx context.Context) map[string]any {
 	configured, _, effective := s.DeploymentProfile(ctx)
 	dev, _ := s.pinnedServerDevice(ctx)
 	return map[string]any{
-		"default_lane":      d.DefaultLane,
-		"auto_apply":        d.AutoApply,
-		"source":            d.Source,
-		"profile":           configured,
-		"profile_effective": effective,
-		"server_pinned":     serverMemberEnabled() && dev != nil,
-		"what_it_means":     "When auto-apply is on, each member's own phone signs \"use the server\" the next time they open the app, in circles where server processing is on. They see a notice and can keep their data on the phone with one tap. Someone who already chose is never changed. The server cannot do this for anyone.",
-		"remind_text":       RemindText,
+		"default_lane":          d.DefaultLane,
+		"auto_apply":            d.AutoApply,
+		"source":                d.Source,
+		"profile":               configured,
+		"profile_effective":     effective,
+		"server_pinned":         serverMemberEnabled() && dev != nil,
+		"what_it_means":         "When auto-apply is on, each member's own phone signs \"use the server\" the next time they open the app, in circles where server processing is on. They see a notice and can keep their data on the phone with one tap. Someone who already chose is never changed. The server cannot do this for anyone. While you have not saved a choice here, the same also happens in every circle whose admin set \"Server processing\" as the default for members.",
+		"follow_circle_default": d.FollowCircleDefault(),
+		"remind_text":           RemindText,
 	}
 }
 

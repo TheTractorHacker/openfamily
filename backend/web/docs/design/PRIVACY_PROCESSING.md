@@ -813,3 +813,48 @@ purges and is final, the app-open path, the notice card. Real server e2e (`built
 tap a sheet; after the app opens Ben is server-assisted and the server stores readable fixes, Cleo (opted out) leaves
 nothing.
 
+
+## 24. End-to-end encryption out of the box; the circle default switches members on
+
+Status: implemented on branch `feat/default-server`. Owner request: "End-to-end encryption should work out of the box
+and be as easy to set up as Pi-hole ... make sure the default is that members are opted in, and they just go through
+settings and opt out." Like section 23 this changes **who presses the button**, not what the button is: no wire format,
+signature, key line, trigger or purge rule changes.
+
+* **New circles are Private with the server.** When the server can take part (a pinned key, the built-in device, or a
+  pending "Your server wants to join"), the create screens (onboarding "Create a family" and "New circle") preselect
+  **Private, with your server**. One tap on Create: the creator's phone enables the circle (existing `enableCircle`),
+  publishes the policy (assistance on, `default_for_new = server`, `member_opt_out = allowed`, or `required_server`
+  when "Everyone must use the server" is ticked) and signs the creator's **own** server lane with the fingerprint this
+  phone verified (the same path as `AddServerFlow.confirm`). If the server key still needs approval by this phone, the
+  add-server sheet opens at once (compare the code, approve, OK); if only another server administrator can approve, or
+  the server has no device, the circle is created Private, phones only, with a message, and the existing "Let the server
+  help" card picks it up later. `Private, phones only` and `Normal` stay available. Code: `NewCircleSetup`
+  (`app/lib/services/e2ee/new_circle_setup.dart`), `CircleModePicker` / `finishNewCircle`
+  (`app/lib/widgets/circle_mode_picker.dart`).
+* **The circle default switches members on.** Section 23 deliberately did not read `default_for_new` as auto-apply.
+  Now it does, in one direction only: while **no server administrator saved a member default**
+  (`member_defaults.source = profile`), a circle whose verified, admin-signed policy says `default_for_new = server` is
+  treated like `auto_apply` for that circle: each member's own phone signs `lane = server` on the next app open, shows
+  the notice, and every rule of 23.1 still holds (never over an earlier pref, never in `required_server` circles, never
+  for child accounts, opt-out is final). An administrator's saved choice is final in both directions. The server
+  exposes this as `member_defaults.follow_circle_default` on `GET /e2ee/server-device` (old apps ignore it; an old
+  server sends nothing and the app does not follow) and the invite preview's `auto_apply` uses the same rule
+  (`MemberDefaults.AppliesTo`). `default_for_new = phone` never switches anyone on. Consequence for existing circles:
+  a cloud-profile circle whose admin explicitly chose "Server processing" as the default now auto-applies.
+* **Admin turn-on defaults to the server.** `AddServerFlow` and the policy screen's "Server assistance" switch now
+  publish `default_for_new = server` regardless of the deployment profile (the profile still drives the wording and
+  warnings of section 21). The admin can choose "Phone only" afterwards.
+* **Opt-out where people look.** Settings > Server & data > **Server processing** (was "Where my data is processed");
+  the Encryption keys screen row shows the real state from this phone's verified lane facts ("On for you", "Phone only
+  for you (you can switch it on)", "Phone only (off for this circle)", "Required in this circle: needs your OK").
+* **Not done, on purpose.** The admin still cannot opt anyone in: "required" means every member consents on their own
+  phone or leaves, as in 16.1. `required_server` is not the default (16.1 owner decision). The deployment profile's
+  meaning (unset = cloud wording) is unchanged.
+
+Tests: Go `TestMemberDefaultsAPI` (`follow_circle_default` while derived, false after an admin choice),
+`TestInvitePreviewShowsOnlyThePrivacySetup` (preview follows the circle default; an admin's "off" wins). Dart
+`auto_apply_test.dart` (circle default applies once by the member's own phone, not for `phone` defaults, not for
+`required_server`, app-open path follows only when the server says so), `new_circle_setup_test.dart` (create screens,
+approve path, required, phones only, no server, onboarding), `add_server_sheet_test.dart`, `processing_screens_test.dart`,
+`trusted_default_test.dart` (Encryption keys row).

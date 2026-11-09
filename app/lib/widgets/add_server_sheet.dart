@@ -271,7 +271,7 @@ class _AddServerSheetState extends State<AddServerSheet> {
       return <Widget>[
         _title('Server added'),
         _p(p.adminTurnsOn
-            ? 'The server is on for this circle and for you. Now ask each other member to open the app and tap "Use the server". Nobody is switched on for them, and they can say no.'
+            ? 'The server is on for this circle and for you. Everyone else\'s own phone switches it on for them the next time they open the app and shows them a notice; each can switch it off. You cannot switch anyone on yourself.'
             : 'The server now works with your location in this circle.', key: const Key('add-server-success')),
         FilledButton(key: const Key('add-server-finish'), onPressed: () => Navigator.of(context).pop(true), child: const Text('Done')),
       ];
@@ -318,7 +318,7 @@ class _AddServerSheetState extends State<AddServerSheet> {
         return <Widget>[
           _title('Step 3 of 3: OK'),
           _p(p.adminTurnsOn
-              ? 'Tapping OK ${p.state == AddServerState.approveServer ? 'approves the server and ' : ''}turns the server on for this circle and for you. Other members are asked on their own phones; nobody is added for them.'
+              ? 'Tapping OK ${p.state == AddServerState.approveServer ? 'approves the server and ' : ''}turns the server on for this circle and for you. Other members are on the server by default: their own phones switch it on, with a notice, and each can switch it off.'
               : 'Tapping OK lets the server work with your location in this circle. You can remove it again at any time.', key: const Key('add-server-confirm-text')),
           if (_error != null) _p(_error!, key: const Key('add-server-error'), color: cs.error),
           FilledButton(key: const Key('add-server-ok'), onPressed: _busy ? null : _ok, child: _busy ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('OK')),

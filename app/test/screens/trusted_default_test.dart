@@ -7,6 +7,7 @@ import 'package:openfamily/screens/trusted_server_screen.dart' show kTrustedServ
 import 'package:openfamily/services/e2ee/e2ee_service.dart';
 import 'package:openfamily/services/e2ee/e2ee_trust.dart';
 import 'package:openfamily/services/e2ee/e2ee_vault.dart';
+import 'package:openfamily/services/e2ee/lanes_store.dart' show LaneStatus;
 import 'package:openfamily/widgets/trusted_server_prompt.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -140,6 +141,29 @@ void main() {
               circle: const Circle(id: cid, name: 'Family', role: 'admin', sharingEnabled: true, memberCount: 2), service: alice)));
       await settle(t);
       expect(find.byKey(const Key('trusted-server-prompt')), findsNothing);
+    });
+
+    testWidgets('the "Server processing" row says the real state of my own data, from the verified lane facts', (t) async {
+      await setup(t, dflt: false);
+      expect(processingRowSubtitle(legacy: false, facts: null), 'See where your data is processed');
+      for (final (({LaneStatus status, bool assist}) facts, String text) c in <(({LaneStatus status, bool assist}), String)>[
+        ((status: LaneStatus.serverAssisted, assist: true), 'On for you'),
+        ((status: LaneStatus.phoneOnly, assist: true), 'Phone only for you (you can switch it on)'),
+        ((status: LaneStatus.phoneOnly, assist: false), 'Phone only (off for this circle)'),
+        ((status: LaneStatus.consentRequired, assist: true), 'Required in this circle: needs your OK'),
+      ]) {
+        await t.pumpWidget(const SizedBox());
+        await t.pumpWidget(MaterialApp(
+            home: EncryptionCircleScreen(
+                circle: const Circle(id: cid, name: 'Family', role: 'admin', sharingEnabled: true, memberCount: 2),
+                service: alice,
+                laneFacts: (String id) async => c.$1)));
+        await settle(t);
+        expect(find.descendant(of: find.byKey(const Key('processing-row')), matching: find.text(c.$2)), findsOneWidget, reason: c.$2);
+      }
+      expect(find.text('Server or phone only'), findsNothing);
+      expect(processingRowSubtitle(legacy: true, facts: (status: LaneStatus.serverAssisted, assist: true)), 'Old mode: the server can read it');
+      expect(processingRowSubtitle(legacy: false, facts: (status: LaneStatus.verificationFailed, assist: true)), 'Phone only (could not be confirmed)');
     });
 
     testWidgets('hidden when the default is off, the key is not pinned, or I already consented', (t) async {

@@ -207,7 +207,10 @@ func (s *Server) E2EEServerDevice(w http.ResponseWriter, r *http.Request) {
 	out["recommended_lane"] = "phone"
 	// Member defaults (section 23): read-only advice. The app's own phone signs; the server never does.
 	md := s.memberDefaults(r.Context())
-	out["member_defaults"] = map[string]any{"default_lane": md.DefaultLane, "auto_apply": md.AutoApply}
+	out["member_defaults"] = map[string]any{"default_lane": md.DefaultLane, "auto_apply": md.AutoApply,
+		// Section 24: true while no administrator saved a choice; the app then also auto-applies in circles whose
+		// admin-signed policy says "server by default". Old apps ignore it.
+		"follow_circle_default": md.FollowCircleDefault()}
 	out["builtin"] = s.ServerDevice != nil
 	if s.ServerDevice != nil {
 		out["builtin_state"] = s.ServerDevice.Info().State

@@ -259,7 +259,7 @@ void main() {
       expect(find.text('Require server processing?'), findsNothing);
     });
 
-    testWidgets('admin turns it on after the full disclosure; off by default for new members; nobody is opted in', (t) async {
+    testWidgets('admin turns it on after the full disclosure; server is the default for members (section 24)', (t) async {
       final FakeProcessingController c = FakeProcessingController(FakeProcessingController.snapshot(assist: false));
       await pumpScreen(t, ProcessingPolicyScreen(circle: adminCircle, controller: c));
       await t.tap(find.descendant(of: find.byKey(const Key('policy-assist-switch')), matching: find.byType(Switch)));
@@ -275,7 +275,7 @@ void main() {
       await t.pumpAndSettle();
       await t.tap(find.text('Turn on'));
       await t.pumpAndSettle();
-      expect(c.calls.where((String x) => x.startsWith('policy')), <String>['policy:true:phone:allowed']);
+      expect(c.calls.where((String x) => x.startsWith('policy')), <String>['policy:true:server:allowed']);
     });
 
     testWidgets('a member with an old app blocks turning on and is named', (t) async {
@@ -308,7 +308,8 @@ void main() {
       await t.tap(find.byKey(const Key('default-server')));
       await t.pumpAndSettle();
       expect(c.calls.where((String x) => x.startsWith('policy')), <String>['policy:true:phone:required_server', 'policy:true:server:allowed']);
-      expect(txt('only a suggestion'), findsOneWidget);
+      expect(txt('nobody, including admins, can do it for them'), findsOneWidget);
+      expect(txt('child\'s or teen\'s phone'), findsOneWidget);
     });
 
     testWidgets('turning it off warns that copies stay and is not destructive-styled as consent', (t) async {

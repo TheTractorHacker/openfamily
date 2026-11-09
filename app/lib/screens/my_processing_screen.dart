@@ -9,7 +9,7 @@ import '../widgets/ds/ds.dart';
 import '../widgets/processing_widgets.dart';
 import 'processing_screen.dart';
 
-/// Settings > Privacy & Security > Where my data is processed.
+/// Settings > Server & data > Server processing (where my data is processed).
 ///
 /// My Private circles with my own setting for each. "Don't send my data to the
 /// server" is the same switch as Circle > Encryption keys > Server processing.
@@ -67,7 +67,7 @@ class _MyProcessingScreenState extends State<MyProcessingScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Where my data is processed')),
+      appBar: AppBar(title: const Text('Server processing')),
       body: SafeArea(
         child: _loading
             ? const Center(child: CircularProgressIndicator())
@@ -75,7 +75,9 @@ class _MyProcessingScreenState extends State<MyProcessingScreen> {
                 padding: const EdgeInsets.all(AppSpace.xl),
                 children: <Widget>[
                   Row(children: <Widget>[
-                    const Expanded(child: Text('Choose, for each Private circle, who works on your data.', style: AppType.secondary)),
+                    const Expanded(
+                        child: Text('Where your data is processed, for each Private circle. Tap a circle to switch the server off or on for you.',
+                            style: AppType.secondary)),
                     InfoHint(
                       title: 'Where my data is processed',
                       body: 'In each Private circle you decide whether the Orbitly server may process your data. '

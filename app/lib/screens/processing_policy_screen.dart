@@ -83,16 +83,20 @@ class _ProcessingPolicyScreenState extends State<ProcessingPolicyScreen> {
     final bool ok = await showDsConfirm(context,
         title: on ? ProcessingCopy.turnOnTitle : ProcessingCopy.turnOffTitle,
         message: on
-            ? '${ProcessingCopy.turnOnBody}\n\nDefault shown to new members: ${s.policy.defaultForNew == E2ee.lineServer ? 'Server processing' : 'Phone only'}.'
+            ? '${ProcessingCopy.turnOnBody}\n\nDefault for members: Server processing. You can change it to "Phone only" afterwards.'
             : ProcessingCopy.turnOffBody,
         confirmLabel: on ? 'Turn on' : 'Turn off',
         destructive: on);
     if (!ok) return;
+    // Section 24: turning it on makes the server the default for members (their own phones sign it, with a
+    // notice); turning it off keeps whatever default the admin had chosen.
     await _apply(
         assist: on,
-        defaultForNew: on ? s.policy.defaultForNew : E2ee.linePhone,
+        defaultForNew: on ? E2ee.lineServer : s.policy.defaultForNew,
         memberOptOut: E2ee.optOutAllowed,
-        done: on ? 'Server processing is on. Nobody is opted in until they choose.' : 'Server processing is off');
+        done: on
+            ? 'Server processing is on. Each member\'s own phone switches it on for them, with a notice; anyone can opt out.'
+            : 'Server processing is off');
   }
 
   Future<void> _setUpServerKey() async {
@@ -192,22 +196,28 @@ class _ProcessingPolicyScreenState extends State<ProcessingPolicyScreen> {
           const DsSectionHeader('Can members keep data on their phone?', padding: EdgeInsets.fromLTRB(0, AppSpace.xl, 0, AppSpace.xs)),
           DsRowGroup(children: <Widget>[
             _option(const Key('opt-allowed'), 'Yes, members may opt out (default)',
-                'Keeping your location on your own phone is the member\'s choice.', s.policy.memberOptOut == E2ee.optOutAllowed,
-                canEdit ? () => _setOptOut(E2ee.optOutAllowed) : null),
+                'Keeping your location on your own phone is the member\'s choice. They switch it off in Settings > Server processing.',
+                s.policy.memberOptOut == E2ee.optOutAllowed, canEdit ? () => _setOptOut(E2ee.optOutAllowed) : null),
             _option(const Key('opt-required'), 'No, server processing is required',
-                'For circles that need it, for example a parent managing a child\'s phone. New members see this before they join. '
-                    'Existing members must consent on their own phone or leave. This applies to child accounts too.',
+                'For a child\'s or teen\'s phone, or anyone whose location the server must always have, so nobody in this circle can '
+                    'keep their data from it. New members see this before they join. Each member still confirms it once on their own '
+                    'phone; until they do, their phone sends nothing to this circle (except help requests), and the only other way out '
+                    'is leaving the circle. This applies to child accounts too.',
                 s.policy.memberOptOut == E2ee.optOutRequiredServer, canEdit ? () => _setOptOut(E2ee.optOutRequiredServer) : null),
           ]),
-          const DsSectionHeader('Default shown to new members', padding: EdgeInsets.fromLTRB(0, AppSpace.xl, 0, AppSpace.xs)),
+          const DsSectionHeader('Default for members', padding: EdgeInsets.fromLTRB(0, AppSpace.xl, 0, AppSpace.xs)),
           DsRowGroup(children: <Widget>[
-            _option(const Key('default-phone'), 'Phone only', 'Preselected for people who join.', s.policy.defaultForNew == E2ee.linePhone,
-                canEdit ? () => _setDefault(E2ee.linePhone) : null),
-            _option(const Key('default-server'), 'Server processing', 'Preselected for people who join. They still have to confirm it themselves.',
+            _option(const Key('default-server'), 'Server processing (recommended)',
+                'Each member\'s own phone switches it on the next time they open the app and shows a notice. Anyone can switch it off.',
                 s.policy.defaultForNew == E2ee.lineServer, canEdit ? () => _setDefault(E2ee.lineServer) : null),
+            _option(const Key('default-phone'), 'Phone only', 'Members are asked. Nothing reaches the server until they confirm it themselves.',
+                s.policy.defaultForNew == E2ee.linePhone, canEdit ? () => _setDefault(E2ee.linePhone) : null),
           ]),
           const SizedBox(height: AppSpace.sm),
-          const Text('A default is only a suggestion. Only a member\'s own phone can put their data on the server; nobody, including admins, can do it for them.',
+          const Text(
+              'Only a member\'s own phone can put their data on the server; nobody, including admins, can do it for them. With '
+              '"Server processing" as the default their phone does it for them, shows it, and they can switch it off at any time '
+              '(unless the server\'s administrator has turned automatic switching off; then members are asked).',
               style: AppType.secondary),
         ],
         const SizedBox(height: AppSpace.xl),

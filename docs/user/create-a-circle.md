@@ -30,7 +30,9 @@ invite code.
 - **Leave** removes you from the circle; **Delete** (admins) removes the circle
   for everyone.
 
-Choosing a privacy mode when you create a circle matters: **Normal** circles
-let the server show locations on the admin map and compute driving reports;
-**Private** circles keep positions sealed between phones. Read
-[Privacy modes explained](privacy-modes.md) before you decide.
+Choosing a privacy mode when you create a circle matters. When your server can take part, **Private, with your
+server** is already selected: positions are end-to-end encrypted between phones, the server joins as its own
+device for maps and driving reports, and everyone is on the server by default and can opt out
+([Server processing](server-processing.md)). **Private, phones only** keeps positions sealed between phones;
+**Normal** lets the server keep readable locations. Read [Privacy modes explained](privacy-modes.md) before you
+decide.

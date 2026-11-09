@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 
 import '../models/circle.dart';
-import '../services/e2ee/e2ee_app.dart';
-import '../services/e2ee/e2ee_service.dart';
-import '../services/e2ee/private_runtime.dart';
+import '../services/e2ee/new_circle_setup.dart';
+import '../services/e2ee/processing_controller.dart';
 import '../services/circle_service.dart';
 import '../theme/app_theme.dart';
+import '../widgets/circle_mode_picker.dart';
 import '../widgets/circle_widgets.dart';
 import '../widgets/ds/ds.dart';
 
@@ -19,9 +19,16 @@ const Map<String, int> kTempCircleDurations = <String, int>{
 /// Creates an additional circle via `POST /circles` (name + icon). Pops with
 /// the created [Circle].
 class CircleCreateScreen extends StatefulWidget {
-  const CircleCreateScreen({super.key, this.service});
+  const CircleCreateScreen({super.key, this.service, this.setup, this.makePrivate});
 
   final CircleService? service;
+
+  /// Server checks and the server switch-on (tests inject one over a fake controller). Without it, and with an
+  /// injected [service] (tests), no Private setup runs at all.
+  final NewCircleSetup? setup;
+
+  /// Makes the new circle Private (default: this phone's E2EE service).
+  final Future<void> Function(String circleId)? makePrivate;
 
   @override
   State<CircleCreateScreen> createState() => _CircleCreateScreenState();
@@ -34,14 +41,44 @@ class _CircleCreateScreenState extends State<CircleCreateScreen> {
   bool _busy = false;
   bool _temporary = false;
 
-  /// Normal (server keeps locations) is the default; Private is a deliberate choice.
-  bool _private = false;
+  /// Section 24: "Private, with your server" is the default when the server can take part; otherwise Normal.
+  NewCircleMode _mode = NewCircleMode.normal;
+  bool _modeTouched = false;
+  bool _serverAvailable = false;
+  bool _requireServer = false;
 
   /// Lifetime of a temporary circle in hours (24h / 3 days / 1 week / custom).
   int _hours = 24;
   bool _custom = false;
 
   CircleService get _service => widget.service ?? CircleService.instance;
+
+  /// Null in widget tests that inject only a fake circle service: no E2EE setup runs there.
+  NewCircleSetup? get _setup =>
+      widget.setup ?? (widget.service == null ? NewCircleSetup(LanesProcessingController.instance) : null);
+
+  @override
+  void initState() {
+    super.initState();
+    _probeServer();
+  }
+
+  Future<void> _probeServer() async {
+    bool ok = false;
+    try {
+      final NewCircleSetup? setup = _setup;
+      if (setup == null) return;
+      ok = await setup.serverAvailable();
+    } catch (_) {
+      // no E2EE runtime here (or offline): Normal stays the default
+    }
+    if (!mounted) return;
+    setState(() {
+      _serverAvailable = ok;
+      if (ok && !_modeTouched) _mode = NewCircleMode.privateServer;
+      if (!ok && _mode == NewCircleMode.privateServer) _mode = NewCircleMode.normal;
+    });
+  }
 
   @override
   void dispose() {
@@ -63,19 +100,16 @@ class _CircleCreateScreenState extends State<CircleCreateScreen> {
       final Circle c = await _service.createCircle(name, _icon,
           durationHours: _temporary ? _hours : null);
       Circle result = c;
-      if (_private && widget.service == null) {
-        try {
-          final E2eeService svc = E2eeApp.service;
-          if (await svc.identity() == null) await svc.registerThisDevice(label: 'This phone');
-          await svc.enableCircle(c.id);
-          await PrivateRuntime.instance.setCircles(await _service.listCircles());
-          result = c.copyWith(e2eeMode: 'private');
-        } catch (_) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                content: Text('The circle was created in normal mode. You can make it private later in the circle settings.')));
-          }
-        }
+      final NewCircleSetup? setup = _setup;
+      if (!mounted) return;
+      if (_mode != NewCircleMode.normal && setup != null) {
+        final NewCircleResult r = await finishNewCircle(context,
+            circle: c,
+            mode: _mode,
+            requireServer: _requireServer,
+            makePrivate: widget.makePrivate ?? makeCirclePrivate,
+            setup: setup);
+        if (r.isPrivate) result = c.copyWith(e2eeMode: 'private', serverAssist: r.serverOn, myLaneServer: r.serverOn);
       }
       if (mounted) Navigator.of(context).pop(result);
     } on SessionExpiredException {
@@ -87,21 +121,6 @@ class _CircleCreateScreenState extends State<CircleCreateScreen> {
         _error = describeCircleError(e).message;
       });
     }
-  }
-
-  Widget _modeTile({required Key key, required bool selected, required String title, required String body, required VoidCallback onTap}) {
-    return Semantics(
-      inMutuallyExclusiveGroup: true,
-      selected: selected,
-      child: ListTile(
-        key: key,
-        contentPadding: EdgeInsets.zero,
-        leading: Icon(selected ? Icons.radio_button_checked : Icons.radio_button_unchecked),
-        title: Text(title),
-        subtitle: Text(body),
-        onTap: _busy ? null : onTap,
-      ),
-    );
   }
 
   @override
@@ -161,20 +180,16 @@ class _CircleCreateScreenState extends State<CircleCreateScreen> {
           ],
         ),
         const SizedBox(height: AppSpace.lg),
-        const DsSectionHeader('Who can see locations', padding: EdgeInsets.only(bottom: AppSpace.sm)),
-        _modeTile(
-          key: const Key('mode-normal'),
-          selected: !_private,
-          title: 'Normal (recommended)',
-          body: 'Your server keeps locations so maps, history and driving reports just work.',
-          onTap: () => setState(() => _private = false),
-        ),
-        _modeTile(
-          key: const Key('mode-private'),
-          selected: _private,
-          title: 'Private',
-          body: 'Only phones can read locations; the server keeps nothing readable. No driving reports unless you turn on phone reports (uses more battery) or later let the server help.',
-          onTap: () => setState(() => _private = true),
+        CircleModePicker(
+          mode: _mode,
+          serverAvailable: _serverAvailable,
+          requireServer: _requireServer,
+          enabled: !_busy,
+          onMode: (NewCircleMode m) => setState(() {
+            _mode = m;
+            _modeTouched = true;
+          }),
+          onRequireServer: (bool v) => setState(() => _requireServer = v),
         ),
         const SizedBox(height: AppSpace.lg),
         DsRowGroup(
