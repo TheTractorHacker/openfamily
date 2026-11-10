@@ -118,11 +118,11 @@ class _MyProcessingScreenState extends State<MyProcessingScreen> {
   }
 
   String _subtitle(ProcessingSnapshot? s) {
-    if (s == null) return 'Could not check this circle';
+    if (s == null) return 'Could not check this circle right now; your position is still sent to it';
     if (s.legacy) return 'Old mode: the server can read it';
     if (!s.assistOn) return 'Phone only';
     final ProcessingMember? me = s.me;
-    if (me?.serverAssisted ?? false) return 'The server processes your data';
-    return s.required ? 'Needs your OK for the server' : 'Phone only';
+    if (me?.serverAssisted ?? false) return s.required ? 'Required by your family admin: the server processes your data' : 'The server processes your data';
+    return s.required ? 'Required by your family admin: switching over' : 'Phone only';
   }
 }

@@ -268,7 +268,8 @@ void main() {
       expect(c.status, DiagStatus.warn);
       expect(c.detail, contains('has not encrypted one'));
       expect(c.detail, contains('15 encrypted updates are waiting'));
-      expect(c.detail, contains('http_401'));
+      expect(c.detail, contains('renewing its sign-in'));
+      expect(c.detail, isNot(contains('http_401')), reason: 'codes stay in the technical section of the report');
       expect(c.fix?.kind, DiagFixKind.sendQueue);
       final String report = buildDiagnosticReport(f, evaluateDiagnostics(f));
       expect(report, contains('Private circle delivery'));
@@ -311,7 +312,60 @@ void main() {
       final DiagCheck c = find(evaluateDiagnostics(f), 'private_delivery');
       expect(c.status, DiagStatus.warn);
       expect(c.detail, contains('4 encrypted updates are waiting'));
-      expect(c.detail, contains('seal_unreadable'));
+      expect(c.detail, contains('could not open its own encryption key'));
+      expect(c.detail, isNot(contains('seal')));
+    });
+
+    test('plain words, no jargon: a missing circle key, an unapproved phone and a refused server copy', () {
+      final List<String> jargon = <String>['seal', 'lane', ' gen ', 'epoch', 'SK', 'parked', 'rejected_', 'http_'];
+      void plain(String d) {
+        for (final String w in jargon) {
+          expect(d, isNot(contains(w)), reason: 'jargon "$w" in: $d');
+        }
+      }
+
+      DiagCheck check(PrivateCircleDelivery c, {String code = ''}) => find(
+          evaluateDiagnostics(withDelivery(PrivateDeliveryFacts(
+            uplink: 'sealed only',
+            circles: <PrivateCircleDelivery>[c],
+            lastFixAt: now.subtract(const Duration(minutes: 1)),
+            lastUploadOkAt: now.subtract(const Duration(minutes: 1)),
+            lastErrorCode: code,
+            lastErrorAt: code.isEmpty ? null : now.subtract(const Duration(minutes: 1)),
+          ))),
+          'private_delivery');
+
+      DiagCheck c = check(const PrivateCircleDelivery(laneKind: 'phone', circleKeyMissing: true, parked: 3));
+      expect(c.status, DiagStatus.warn);
+      expect(c.detail, contains("waiting for the family's encryption key"));
+      expect(c.detail, contains('asked for automatically'));
+      plain(c.detail);
+
+      c = check(const PrivateCircleDelivery(laneKind: 'phone', awaitingApproval: true));
+      expect(c.detail, contains('waiting to be approved'));
+      plain(c.detail);
+
+      c = check(PrivateCircleDelivery(laneKind: 'phone', serverCopyRefused: true, lastSealedAt: now), code: 'rejected_lane_not_server');
+      expect(c.detail, contains('sends the family copy instead'));
+      plain(c.detail);
+
+      // Fresh positions, nothing encrypted for an hour, positions waiting for a key: the key is the reason.
+      c = check(PrivateCircleDelivery(laneKind: 'phone', parked: 5, lastSealedAt: now.subtract(const Duration(hours: 1))));
+      expect(c.detail, contains("waiting for the family's encryption key"));
+      plain(c.detail);
+
+      c = check(const PrivateCircleDelivery(laneKind: 'pending'));
+      expect(c.detail, contains('requires server processing'));
+      expect(c.detail, contains('refuses your positions'));
+      plain(c.detail);
+
+      expect(plainDeliveryProblem('required_server'), contains('has not signed its server choice'));
+      expect(plainDeliveryProblem('rejected_required_server'), contains('update the app'));
+      expect(plainDeliveryProblem('rejected_lane_not_server'), contains('family copy'));
+      expect(plainDeliveryProblem('http_403'), contains('replaced'));
+      expect(plainDeliveryProblem('offline'), contains('no connection'));
+      expect(plainDeliveryProblem('http_503'), contains('server had a problem'));
+      expect(plainDeliveryProblem(''), '');
     });
 
     test('no Private circle or not collected: no section', () {
@@ -323,13 +377,13 @@ void main() {
       final DiagFacts f = withDelivery(PrivateDeliveryFacts(
         uplink: 'sealed only',
         circles: <PrivateCircleDelivery>[
-          const PrivateCircleDelivery(laneKind: 'consent'),
+          const PrivateCircleDelivery(laneKind: 'pending'),
           const PrivateCircleDelivery(laneKind: 'failed', queued: 2),
         ],
         lastFixAt: now,
       ));
       final String report = buildDiagnosticReport(f, evaluateDiagnostics(f));
-      expect(report, contains('circle1 lane="consent required"'));
+      expect(report, contains('circle1 lane="server processing required (phone signs by itself; positions refused until it has)"'));
       expect(report, contains('circle2 lane="phone (verification failed)" queued=2'));
       final String section = report.substring(report.indexOf('\nPrivate circle delivery\n'));
       expect(section, isNot(matches(RegExp(r'\d+\.\d{3,}'))), reason: 'nothing that looks like a coordinate');

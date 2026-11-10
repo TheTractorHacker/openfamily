@@ -31,6 +31,7 @@ hand. The Wear OS app (`wear/`) is first-party AGPL-3.0 code.
 | Component | Used by | License | Notes |
 |---|---|---|---|
 | com.google.android.gms:play-services-wearable 19.0.0 | phone app, Wear OS app | Android Software Development Kit License | Google Play services client library for the Wearable Data Layer. Proprietary terms, not open source, same category as the Play services location library the phone app already uses. At run time it needs Google Play services; without them the watch bridge does nothing. |
+| com.google.android.gms:play-services-auth-blockstore 16.4.0 | phone app | Android Software Development Kit License | Google Play services Block Store client, for "Keep this phone's key safe through reinstalls" (`KeyBackupChannel.kt`). Proprietary terms, same category as the other Play services libraries. Without Google Play services the setting does nothing. |
 | androidx.wear.compose (compose-material, compose-foundation, compose-navigation) 1.7.1 | Wear OS app | Apache-2.0 | |
 | androidx.wear.tiles 1.6.2, androidx.wear.protolayout 1.4.2 | Wear OS app | Apache-2.0 | |
 | androidx.wear.watchface:watchface-complications-data-source-ktx 1.3.0 | Wear OS app | Apache-2.0 | |

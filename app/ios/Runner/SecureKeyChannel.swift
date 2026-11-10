@@ -29,6 +29,9 @@ import UIKit
 //   the Keychain, reported honestly as "keychain".
 // * Items are ThisDeviceOnly and non-synchronizable: not in iCloud Keychain, not
 //   migrated to a new phone, not restorable from a backup.
+// * The one exception is the separate "openfamily_key_backup" item written by
+//   lib/services/e2ee/key_backup.dart ("keep the key through reinstalls"). It is
+//   not in storageServices below ON PURPOSE: the fresh-install wipe skips it.
 final class SecureKeyChannel {
   static let channelName = "app.openfamily/keystore"
 

@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
+
 import 'package:bip39/bip39.dart' as bip39;
 
 import '../storage_event_log.dart';
@@ -10,6 +12,7 @@ import 'e2ee_models.dart';
 import 'e2ee_trust.dart';
 import 'lanes_wire.dart';
 import 'e2ee_vault.dart';
+import 'key_backup.dart';
 
 /// This phone's identity. The private halves ([edSeed], [xSecret]) live only
 /// in memory while in use and in the [E2eeVault]; they are never sent or logged.
@@ -145,7 +148,11 @@ class LogSync {
 
 /// What [E2eeService.resetThisDevice] did.
 class KeyResetResult {
-  const KeyResetResult(this.key, {this.serverKeyRevoked = false, this.serverRejoined = false});
+  const KeyResetResult(this.key, {this.serverKeyRevoked = false, this.serverRejoined = false, this.serverKept = false});
+
+  /// The reset KEPT the built-in server key: this phone signed a re-attachment of exactly that key (same id, same
+  /// fingerprint) and the server confirmed it. Nobody is asked anything and members' choices naming that key stay valid.
+  final bool serverKept;
 
   /// This phone's new key.
   final DeviceKey key;
@@ -157,12 +164,24 @@ class KeyResetResult {
   final bool serverRejoined;
 }
 
+/// Outcome of looking for the platform copy: the identity it brought back, or null.
+class _PlatformRestore {
+  const _PlatformRestore(this.identity, {this.deferred});
+  final BackedUpIdentity? identity;
+
+  /// A copy exists but the server could not be asked: the error, so a caller that would create a new identity
+  /// fails instead (and tries again later).
+  final Object? deferred;
+}
+
 class E2eeService {
   E2eeService({
     required this.api,
     required E2eeVault vault,
     required this.trust,
     required this.userIdProvider,
+    this.keyBackup,
+    this.onPlatformRestore,
   }) : vault = TickVault(vault);
 
   final E2eeApi api;
@@ -173,14 +192,30 @@ class E2eeService {
   final TrustStore trust;
   final Future<String> Function() userIdProvider;
 
+  /// The copy of this phone's identity that survives a reinstall (see key_backup.dart). Null in the background
+  /// isolate and on platforms without one: then nothing is saved or restored.
+  final KeyBackup? keyBackup;
+
+  /// Called after an identity was brought back from [keyBackup], before anything is sealed with it (the app moves
+  /// the item sequence of that device id past the numbers the previous install used). Never key material.
+  final Future<void> Function(String deviceId)? onPlatformRestore;
+
   /// Capabilities advertised in device registration (see [kCapLanes]).
-  static const List<String> capabilities = <String>[kCapLanes, kCapChat];
+  static const List<String> capabilities = <String>[kCapLanes, kCapChat, kCapRequiredServer];
 
   static const String _seedName = 'identity_seed';
   static const String _deviceName = 'device_id';
   static const String _userName = 'identity_user';
 
   LocalIdentity? _cached;
+
+  /// Accounts whose platform copy was already looked at in this process (none, refused or unusable).
+  final Set<String> _platformChecked = <String>{};
+  Future<_PlatformRestore>? _platformInFlight;
+  String? _backupSyncedFor;
+
+  /// The background save of the platform copy started by [identity] (tests await it).
+  Future<void>? keyBackupSync;
 
   // ------------------------------------------------------------- identity
 
@@ -260,20 +295,166 @@ class E2eeService {
         throw const LocalKeyException(LocalKeyProblem.unreadable, cause: 'device id missing');
       }
     }
+    bool fresh = false;
     if (seed == null || deviceId == null) {
-      if (!create) return null;
-      StorageEventLog.instance.record('identity_created', store: 'vault');
-      seed = E2ee.randomBytes(32);
-      deviceId = E2ee.newUuid();
-      await vault.write(_seedName, seed);
-      await vault.write(_deviceName, Uint8List.fromList(utf8.encode(deviceId)));
-      await vault.write(_userName, Uint8List.fromList(utf8.encode(uid)));
+      // No identity on this phone: first look for this phone's own copy that survived a reinstall.
+      final _PlatformRestore r = await _restoreFromPlatform(uid);
+      if (r.deferred != null && create) throw r.deferred!;
+      if (r.identity != null) {
+        seed = r.identity!.seed;
+        deviceId = r.identity!.deviceId;
+      } else {
+        if (!create) return null;
+        StorageEventLog.instance.record('identity_created', store: 'vault');
+        seed = E2ee.randomBytes(32);
+        deviceId = E2ee.newUuid();
+        await vault.write(_seedName, seed);
+        await vault.write(_deviceName, Uint8List.fromList(utf8.encode(deviceId)));
+        await vault.write(_userName, Uint8List.fromList(utf8.encode(uid)));
+        fresh = true;
+      }
     }
     if (seed.length != 32) throw LocalKeyException(LocalKeyProblem.unreadable, cause: 'seed of ${seed.length} bytes');
     final (Uint8List es, Uint8List xs) = await E2ee.deriveIdentity(seed);
     final Uint8List ed = await E2ee.edPublicFromSeed(es);
     final Uint8List x = await E2ee.xPublicFromSecret(xs);
-    return _cached = LocalIdentity._(uid, deviceId, es, xs, ed, x, await E2ee.fingerprint(ed, x));
+    final LocalIdentity id = _cached = LocalIdentity._(uid, deviceId, es, xs, ed, x, await E2ee.fingerprint(ed, x));
+    if (fresh) {
+      // A new identity replaces this account's copy at once (also the stale copy of a revoked key).
+      await _saveBackup(uid, deviceId, seed);
+    } else if (_backupSyncedFor != uid) {
+      // Once per process: keep the copy in step with the live identity (and pay a pending "off").
+      final Uint8List s = seed;
+      final String d = deviceId;
+      keyBackupSync = syncKeyBackup(uid, d, s);
+    }
+    return id;
+  }
+
+  /// Saves or (when the switch is off) removes the platform copy. Never throws.
+  Future<void> syncKeyBackup(String uid, String deviceId, Uint8List seed) async {
+    final KeyBackup? kb = keyBackup;
+    if (kb == null) return;
+    _backupSyncedFor = uid;
+    try {
+      await kb.payPending();
+      if (await kb.enabled()) {
+        await kb.save(BackedUpIdentity(uid, deviceId, seed));
+      } else {
+        await kb.removeAll();
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _saveBackup(String uid, String deviceId, Uint8List seed) async {
+    final KeyBackup? kb = keyBackup;
+    if (kb == null) return;
+    _backupSyncedFor = uid;
+    await kb.save(BackedUpIdentity(uid, deviceId, seed));
+  }
+
+  /// Saves the live identity's copy now (the switch was turned on, or a reset). Never throws. False when a copy
+  /// should exist but could not be saved (the caller says so); true when saved or when there is nothing to save yet.
+  Future<bool> backUpIdentityNow() async {
+    try {
+      final KeyBackup? kb = keyBackup;
+      if (kb == null) return true;
+      final LocalIdentity? id = await identity();
+      final Uint8List? seed = await _readKey(_seedName);
+      if (id == null || seed == null) return true;
+      _backupSyncedFor = id.userId;
+      return await kb.save(BackedUpIdentity(id.userId, id.deviceId, seed));
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Brings this phone's identity back from its platform copy when, and only when:
+  ///  * the vault holds no identity (the caller checked; nothing live is ever overwritten),
+  ///  * the copy opens on this phone and names the signed-in account [uid],
+  ///  * the server lists that device id as an ACTIVE `device` key of this account with exactly the public keys the
+  ///    seed derives (a reset or revoked key, an unknown device id or other keys: refused, a fresh identity follows).
+  /// Store failures are swallowed (no copy). When a copy exists but the server cannot be asked, the result carries
+  /// the error ([_PlatformRestore.deferred]): a new identity must not replace a key that can still come back.
+  Future<_PlatformRestore> _restoreFromPlatform(String uid) {
+    final Future<_PlatformRestore>? running = _platformInFlight;
+    if (running != null) return running;
+    final Future<_PlatformRestore> f = _restoreFromPlatformOnce(uid);
+    _platformInFlight = f;
+    return f.whenComplete(() => _platformInFlight = null);
+  }
+
+  Future<_PlatformRestore> _restoreFromPlatformOnce(String uid) async {
+    final KeyBackup? kb = keyBackup;
+    if (kb == null || uid.isEmpty || _platformChecked.contains(uid)) return const _PlatformRestore(null);
+    final BackedUpIdentity? copy = await kb.load(uid);
+    if (copy == null && kb.lastMiss == KeyBackupMiss.storeError) {
+      // The store exists but could not be read (a timeout, a Play services error): a good copy MAY be there. Not
+      // "no copy": the account is not marked as checked (the next try reads again) and a caller that would create a
+      // new identity fails instead, because that would replace the only copy of a key the server still lists.
+      return _PlatformRestore(null,
+          deferred: StateError("The saved copy of this phone's encryption key could not be checked right now "
+              '(Google Play services did not answer). Try again in a moment. If this keeps happening, turn off '
+              '"Keep this phone\'s key safe through reinstalls" in Settings, Security.'));
+    }
+    if (copy == null || copy.userId != uid || copy.seed.length != 32) {
+      _platformChecked.add(uid);
+      if (copy != null) StorageEventLog.instance.record('keybackup_refused', store: 'keybackup', detail: 'reason=account');
+      return const _PlatformRestore(null);
+    }
+    final (Uint8List es, Uint8List xs) = await E2ee.deriveIdentity(copy.seed);
+    final Uint8List ed = await E2ee.edPublicFromSeed(es);
+    final Uint8List x = await E2ee.xPublicFromSecret(xs);
+    final Uint8List fp = await E2ee.fingerprint(ed, x);
+    final List<DeviceKey> mine;
+    try {
+      mine = await api.myKeys();
+    } catch (e) {
+      StorageEventLog.instance.record('keybackup_deferred', store: 'keybackup', detail: e.runtimeType.toString());
+      return _PlatformRestore(null, deferred: e);
+    }
+    DeviceKey? rec;
+    for (final DeviceKey k in mine) {
+      if (k.deviceId == copy.deviceId) rec = k;
+    }
+    String? refused;
+    if (rec == null) {
+      refused = 'unknown';
+    } else if (!rec.isActive) {
+      refused = 'revoked';
+    } else if (rec.kind != 'device' || rec.userId != uid) {
+      refused = 'kind';
+    } else if (!E2ee.constEq(rec.edPub, ed) ||
+        !E2ee.constEq(rec.xPub, x) ||
+        rec.fingerprint != E2ee.hex(fp) ||
+        !E2ee.constEq(await E2ee.fingerprint(rec.edPub, rec.xPub), fp)) {
+      refused = 'mismatch';
+    }
+    if (refused != null) {
+      _platformChecked.add(uid);
+      StorageEventLog.instance.record('keybackup_refused', store: 'keybackup', detail: 'reason=$refused');
+      return const _PlatformRestore(null);
+    }
+    // Never overwrite: another caller may have created or restored an identity meanwhile.
+    if ((await _readKey(_seedName)) != null) {
+      _platformChecked.add(uid);
+      return const _PlatformRestore(null);
+    }
+    await vault.write(_seedName, copy.seed);
+    await vault.write(_deviceName, Uint8List.fromList(utf8.encode(copy.deviceId)));
+    await vault.write(_userName, Uint8List.fromList(utf8.encode(uid)));
+    _platformChecked.add(uid);
+    _backupSyncedFor = uid;
+    StorageEventLog.instance.record('identity_restored_platform', store: 'vault', detail: kb.store.name);
+    final Future<void> Function(String)? hook = onPlatformRestore;
+    if (hook != null) {
+      try {
+        await hook(copy.deviceId);
+      } catch (e) {
+        StorageEventLog.instance.record('keybackup_hook_error', store: 'keybackup', detail: e.runtimeType.toString());
+      }
+    }
+    return _PlatformRestore(copy);
   }
 
   /// Removes this phone's keys from the live vault. Key material is archived
@@ -298,7 +479,38 @@ class E2eeService {
   /// Forgets this phone's keys locally (sign out / "erase keys"). Does not touch
   /// the server; revoke the key first if you want peers to stop wrapping to it.
   /// Key material is archived on this phone, not destroyed.
-  Future<void> eraseLocalKeys() => _wipeIdentity();
+  ///
+  /// The platform copy that survives a reinstall is removed too (an explicit erase must not come back by itself), and
+  /// this process does not look for it again. Only the copy of the account that owned the erased identity goes; when
+  /// no owner can be named every copy this app keeps goes. A copy of another account is never touched otherwise.
+  /// Returns false when the copy could not be removed: the removal is remembered and repeated before the copy is
+  /// next read or saved (it cannot be restored meanwhile), and the caller should tell the person.
+  ///
+  /// [keepReinstallCopy] leaves the copy alone: used when the local key is merely unreadable and the copy is the way
+  /// back to the very same key (it is only used if the server still lists that key as active).
+  Future<bool> eraseLocalKeys({bool keepReinstallCopy = false}) async {
+    String owner = '';
+    try {
+      owner = await storedUserId();
+    } catch (_) {}
+    await _wipeIdentity();
+    _backupSyncedFor = null;
+    final KeyBackup? kb = keyBackup;
+    if (kb == null) return true;
+    if (keepReinstallCopy) {
+      // The copy is looked at again (it may have been judged unusable earlier in this process).
+      _platformChecked.clear();
+      return true;
+    }
+    String target = owner;
+    if (target.isEmpty) {
+      try {
+        target = await userIdProvider();
+      } catch (_) {}
+    }
+    if (target.isNotEmpty) _platformChecked.add(target);
+    return kb.remove(target);
+  }
 
   /// The newest archived identity of the signed-in account that still opens,
   /// or null. Only offered while this phone has no live identity.
@@ -342,6 +554,8 @@ class E2eeService {
     }
     _cached = null;
     StorageEventLog.instance.record('identity_restored', store: 'vault', detail: 'names=$n');
+    // The platform copy follows the identity that is live now (never throws).
+    if (n > 0) await backUpIdentityNow();
     return n;
   }
 
@@ -377,7 +591,11 @@ class E2eeService {
   /// Registers this phone's PUBLIC keys. The first key of an account is a root.
   /// Otherwise it needs [approval] (a cross-signature from another device or the
   /// recovery key) unless [reset] replaces all keys (peers must then re-approve).
-  Future<DeviceKey> registerThisDevice({LinkApproval? approval, bool reset = false, String label = ''}) async {
+  ///
+  /// [keepServer] (reset only): the account's built-in server key to KEEP. This phone, as the new root, signs a
+  /// re-attachment of exactly that key (log action 13) and sends it with the reset; a server that does not know the
+  /// field revokes the key as before and the answer has no `serverKept`.
+  Future<DeviceKey> registerThisDevice({LinkApproval? approval, bool reset = false, String label = '', DeviceKey? keepServer}) async {
     final LocalIdentity id = (await identity(create: true))!;
     final List<DeviceKey> mine = await api.myKeys();
     final bool anyActive = mine.any((DeviceKey k) => k.isActive);
@@ -394,13 +612,83 @@ class E2eeService {
     }
     if (anyActive && !reset) throw const NeedsCrossSignatureException();
     final bool first = mine.isEmpty;
-    return api.register(await _registrationBody(id,
+    final Map<String, dynamic> body = await _registrationBody(id,
         kind: 'device',
         action: first ? E2ee.actRegister : E2ee.actReset,
         actorDeviceId: id.deviceId,
         actorEdSeed: id.edSeed,
         reset: !first && anyActive,
-        label: label));
+        label: label);
+    if (keepServer != null && !first && anyActive) {
+      final Uint8List sig = await E2ee.sign(id.edSeed,
+          E2ee.logActionMessage(E2ee.actServerAttach, id.userId, id.deviceId, subjectId: keepServer.deviceId, ref: E2ee.unhex(keepServer.fingerprint)));
+      body['keep_server'] = <String, dynamic>{'device_id': keepServer.deviceId, 'log_signature': E2ee.b64(sig)};
+    }
+    return api.register(body);
+  }
+
+  /// The one server key a reset may KEEP, or null. Strict: it must be an active `server` key of THIS account from this
+  /// phone's own pre-reset key list, which the VERIFIED key log shows vouched for by an approved key of this account
+  /// ([serverKeyVouched]: the registration entry is in the log and matches, the voucher chain reaches a self-registered
+  /// root), and it must be the key the server itself reports as its pinned built-in device (same id, same fingerprint).
+  /// Anything else (an unknown, foreign, unpinned, unlogged or unsigned key) is never attached: it is revoked with the
+  /// rest, as before. What the key list alone says never makes this phone sign.
+  @visibleForTesting
+  Future<DeviceKey?> serverKeyToKeep(List<DeviceKey> before) async {
+    try {
+      final ServerProfile p = await api.serverProfile();
+      final ServerDeviceInfo? pinned = p.device;
+      if (!p.builtin || pinned == null) return null;
+      final LocalIdentity? me = await identity();
+      final Map<String, DeviceKey> byId = <String, DeviceKey>{for (final DeviceKey k in before) k.deviceId: k};
+      List<LogEntry>? log;
+      for (final DeviceKey k in before) {
+        if (!k.isActive || k.kind != 'server' || k.deviceId != pinned.deviceId) continue;
+        if (me != null && k.userId != me.userId) continue;
+        if (k.fingerprint != pinned.fingerprint.toLowerCase()) continue;
+        log ??= await verifiedFullLog();
+        if (log == null || !await serverKeyVouched(log, k, byId)) continue;
+        return k;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  /// The whole key log, fetched from entry 1 and verified (chain, signatures, my pinned head). Null when it does not
+  /// verify. Throws on a transport error.
+  Future<List<LogEntry>?> verifiedFullLog() async {
+    final List<LogEntry> all = <LogEntry>[];
+    int after = 0;
+    LogHead head = LogHead(0, E2ee.genesisHash);
+    for (int page = 0; page < 200; page++) {
+      final ({List<LogEntry> entries, LogHead head}) r = await api.log(after);
+      head = r.head;
+      all.addAll(r.entries);
+      if (r.entries.isEmpty || r.entries.last.seq >= head.seq) break;
+      after = r.entries.last.seq;
+    }
+    final LogCheck check = await verifyLogSlice(pinned: await trust.pinnedHead(), entries: all, head: head);
+    return check.ok ? all : null;
+  }
+
+  /// Drops the identity this isolate cached, so the next [identity] call reads the vault again. A background isolate
+  /// that kept using a key an owner reset has since revoked calls this when the server refuses its uploads
+  /// (`device_revoked`): it then stops sealing under the old key and picks up the new one.
+  void forgetCachedIdentity() => _cached = null;
+
+  /// Drops the cached identity only when the vault now holds a different phone key than this isolate cached (an owner
+  /// reset or a restore replaced it elsewhere). True when it did. Cheap enough to call whenever the app opens.
+  Future<bool> dropStaleIdentity() async {
+    final LocalIdentity? c = _cached;
+    if (c == null) return false;
+    try {
+      final Uint8List? d = await _readKey(_deviceName);
+      if (d != null && utf8.decode(d) != c.deviceId) {
+        _cached = null;
+        return true;
+      }
+    } catch (_) {}
+    return false;
   }
 
   // ---- linking a second phone (manual ping-pong, no server round trip)
@@ -492,13 +780,20 @@ class E2eeService {
     Duration serverWait = const Duration(seconds: 20),
     Duration step = const Duration(seconds: 1),
   }) async {
+    final List<DeviceKey> before = await api.myKeys();
     final Set<String> oldServerKeys = <String>{
-      for (final DeviceKey k in await api.myKeys())
+      for (final DeviceKey k in before)
         if (k.isActive && k.kind == 'server') k.deviceId,
     };
-    final DeviceKey key = await registerThisDevice(reset: true, label: label);
+    await identity(create: true); // the new root's id and key are needed to sign the re-attachment before the request
+    final DeviceKey? keep = oldServerKeys.isEmpty ? null : await serverKeyToKeep(before);
+    final DeviceKey key = await registerThisDevice(reset: true, label: label, keepServer: keep);
+    // The copy that survives a reinstall now holds exactly the key that stays (never one the reset revoked).
+    await backUpIdentityNow();
     // Nothing was revoked (this phone's key was still active): the server key is untouched.
     if (key.registrationAction != E2ee.actReset || oldServerKeys.isEmpty) return KeyResetResult(key);
+    // The server kept its key (same id, same fingerprint): nothing to approve again.
+    if (key.serverKept && keep != null) return KeyResetResult(key, serverKept: true);
     bool rejoined;
     try {
       rejoined = await rejoinServerAfterReset(oldServerKeys, timeout: serverWait, step: step);

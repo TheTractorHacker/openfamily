@@ -408,8 +408,9 @@ class _EncryptionKeysScreenState extends State<EncryptionKeysScreen> {
       context,
       title: 'Set this phone up again?',
       message: 'The key stored on this phone cannot be read, so it is put aside on this phone (kept, not deleted, so it '
-          'can be brought back if it becomes readable again). Nothing is deleted on the '
-          'server. Next, restore with your recovery phrase or link this phone from your other phone, so it gets your '
+          'can be brought back if it becomes readable again). The copy kept for reinstalls (see Settings, Security) is '
+          'not deleted: if the server still lists that key, this phone gets the very same key back by itself. Nothing is '
+          'deleted on the server. Otherwise, restore with your recovery phrase or link this phone from your other phone, so it gets your '
           'circles back. If neither is possible, create new keys: the other members will see that your key changed, and '
           'an admin shares the circle keys with this phone again.',
       confirmLabel: 'Remove and set up',
@@ -418,7 +419,7 @@ class _EncryptionKeysScreenState extends State<EncryptionKeysScreen> {
     if (!ok || !mounted) return;
     setState(() => _busy = true);
     try {
-      await _svc.eraseLocalKeys();
+      await _svc.eraseLocalKeys(keepReinstallCopy: true);
     } catch (e) {
       debugPrint('encryption keys: erase failed (${e.runtimeType})');
     }

@@ -9,7 +9,6 @@ import '../theme/app_theme.dart';
 import '../widgets/ds/ds.dart';
 import '../widgets/add_server_sheet.dart';
 import '../widgets/processing_widgets.dart';
-import 'security_widgets.dart';
 
 /// Circle-wide processing settings. ONLY a circle admin can change them
 /// (server-enforced and signed); everybody else sees the same screen read-only
@@ -28,10 +27,9 @@ class _ProcessingPolicyScreenState extends State<ProcessingPolicyScreen> {
   ProcessingSnapshot? _s;
   bool _loading = true;
   bool _busy = false;
-  String? _error;
+  ProcessingErrorText? _error;
 
   /// What failed, so the error state can name the cause (see describeError).
-  Object? _errorCause;
 
   @override
   void initState() {
@@ -43,7 +41,6 @@ class _ProcessingPolicyScreenState extends State<ProcessingPolicyScreen> {
     setState(() {
       _loading = _s == null;
       _error = null;
-      _errorCause = null;
     });
     try {
       final ProcessingSnapshot s = await _c.load(widget.circle.id, force: true);
@@ -58,8 +55,7 @@ class _ProcessingPolicyScreenState extends State<ProcessingPolicyScreen> {
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _error = errorText(e);
-        _errorCause = e;
+        _error = processingErrorText(e);
       });
     }
   }
@@ -72,7 +68,7 @@ class _ProcessingPolicyScreenState extends State<ProcessingPolicyScreen> {
     } on LanesNotReady catch (e) {
       _say('${e.names.join(', ')} must update the app first.');
     } catch (e) {
-      _say(e is StateError ? e.message : errorText(e));
+      _say(processingErrorText(e, step: 'The setting was not saved.').message);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -134,9 +130,7 @@ class _ProcessingPolicyScreenState extends State<ProcessingPolicyScreen> {
         child: _loading
             ? const Center(child: CircularProgressIndicator())
             : _error != null && _s == null
-                ? (_errorCause != null
-                    ? LoadStateView.forError(_errorCause!, onRetry: _load)
-                    : LoadStateView(error: _error, offline: false, onRetry: _load))
+                ? DsErrorState(icon: _error!.icon, title: _error!.title, message: _error!.message, onRetry: _load)
                 : _body(_s!),
       ),
     );
@@ -153,9 +147,11 @@ class _ProcessingPolicyScreenState extends State<ProcessingPolicyScreen> {
 
   Widget _body(ProcessingSnapshot s) {
     final bool admin = s.iAmAdmin;
-    final bool canEdit = admin && !_busy && s.isPrivate && !s.legacy;
+    final bool canEdit = admin && !_busy && s.isPrivate && !s.legacy && !s.unconfirmed;
     String? blocked;
-    if (!s.isPrivate) {
+    if (s.unconfirmed) {
+      blocked = 'The current settings could not be confirmed right now, so they cannot be changed. Pull down on the previous screen to try again.';
+    } else if (!s.isPrivate) {
       blocked = 'This is not a Private circle.';
     } else if (s.legacy) {
       blocked = 'This circle is in the old trusted-server mode. Upgrade it first (Server processing > Upgrade this circle).';
@@ -206,10 +202,8 @@ class _ProcessingPolicyScreenState extends State<ProcessingPolicyScreen> {
                 'Keeping your location on your own phone is the member\'s choice. They switch it off in Settings > Server processing.',
                 s.policy.memberOptOut == E2ee.optOutAllowed, canEdit ? () => _setOptOut(E2ee.optOutAllowed) : null),
             _option(const Key('opt-required'), 'No, server processing is required',
-                'For a child\'s or teen\'s phone, or anyone whose location the server must always have, so nobody in this circle can '
-                    'keep their data from it. New members see this before they join. Each member still confirms it once on their own '
-                    'phone; until they do, their phone sends nothing to this circle (except help requests), and the only other way out '
-                    'is leaving the circle. This applies to child accounts too.',
+                'Everyone\'s phone sends its location to your Orbitly server for processing. Members cannot turn it off. Each '
+                    'member\'s phone switches over by itself, without a question; a phone that has not switched over yet cannot send positions until it has. Applies to child accounts too.',
                 s.policy.memberOptOut == E2ee.optOutRequiredServer, canEdit ? () => _setOptOut(E2ee.optOutRequiredServer) : null),
           ]),
           const DsSectionHeader('Default for members', padding: EdgeInsets.fromLTRB(0, AppSpace.xl, 0, AppSpace.xs)),
@@ -222,9 +216,10 @@ class _ProcessingPolicyScreenState extends State<ProcessingPolicyScreen> {
           ]),
           const SizedBox(height: AppSpace.sm),
           const Text(
-              'Only a member\'s own phone can put their data on the server; nobody, including admins, can do it for them. With '
-              '"Server processing" as the default their phone does it for them, shows it, and they can switch it off at any time '
-              '(unless the server\'s administrator has turned automatic switching off; then members are asked).',
+              'Only a member\'s own phone signs where their data is processed. With "Server processing" as the default their phone '
+              'does it for them, shows it, and they can switch it off at any time (unless the server\'s administrator has turned '
+              'automatic switching off; then members are asked). When server processing is required, every member\'s phone '
+              'signs it by itself and members cannot switch it off.',
               style: AppType.secondary),
         ],
         const SizedBox(height: AppSpace.xl),

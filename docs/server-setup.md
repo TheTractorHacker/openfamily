@@ -75,8 +75,10 @@ force it).
 
 In the app, create a circle. **Private, with your server (recommended)** is already selected: one tap on
 **Create** makes the circle Private, switches server processing on and makes the server the default for
-everyone who joins. (Tick **Everyone must use the server** for a circle with children's phones, where nobody
-should be able to keep their data from the server; each member then confirms it once on their own phone.)
+everyone who joins. **Require server processing** is ticked by default: every member's phone then signs its own
+server choice by itself, with no question, and members cannot turn it off (untick it to let members choose; you can
+change it later in the circle settings). The honest consequence: the admin can force it, and a member who does not
+want it can only leave the circle.
 
 When someone joins and opens the app, **their own phone** switches server processing on for them and shows a
 notice. They have nothing to do. Each person decides for themselves and can switch back at any time:

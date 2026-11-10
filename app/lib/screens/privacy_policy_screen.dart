@@ -65,7 +65,10 @@ class PrivacyPolicyScreen extends StatelessWidget {
           'only connects to HTTPS servers, encrypting network traffic in transit. In a Normal circle, '
           'locations and chat are readable by the server. In a Private circle they are end-to-end '
           'encrypted between members\' phones, except the location data of members who let the server '
-          'process it, which the server can read. Optional biometric '
+          'process it, which the server can read. A sealed copy of this phone\'s own encryption key is kept on the '
+          'phone where it survives reinstalling the app (Android: Google Play services Block Store, also stored '
+          'end-to-end encrypted in your Google account when your phone has a screen lock; iPhone: the keychain, '
+          'not synced to iCloud Keychain); turn it off in Settings, Security. Optional biometric '
           'unlock protects access to the app interface. Orbitly contains no '
           'advertising, analytics or crash-reporting SDK.'
     ),

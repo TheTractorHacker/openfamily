@@ -103,8 +103,8 @@ String processingRowSubtitle({required bool legacy, ({LaneStatus status, bool as
   switch (facts.status) {
     case LaneStatus.serverAssisted:
       return 'On for you';
-    case LaneStatus.consentRequired:
-      return 'Required in this circle: needs your OK';
+    case LaneStatus.serverPending:
+      return 'Switching on for you';
     case LaneStatus.verificationFailed:
       return 'Phone only (could not be confirmed)';
     case LaneStatus.phoneOnly:

@@ -76,6 +76,9 @@ phone** (or **Encryption keys, Link another phone**) on each. The screen first a
 No other phone? Restore with your recovery phrase instead. Without either, **No other phone?** on the same
 screen offers **Reset my keys** (see [If you reset your encryption keys](server-processing.md#if-you-reset-your-encryption-keys)).
 
+Deleting and reinstalling the app keeps your key: see
+[Reinstalling Orbitly](reinstalling.md).
+
 ## Owner approval (when you are the only admin)
 
 If you created a Private circle, are its only admin and set your own phone up

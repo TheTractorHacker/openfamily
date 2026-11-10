@@ -27,6 +27,7 @@ class DeviceKey {
     this.userName,
     this.caps = const <String>[],
     this.ownerApproved = false,
+    this.serverKept = false,
   });
 
   final String deviceId;
@@ -65,12 +66,29 @@ class DeviceKey {
   /// an admin may enable server assistance, it never grants access to anything.
   final List<String> caps;
 
+  /// Registration answer only: the reset kept the built-in server key (the server confirmed the signed re-attachment).
+  final bool serverKept;
+
   bool get supportsLanes => caps.contains(kCapLanes);
   bool get supportsChat => caps.contains(kCapChat);
+
+  /// Whether this phone signs its own lane by itself in a circle that requires server processing (an older app seals
+  /// nothing there until it updates).
+  bool get supportsRequiredServer => caps.contains(kCapRequiredServer);
 
   bool get isRecovery => kind == 'recovery';
   bool get isActive => revokedAt == null;
   bool get isRoot => registeredByDeviceId == deviceId;
+
+  /// Null for an entry that is not a readable key record.
+  static DeviceKey? tryFromJson(Object? j) {
+    if (j is! Map<String, dynamic>) return null;
+    try {
+      return DeviceKey.fromJson(j);
+    } catch (_) {
+      return null;
+    }
+  }
 
   factory DeviceKey.fromJson(Map<String, dynamic> j) => DeviceKey(
         deviceId: j['device_id'] as String,
@@ -94,6 +112,7 @@ class DeviceKey {
         revokedReason: j['revoked_reason'] as String?,
         approved: j['approved'] as bool?,
         ownerApproved: j['owner_approved'] == true,
+        serverKept: j['server_kept'] == true,
         userName: j['user_name'] as String?,
         caps: j['caps'] is List ? (j['caps'] as List<dynamic>).whereType<String>().toList() : const <String>[],
       );
@@ -101,6 +120,9 @@ class DeviceKey {
 
 /// Capability string of the processing-lanes format (v2 items, SK wraps).
 const String kCapLanes = 'lanes2';
+
+/// Capability string: signs its own server-lane choice by itself when the family admin requires server processing.
+const String kCapRequiredServer = 'reqsrv1';
 
 /// Capability string of encrypted chat (docs/design/E2EE_CHAT.md).
 const String kCapChat = 'chat2';
@@ -214,10 +236,12 @@ class CircleE2eeState {
                   userId: m['user_id'] as String,
                   name: m['name'] as String? ?? '',
                   role: m['role'] as String? ?? 'member',
-                  devices: ((m['devices'] as List<dynamic>?) ?? <dynamic>[])
-                      .cast<Map<String, dynamic>>()
-                      .map(DeviceKey.fromJson)
-                      .toList(),
+                  // One key entry the app cannot read is left out (fail closed: that key is neither trusted nor wrapped
+                  // to), instead of making the whole circle unreadable.
+                  devices: <DeviceKey>[
+                    for (final dynamic d in (m['devices'] as List<dynamic>?) ?? <dynamic>[])
+                      if (DeviceKey.tryFromJson(d) case final DeviceKey k) k
+                  ],
                 ))
             .toList(),
       );

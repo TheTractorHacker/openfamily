@@ -38,6 +38,7 @@ class FakeProcessingController implements ProcessingController {
     List<ProcessingViewer> viewers = const <ProcessingViewer>[],
     int undeliveredCount = 0,
     DateTime? optOutPendingSince,
+    String? problem,
   }) {
     final Map<String, String> names = <String, String>{pA: 'Alice', pB: 'Bob', pC: 'Carol'};
     final StoredPolicy pol = StoredPolicy(assist: assist, skGen: assist ? 1 : 0, defaultForNew: defaultForNew, memberOptOut: optOut);
@@ -49,7 +50,7 @@ class FakeProcessingController implements ProcessingController {
       status: status ??
           (meServer
               ? LaneStatus.serverAssisted
-              : (assist && optOut == E2ee.optOutRequiredServer ? LaneStatus.consentRequired : LaneStatus.phoneOnly)),
+              : (assist && optOut == E2ee.optOutRequiredServer ? LaneStatus.serverPending : LaneStatus.phoneOnly)),
       iAmAdmin: admin,
       legacy: legacy,
       legacyAccessOpen: legacyAccessOpen,
@@ -57,6 +58,7 @@ class FakeProcessingController implements ProcessingController {
       undeliveredCount: undeliveredCount,
       undeliveredCode: undeliveredCount > 0 ? 'required_server' : '',
       optOutPendingSince: optOutPendingSince,
+      problem: problem,
       notReady: notReady,
       serverKeyShort: serverKey ? 'ab12 cd34' : null,
       serverKeyDigits: serverKey ? '11111 22222 33333' : null,
@@ -99,6 +101,14 @@ class FakeProcessingController implements ProcessingController {
     _maybeFail();
     if (snap.notReady.isNotEmpty && assist && !snap.assistOn) throw LanesNotReady(snap.notReady);
     calls.add('policy:$assist:${E2ee.lineName(defaultForNew)}:${E2ee.optOutName(memberOptOut)}');
+  }
+
+  @override
+  Future<void> setRequireServer(String circleId, bool on) async {
+    _maybeFail();
+    calls.add('require:$on');
+    snap = FakeProcessingController.snapshot(
+        me: me, admin: snap.iAmAdmin, optOut: on ? E2ee.optOutRequiredServer : E2ee.optOutAllowed, defaultForNew: E2ee.lineServer);
   }
 
   @override

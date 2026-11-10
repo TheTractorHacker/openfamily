@@ -121,6 +121,9 @@ dependencies {
     // Wear OS companion bridge (WatchBridgePlugin.kt). Talks to a paired watch
     // over the Wearable Data Layer; unused (no-op) without Play services.
     implementation("com.google.android.gms:play-services-wearable:19.0.0")
+    // "Keep this phone's key safe through reinstalls" (KeyBackupChannel.kt): Block Store,
+    // local only, survives an uninstall when Google backup is on.
+    implementation("com.google.android.gms:play-services-auth-blockstore:16.4.0")
 }
 
 // unifiedpush/webpush pull JVM tink; flutter_secure_storage pulls tink-android.

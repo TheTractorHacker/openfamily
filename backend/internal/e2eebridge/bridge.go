@@ -264,7 +264,7 @@ func (b *bridge) verifyLog(ctx context.Context) error {
 				Hash string `json:"hash"`
 			} `json:"head"`
 		}
-		if err := b.api.do(ctx, "GET", "/e2ee/log?after="+strconv.FormatInt(after, 10), nil, &resp); err != nil {
+		if err := b.api.do(ctx, "GET", "/e2ee/log?server_attach=1&after="+strconv.FormatInt(after, 10), nil, &resp); err != nil {
 			return nil, e2ee.LogHead{}, err
 		}
 		h, err := hex.DecodeString(resp.Head.Hash)
@@ -354,6 +354,14 @@ func (b *bridge) trust(st *circleState) e2ee.Trust {
 	t := e2ee.Trust{Index: b.logIdx, Members: st.Members, OwnUserID: b.id.f.UserID}
 	if b.id.f.ApprovedBy != "" && b.id.f.ApproverEdPub != "" {
 		t.Anchor = &e2ee.Anchor{DeviceID: b.id.f.ApprovedBy, EdPub: b.id.f.ApproverEdPub}
+	}
+	// A server key kept across an owner reset hangs on the new root phone that re-attached it. The log says so on its
+	// own, so a device that missed the live move of its anchor (restart, failed write) still finds it: derived from
+	// the verified log only, for this very key and fingerprint, never from the API's say-so.
+	if b.id.f.RegisteredAt != "" {
+		if a, ok := b.logIdx.KeptAnchor(b.id.f.DeviceID, hex.EncodeToString(b.id.fp)); ok {
+			t.Anchor = a
+		}
 	}
 	return t
 }

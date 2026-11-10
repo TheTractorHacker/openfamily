@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../services/api_client.dart' show ApiException;
+import '../services/e2ee/e2ee_service.dart' show LocalKeyException, localKeyProblemOf;
 import '../services/e2ee/private_channel.dart' show ProcessingBadge;
 import '../theme/app_theme.dart';
 import 'ds/ds.dart';
@@ -43,11 +45,27 @@ class ProcessingCopy {
 
   static const String requiredTitle = 'Require server processing?';
   static const String requiredBody =
-      'Members will no longer be able to keep their data on their phone in this circle. New members see this before they '
-      'join. Existing members are asked to give their own consent or leave the circle; until they do, their phone sends '
-      'nothing to this circle (except help requests).\n\n'
-      'Only a member\'s own phone can put their data on the server. You cannot do it for them, and every change is a signed '
-      'entry in the key log that all members can see.\n\n$operatorCanRead';
+      'Everyone\'s phone sends its location to your Orbitly server for processing. Members cannot turn it off.\n\n'
+      'Each member\'s own phone signs this by itself the next time it runs; nobody is asked and a phone '
+      'that has not switched over yet cannot send positions until it has (check-ins, events and chat are not affected). Members see a notice that '
+      'you require it. Every change is a signed entry in the key log that all members can see.\n\n$operatorCanRead';
+
+  /// The one owner switch on the circle settings screen.
+  static const String requireSwitchTitle = 'Require server processing';
+  static const String requireSwitchBody =
+      'Everyone\'s phone sends its location to your Orbitly server for processing. Members cannot turn it off.';
+
+  /// What a member sees when the admin requires it.
+  static const String requiredNoticeTitle = 'Your family admin requires server processing.';
+  static const String requiredNoticeBody =
+      'Your phone sends your location to your Orbitly server for processing. Members cannot turn it off. $operatorCanRead';
+  static const String requiredCatchingUp =
+      'Your phone is switching over by itself. Until it has, positions from this phone are not delivered (check-ins and emergency alerts still are). If this does not clear up soon, update the app.';
+
+  /// A member whose phone has not switched over yet while the admin requires it.
+  static const String catchingUp = 'Catching up';
+  static const String catchingUpInfo =
+      'Their phone signs the choice the next time it runs. Until then their positions may not arrive (check-ins and emergency alerts still do). An app that is too old needs an update first.';
 
   // ---- member: opt out / opt in
   static const String optOutTitle = 'Keep your data on your phone only?';
@@ -96,7 +114,7 @@ class ProcessingCopy {
       'processed the history you need. It cannot be undone. Plain copies the server already made stay until they are deleted.';
 }
 
-/// "Processed by server" / "Phone only" / "Not chosen yet" chip. Colours: the app accent for the server (the normal,
+/// "Processed by server" / "Phone only" / "Not confirmed" chip. Colours: the app accent for the server (the normal,
 /// recommended mode, so never amber), a calm blue for phone only, neutral grey for undecided, red only when a lane
 /// could not be confirmed.
 class ProcessingBadgeChip extends StatelessWidget {
@@ -116,12 +134,12 @@ class ProcessingBadgeChip extends StatelessWidget {
   }
 }
 
-/// Neutral chip for a member who has not made a choice yet (their data stays on their phone until they do).
-class NotChosenChip extends StatelessWidget {
-  const NotChosenChip({super.key});
+/// Neutral chip for a member whose phone is still switching over to what the admin requires (its positions wait until it has).
+class CatchingUpChip extends StatelessWidget {
+  const CatchingUpChip({super.key});
   @override
   Widget build(BuildContext context) =>
-      const DsStatusChip(label: 'Not chosen yet', icon: Icons.hourglass_empty, color: AppColors.statusGrey);
+      const DsStatusChip(label: ProcessingCopy.catchingUp, icon: Icons.sync, color: AppColors.statusGrey);
 }
 
 /// Chip for a member lane (true = server).
@@ -261,4 +279,53 @@ class ProcessingNote extends StatelessWidget {
       ]),
     );
   }
+}
+
+/// A load or action failure of the server processing screens, in plain words: what went wrong and what to do.
+class ProcessingErrorText {
+  const ProcessingErrorText(this.title, this.message, {this.offline = false, this.icon = Icons.error_outline});
+  final String title;
+  final String message;
+  final bool offline;
+  final IconData icon;
+}
+
+/// The messages [ApiClient] uses for "no answer at all" (status 0 also covers "the answer could not be read").
+bool _noConnection(ApiException e) =>
+    e.status == 0 && (e.message.startsWith('Could not reach the server') || e.message.contains('timed out'));
+
+/// Specific, plain words for [e]; never "Something went wrong". [step] names what this screen was doing.
+ProcessingErrorText processingErrorText(Object e, {String step = "Could not check this circle's server processing settings."}) {
+  if (e is ApiException) {
+    if (_noConnection(e)) {
+      return const ProcessingErrorText('No connection', 'You appear to be offline. Check your connection and try again.',
+          offline: true, icon: Icons.cloud_off);
+    }
+    if (e.status == 0) return ProcessingErrorText("The server's answer could not be read", '$step ${e.message}');
+    if (e.status == 429) return const ProcessingErrorText('Please wait a moment', 'Too many requests. Wait a minute and try again.');
+    if (e.status >= 500) return const ProcessingErrorText('The server had a problem', 'The server had a problem. Try again shortly.');
+    if (e.status == 403 && e.message.toLowerCase().contains('approv')) {
+      return const ProcessingErrorText('Waiting for approval',
+          'This phone is waiting to be approved in this circle. A circle admin approves it once; pull down to check again after that.',
+          icon: Icons.hourglass_top);
+    }
+    if (e.status == 404) {
+      return const ProcessingErrorText('Circle not found', 'This circle could not be found. You may have left it or it was deleted.');
+    }
+    return ProcessingErrorText('Could not load server processing', '$step The server said: ${e.message}');
+  }
+  final LocalKeyException? k = localKeyProblemOf(e);
+  if (k != null) return ProcessingErrorText("This phone's encryption key cannot be opened right now", k.message, icon: Icons.key_off_outlined);
+  if (e is StateError && e.message.toLowerCase().contains('approv')) {
+    return const ProcessingErrorText('Waiting for approval',
+        'This phone is waiting to be approved in this circle. A circle admin approves it once; pull down to check again after that.',
+        icon: Icons.hourglass_top);
+  }
+  if (e is StateError && e.message.isNotEmpty) return ProcessingErrorText('Could not finish', e.message);
+  if (e is FormatException || e is TypeError) {
+    // A reply that is not what this app expects (a server that was busy or is being updated): not a connection problem.
+    return ProcessingErrorText("The server's answer could not be read", '$step The server sent something this app did not expect. Try again in a moment.');
+  }
+  return ProcessingErrorText('Could not load server processing',
+      '$step Your position is never sent unencrypted meanwhile. Try again in a moment.');
 }
