@@ -494,7 +494,7 @@ void main() {
         readErrors: () => const <String, String>{'A': 'PlatformException'},
         vault: v,
       );
-      expect(line, 'tokens=D token_errors=A identity=ok keys=1');
+      expect(line, 'tokens=D token_errors=A identity=ok owner=missing keys=1');
       expect((await events()).last, contains('selfcheck'));
     });
 

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -48,17 +49,44 @@ enum LocalKeyProblem {
   locked,
 }
 
+/// Why [LocalKeyException.cause] says the key could not be used (fixed reason codes; the other causes are the type
+/// name of a platform failure). Reason codes only, never key material or ids.
+abstract final class KeyCause {
+  /// No account id to compare the stored key with (the foreground profile had none, or the background isolate found no
+  /// owner entry in the vault).
+  static const String emptyUserId = 'empty-user-id';
+
+  /// The stored "which account does this key belong to" note is not readable text.
+  static const String ownerFormat = 'owner-format';
+
+  /// The seed is stored but the note of this phone's id next to it is missing.
+  static const String deviceIdMissing = 'device-id-missing';
+  static const String deviceIdFormat = 'device-id-format';
+
+  /// The stored seed does not have the size of a key.
+  static const String seedLength = 'seed-length';
+}
+
 /// This phone cannot sign or open anything because its own key is not usable.
 /// Raised instead of a bare null-check failure, so screens can say what is
 /// wrong and offer the repair (Encryption keys) instead of "can't reach the server".
 class LocalKeyException implements Exception {
-  const LocalKeyException(this.problem, {this.cause = ''});
+  const LocalKeyException(this.problem, {this.cause = '', this.which = ''});
   final LocalKeyProblem problem;
 
-  /// Type name of the underlying failure (for logs; never key material).
+  /// A [KeyCause] reason code, or the type name of the underlying failure (for logs; never key material).
   final String cause;
 
-  /// Short, user-facing reason with the next step.
+  /// Which stored entry could not be read when [cause] is a platform failure: `seed`, `device_id` or `owner`.
+  /// Empty for the fixed reasons in [KeyCause].
+  final String which;
+
+  /// One short code for logs and the delivery line (`owner-read-PlatformException`, `empty-user-id`...). Empty when
+  /// nothing more is known.
+  String get reasonCode => which.isEmpty ? cause : '${which.replaceAll('_', '-')}-read${cause.isEmpty ? '' : '-$cause'}';
+
+  /// Short, user-facing reason with the next step. Works from anywhere in the app (it points at the Encryption keys
+  /// screen); the screen itself uses [screenMessage].
   String get message {
     switch (problem) {
       case LocalKeyProblem.missing:
@@ -73,8 +101,77 @@ class LocalKeyException implements Exception {
     }
   }
 
+  /// [message] for the Encryption keys screen, which must not tell the person to open the screen they are on.
+  String get screenMessage {
+    switch (problem) {
+      case LocalKeyProblem.missing:
+        return 'This phone has no encryption key.';
+      case LocalKeyProblem.unreadable:
+        return "This phone's encryption key could not be read.";
+      case LocalKeyProblem.invalidated:
+        return "This phone's key storage was reset, so its encryption key is lost.";
+      case LocalKeyProblem.locked:
+        return message;
+    }
+  }
+
+  /// What is actually wrong, in plain words, when the cause is known; empty otherwise. Says what was NOT changed.
+  String get whatIsWrong {
+    if (problem != LocalKeyProblem.unreadable) return '';
+    if (which.isNotEmpty) {
+      return "This phone's secure storage did not hand over the ${which == 'owner' ? 'note of which account the key belongs to' : which == 'device_id' ? "note of this phone's id" : 'key'} "
+          'just now. Nothing was changed or deleted.';
+    }
+    switch (cause) {
+      case KeyCause.ownerFormat:
+        return 'This phone lost the note of which account the key belongs to (it is damaged). The key itself is stored '
+            'and has not been changed.';
+      case KeyCause.emptyUserId:
+        return 'The app could not tell which account is signed in, so it did not open the key. The key is stored and '
+            'has not been changed.';
+      case KeyCause.deviceIdMissing:
+        return "The key is stored, but the note of this phone's id that belongs to it is missing. Nothing was changed.";
+      case KeyCause.deviceIdFormat:
+        return "The key is stored, but the note of this phone's id that belongs to it is damaged. Nothing was changed.";
+      case KeyCause.seedLength:
+        return 'The stored key does not have the size of a key, so it cannot be used.';
+    }
+    return '';
+  }
+
+  /// Whether the stored key is known to be intact and only something around it is missing or cannot be read now.
+  bool get keyIntact => problem == LocalKeyProblem.unreadable && cause != KeyCause.seedLength && whatIsWrong.isNotEmpty;
+
+  /// Whether [E2eeService.repairOwnerRecord] can fix this (the key is intact; only the account note is damaged).
+  bool get ownerRepairable => problem == LocalKeyProblem.unreadable && cause == KeyCause.ownerFormat;
+
   @override
-  String toString() => 'LocalKeyException(${problem.name}${cause.isEmpty ? '' : ', $cause'})';
+  String toString() => 'LocalKeyException(${problem.name}${cause.isEmpty ? '' : ', $cause'}${which.isEmpty ? '' : ', $which'})';
+}
+
+/// What [E2eeService.repairOwnerRecord] did.
+enum OwnerRepair {
+  /// The note of which account the key belongs to is fine (or there is no key to attach it to).
+  notNeeded,
+
+  /// The note was missing, empty or damaged; it was written again after the server confirmed this phone's key
+  /// belongs to the signed-in account. The key was not touched.
+  repaired,
+
+  /// The server could not be asked (offline, session), so nothing was changed. Try again later.
+  offline,
+
+  /// The server does not list this phone's key as active under the signed-in account: nothing was changed.
+  notOurs,
+
+  /// The note names another account: never adopted, never overwritten.
+  otherAccount,
+
+  /// No signed-in account id is known right now.
+  noAccount,
+
+  /// The stored key or its device id cannot be used for the check (nothing is written).
+  noKey,
 }
 
 /// The [LocalKeyException] that [e] amounts to, or null when [e] is not about
@@ -91,6 +188,17 @@ class NeedsCrossSignatureException implements Exception {
   @override
   String toString() =>
       'This account already has encryption keys. Link this phone from your other device, restore with your recovery phrase, or reset your keys.';
+}
+
+enum _OwnerState { missing, empty, garbled, set }
+
+class _Owner {
+  const _Owner(this.state, [this.id0]);
+  final _OwnerState state;
+  final String? id0;
+
+  /// The account id, or null when the note is missing, empty or damaged.
+  String? get id => state == _OwnerState.set ? id0 : null;
 }
 
 class RecoverySetup {
@@ -221,22 +329,55 @@ class E2eeService {
 
   Future<bool> hasIdentity() async => (await _readKey(_seedName)) != null;
 
+  /// Reason codes for log lines: which entry a vault read was for.
+  static String _whichOf(String name) => name == _seedName
+      ? 'seed'
+      : name == _deviceName
+          ? 'device_id'
+          : name == _userName
+              ? 'owner'
+              : '';
+
+  /// Records a refusal to use the key in the storage event log (reason codes only, never key material or ids), at most
+  /// once per half hour per distinct line so a retry loop cannot fill the ring buffer.
+  final Map<String, DateTime> _eventSeen = <String, DateTime>{};
+  void _noteKeyEvent(String code, String detail) {
+    final String k = '$code $detail';
+    final DateTime now = DateTime.now();
+    final DateTime? last = _eventSeen[k];
+    if (last != null && now.difference(last) < const Duration(minutes: 30)) return;
+    _eventSeen[k] = now;
+    StorageEventLog.instance.record(code, store: 'vault', detail: detail);
+  }
+
+  /// The exception for "this stored identity cannot be used", recorded with its reason. [detail] adds short
+  /// non-secret facts (`owner=missing`).
+  LocalKeyException _unusable(String cause, {String detail = ''}) {
+    _noteKeyEvent('identity_unreadable', 'cause=$cause${detail.isEmpty ? '' : ' $detail'}');
+    return LocalKeyException(LocalKeyProblem.unreadable, cause: cause);
+  }
+
   /// A vault read for identity material. The two vault exceptions that already
   /// say what happened pass through; anything else the platform throws (a
   /// Keystore error, a missing channel, a blob that does not decode) becomes
   /// [LocalKeyException] `unreadable`, so no caller mistakes it for a network
-  /// failure. Never regenerates anything.
+  /// failure. Never regenerates anything. The failure is recorded with the entry it was for.
   Future<Uint8List?> _readKey(String name) async {
+    final String which = _whichOf(name);
     try {
       return await vault.read(name);
-    } on VaultInvalidatedException {
+    } on VaultInvalidatedException catch (e) {
+      _noteKeyEvent('identity_read_failed', 'which=$which cause=${e.runtimeType}');
       rethrow;
-    } on VaultLockedException {
+    } on VaultLockedException catch (e) {
+      _noteKeyEvent('identity_read_failed', 'which=$which cause=${e.runtimeType}');
       rethrow;
     } on VaultUnreadableException catch (e) {
-      throw LocalKeyException(LocalKeyProblem.unreadable, cause: e.toString());
+      _noteKeyEvent('identity_read_failed', 'which=$which stage=${e.stage}${e.cause.isEmpty ? '' : ' cause=${e.cause}'}');
+      throw LocalKeyException(LocalKeyProblem.unreadable, cause: 'vault-${e.stage}', which: which);
     } catch (e) {
-      throw LocalKeyException(LocalKeyProblem.unreadable, cause: e.runtimeType.toString());
+      _noteKeyEvent('identity_read_failed', 'which=$which cause=${e.runtimeType}');
+      throw LocalKeyException(LocalKeyProblem.unreadable, cause: e.runtimeType.toString(), which: which);
     }
   }
 
@@ -246,53 +387,98 @@ class E2eeService {
   /// [userIdProvider] (network, session) pass through unchanged.
   Future<LocalIdentity> requireIdentity() async {
     final LocalIdentity? id = await identity();
-    if (id == null) throw const LocalKeyException(LocalKeyProblem.missing);
+    if (id == null) {
+      _noteKeyEvent('identity_missing', 'no seed in the vault');
+      throw const LocalKeyException(LocalKeyProblem.missing);
+    }
     return id;
   }
 
   /// The account the stored identity belongs to (for the headless background
-  /// isolate, which cannot ask the API who is signed in).
+  /// isolate, which cannot ask the API who is signed in). Empty when the vault has no usable note of it: the
+  /// foreground repairs that (see [repairOwnerRecord]) and this isolate then picks it up on its next run.
   Future<String> storedUserId() async {
-    final Uint8List? u = await vault.read(_userName);
-    return u == null ? '' : utf8.decode(u);
+    final _Owner o = await _readOwner();
+    return o.id ?? '';
   }
+
+  /// The stored account note, classified. A vault failure throws like any identity read.
+  Future<_Owner> _readOwner() async {
+    final Uint8List? raw = await _readKey(_userName);
+    if (raw == null) return const _Owner(_OwnerState.missing);
+    final String id;
+    try {
+      id = utf8.decode(raw);
+    } on FormatException {
+      return const _Owner(_OwnerState.garbled);
+    }
+    return id.isEmpty ? const _Owner(_OwnerState.empty) : _Owner(_OwnerState.set, id);
+  }
+
+  /// A create that is writing the three identity entries in this isolate, so a concurrent reader waits for it
+  /// instead of reporting a half-written identity.
+  Future<void>? _creating;
+
+  /// Set when the stored account note is missing and the server could not confirm this phone's key yet.
+  bool _ownerUnconfirmed = false;
+  DateTime? _ownerTriedAt;
+  Future<OwnerRepair>? _ownerRepairing;
 
   /// Loads (or, with [create], generates) this phone's identity. Generation
   /// happens on the device; only public keys are ever uploaded.
+  ///
+  /// Never overwrites or deletes a stored seed. A missing, empty or damaged account note next to an intact seed is
+  /// written again, but only after the server confirmed that the signed-in account owns this device's registered key
+  /// ([repairOwnerRecord]).
   Future<LocalIdentity?> identity({bool create = false}) async {
     final LocalIdentity? c = _cached;
-    if (c != null) return c;
+    if (c != null) {
+      if (_ownerUnconfirmed) _retryOwnerRepairSoon();
+      return c;
+    }
+    final Future<void>? writing = _creating;
+    if (writing != null) {
+      try {
+        await writing;
+      } catch (_) {}
+    }
     final String uid = await userIdProvider();
     Uint8List? seed = await _readKey(_seedName);
-    final Uint8List? owner = await _readKey(_userName);
-    String? ownerId;
-    try {
-      ownerId = owner == null ? null : utf8.decode(owner);
-    } on FormatException {
-      throw const LocalKeyException(LocalKeyProblem.unreadable, cause: 'FormatException');
-    }
-    // An empty answer is not "another account": never wipe on it.
-    if (uid.isEmpty && seed != null) throw const LocalKeyException(LocalKeyProblem.unreadable, cause: 'empty user id');
-    if (seed != null && ownerId != null && ownerId != uid) {
-      // A different account signed in on this phone: its identity is not ours. It is put aside (archived, still
-      // wrapped by the Keystore key), never destroyed, so signing back in to that account can restore it.
-      StorageEventLog.instance.record('identity_archived', store: 'vault', detail: 'reason=other account');
-      await _wipeIdentity();
-      seed = null;
+    final _Owner owner = await _readOwner();
+    bool ownerNeedsCheck = false;
+    if (seed != null) {
+      if (uid.isEmpty) throw _unusable(KeyCause.emptyUserId, detail: 'owner=${owner.state.name}');
+      if (owner.id == null) {
+        ownerNeedsCheck = true;
+      } else if (owner.id != uid) {
+        // A different account signed in on this phone: its identity is not ours. It is put aside (archived, still
+        // wrapped by the Keystore key), never destroyed, so signing back in to that account can restore it.
+        StorageEventLog.instance.record('identity_archived', store: 'vault', detail: 'reason=other account');
+        await _wipeIdentity();
+        seed = null;
+        ownerNeedsCheck = false;
+      }
     }
     String? deviceId;
     if (seed != null) {
-      final Uint8List? d = await _readKey(_deviceName);
+      Uint8List? d = await _readKey(_deviceName);
+      if (d == null && _creating != null) {
+        // This isolate is in the middle of writing the identity: wait for it and look again.
+        try {
+          await _creating;
+        } catch (_) {}
+        d = await _readKey(_deviceName);
+      }
       try {
         deviceId = d == null ? null : utf8.decode(d);
       } on FormatException {
-        throw const LocalKeyException(LocalKeyProblem.unreadable, cause: 'FormatException');
+        throw _unusable(KeyCause.deviceIdFormat);
       }
       // A seed without its device id is a partial read (or a half-finished write), never "no key": generating a
       // new identity here would overwrite the real seed. Report it; the stored seed stays as it is.
       if (deviceId == null) {
         StorageEventLog.instance.record('identity_partial', store: 'vault', detail: 'seed without device id');
-        throw const LocalKeyException(LocalKeyProblem.unreadable, cause: 'device id missing');
+        throw _unusable(KeyCause.deviceIdMissing);
       }
     }
     bool fresh = false;
@@ -305,19 +491,28 @@ class E2eeService {
         deviceId = r.identity!.deviceId;
       } else {
         if (!create) return null;
-        StorageEventLog.instance.record('identity_created', store: 'vault');
-        seed = E2ee.randomBytes(32);
-        deviceId = E2ee.newUuid();
-        await vault.write(_seedName, seed);
-        await vault.write(_deviceName, Uint8List.fromList(utf8.encode(deviceId)));
-        await vault.write(_userName, Uint8List.fromList(utf8.encode(uid)));
+        final (Uint8List, String)? made = await _serialCreate(uid);
+        // A seed appeared while this call waited (another caller created or restored it): never replace it.
+        if (made == null) return identity(create: create);
+        seed = made.$1;
+        deviceId = made.$2;
         fresh = true;
       }
     }
-    if (seed.length != 32) throw LocalKeyException(LocalKeyProblem.unreadable, cause: 'seed of ${seed.length} bytes');
+    if (seed.length != 32) throw _unusable(KeyCause.seedLength);
     final (Uint8List es, Uint8List xs) = await E2ee.deriveIdentity(seed);
     final Uint8List ed = await E2ee.edPublicFromSeed(es);
     final Uint8List x = await E2ee.xPublicFromSecret(xs);
+    if (ownerNeedsCheck) {
+      // The key is intact; only the note of which account it belongs to is missing, empty or damaged.
+      final OwnerRepair r = await _guardedOwnerRepair(uid, deviceId, ed, x);
+      if (r != OwnerRepair.repaired && r != OwnerRepair.notNeeded) {
+        if (owner.state == _OwnerState.garbled) throw _unusable(KeyCause.ownerFormat, detail: 'repair=${r.name}');
+        // A missing or empty note was always tolerated in the foreground; the repair is tried again later.
+        _ownerUnconfirmed = true;
+        _noteKeyEvent('owner_unconfirmed', 'owner=${owner.state.name} repair=${r.name}');
+      }
+    }
     final LocalIdentity id = _cached = LocalIdentity._(uid, deviceId, es, xs, ed, x, await E2ee.fingerprint(ed, x));
     if (fresh) {
       // A new identity replaces this account's copy at once (also the stale copy of a revoked key).
@@ -329,6 +524,134 @@ class E2eeService {
       keyBackupSync = syncKeyBackup(uid, d, s);
     }
     return id;
+  }
+
+  Future<void>? _createTail;
+
+  /// Generates and stores a new identity, one caller at a time, and only while no seed exists. Null when a seed is
+  /// there by now.
+  Future<(Uint8List, String)?> _serialCreate(String uid) async {
+    final Future<void>? prev = _createTail;
+    final Completer<void> mine = Completer<void>();
+    _createTail = mine.future;
+    try {
+      if (prev != null) await prev;
+      if ((await _readKey(_seedName)) != null) return null;
+      StorageEventLog.instance.record('identity_created', store: 'vault');
+      final Uint8List seed = E2ee.randomBytes(32);
+      final String deviceId = E2ee.newUuid();
+      final Future<void> write = _writeIdentity(seed, deviceId, uid);
+      _creating = write;
+      try {
+        await write;
+      } finally {
+        _creating = null;
+      }
+      return (seed, deviceId);
+    } finally {
+      mine.complete();
+    }
+  }
+
+  /// Writes a new identity. The seed goes LAST: "a seed exists" then means the device id and the account note are
+  /// already there, so a reader in another isolate never sees a half-written identity, and a write that fails midway
+  /// leaves no seed (the next call creates again) instead of a seed without its device id.
+  Future<void> _writeIdentity(Uint8List seed, String deviceId, String uid) async {
+    await vault.write(_deviceName, Uint8List.fromList(utf8.encode(deviceId)));
+    await vault.write(_userName, Uint8List.fromList(utf8.encode(uid)));
+    await vault.write(_seedName, seed);
+  }
+
+  /// Retries a pending owner-note repair in the background, at most once a minute.
+  void _retryOwnerRepairSoon() {
+    final DateTime now = DateTime.now();
+    final DateTime? t = _ownerTriedAt;
+    if (_ownerRepairing != null || (t != null && now.difference(t) < const Duration(minutes: 1))) return;
+    _ownerTriedAt = now;
+    unawaited(repairOwnerRecord().catchError((Object _) => OwnerRepair.offline));
+  }
+
+  Future<OwnerRepair> _guardedOwnerRepair(String uid, String deviceId, Uint8List ed, Uint8List x) {
+    final Future<OwnerRepair>? running = _ownerRepairing;
+    if (running != null) return running;
+    _ownerTriedAt = DateTime.now();
+    final Future<OwnerRepair> f = _confirmAndWriteOwner(uid, deviceId, ed, x).catchError((Object e) {
+      _noteKeyEvent('owner_repair_error', e.runtimeType.toString());
+      return OwnerRepair.offline;
+    });
+    _ownerRepairing = f;
+    return f.whenComplete(() => _ownerRepairing = null);
+  }
+
+  /// Writes the signed-in account's id as this key's owner note, when and only when it is missing, empty or damaged
+  /// AND the server lists this device id as an active `device` key of that account with exactly the public keys the
+  /// stored seed derives. Never touches the seed or the device id, never replaces a note naming another account,
+  /// never runs after a vault read failure.
+  Future<OwnerRepair> repairOwnerRecord() async {
+    final String uid = await userIdProvider();
+    if (uid.isEmpty) return OwnerRepair.noAccount;
+    final Uint8List? seed = await _readKey(_seedName);
+    final Uint8List? d = await _readKey(_deviceName);
+    if (seed == null || d == null || seed.length != 32) return OwnerRepair.noKey;
+    final String deviceId;
+    try {
+      deviceId = utf8.decode(d);
+    } on FormatException {
+      return OwnerRepair.noKey;
+    }
+    if (deviceId.isEmpty) return OwnerRepair.noKey;
+    final _Owner o = await _readOwner();
+    if (o.id != null) return o.id == uid ? OwnerRepair.notNeeded : OwnerRepair.otherAccount;
+    final (Uint8List es, Uint8List xs) = await E2ee.deriveIdentity(seed);
+    final Uint8List ed = await E2ee.edPublicFromSeed(es);
+    final Uint8List x = await E2ee.xPublicFromSecret(xs);
+    final OwnerRepair r = await _guardedOwnerRepair(uid, deviceId, ed, x);
+    if (r == OwnerRepair.repaired || r == OwnerRepair.notNeeded) {
+      _ownerUnconfirmed = false;
+    }
+    return r;
+  }
+
+  Future<OwnerRepair> _confirmAndWriteOwner(String uid, String deviceId, Uint8List ed, Uint8List x) async {
+    final List<DeviceKey> mine;
+    try {
+      mine = await api.myKeys();
+    } catch (e) {
+      _noteKeyEvent('owner_repair_deferred', e.runtimeType.toString());
+      return OwnerRepair.offline;
+    }
+    final Uint8List fp = await E2ee.fingerprint(ed, x);
+    final String? refused = await _refuseServerRecord(mine, uid, deviceId, ed, x, fp);
+    if (refused != null) {
+      _noteKeyEvent('owner_repair_refused', 'reason=$refused');
+      return OwnerRepair.notOurs;
+    }
+    // Look again right before writing: another isolate may have written the note meanwhile.
+    final _Owner now = await _readOwner();
+    if (now.id != null) return now.id == uid ? OwnerRepair.notNeeded : OwnerRepair.otherAccount;
+    await vault.write(_userName, Uint8List.fromList(utf8.encode(uid)));
+    _ownerUnconfirmed = false;
+    StorageEventLog.instance.record('owner_repaired', store: 'vault', detail: 'was=${now.state.name}');
+    return OwnerRepair.repaired;
+  }
+
+  /// Why the server's key list does not vouch for [deviceId] under [uid] with exactly these public keys, or null when
+  /// it does (an ACTIVE `device` key of that account, same public keys, same fingerprint).
+  Future<String?> _refuseServerRecord(List<DeviceKey> mine, String uid, String deviceId, Uint8List ed, Uint8List x, Uint8List fp) async {
+    DeviceKey? rec;
+    for (final DeviceKey k in mine) {
+      if (k.deviceId == deviceId) rec = k;
+    }
+    if (rec == null) return 'unknown';
+    if (!rec.isActive) return 'revoked';
+    if (rec.kind != 'device' || rec.userId != uid) return 'kind';
+    if (!E2ee.constEq(rec.edPub, ed) ||
+        !E2ee.constEq(rec.xPub, x) ||
+        rec.fingerprint != E2ee.hex(fp) ||
+        !E2ee.constEq(await E2ee.fingerprint(rec.edPub, rec.xPub), fp)) {
+      return 'mismatch';
+    }
+    return null;
   }
 
   /// Saves or (when the switch is off) removes the platform copy. Never throws.
@@ -413,23 +736,7 @@ class E2eeService {
       StorageEventLog.instance.record('keybackup_deferred', store: 'keybackup', detail: e.runtimeType.toString());
       return _PlatformRestore(null, deferred: e);
     }
-    DeviceKey? rec;
-    for (final DeviceKey k in mine) {
-      if (k.deviceId == copy.deviceId) rec = k;
-    }
-    String? refused;
-    if (rec == null) {
-      refused = 'unknown';
-    } else if (!rec.isActive) {
-      refused = 'revoked';
-    } else if (rec.kind != 'device' || rec.userId != uid) {
-      refused = 'kind';
-    } else if (!E2ee.constEq(rec.edPub, ed) ||
-        !E2ee.constEq(rec.xPub, x) ||
-        rec.fingerprint != E2ee.hex(fp) ||
-        !E2ee.constEq(await E2ee.fingerprint(rec.edPub, rec.xPub), fp)) {
-      refused = 'mismatch';
-    }
+    final String? refused = await _refuseServerRecord(mine, uid, copy.deviceId, ed, x, fp);
     if (refused != null) {
       _platformChecked.add(uid);
       StorageEventLog.instance.record('keybackup_refused', store: 'keybackup', detail: 'reason=$refused');
@@ -440,9 +747,7 @@ class E2eeService {
       _platformChecked.add(uid);
       return const _PlatformRestore(null);
     }
-    await vault.write(_seedName, copy.seed);
-    await vault.write(_deviceName, Uint8List.fromList(utf8.encode(copy.deviceId)));
-    await vault.write(_userName, Uint8List.fromList(utf8.encode(uid)));
+    await _writeIdentity(copy.seed, copy.deviceId, uid);
     _platformChecked.add(uid);
     _backupSyncedFor = uid;
     StorageEventLog.instance.record('identity_restored_platform', store: 'vault', detail: kb.store.name);
@@ -596,6 +901,16 @@ class E2eeService {
   /// re-attachment of exactly that key (log action 13) and sends it with the reset; a server that does not know the
   /// field revokes the key as before and the answer has no `serverKept`.
   Future<DeviceKey> registerThisDevice({LinkApproval? approval, bool reset = false, String label = '', DeviceKey? keepServer}) async {
+    final DeviceKey k = await _registerThisDevice(approval: approval, reset: reset, label: label, keepServer: keepServer);
+    // The server now lists this phone's key under the signed-in account: if the note of which account the key
+    // belongs to is missing, it can be written back (best effort; never touches the key).
+    try {
+      if (_ownerUnconfirmed) await repairOwnerRecord();
+    } catch (_) {}
+    return k;
+  }
+
+  Future<DeviceKey> _registerThisDevice({LinkApproval? approval, bool reset = false, String label = '', DeviceKey? keepServer}) async {
     final LocalIdentity id = (await identity(create: true))!;
     final List<DeviceKey> mine = await api.myKeys();
     final bool anyActive = mine.any((DeviceKey k) => k.isActive);

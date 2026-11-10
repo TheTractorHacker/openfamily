@@ -9,6 +9,7 @@ import 'package:permission_handler/permission_handler.dart';
 import '../api_client.dart';
 import '../background_location_service.dart';
 import '../e2ee/e2ee_app.dart';
+import '../e2ee/e2ee_service.dart' show LocalKeyException;
 import '../e2ee/e2ee_vault.dart';
 import '../e2ee/private_runtime.dart';
 import '../e2ee/private_store.dart';
@@ -209,6 +210,17 @@ class DiagnosticsProbe {
         // A real decrypt of a stored secret proves the Keystore key still works.
         await E2eeApp.service.hasIdentity();
         vaultOk = true;
+        // The same checks the app makes when it uses the key (the account note, the device id, the key size), so this
+        // check cannot pass while the Encryption keys screen says the key cannot be read. A network or session
+        // failure while asking who is signed in says nothing about the key and is ignored here.
+        try {
+          await E2eeApp.service.identity();
+        } on LocalKeyException catch (e) {
+          vaultOk = false;
+          vaultDetail = e.reasonCode.isEmpty ? 'unreadable' : 'unreadable: ${e.reasonCode}';
+        } on VaultInvalidatedException {
+          rethrow;
+        } catch (_) {}
       } on VaultInvalidatedException {
         vaultOk = false;
         vaultDetail = 'the key store was reset';

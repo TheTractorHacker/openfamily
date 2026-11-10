@@ -1050,7 +1050,10 @@ class PrivateRuntime {
       }
       return n;
     } catch (e) {
-      await queue.noteUpload(code: 'flush_${localKeyProblemOf(e)?.problem.name ?? 'error'}');
+      final LocalKeyException? key = localKeyProblemOf(e);
+      // The cause rides along (`flush_unreadable:empty-user-id`) so the next report names what failed.
+      final String why = key == null ? '' : shortSealCause(key.reasonCode);
+      await queue.noteUpload(code: 'flush_${key?.problem.name ?? 'error'}${why.isEmpty ? '' : ':$why'}');
       return 0;
     }
   }

@@ -44,7 +44,11 @@ If it happens anyway:
 2. Open **Settings, Advanced, Diagnostics** and copy the report: the
    "Sign-in and key storage" section says what failed (no secrets in it).
    Send it to your server operator.
-3. Only if the key stays unreadable, use **Set this phone up again**. The old
+3. If the screen says **"This phone lost the note of which account its key
+   belongs to"**, tap **Repair**: the key is not touched, the app only writes
+   the account note back after your server confirms this phone's key belongs to
+   your account. Since 0.26.31 the app also does this by itself.
+4. Only if the key stays unreadable, use **Set this phone up again**. The old
    key is put aside on the phone, not deleted, and **Encryption keys** offers
    to bring it back if it becomes readable later. The copy kept for reinstalls
    is removed by this step.

@@ -721,6 +721,14 @@ String plainDeliveryProblem(String code) {
   if (c == 'rejected_bad_epoch' || c == 'rejected_legacy_epoch_closed') {
     return 'the family\'s encryption key changed; the phone fetches the new one and sends again';
   }
+  if (c.startsWith('flush_unreadable') || c.startsWith('flush_missing') || c.startsWith('flush_invalidated')) {
+    if (c.contains('empty-user-id')) {
+      return 'the part of the app that sends positions in the background has lost the note of which account this '
+          'phone\'s key belongs to; opening the app repairs it by itself, and the key is not changed';
+    }
+    return 'this phone could not use its own encryption key for a moment (reason code: ${c.substring(c.indexOf('_') + 1)}); '
+        'the key is not changed and the phone tries again';
+  }
   if (c.startsWith('seal_')) {
     return 'this phone could not open its own encryption key for a moment; it tries again with the next position';
   }

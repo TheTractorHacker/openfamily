@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'e2ee/e2ee_vault.dart';
@@ -50,16 +51,24 @@ class StorageSelfCheck {
     // Identity and the other key material.
     final E2eeVault v = vault ?? SecureVault();
     String identity;
+    String owner = '';
     int keys = 0;
     int bad = 0;
     try {
       final Uint8List? seed = await v.read('identity_seed');
       final Uint8List? device = seed == null ? null : await v.read('device_id');
-      identity = seed == null
-          ? 'none'
-          : (device == null ? 'partial' : 'ok');
+      identity = seed == null ? 'none' : (device == null ? 'partial' : 'ok');
+      // The same content checks identity() makes, read-only: a stored key that opens but is not usable must not say ok.
+      if (seed != null && device != null) {
+        if (seed.length != 32) {
+          identity = 'bad(seed_len)';
+        } else if (!_isText(device) || device.isEmpty) {
+          identity = 'bad(device_format)';
+        }
+      }
+      if (seed != null) owner = await _owner(v);
       for (final String n in await v.names()) {
-        if (!isVaultKeyMaterial(n) || n == 'identity_seed' || n == 'device_id') continue;
+        if (!isVaultKeyMaterial(n) || n == 'identity_seed' || n == 'device_id' || n == 'identity_user') continue;
         try {
           await v.read(n);
           keys++;
@@ -76,9 +85,36 @@ class StorageSelfCheck {
     } catch (e) {
       identity = 'unreadable(${e.runtimeType})';
     }
-    final String line = '$tokens identity=$identity keys=$keys${bad == 0 ? '' : ' unreadable_keys=$bad'}';
+    final String line = '$tokens identity=$identity${owner.isEmpty ? '' : ' owner=$owner'} keys=$keys${bad == 0 ? '' : ' unreadable_keys=$bad'}';
     StorageEventLog.instance.record('selfcheck', detail: line);
     return line;
+  }
+
+  static bool _isText(Uint8List b) {
+    try {
+      utf8.decode(b);
+      return true;
+    } on FormatException {
+      return false;
+    }
+  }
+
+  /// The account note next to the key: `ok`, `missing`, `empty`, `garbled` or `unreadable(stage)`. Never throws.
+  static Future<String> _owner(E2eeVault v) async {
+    try {
+      final Uint8List? raw = await v.read('identity_user');
+      if (raw == null) return 'missing';
+      if (raw.isEmpty) return 'empty';
+      return _isText(raw) ? 'ok' : 'garbled';
+    } on VaultUnreadableException catch (e) {
+      return 'unreadable(${e.stage})';
+    } on VaultLockedException {
+      return 'locked';
+    } on VaultInvalidatedException {
+      return 'invalidated';
+    } catch (e) {
+      return 'unreadable(${e.runtimeType})';
+    }
   }
 
   /// Test hook.

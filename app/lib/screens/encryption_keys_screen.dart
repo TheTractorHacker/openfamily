@@ -68,12 +68,19 @@ class _EncryptionKeysScreenState extends State<EncryptionKeysScreen> {
   /// Set when this phone's own key cannot be used (the screen then offers the repair).
   LocalKeyProblem? _keyProblem;
 
+  /// The exception behind [_keyProblem] (its cause decides the wording and whether the owner-note repair is offered).
+  LocalKeyException? _keyError;
+
+  /// What the last "Repair" tap found, in words.
+  String? _repairNote;
+
   Future<void> _load() async {
     setState(() {
       _loading = true;
       _error = null;
       _errorCause = null;
       _keyProblem = null;
+      _keyError = null;
     });
     try {
       final LocalIdentity? id = await _svc.identity();
@@ -175,16 +182,17 @@ class _EncryptionKeysScreenState extends State<EncryptionKeysScreen> {
             'or link it from your other phone.';
       });
     } on LocalKeyException catch (e) {
-      // Stored but unreadable: not a network problem, and Retry alone will not fix it. Offer the way out.
+      // Stored but unreadable: not a network problem, and Retry alone will not fix it. Say what is wrong when it is
+      // known (the cause is also in the storage events and the Diagnostics report), and offer the way out.
       debugPrint('encryption keys: ${e.toString()}');
       if (!mounted) return;
       setState(() {
         _loading = false;
         _keyProblem = e.problem;
+        _keyError = e;
         _error = e.problem == LocalKeyProblem.locked
             ? e.message
-            : '${e.message} The stored key cannot be used as it is. Set this phone up again, then restore with your '
-                'recovery phrase or link it from your other phone.';
+            : (e.whatIsWrong.isNotEmpty ? e.whatIsWrong : e.screenMessage);
       });
     } on VaultLockedException {
       if (!mounted) return;
@@ -403,30 +411,95 @@ class _EncryptionKeysScreenState extends State<EncryptionKeysScreen> {
         ),
       ];
 
-  /// This phone's stored key cannot be read. Retrying does not help; the way out is to drop the unreadable copy
-  /// (it is useless) and set the phone up again: restore with the recovery phrase, link from another phone, or new keys.
-  Widget _repairView() => ListView(
-        padding: EdgeInsets.all(DsListRow.compactFor(context) ? AppSpace.md : AppSpace.lg),
-        children: <Widget>[
-          const Text("This phone's encryption key can't be read", key: Key('keys-repair-title'), style: AppType.headline),
-          const SizedBox(height: AppSpace.sm),
-          Text(_error ?? ''),
+  /// This phone's stored key cannot be read. When the cause is known the screen says what is wrong in plain words;
+  /// "Try again" re-runs the check (and the automatic repair of the account note); the way out of last resort is to
+  /// put the unreadable copy aside and set the phone up again (restore with the recovery phrase, link from another
+  /// phone, or new keys).
+  Widget _repairView() {
+    final bool ownerNote = _keyError?.ownerRepairable ?? false;
+    final bool intact = _keyError?.keyIntact ?? false;
+    return ListView(
+      padding: EdgeInsets.all(DsListRow.compactFor(context) ? AppSpace.md : AppSpace.lg),
+      children: <Widget>[
+        Text(ownerNote ? 'This phone lost the note of which account its key belongs to' : "This phone's encryption key can't be read",
+            key: const Key('keys-repair-title'), style: AppType.headline),
+        const SizedBox(height: AppSpace.sm),
+        Text(_error ?? ''),
+        if (ownerNote) ...<Widget>[
           const SizedBox(height: AppSpace.sm),
           const Text(
-              'Right after an app update or a restart this can be temporary: tap Try again first, or restart the phone. '
-              'Nothing is deleted while you wait.',
+              'Repair writes that note again, but only after the server confirms that this phone\'s key belongs to your '
+              'account. The key itself is never touched.',
               style: AppType.secondary),
-          const SizedBox(height: AppSpace.lg),
-          DsPillButton(label: 'Try again', icon: Icons.refresh, onPressed: _busy ? null : _load),
-          const SizedBox(height: AppSpace.sm),
-          DsPillButton(
-            key: const Key('keys-repair-reset'),
-            label: 'Set this phone up again',
-            icon: Icons.build_outlined,
-            onPressed: _busy ? null : _repair,
-          ),
         ],
-      );
+        if (_repairNote != null) ...<Widget>[
+          const SizedBox(height: AppSpace.sm),
+          Text(_repairNote!, key: const Key('keys-repair-note')),
+        ],
+        const SizedBox(height: AppSpace.sm),
+        const Text(
+            'Right after an app update or a restart this can be temporary: tap Try again first, or restart the phone. '
+            'Nothing is deleted while you wait.',
+            style: AppType.secondary),
+        const SizedBox(height: AppSpace.lg),
+        if (ownerNote) ...<Widget>[
+          DsPillButton(
+            key: const Key('keys-repair-owner'),
+            label: 'Repair',
+            icon: Icons.build_outlined,
+            onPressed: _busy ? null : _repairOwner,
+          ),
+          const SizedBox(height: AppSpace.sm),
+        ],
+        DsPillButton(label: 'Try again', icon: Icons.refresh, onPressed: _busy ? null : _load),
+        const SizedBox(height: AppSpace.lg),
+        Text(
+            intact
+                ? 'Only if nothing above helps: set this phone up again, then restore with your recovery phrase or link it '
+                    'from your other phone. The stored key is put aside, not deleted.'
+                : 'If Try again does not help, set this phone up again, then restore with your recovery phrase or link it '
+                    'from your other phone.',
+            style: AppType.secondary),
+        const SizedBox(height: AppSpace.sm),
+        DsPillButton(
+          key: const Key('keys-repair-reset'),
+          label: 'Set this phone up again',
+          icon: Icons.build_outlined,
+          onPressed: _busy ? null : _repair,
+        ),
+      ],
+    );
+  }
+
+  /// "Repair": writes the account note again once the server confirms this phone's key (see
+  /// [E2eeService.repairOwnerRecord]). Never changes the key.
+  Future<void> _repairOwner() async {
+    setState(() {
+      _busy = true;
+      _repairNote = null;
+    });
+    OwnerRepair r;
+    try {
+      r = await _svc.repairOwnerRecord();
+    } catch (e) {
+      debugPrint('encryption keys: owner repair failed (${e.runtimeType})');
+      r = OwnerRepair.offline;
+    }
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      _repairNote = switch (r) {
+        OwnerRepair.repaired || OwnerRepair.notNeeded => null,
+        OwnerRepair.offline => 'The server could not be asked just now, so nothing was changed. Check the connection and tap Repair again.',
+        OwnerRepair.notOurs => 'Your account does not list this phone\'s key as active, so nothing was changed. '
+            'Use Set this phone up again, then restore or link this phone.',
+        OwnerRepair.otherAccount => 'The key on this phone belongs to another account, so nothing was changed.',
+        OwnerRepair.noAccount => 'The app could not tell which account is signed in. Sign in again, then tap Repair.',
+        OwnerRepair.noKey => 'The stored key could not be checked, so nothing was changed.',
+      };
+    });
+    if (r == OwnerRepair.repaired || r == OwnerRepair.notNeeded) await _load();
+  }
 
   Future<void> _repair() async {
     final bool ok = await showDsConfirm(
