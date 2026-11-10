@@ -57,6 +57,88 @@ class DiagCheck {
 /// Server reachability as the app experienced it.
 enum ServerState { ok, unreachable, authFailed, unknown }
 
+/// How this phone delivers to ONE Private circle. Counts, times and short codes only: no circle id or name, no
+/// position, no content.
+class PrivateCircleDelivery {
+  const PrivateCircleDelivery({
+    required this.laneKind,
+    this.serverGen = 0,
+    this.prefGen = 0,
+    this.serverKeyMissing = false,
+    this.queued = 0,
+    this.parked = 0,
+    this.lastSealedAt,
+  });
+
+  /// 'phone' | 'server' | 'consent' (the circle requires server processing and this member has not agreed: nothing
+  /// is sealed for it) | 'failed' (the processing records did not verify: the phone lane is used).
+  final String laneKind;
+
+  /// The circle's current server-key generation (server lane only).
+  final int serverGen;
+
+  /// The generation this member's own signed pref names (0: unknown). Older than [serverGen] is accepted by the phone
+  /// and the server alike; shown so a reader does not have to wonder.
+  final int prefGen;
+
+  /// Server lane, but this phone does not hold the server key of [serverGen]: items go on the phone line instead.
+  final bool serverKeyMissing;
+
+  /// Sealed items waiting for upload.
+  final int queued;
+
+  /// Positions waiting to be sealed (no key yet, keys unreadable): not part of "Updates waiting".
+  final int parked;
+  final DateTime? lastSealedAt;
+
+  bool get stalePref => laneKind == 'server' && prefGen > 0 && prefGen < serverGen;
+
+  String get laneLabel {
+    switch (laneKind) {
+      case 'server':
+        return 'server gen $serverGen${stalePref ? ' (pref names gen $prefGen)' : ''}${serverKeyMissing ? ' (no server key here: phone line used)' : ''}';
+      case 'consent':
+        return 'consent required';
+      case 'failed':
+        return 'phone (verification failed)';
+      default:
+        return 'phone';
+    }
+  }
+}
+
+/// This phone's Private-circle pipeline (see `PrivateRuntime.deliveryFacts`).
+class PrivateDeliveryFacts {
+  const PrivateDeliveryFacts({
+    required this.uplink,
+    this.circles = const <PrivateCircleDelivery>[],
+    this.lastFixAt,
+    this.lastUploadOkAt,
+    this.lastErrorCode = '',
+    this.lastErrorAt,
+  });
+
+  /// 'sealed only' | 'both' | 'plaintext only'.
+  final String uplink;
+  final List<PrivateCircleDelivery> circles;
+
+  /// The newest GPS fix the pipeline was handed (before sealing), either isolate.
+  final DateTime? lastFixAt;
+
+  /// The last time the relay answered an upload of sealed items.
+  final DateTime? lastUploadOkAt;
+
+  /// The last seal or upload problem, as a short code (`seal_timeout`, `http_401`, `rejected_bad_epoch` ...).
+  final String lastErrorCode;
+  final DateTime? lastErrorAt;
+}
+
+/// GPS fixes this recent count as "the phone is getting positions".
+const Duration kRecentFix = Duration(minutes: 15);
+
+/// Nothing sealed for this long while fixes arrive: the Private pipeline is stuck.
+const Duration kNoSealWarn = Duration(minutes: 30);
+
 /// Raw facts about this phone. Null means "could not be determined", which the
 /// checks report honestly instead of guessing.
 class DiagFacts {
@@ -97,7 +179,11 @@ class DiagFacts {
     this.vaultNeedsUnlock = false,
     this.vaultUserAuth = false,
     this.deviceIdSuffix = '',
+    this.privateDelivery,
   });
+
+  /// The Private-circle pipeline of this phone (null: no Private circle or not collected).
+  final PrivateDeliveryFacts? privateDelivery;
 
   final DateTime now;
   final bool isAndroid;
@@ -571,6 +657,10 @@ List<DiagCheck> evaluateDiagnostics(DiagFacts f) {
     }
   }
 
+  // 13b. Private circles: is the phone actually sealing and uploading?
+  final DiagCheck? pd = privateDeliveryCheck(f);
+  if (pd != null) out.add(pd);
+
   // 14. iOS: is the store of the private circles kept out of backups?
   if (f.storeBackupExcluded != null) {
     out.add(f.storeBackupExcluded == true
@@ -589,6 +679,70 @@ List<DiagCheck> evaluateDiagnostics(DiagFacts f) {
   }
 
   return out;
+}
+
+/// The "Private circle delivery" check: null when there is nothing to say (no Private circle, not collected).
+DiagCheck? privateDeliveryCheck(DiagFacts f) {
+  final PrivateDeliveryFacts? p = f.privateDelivery;
+  if (p == null || p.circles.isEmpty) return null;
+  final DateTime? fix = p.lastFixAt;
+  final bool gettingFixes = fix != null && f.now.difference(fix) <= kRecentFix;
+  final List<String> problems = <String>[];
+  int n = 0;
+  for (final PrivateCircleDelivery c in p.circles) {
+    n++;
+    final String name = p.circles.length == 1 ? 'your Private circle' : 'Private circle $n';
+    if (c.laneKind == 'consent') {
+      problems.add('$name requires server processing and you have not agreed, so nothing of yours is sent to it. '
+          'Open the circle\'s processing settings to agree or leave the circle.');
+      continue;
+    }
+    final DateTime? s = c.lastSealedAt;
+    if (gettingFixes && (s == null || f.now.difference(s) > kNoSealWarn)) {
+      problems.add('This phone has fresh positions but has not encrypted one for $name '
+          '${s == null ? 'yet' : 'recently (the last one ${humanAgo(f.now.difference(s))})'}, so the others see an old position.');
+    }
+  }
+  final int waiting = p.circles.fold(0, (int a, PrivateCircleDelivery c) => a + c.queued + c.parked);
+  final DateTime? ok = p.lastUploadOkAt;
+  if (waiting > 0 && (ok == null || f.now.difference(ok) > kStaleUpload)) {
+    problems.add('$waiting encrypted update${waiting == 1 ? ' is' : 's are'} waiting and the server has not accepted an '
+        'upload ${ok == null ? 'yet' : 'recently (the last one ${humanAgo(f.now.difference(ok))})'}'
+        '${p.lastErrorCode.isEmpty ? '' : ' (last problem: ${p.lastErrorCode})'}.');
+  }
+  final String summary = privateDeliverySummary(f);
+  if (problems.isEmpty) {
+    return DiagCheck(
+        id: 'private_delivery',
+        title: 'Private circle delivery',
+        status: DiagStatus.pass,
+        detail: 'Positions are encrypted and sent. $summary');
+  }
+  return DiagCheck(
+      id: 'private_delivery',
+      title: 'Private circle delivery',
+      status: DiagStatus.warn,
+      detail: '${problems.join(' ')} $summary',
+      fix: const DiagFix(DiagFixKind.sendQueue, 'Send now'));
+}
+
+String _ageS(DateTime now, DateTime? t) => t == null ? 'never' : '${now.difference(t).inSeconds}';
+
+/// One-line, redacted summary of the Private pipeline (counts, ages in seconds, short codes).
+String privateDeliverySummary(DiagFacts f) {
+  final PrivateDeliveryFacts? p = f.privateDelivery;
+  if (p == null) return '';
+  final StringBuffer b = StringBuffer('Uplink: ${p.uplink}.');
+  int n = 0;
+  for (final PrivateCircleDelivery c in p.circles) {
+    n++;
+    b.write(' Circle $n: lane ${c.laneLabel}, ${c.queued} queued, ${c.parked} parked, '
+        'last sealed ${c.lastSealedAt == null ? 'never' : '${_ageS(f.now, c.lastSealedAt)} s ago'}.');
+  }
+  b.write(' Last GPS fix: ${p.lastFixAt == null ? 'never' : '${_ageS(f.now, p.lastFixAt)} s ago'}.');
+  b.write(' Last accepted upload: ${p.lastUploadOkAt == null ? 'never' : '${_ageS(f.now, p.lastUploadOkAt)} s ago'}.');
+  b.write(' Last error: ${p.lastErrorCode.isEmpty ? 'none' : '${p.lastErrorCode} (${_ageS(f.now, p.lastErrorAt)} s ago)'}.');
+  return b.toString();
 }
 
 DiagFix? _oemFix(String manufacturer, DiagFixKind kind, String label) =>
@@ -631,6 +785,21 @@ String buildDiagnosticReport(DiagFacts f, List<DiagCheck> checks) {
     ..writeln();
   for (final DiagCheck c in checks) {
     b.writeln('[${statusWord(c.status)}] ${c.title}: ${c.detail}');
+  }
+  final PrivateDeliveryFacts? p = f.privateDelivery;
+  if (p != null && p.circles.isNotEmpty) {
+    b
+      ..writeln()
+      ..writeln('Private circle delivery')
+      ..writeln('uplink=${p.uplink}');
+    int n = 0;
+    for (final PrivateCircleDelivery c in p.circles) {
+      n++;
+      b.writeln('circle$n lane="${c.laneLabel}" queued=${c.queued} parked=${c.parked} sealed_s=${_ageS(f.now, c.lastSealedAt)}');
+    }
+    b
+      ..writeln('gps_fix_s=${_ageS(f.now, p.lastFixAt)} upload_ok_s=${_ageS(f.now, p.lastUploadOkAt)}')
+      ..writeln('last_error=${p.lastErrorCode.isEmpty ? 'none' : p.lastErrorCode} error_s=${p.lastErrorCode.isEmpty ? '-' : _ageS(f.now, p.lastErrorAt)}');
   }
   b
     ..writeln()

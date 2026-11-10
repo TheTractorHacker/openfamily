@@ -248,4 +248,97 @@ void main() {
     expect(due(0, 1 * min, '0.21.1', '0.23.0'), isTrue, reason: 'version change');
     expect(due(0, 1 * min, null, ''), isFalse, reason: 'unknown version must not force reports');
   });
+
+  group('Private circle delivery (0.26.23)', () {
+    final DateTime now = DateTime.utc(2026, 11, 9, 20);
+    DiagFacts withDelivery(PrivateDeliveryFacts p) => DiagFacts(now: now, hasPrivateCircle: true, vaultReadable: true, privateDelivery: p);
+
+    test('fresh GPS fixes but nothing sealed for an hour: WARN, with the numbers', () {
+      final DiagFacts f = withDelivery(PrivateDeliveryFacts(
+        uplink: 'sealed only',
+        circles: <PrivateCircleDelivery>[
+          PrivateCircleDelivery(laneKind: 'server', serverGen: 3, prefGen: 2, queued: 15, lastSealedAt: now.subtract(const Duration(hours: 1))),
+        ],
+        lastFixAt: now.subtract(const Duration(minutes: 2)),
+        lastUploadOkAt: now.subtract(const Duration(hours: 1)),
+        lastErrorCode: 'http_401',
+        lastErrorAt: now.subtract(const Duration(minutes: 5)),
+      ));
+      final DiagCheck c = find(evaluateDiagnostics(f), 'private_delivery');
+      expect(c.status, DiagStatus.warn);
+      expect(c.detail, contains('has not encrypted one'));
+      expect(c.detail, contains('15 encrypted updates are waiting'));
+      expect(c.detail, contains('http_401'));
+      expect(c.fix?.kind, DiagFixKind.sendQueue);
+      final String report = buildDiagnosticReport(f, evaluateDiagnostics(f));
+      expect(report, contains('Private circle delivery'));
+      expect(report, contains('uplink=sealed only'));
+      expect(report, contains('circle1 lane="server gen 3 (pref names gen 2)" queued=15 parked=0 sealed_s=3600'));
+      expect(report, contains('gps_fix_s=120 upload_ok_s=3600'));
+      expect(report, contains('last_error=http_401 error_s=300'));
+    });
+
+    test('sealing and uploading normally: PASS', () {
+      final DiagFacts f = withDelivery(PrivateDeliveryFacts(
+        uplink: 'sealed only',
+        circles: <PrivateCircleDelivery>[PrivateCircleDelivery(laneKind: 'phone', lastSealedAt: now.subtract(const Duration(seconds: 40)))],
+        lastFixAt: now.subtract(const Duration(seconds: 40)),
+        lastUploadOkAt: now.subtract(const Duration(seconds: 30)),
+      ));
+      final DiagCheck c = find(evaluateDiagnostics(f), 'private_delivery');
+      expect(c.status, DiagStatus.pass);
+      expect(c.detail, contains('lane phone, 0 queued, 0 parked, last sealed 40 s ago'));
+      expect(c.detail, contains('Last error: none'));
+    });
+
+    test('no recent GPS fix (phone lying still, location off): no "stuck" warning for an old seal', () {
+      final DiagFacts f = withDelivery(PrivateDeliveryFacts(
+        uplink: 'sealed only',
+        circles: <PrivateCircleDelivery>[PrivateCircleDelivery(laneKind: 'phone', lastSealedAt: now.subtract(const Duration(hours: 3)))],
+        lastFixAt: now.subtract(const Duration(hours: 3)),
+        lastUploadOkAt: now.subtract(const Duration(hours: 3)),
+      ));
+      expect(find(evaluateDiagnostics(f), 'private_delivery').status, DiagStatus.pass);
+    });
+
+    test('positions waiting for a key (parked) count as waiting too', () {
+      final DiagFacts f = withDelivery(PrivateDeliveryFacts(
+        uplink: 'both',
+        circles: <PrivateCircleDelivery>[const PrivateCircleDelivery(laneKind: 'phone', parked: 4)],
+        lastErrorCode: 'seal_unreadable',
+        lastErrorAt: now.subtract(const Duration(minutes: 1)),
+      ));
+      final DiagCheck c = find(evaluateDiagnostics(f), 'private_delivery');
+      expect(c.status, DiagStatus.warn);
+      expect(c.detail, contains('4 encrypted updates are waiting'));
+      expect(c.detail, contains('seal_unreadable'));
+    });
+
+    test('no Private circle or not collected: no section', () {
+      expect(evaluateDiagnostics(healthy()).any((DiagCheck c) => c.id == 'private_delivery'), isFalse);
+      expect(buildDiagnosticReport(healthy(), evaluateDiagnostics(healthy())), isNot(contains('Private circle delivery')));
+    });
+
+    test('the section names no circle and holds no coordinates', () {
+      final DiagFacts f = withDelivery(PrivateDeliveryFacts(
+        uplink: 'sealed only',
+        circles: <PrivateCircleDelivery>[
+          const PrivateCircleDelivery(laneKind: 'consent'),
+          const PrivateCircleDelivery(laneKind: 'failed', queued: 2),
+        ],
+        lastFixAt: now,
+      ));
+      final String report = buildDiagnosticReport(f, evaluateDiagnostics(f));
+      expect(report, contains('circle1 lane="consent required"'));
+      expect(report, contains('circle2 lane="phone (verification failed)" queued=2'));
+      final String section = report.substring(report.indexOf('\nPrivate circle delivery\n'));
+      expect(section, isNot(matches(RegExp(r'\d+\.\d{3,}'))), reason: 'nothing that looks like a coordinate');
+      expect(section, isNot(matches(RegExp(r'[0-9a-f]{8}-'))), reason: 'no uuid fragments');
+    });
+
+    test('the fleet report body is unchanged (no backend columns for it)', () {
+      final Map<String, dynamic> b = DiagnosticsReporter.body(withDelivery(const PrivateDeliveryFacts(uplink: 'sealed only')));
+      expect(b.keys.any((String k) => k.contains('private') || k.contains('seal') || k.contains('lane')), isFalse);
+    });
+  });
 }

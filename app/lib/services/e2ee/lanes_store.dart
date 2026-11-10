@@ -113,10 +113,15 @@ class LaneStore {
     return LaneChoice.phone;
   }
 
-  Future<void> setOwnLane(String circleId, LaneChoice c) async {
-    await kv.set(_own(circleId), jsonEncode(<String, dynamic>{'l': c.line, 'g': c.skGen}));
+  /// [prefGen]: the server-key generation this member's verified signed pref names (it may be older than the
+  /// policy's current one, which both the phone and the server accept). Diagnostics only; the sealer never uses it.
+  Future<void> setOwnLane(String circleId, LaneChoice c, {int prefGen = 0}) async {
+    await kv.set(_own(circleId), jsonEncode(<String, dynamic>{'l': c.line, 'g': c.skGen, if (prefGen > 0) 'pg': prefGen}));
     await _bumpVer(circleId);
   }
+
+  /// The server-key generation named by this member's own verified server-lane pref (0: none / phone lane / unknown).
+  Future<int> ownPrefGen(String circleId) async => ((await _json(_own(circleId)))?['pg'] as num?)?.toInt() ?? 0;
 
   // ---- policy
   Future<StoredPolicy> policy(String circleId) async => StoredPolicy.fromJson(await _json(_policy(circleId)));

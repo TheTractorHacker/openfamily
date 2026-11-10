@@ -538,7 +538,13 @@ class ChannelSealer {
 /// queued, so nothing readable is ever on disk or in memory longer than needed).
 /// Retries are idempotent on the server by (circle, device, seq).
 class SealedQueue {
-  SealedQueue({required this.kv, this.clock = const Clock(), this.maxItems = 2000, this.maxAge = const Duration(hours: 48)});
+  SealedQueue({
+    required this.kv,
+    this.clock = const Clock(),
+    this.maxItems = 2000,
+    this.maxAge = const Duration(hours: 48),
+    this.lockTimeout = const Duration(minutes: 2),
+  });
 
   final ChannelKv kv;
   final Clock clock;
@@ -546,6 +552,12 @@ class SealedQueue {
 
   /// Items older than this (by enqueue time) are dropped, except places/events.
   final Duration maxAge;
+
+  /// Longest one locked step (a store read or a read-modify-write) may hold the queue lock. The lock is a chain of
+  /// futures: one store call that never answers (a platform channel of a background engine that went away) used to
+  /// hold every later enqueue, count and upload of this isolate for the rest of its life, silently. After this long
+  /// the step fails and the chain moves on; a write that finishes late is caught by the version check of [_mutate].
+  final Duration lockTimeout;
 
   static const String _key = 'queue/v1';
   static final Random _rng = Random.secure();
@@ -555,7 +567,7 @@ class SealedQueue {
     final Completer<T> c = Completer<T>();
     _lock = _lock.then((_) async {
       try {
-        c.complete(await f());
+        c.complete(await f().timeout(lockTimeout));
       } catch (e, st) {
         c.completeError(e, st);
       }
@@ -649,6 +661,55 @@ class SealedQueue {
 
   Future<int> length() => _locked(() async => (await _load()).length);
 
+  /// Waiting items per circle (diagnostics: counts only).
+  Future<Map<String, int>> countByCircle() => _locked(() async {
+        final Map<String, int> out = <String, int>{};
+        for (final Map<String, dynamic> m in await _load()) {
+          final String c = '${m['c']}';
+          out[c] = (out[c] ?? 0) + 1;
+        }
+        return out;
+      });
+
+  static const String _delivKey = 'queue/deliv';
+
+  /// Remembers the outcome of an upload attempt: [ok] for an answer from the relay, else a short [code]
+  /// (`http_401`, `offline`, `rejected_lane_not_server` ...). Times and codes only. Never throws.
+  Future<void> noteUpload({bool ok = false, String? code}) async {
+    try {
+      Map<String, dynamic> m = <String, dynamic>{};
+      try {
+        final Object? d = jsonDecode(await kv.getFresh(_delivKey) ?? '{}');
+        if (d is Map<String, dynamic>) m = d;
+      } catch (_) {}
+      final int now = clock.now().millisecondsSinceEpoch;
+      if (ok) m['ok'] = now;
+      if (code != null && code.isNotEmpty) {
+        m['code'] = code.length > 40 ? code.substring(0, 40) : code;
+        m['at'] = now;
+      }
+      await kv.set(_delivKey, jsonEncode(m));
+    } catch (_) {}
+  }
+
+  /// The last answer from the relay and the last upload problem (either isolate).
+  Future<({DateTime? okAt, String code, DateTime? codeAt})> uploadStatus() async {
+    DateTime? t(Object? v) => v is num ? DateTime.fromMillisecondsSinceEpoch(v.toInt(), isUtc: true) : null;
+    try {
+      final Object? d = jsonDecode(await kv.getFresh(_delivKey) ?? '{}');
+      if (d is Map<String, dynamic>) return (okAt: t(d['ok']), code: (d['code'] as String?) ?? '', codeAt: t(d['at']));
+    } catch (_) {}
+    return (okAt: null, code: '', codeAt: null);
+  }
+
+  /// A short code for an [UploadUnavailable] message (a status number, or anything else = no connection).
+  static String unavailableCode(String message) {
+    final int? n = int.tryParse(message);
+    if (n == null && message == 'credentials') return 'no_credentials';
+    if (n == null || n == 0) return 'offline';
+    return 'http_$n';
+  }
+
   Future<List<WireItem>> peek() => _locked(() async => (await _load()).map(WireItem.fromStore).toList());
 
   /// Sends the queue, at most [batchSize] per request, newest fixes first is NOT
@@ -688,22 +749,30 @@ class SealedQueue {
       List<BatchResult> results;
       try {
         results = await api.postBatch(circle, device, items);
-      } on UploadUnavailable {
-        return delivered; // no connection / session being renewed: keep everything, and do NOT count a failure
+      } on UploadUnavailable catch (e) {
+        // No connection / session being renewed: keep everything, and do NOT count a failure. Remembered (a code and a
+        // time) so a phone whose every upload is refused with 401 is visible in its diagnostic report.
+        await noteUpload(code: unavailableCode(e.message));
+        return delivered;
       } on PermanentUploadError catch (e) {
         // e.g. circle no longer private / device revoked: drop the batch, it can never succeed.
         // Not silent: the diagnostics screen tells the user that the relay refused updates, and why.
         await noteUndelivered(circle, 'http_${e.message}');
+        await noteUpload(code: 'http_${e.message}');
         await _remove(batch, <int>{for (final WireItem i in items) i.seq});
         continue;
       } catch (e) {
         // Offline or server trouble (5xx): keep everything, try later. A server that is down does not make
         // the items bad, so only an answer that is not a connection problem counts against the batch.
-        if (!isOfflineError(e)) await _bump(batch);
+        final bool offline = isOfflineError(e);
+        await noteUpload(code: offline ? 'offline' : 'server_error');
+        if (!offline) await _bump(batch);
         return delivered;
       }
+      await noteUpload(ok: true);
       final Set<int> done = <int>{};
       bool needSync = false;
+      String? rejectedCode;
       for (final BatchResult r in results) {
         if (r.status != 'rejected') {
           // stored/duplicate: the server has it.
@@ -712,6 +781,7 @@ class SealedQueue {
           continue;
         }
         final String code = r.error ?? '';
+        rejectedCode ??= 'rejected_${code.isEmpty ? 'unknown' : code}';
         if (transientRejections.contains(code)) {
           // An epoch problem a key sync may fix: keep the item, sync keys, retry later (bounded by the retry counter).
           needSync = true;
@@ -721,6 +791,7 @@ class SealedQueue {
         if (code == 'required_server') await noteUndelivered(circle, code);
         done.add(r.seq);
       }
+      if (rejectedCode != null) await noteUpload(code: rejectedCode);
       if (needSync) onNeedKeySync?.call(circle);
       // Items the server did not mention stay queued.
       await _remove(batch, done);

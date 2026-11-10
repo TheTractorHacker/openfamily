@@ -234,8 +234,9 @@ class LanesService {
     final List<MemberLaneView> views = <MemberLaneView>[];
     final Map<String, int> claimedSince = <String, int>{for (final ClaimedMember m in proc.claimedMembers) m.userId: m.sinceMs};
     int ownLane = E2ee.linePhone;
+    int ownPrefGen = 0;
     for (final CircleE2eeMember m in st.members) {
-      final ({int seq, int lane})? v = await _verifiedPref(circleId, m.userId, log, proc, deviceById, serverKey, policy, voidBefore);
+      final ({int seq, int lane, int gen})? v = await _verifiedPref(circleId, m.userId, log, proc, deviceById, serverKey, policy, voidBefore);
       final int trueLane = v?.lane ?? E2ee.linePhone;
       final int seq = v?.seq ?? 0;
       final int since = (claimedSince[m.userId] ?? 0) > 0 ? claimedSince[m.userId]! : clock.now().millisecondsSinceEpoch;
@@ -243,7 +244,10 @@ class LanesService {
       final int shown = trueLane == E2ee.lineServer && policy.assist ? E2ee.lineServer : E2ee.linePhone;
       members.add(StoredMember(m.userId, shown, seq, since));
       views.add(MemberLaneView(m.userId, shown, since, verified: v != null));
-      if (m.userId == me.userId) ownLane = shown;
+      if (m.userId == me.userId) {
+        ownLane = shown;
+        ownPrefGen = v?.gen ?? 0;
+      }
     }
     await store.setMembers(circleId, members);
 
@@ -267,7 +271,8 @@ class LanesService {
       }
     }
     final bool serverLane = policy.assist && ownLane == E2ee.lineServer && !pendingActive;
-    await store.setOwnLane(circleId, serverLane ? LaneChoice(E2ee.lineServer, policy.skGen) : LaneChoice.phone);
+    await store.setOwnLane(circleId, serverLane ? LaneChoice(E2ee.lineServer, policy.skGen) : LaneChoice.phone,
+        prefGen: serverLane ? ownPrefGen : 0);
     final LaneStatus status = serverLane
         ? LaneStatus.serverAssisted
         : (policy.assist && policy.memberOptOut == E2ee.optOutRequiredServer ? LaneStatus.consentRequired : LaneStatus.phoneOnly);
@@ -316,7 +321,7 @@ class LanesService {
 
   /// The member's lane from the NEWEST pref entry of the log, or null when
   /// there is none or it does not verify (then the member is phone-only).
-  Future<({int seq, int lane})?> _verifiedPref(String circleId, String userId, List<LogEntry> log, ProcessingServerState proc,
+  Future<({int seq, int lane, int gen})?> _verifiedPref(String circleId, String userId, List<LogEntry> log, ProcessingServerState proc,
       Map<String, DeviceKey> deviceById, DeviceKey? serverKey, StoredPolicy policy, int voidBefore) async {
     LogEntry? e;
     for (final LogEntry x in log) {
@@ -328,7 +333,7 @@ class LanesService {
     final DeviceKey? actor = deviceById[e.actorDeviceId];
     if (actor == null || actor.userId != userId || actor.kind != 'device' || !actor.isActive) return null;
     final String subject = e.subjectId ?? E2ee.zeroUuid;
-    if (subject == E2ee.zeroUuid) return (seq: e.seq, lane: E2ee.linePhone);
+    if (subject == E2ee.zeroUuid) return (seq: e.seq, lane: E2ee.linePhone, gen: 0);
     // Server lane: the statement must name the exact pinned server key and verify.
     try {
       if (serverKey == null || subject != serverKey.deviceId || e.seq < voidBefore) return null;
@@ -342,7 +347,7 @@ class LanesService {
       final Uint8List msg = s.message(circleId, E2ee.unhex(serverKey.fingerprint));
       if (e.ref == null || !E2ee.constEq(await E2ee.processingRef(msg), e.ref!)) return null;
       if (!await E2ee.verify(actor.edPub, msg, s.signature)) return null;
-      return (seq: e.seq, lane: E2ee.lineServer);
+      return (seq: e.seq, lane: E2ee.lineServer, gen: gen);
     } catch (_) {
       return null;
     }
