@@ -67,6 +67,8 @@ class _PhoneRoutingClient extends http.BaseClient {
     out.headers.addAll(request.headers);
     if (request is http.Request) out.bodyBytes = request.bodyBytes;
     if (phone != null && phone.token != null) out.headers['Authorization'] = 'Bearer ${phone.token}';
+    // A stack behind a trusting proxy (scripts/dev/dev-stack.sh) keys its auth rate limits on this address.
+    if (phone != null && phone.ip.isNotEmpty) out.headers['X-Forwarded-For'] = phone.ip;
     trace.add('${phone?.name ?? '-'} ${request.method} ${request.url.path}');
     return _inner.send(out);
   }
@@ -88,10 +90,11 @@ Future<void> bootstrap(E2eEnv env) async {
 List<String> get httpTrace => _routing.trace;
 
 /// Plain JSON call to the real server (setup only; the code under test never uses this).
-Future<Map<String, dynamic>> rawJson(E2eEnv env, String method, String path, {Map<String, dynamic>? body, String? token}) async {
+Future<Map<String, dynamic>> rawJson(E2eEnv env, String method, String path, {Map<String, dynamic>? body, String? token, String? ip}) async {
   final http.Request r = http.Request(method, Uri.parse('${env.base}$path'));
   r.headers['Content-Type'] = 'application/json';
   if (token != null) r.headers['Authorization'] = 'Bearer $token';
+  if (ip != null && ip.isNotEmpty) r.headers['X-Forwarded-For'] = ip;
   if (body != null) r.body = jsonEncode(body);
   final http.Response res = await http.Response.fromStream(await http.Client().send(r));
   if (res.statusCode < 200 || res.statusCode >= 300) {
@@ -114,6 +117,11 @@ class Phone {
   final String password;
   late String userId;
   String? token;
+  String? refreshToken;
+
+  /// Client address sent as X-Forwarded-For (empty = none). Only a server that trusts the proxy header
+  /// (the dev stack) uses it; it gives every simulated phone its own per-IP rate-limit budget.
+  String ip = '';
 
   final MemoryVault vault = MemoryVault();
   final MemoryKv kv = MemoryKv();
@@ -160,6 +168,14 @@ class Phone {
     userId = (reg['id'] ?? (reg['user'] as Map<String, dynamic>?)?['id']) as String;
     final Map<String, dynamic> login = await rawJson(env, 'POST', '/auth/login', body: <String, dynamic>{'email': email, 'password': password});
     token = login['access_token'] as String;
+  }
+
+  /// Signs in an account that already exists (made by an admin, not by /auth/register).
+  Future<void> loginExisting(E2eEnv env, String id) async {
+    userId = id;
+    final Map<String, dynamic> login = await rawJson(env, 'POST', '/auth/login', body: <String, dynamic>{'email': email, 'password': password}, ip: ip);
+    token = login['access_token'] as String;
+    refreshToken = login['refresh_token'] as String?;
   }
 
   Future<void> syncCircle(String circleId) => run(() async {
@@ -249,7 +265,7 @@ class ServerDevice {
   }
 }
 
-/// Read-only SQL against the throwaway database through the probe binary.
+/// SQL against the throwaway database through the probe binary (reads; `exec` for deliberate test plumbing).
 class Db {
   Db(this.env);
   final E2eEnv env;
@@ -258,6 +274,12 @@ class Db {
     final ProcessResult r = await Process.run(env.probeBin, <String>[sql], environment: <String, String>{'DATABASE_URL': env.dbUrl});
     if (r.exitCode != 0) throw StateError('probe failed: ${r.stderr}');
     return (jsonDecode(r.stdout as String) as List<dynamic>).map((dynamic x) => (x as List<dynamic>)).toList();
+  }
+
+  /// A write (UPDATE/DELETE/INSERT). The probe runs any statement; this is for deliberate test plumbing
+  /// such as backdating a timestamp to test a time window without waiting for it.
+  Future<void> exec(String sql) async {
+    await query(sql);
   }
 
   Future<int> count(String sql) async => (await query(sql)).single.single as int;
