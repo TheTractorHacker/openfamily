@@ -67,6 +67,9 @@ var refreshIdempotentWindow = 3 * time.Minute
 // cap the strict rules apply (the one-off grace, then theft).
 const refreshIdempotentMax = 8
 
+// Once a token has used up its answers (refreshIdempotentMax) the one-off grace below is closed to it as well:
+// the grace issues a SECOND live successor (a fork of the session), which a replayed token must not get.
+
 type pgRefreshStore struct{ pool *pgxpool.Pool }
 
 func (p pgRefreshStore) Create(ctx context.Context, userID, jti string, expires time.Time) error {
@@ -151,9 +154,10 @@ func (p pgRefreshStore) Rotate(ctx context.Context, userID, oldJTI, newJTI strin
 		  AND used_at IS NOT NULL AND revoked_at IS NULL AND grace_used_at IS NULL
 		  AND expires_at > now()
 		  AND used_at > now() - make_interval(secs => $3)
+		  AND retry_count < $4
 		  AND NOT EXISTS (SELECT 1 FROM refresh_sessions c
 		                  WHERE c.parent_jti = $1 AND c.used_at IS NOT NULL)
-		RETURNING family_id`, oldJTI, userID, refreshReuseGrace.Seconds()).Scan(&graceFamily)
+		RETURNING family_id`, oldJTI, userID, refreshReuseGrace.Seconds(), refreshIdempotentMax).Scan(&graceFamily)
 	if err == nil {
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO refresh_sessions (jti, family_id, user_id, expires_at, parent_jti, client_key, user_agent)

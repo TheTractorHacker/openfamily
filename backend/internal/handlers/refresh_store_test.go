@@ -305,11 +305,16 @@ func TestPGRefreshConcurrentPresentations(t *testing.T) {
 			t.Fatalf("answer %d of the cap: %v %q %v", i, out, got, err)
 		}
 	}
-	if out, got, err := st.Rotate(ctx, uid, "cap-a", "cap-grace", exp); err != nil || out != rotateOK || got != "cap-grace" {
-		t.Fatalf("after the cap only the one-off grace is left: %v %q %v", out, got, err)
-	}
+	// Past the cap there is no fork either (no one-off grace sibling): it is reuse and the family is revoked.
 	if out, _, err := st.Rotate(ctx, uid, "cap-a", "cap-theft", exp); err != nil || out != rotateReused {
-		t.Fatalf("past the cap and the grace: %v %v", out, err)
+		t.Fatalf("past the cap: %v %v", out, err)
+	}
+	var live int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM refresh_sessions WHERE parent_jti = 'cap-a'`).Scan(&live); err != nil || live != 1 {
+		t.Fatalf("children of cap-a after exhausting the cap (no fork): %d %v", live, err)
+	}
+	if out, _, err := st.Rotate(ctx, uid, "cap-b", "cap-c", exp); err != nil || out != rotateReused {
+		t.Fatalf("the successor is revoked with its family: %v %v", out, err)
 	}
 	// A replay after the window (and no strict grace left) is theft.
 	if err := st.Create(ctx, uid, "late-a", exp); err != nil {

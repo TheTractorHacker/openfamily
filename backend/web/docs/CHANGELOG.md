@@ -10,6 +10,12 @@ for the **last 5 minor versions** of the app (see
 [API compatibility](api-compat.md)), so you can update the server first and
 the phones afterwards.
 
+## v0.26.24 (2026-11-10)
+
+Server only: update the server, no app update needed.
+
+- **Sign-in renewal: no second copy of a session past the retry limit.** A used sign-in token is answered again at most 8 times (v0.26.23). After that the old one-off grace, which would have created a second live copy of the session, is closed too: the token counts as reuse and the session is signed out.
+
 ## v0.26.23 (2026-11-10)
 
 Update the server first, then the phones.
