@@ -101,6 +101,27 @@ void main() {
     });
   });
 
+  testWidgets('with Quiet hours ON the row is there from the start; From and Until slide in when the answer arrives', (WidgetTester t) async {
+    // Honest limit: the placeholder cannot know the answer, so the sub-rows
+    // appear (and the sections below move down) once, on the first visit.
+    setWindow(t, const Size(344, 882));
+    final Map<String, int> calls = <String, int>{};
+    await withServer(calls, const Duration(milliseconds: 400), quietOn: true, () async {
+      await t.pumpWidget(scaled(const NotificationSettingsScreen(), 1));
+      await t.pump(const Duration(milliseconds: 450));
+      await t.pump(const Duration(milliseconds: 10));
+      expect(find.text('Quiet hours'), findsOneWidget);
+      expect(find.byKey(const Key('quiet-hours-placeholder')), findsOneWidget);
+      expect(find.text('From'), findsNothing);
+      await t.pump(const Duration(milliseconds: 500));
+      await t.pumpAndSettle();
+      expect(find.byKey(const Key('quiet-hours-placeholder')), findsNothing);
+      expect(find.text('From'), findsOneWidget);
+      expect(find.text('Until'), findsOneWidget);
+      expect(t.takeException(), isNull);
+    });
+  });
+
   testWidgets('a failed Quiet hours load shows the row, a reason and Try again', (WidgetTester t) async {
     setWindow(t, const Size(344, 882));
     final Map<String, int> calls = <String, int>{};

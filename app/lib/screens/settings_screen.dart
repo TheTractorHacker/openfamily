@@ -143,6 +143,10 @@ class SettingsScreen extends StatefulWidget {
   State<SettingsScreen> createState() => _SettingsScreenState();
 }
 
+/// Forgets the remembered server release (tests only).
+@visibleForTesting
+void resetSettingsServerVersionCache() => _SettingsScreenState._resetServerVersion();
+
 class _SettingsScreenState extends State<SettingsScreen> {
   bool _locationSharing = true;
   bool _locationSharingLoading = true;
@@ -162,8 +166,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String? _biometricError;
   Duration _lockGrace = Duration.zero;
 
-  /// The server release seen earlier in this app run (empty until known).
+  /// The server release seen earlier in this app run, and the server it was
+  /// read from. A different server (after "Change server") never reuses it.
   static String _serverVersion = '';
+  static String _serverVersionFor = '';
+
+  static void _resetServerVersion() {
+    _serverVersion = '';
+    _serverVersionFor = '';
+  }
+
 
   final VersionTapCounter _versionTaps = VersionTapCounter();
   String _versionText = 'Version …';
@@ -177,12 +189,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
     } catch (_) {}
     // The server release changes only when the server is updated: ask once per
     // app run instead of on every visit to Settings.
-    String server = _serverVersion;
+    final String base = ServerConfig.instance.apiBaseUrl;
+    String server = _serverVersionFor == base ? _serverVersion : '';
     if (server.isEmpty) {
       try {
         final r = await ApiClient.get('/version');
         final v = r is Map ? r['version'] : null;
-        if (v is String && v.isNotEmpty) server = _serverVersion = v;
+        if (v is String && v.isNotEmpty) {
+          server = v;
+          _serverVersion = v;
+          _serverVersionFor = base;
+        }
       } catch (_) {}
     }
     if (!mounted) return;
