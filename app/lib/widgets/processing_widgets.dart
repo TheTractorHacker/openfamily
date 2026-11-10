@@ -298,7 +298,7 @@ bool _noConnection(ApiException e) =>
 ProcessingErrorText processingErrorText(Object e, {String step = "Could not check this circle's server processing settings."}) {
   if (e is ApiException) {
     if (_noConnection(e)) {
-      return const ProcessingErrorText('No connection', 'You appear to be offline. Check your connection and try again.',
+      return const ProcessingErrorText('No connection', 'You appear to be offline. Try again when this phone is back online.',
           offline: true, icon: Icons.cloud_off);
     }
     if (e.status == 0) return ProcessingErrorText("The server's answer could not be read", '$step ${e.message}');

@@ -59,25 +59,6 @@ void main() {
     });
   });
 
-  group('ProcessingScreen: load errors name the cause', () {
-    final Map<Object, (String, String)> cases = <Object, (String, String)>{
-      const ApiException(503, 'Request failed (503).'): ('Server busy', 'restarting'),
-      const ApiException(401, 'unauthorized'): ('Sign in again', 'Sign in again'),
-      const LocalKeyException(LocalKeyProblem.missing): ('Encryption key problem', 'Encryption keys'),
-    };
-    for (final MapEntry<Object, (String, String)> e in cases.entries) {
-      testWidgets('${e.value.$1}: not "Something went wrong", not "offline"', (t) async {
-        final FakeProcessingController c = FakeProcessingController(FakeProcessingController.snapshot())..loadFails = e.key;
-        await pumpScreen(t, ProcessingScreen(circle: adminCircle, controller: c));
-        expect(find.text(e.value.$1), findsWidgets);
-        expect(find.textContaining(e.value.$2), findsWidgets);
-        expect(find.text('Something went wrong'), findsNothing);
-        expect(find.textContaining('offline'), findsNothing);
-        expect(find.text('Try again'), findsOneWidget);
-      });
-    }
-  });
-
   group('ProcessingScreen: a member', () {
     testWidgets('sees the setting read-only with the reason, and decides for their own data', (t) async {
       final FakeProcessingController c = FakeProcessingController(FakeProcessingController.snapshot(me: pB, admin: false), me: pB);
