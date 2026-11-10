@@ -1,0 +1,32 @@
+# Override for scripts/dev/dev-stack.sh. Layered on top of the repo's docker-compose.yml, under a
+# DIFFERENT compose project name, so the containers and volumes (pgdata, server_device, apk_data)
+# are separate from a production stack on the same host. Nothing here is for production use.
+services:
+  api:
+    # NOT openfamily-api:local: that tag belongs to the production stack on a shared host. The tag is per
+    # worktree (dev-stack.sh writes it into stack.env as DEV_API_IMAGE).
+    image: ${DEV_API_IMAGE:?}
+    build:
+      labels:
+        org.orbitly.devstack.commit: ${GIT_COMMIT:-}
+    restart: "no"
+    # Only loopback, on a port the script found free.
+    ports: !override
+      - "127.0.0.1:${DEV_API_PORT:?}:8080"
+    environment:
+      # Plain http on loopback; the compose default (TLS_BEHIND_PROXY=true) trusts X-Forwarded-For from
+      # private ranges, which the scenarios use to give every simulated phone its own client address
+      # (the auth rate limits are per client IP). See docs/developers/dev-stack.md.
+      TLS_BEHIND_PROXY: "true"
+      # Built-in server device (no sidecar, no ingest token).
+      OPENFAMILY_SERVER_DEVICE: builtin
+  postgres:
+    restart: "no"
+    # A first start on a busy host (initdb, TimescaleDB setup) can take several minutes; the repo's default
+    # of 12 checks every 5 s would give up and mark the stack failed.
+    healthcheck:
+      retries: 120
+    ports:
+      - "127.0.0.1:${DEV_DB_PORT:?}:5432"
+    # No `command` here on purpose: the container runs docker-compose.yml's own command (the production
+    # max_connections). dev-stack.sh turns fsync off with ALTER SYSTEM after start instead.

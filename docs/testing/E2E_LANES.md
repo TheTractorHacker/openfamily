@@ -17,6 +17,9 @@ and are removed at the end. Extra arguments are passed to `flutter test`.
 
 Without `E2E_BASE_URL` (the normal `flutter test`) the suite is skipped.
 
+For the production image, the compose Postgres limits, sign-in/refresh rules, key resets and refusal log lines see
+[Dev stack and end-to-end scenarios](../developers/dev-stack.md).
+
 How the pieces fit: `ApiClient` insists on https and one token store, so the tests use a pretend https
 host that a zone-scoped http client rewrites to the real server and signs with the token of the phone the
 call belongs to. The Orbitly server's own device is the real `e2ee-bridge` binary (`enroll --kind server`,
