@@ -177,6 +177,7 @@ void main() {
     test('visible and hidden: the cadence vocabulary, additive', () {
       expect(WatchCommand.tryParse(cmd('visible'))?.cmd, WatchCmd.visible);
       expect(WatchCommand.tryParse(cmd('visible', arg: 'ambient'))?.arg, 'ambient');
+      expect(WatchCommand.tryParse(cmd('visible', arg: 'finding'))?.arg, 'finding');
       expect(WatchCommand.tryParse(cmd('hidden'))?.cmd, WatchCmd.hidden);
       expect(WatchCommand.tryParse(cmd('visible', arg: 'always')), isNull);
       expect(WatchCommand.tryParse(cmd('hidden', arg: 'x')), isNull);

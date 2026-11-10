@@ -410,6 +410,7 @@ class WatchBridge {
     DateTime Function()? clock,
     Timer Function(Duration delay, void Function() callback)? timer,
     this.minInterval = const Duration(seconds: 5),
+    this.findingInterval = const Duration(seconds: 2),
     this.ambientInterval = const Duration(seconds: 60),
     this.hiddenInterval = const Duration(minutes: 2),
     this.keepAlive = const Duration(minutes: 10),
@@ -451,6 +452,10 @@ class WatchBridge {
   /// Floor between two snapshots (and between two looks at the roster), and
   /// the cadence while the watch app is on screen.
   final Duration minInterval;
+
+  /// The same floor while the watch shows its direction screen (`visible` with
+  /// arg `finding`): the arrow there is only as fresh as the last snapshot.
+  final Duration findingInterval;
 
   /// Meaningful changes while the watch app is in always-on (ambient) mode.
   final Duration ambientInterval;
@@ -510,6 +515,9 @@ class WatchBridge {
   WatchTier _tier = WatchTier.hidden;
   DateTime? _tierUntil;
 
+  /// The watch's direction screen is open (valid with the visible tier only).
+  bool _finding = false;
+
   final List<String> _seenCommandIds = <String>[];
   final Map<WatchCmd, DateTime> _lastRun = <WatchCmd, DateTime>{};
 
@@ -518,6 +526,14 @@ class WatchBridge {
 
   /// What the watch app said last, expired after [visibleTtl] / [ambientTtl].
   WatchTier get tier => _tierAt(_clock());
+
+  /// True while the watch shows its direction screen (and said so within [visibleTtl]).
+  bool get finding => _findingAt(_clock());
+
+  bool _findingAt(DateTime now) => _finding && _tierAt(now) == WatchTier.visible;
+
+  /// The floor between two snapshots (and two looks at the roster) right now.
+  Duration _floorAt(DateTime now) => _findingAt(now) ? findingInterval : minInterval;
 
   WatchTier _tierAt(DateTime now) {
     final DateTime? until = _tierUntil;
@@ -558,6 +574,7 @@ class WatchBridge {
       _lastHash = null;
       _tier = WatchTier.hidden;
       _tierUntil = null;
+      _finding = false;
       return;
     }
     if (forcePublish || !was) await publish(force: true);
@@ -658,18 +675,19 @@ class WatchBridge {
   /// How long a change of kind [c] still has to wait in [tier]; null: it is
   /// left to the keep-alive.
   Duration? _wait(WatchChange c, WatchTier tier, DateTime now) {
+    final Duration floor = _floorAt(now);
     final Duration need;
     switch (c) {
       case WatchChange.none:
         return null;
       case WatchChange.urgent:
       case WatchChange.event:
-        need = minInterval;
+        need = floor;
       case WatchChange.meaningful:
-        need = switch (tier) { WatchTier.visible => minInterval, WatchTier.ambient => ambientInterval, WatchTier.hidden => hiddenInterval };
+        need = switch (tier) { WatchTier.visible => floor, WatchTier.ambient => ambientInterval, WatchTier.hidden => hiddenInterval };
       case WatchChange.minor:
         if (tier != WatchTier.visible) return null;
-        need = minInterval;
+        need = floor;
     }
     final DateTime? last = _lastPublish;
     if (last == null) return Duration.zero;
@@ -697,8 +715,9 @@ class WatchBridge {
     }
     final DateTime now = _clock();
     final DateTime? lastEval = _lastEval;
-    if (!force && !event && lastEval != null && now.difference(lastEval) < minInterval) {
-      _scheduleAt(lastEval.add(minInterval));
+    final Duration floor = _floorAt(now);
+    if (!force && !event && lastEval != null && now.difference(lastEval) < floor) {
+      _scheduleAt(lastEval.add(floor));
       return;
     }
     _lastEval = now;
@@ -791,20 +810,26 @@ class WatchBridge {
   /// heartbeat).
   void _onPresence(WatchCommand cmd, DateTime now) {
     final WatchTier before = _tierAt(now);
+    final bool findingBefore = _findingAt(now);
     if (cmd.cmd == WatchCmd.hidden) {
       _tier = WatchTier.hidden;
       _tierUntil = null;
+      _finding = false;
     } else if (cmd.arg == 'ambient') {
       _tier = WatchTier.ambient;
       _tierUntil = now.add(ambientTtl);
+      _finding = false;
     } else {
       _tier = WatchTier.visible;
       _tierUntil = now.add(visibleTtl);
+      _finding = cmd.arg == 'finding';
     }
+    final bool cameOnScreen = _tier == WatchTier.visible && before != WatchTier.visible;
+    final bool startedFinding = _findingAt(now) && !findingBefore;
     _armKeepAlive();
     final DateTime? last = _lastPublish;
-    if (_tier == WatchTier.visible && before != WatchTier.visible && (last == null || now.difference(last) >= minInterval)) {
-      // The app just came on screen: a fresh snapshot right away.
+    if ((cameOnScreen || startedFinding) && (last == null || now.difference(last) >= _floorAt(now))) {
+      // The app just came on screen (or opened the direction screen): a fresh snapshot right away.
       unawaited(publish(force: true, urgent: true));
     } else {
       // Changes held back for the slower tier may be due now.

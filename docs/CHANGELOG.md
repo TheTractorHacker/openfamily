@@ -10,6 +10,14 @@ for the **last 5 minor versions** of the app (see
 [API compatibility](api-compat.md)), so you can update the server first and
 the phones afterwards.
 
+## v0.26.30 (2026-11-10)
+
+Needs the new app **and** the new Apple Watch app (they ship together in the same iPhone app update; install it and let the watch app update). The server needs no change. The watch app code could not be compiled or tried on a watch here: the first iOS build on the macOS runner compiles it, and the feel has to be judged on a real Apple Watch.
+
+- **Apple Watch: the direction arrow now turns with your wrist, like Precision Finding.** The watch reads its own compass while the Distance and direction screen is open and awake, and draws the arrow at 30 frames a second, easing between readings and always turning the short way round (359 to 1 degrees no longer spins the long way). The ring with the N turns the other way so north stays put. The compass stops when the screen closes or the wrist goes down. If the compass is not ready the arrow points with north at the top as before. Under about 15 m the screen says the person is close instead of showing a jittery arrow, and it shows how old their position is ("Updated 12 s ago"). The watch asks for location permission once so the compass can point to true north.
+- **Fresher position while you look for someone.** While the direction screen is open the iPhone sends the watch an update every 2 seconds instead of every 5 (`visible` with the new argument `finding`; Wear OS is unchanged). The arrow is still limited by how often the other person's phone reports.
+- **Less lag on the rest of the Apple Watch app.** A new snapshot is decoded and saved off the main thread, an identical one is skipped, and the people list redraws only the rows that changed. The watch also says it is on screen again once the connection to the iPhone is up, instead of waiting up to a minute.
+
 ## v0.26.26 (2026-11-10)
 
 App-only release (the server needs no change; v0.26.25 fixed the database connections and needs a server update). Install over the current app.

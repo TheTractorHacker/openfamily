@@ -391,8 +391,8 @@ WatchChange classifyWatchChange(Map<String, dynamic>? prev, Map<String, dynamic>
 // ---- Commands (watch to phone) ----------------------------------------------
 
 /// `visible` and `hidden` are not actions: the watch app says whether it is on
-/// screen (`visible`, with arg `ambient` in always-on mode) so the phone can
-/// choose how often to send (docs/design/WATCH_APPS.md, Cadence).
+/// screen (`visible`, with arg `ambient` in always-on mode, or `finding` while
+/// the direction screen is open) so the phone can choose how often to send (docs/design/WATCH_APPS.md, Cadence).
 enum WatchCmd { sos, checkin, pause, resume, ack, refresh, reply, visible, hidden }
 
 /// Fixed quick replies. The watch sends only the id; the phone owns the words.
@@ -443,7 +443,7 @@ class WatchCommand {
         case WatchCmd.ack:
           if (a == null || a.isEmpty) return null;
         case WatchCmd.visible:
-          if (a != null && a != 'ambient') return null;
+          if (a != null && a != 'ambient' && a != 'finding') return null;
         case WatchCmd.hidden:
           if (a != null) return null;
         case WatchCmd.sos:

@@ -166,7 +166,7 @@ when it leaves. A `visible` not repeated within 150 s (an `ambient` within
 
 | Tier | Meaningful changes | Keep-alive | Data Layer |
 |---|---|---|---|
-| visible | every change, at most one snapshot per 5 s; a fresh one right away when the app comes on screen | 60 s (keeps "Updated" current) | urgent |
+| visible | every change, at most one snapshot per 5 s (2 s while the Apple Watch direction screen is open: `visible` with arg `finding`); a fresh one right away when the app comes on screen | 60 s (keeps "Updated" current) | urgent |
 | ambient | at most once per 60 s | 10 min | urgent |
 | hidden (default) | at most once per 2 min | 10 min | not urgent: the system may batch it for a few minutes |
 
@@ -330,5 +330,4 @@ project layout, CI and the kill switch are in [WATCH_APPS_APPLE.md](WATCH_APPS_A
   delete succeeded with a watch connected (an empty snapshot announcing the new session
   is added when the app is not running).
 - Not on the watch (v1): complications (needs a widget extension and App Group),
-  live compass heading (the arrow is north-up from the coordinates in the
-  snapshot), standalone LTE (see above).
+  standalone LTE (see above).

@@ -22,6 +22,8 @@ final class PhoneLink: NSObject, ObservableObject, WCSessionDelegate {
         super.init()
         if let saved = UserDefaults.standard.string(forKey: storeKey) {
             snapshot = WSnapshot.decode(json: saved)
+            // Only a copy that decoded counts as "already shown".
+            if snapshot != nil { storedJSON = saved }
         }
         if WCSession.isSupported() {
             let session = WCSession.default
@@ -32,38 +34,58 @@ final class PhoneLink: NSObject, ObservableObject, WCSessionDelegate {
 
     // MARK: Receiving
 
-    private func wipe() {
-        snapshot = nil
-        UserDefaults.standard.removeObject(forKey: storeKey)
+    /// Decoding and the UserDefaults write happen here, off the main thread that draws
+    /// the arrow. The queue is serial, and it hands every result to the main queue
+    /// in the order the contexts arrived, so a wipe can never be overtaken by older data.
+    private let applyQueue = DispatchQueue(label: "app.openfamily.watch.apply", qos: .userInitiated)
+
+    /// The JSON stored last. Only touched on `applyQueue`.
+    private var storedJSON: String? = nil
+
+    /// Forgets the stored data (on `applyQueue`) and clears the screen (on main).
+    private func wipe(forgetSession: Bool) {
+        storedJSON = nil
+        let defaults = UserDefaults.standard
+        defaults.removeObject(forKey: storeKey)
+        if forgetSession { defaults.removeObject(forKey: sessionKey) }
+        DispatchQueue.main.async {
+            self.snapshot = nil
+        }
     }
 
-    /// Applies one application context. Everything runs on the main thread in
-    /// arrival order, so a wipe can never be overtaken by older data.
+    /// Applies one application context on `applyQueue`.
     private func apply(context: [String: Any]) {
-        DispatchQueue.main.async {
+        applyQueue.async {
             let defaults = UserDefaults.standard
             if context["cleared"] as? Bool == true {
-                self.wipe()
-                defaults.removeObject(forKey: self.sessionKey)
+                self.wipe(forgetSession: true)
             }
             // Another sign-in than the one the stored data belongs to: drop it.
             if let sid = context["session"] as? String, sid != defaults.string(forKey: self.sessionKey) {
-                self.wipe()
+                self.wipe(forgetSession: false)
                 defaults.set(sid, forKey: self.sessionKey)
             }
             guard let json = context["snapshot"] as? String,
                   let decoded = WSnapshot.decode(json: json) else { return }
             if !decoded.signedIn {
                 // The phone is signed out: forget everything.
-                self.wipe()
-                defaults.removeObject(forKey: self.sessionKey)
+                self.wipe(forgetSession: true)
                 return
             }
-            defaults.set(json, forKey: self.storeKey)
-            self.snapshot = decoded
-            if let last = decoded.lastCommand {
-                let text = last.message.isEmpty ? (last.ok ? "Done." : "The iPhone could not do it.") : last.message
-                self.finish(last.id, last.ok, text)
+            // The same text again (a repeated delivery): nothing to store or redraw.
+            let unchanged = json == self.storedJSON
+            if !unchanged {
+                defaults.set(json, forKey: self.storeKey)
+                self.storedJSON = json
+            }
+            DispatchQueue.main.async {
+                if !unchanged && self.snapshot != decoded {
+                    self.snapshot = decoded
+                }
+                if let last = decoded.lastCommand {
+                    let text = last.message.isEmpty ? (last.ok ? "Done." : "The iPhone could not do it.") : last.message
+                    self.finish(last.id, last.ok, text)
+                }
             }
         }
     }
@@ -75,6 +97,8 @@ final class PhoneLink: NSObject, ObservableObject, WCSessionDelegate {
         let context = session.receivedApplicationContext
         DispatchQueue.main.async {
             self.reachable = isReachable
+            // The first "visible" can be sent before the session is active: say it again now.
+            self.resendPresenceIfOnScreen()
         }
         if !context.isEmpty {
             apply(context: context)
@@ -85,6 +109,7 @@ final class PhoneLink: NSObject, ObservableObject, WCSessionDelegate {
         let isReachable = session.isReachable
         DispatchQueue.main.async {
             self.reachable = isReachable
+            if isReachable { self.resendPresenceIfOnScreen() }
         }
     }
 
@@ -145,10 +170,11 @@ final class PhoneLink: NSObject, ObservableObject, WCSessionDelegate {
     }
 
     /// Tells the iPhone whether this app is on screen ("visible", "visible ambient",
-    /// "hidden") so it sends every few seconds only while it is
-    /// (docs/design/WATCH_APPS.md, Cadence). Fire and forget: no answer is expected,
-    /// and a lost one is harmless (the iPhone forgets "visible" after 150 s).
-    func presence(visible: Bool, ambient: Bool = false) {
+    /// "visible finding", "hidden") so it sends every few seconds only while it is
+    /// (docs/design/WATCH_APPS.md, Cadence). "finding" is the direction screen: the
+    /// iPhone then sends every 2 s. Fire and forget: no answer is expected, and a
+    /// lost one is harmless (the iPhone forgets "visible" after 150 s).
+    func presence(visible: Bool, ambient: Bool = false, finding: Bool = false) {
         let session = WCSession.default
         guard WCSession.isSupported(), session.activationState == .activated, session.isReachable else { return }
         var object: [String: Any] = [
@@ -156,22 +182,48 @@ final class PhoneLink: NSObject, ObservableObject, WCSessionDelegate {
             "cmd": visible ? "visible" : "hidden",
             "at": Int64(Date().timeIntervalSince1970 * 1000.0),
         ]
-        if visible && ambient { object["arg"] = "ambient" }
+        if visible && ambient {
+            object["arg"] = "ambient"
+        } else if visible && finding {
+            object["arg"] = "finding"
+        }
         guard let data = try? JSONSerialization.data(withJSONObject: object),
               let text = String(data: data, encoding: .utf8) else { return }
         session.sendMessage(["json": text], replyHandler: { _ in }, errorHandler: { _ in })
     }
 
     private var presenceTimer: Timer? = nil
+    private var wantOnScreen = false
+    private var wantAmbient = false
+    private var wantFinding = false
 
     /// Called on scene phase changes. While active, "visible" is repeated once a minute.
     func setOnScreen(_ onScreen: Bool, ambient: Bool) {
+        wantOnScreen = onScreen
+        wantAmbient = ambient
+        sendPresenceAndRearm()
+    }
+
+    /// The direction screen is open (true) or closed (false). Asks the iPhone to send
+    /// position updates every 2 s instead of every 5 s while it is.
+    func setFinding(_ on: Bool) {
+        if on == wantFinding { return }
+        wantFinding = on
+        if wantOnScreen && !wantAmbient { sendPresenceAndRearm() }
+    }
+
+    private func resendPresenceIfOnScreen() {
+        if wantOnScreen { sendPresenceAndRearm() }
+    }
+
+    private func sendPresenceAndRearm() {
         presenceTimer?.invalidate()
         presenceTimer = nil
-        presence(visible: onScreen, ambient: ambient)
-        if onScreen && !ambient {
+        presence(visible: wantOnScreen, ambient: wantAmbient, finding: wantFinding)
+        if wantOnScreen && !wantAmbient {
             presenceTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
-                self?.presence(visible: true)
+                guard let self = self else { return }
+                self.presence(visible: true, finding: self.wantFinding)
             }
         }
     }

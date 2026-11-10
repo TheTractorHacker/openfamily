@@ -293,6 +293,18 @@ void main() {
       expect(r.total, greaterThanOrEqualTo(50));
     });
 
+    test('finding (direction screen open): a snapshot every 2 s while someone moves, all urgent', () async {
+      final SimResult r = await simulate(drivingHour(), visibleFrom: 0, visibleArg: 'finding');
+      // ignore: avoid_print
+      print('CADENCE driving finding: after ${r.total} (urgent ${r.urgent})');
+      expect(r.total, greaterThan(1500));
+      expect(r.total, lessThanOrEqualTo(1801));
+      expect(r.urgent, r.total);
+      for (int i = 1; i < r.sent.length; i++) {
+        expect(r.sent[i].at.difference(r.sent[i - 1].at), greaterThanOrEqualTo(const Duration(seconds: 2)));
+      }
+    });
+
     test('a visible watch that goes quiet falls back to the hidden tier', () async {
       // visible only for the first 10 minutes, then the heartbeats stop (no "hidden" either).
       final List<ScenarioSecond> hour = drivingHour();
@@ -332,6 +344,42 @@ void main() {
       await t.onCommand!(command('visible', time.now, 'p2', arg: 'ambient'));
       expect(b.tier, WatchTier.ambient);
       await t.onCommand!(command('hidden', time.now, 'p3'));
+      expect(b.tier, WatchTier.hidden);
+    });
+
+    test('finding is a visible tier with a 2 s floor; plain visible, ambient and hidden end it', () async {
+      await make();
+      expect(b.finding, false);
+      await time.advanceTo(time.now.add(const Duration(seconds: 10)));
+      await t.onCommand!(command('visible', time.now, 'p1'));
+      await time.settle();
+      expect(b.finding, false);
+      final int n = t.sent.length;
+      // Opening the direction screen sends a fresh snapshot at once (the last one is 0 s old, so not yet).
+      await time.advanceTo(time.now.add(const Duration(seconds: 3)));
+      await t.onCommand!(command('visible', time.now, 'p2', arg: 'finding'));
+      await time.settle();
+      expect(b.tier, WatchTier.visible);
+      expect(b.finding, true);
+      expect(t.sent.length, n + 1);
+      expect(t.sent.last.urgent, true);
+      await t.onCommand!(command('visible', time.now, 'p3'));
+      expect(b.finding, false);
+      await t.onCommand!(command('visible', time.now, 'p4', arg: 'finding'));
+      await t.onCommand!(command('visible', time.now, 'p5', arg: 'ambient'));
+      expect(b.finding, false);
+      expect(b.tier, WatchTier.ambient);
+      await t.onCommand!(command('visible', time.now, 'p6', arg: 'finding'));
+      await t.onCommand!(command('hidden', time.now, 'p7'));
+      expect(b.finding, false);
+    });
+
+    test('finding expires with the visible tier when the heartbeats stop', () async {
+      await make();
+      await t.onCommand!(command('visible', time.now, 'p1', arg: 'finding'));
+      expect(b.finding, true);
+      await time.advanceTo(time.now.add(const Duration(seconds: 151)));
+      expect(b.finding, false);
       expect(b.tier, WatchTier.hidden);
     });
 
