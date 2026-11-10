@@ -18,6 +18,7 @@ import (
 	"errors"
 	"context"
 	"encoding/base64"
+	"encoding/hex"
 	"net/http"
 	"sort"
 	"strings"
@@ -99,6 +100,13 @@ type prefRow struct {
 	SQLServerOK  bool // e2ee_pref_lane_server (SQL view, not trusted for writes)
 	CircleSKGen  int
 	CircleAssist bool
+	// Facts for the catch-up rule (e2ee_member_catching_up), all server-side records.
+	SQLCatchingUp  bool       // e2ee_member_catching_up (SQL view, not trusted for writes)
+	NamedFP        string     // fingerprint (hex) the NAMED server device registered with
+	NamedRevokedAt *time.Time // when the named server device was revoked
+	PinnedID       string     // the currently pinned live server device ("" if none)
+	PinnedSetAt    *time.Time // e2ee_server_device.set_at
+	GenAt          *time.Time // circles.e2ee_server_gen_at
 }
 
 // loadPrefs loads the prefs of one user (userID != "") or of the whole circle
@@ -108,10 +116,15 @@ func loadPrefs(ctx context.Context, q querier, circleID, userID string) (map[str
 	rows, err := q.Query(ctx, `
 		SELECT p.user_id::text, p.lane, p.sk_gen, p.server_device_id::text, p.server_fingerprint, p.nonce, p.signature, p.legacy, p.log_seq,
 		       p.approver_device_id::text, ak.ed25519_pub, p.signed_at, e2ee_pref_lane_server(p.circle_id, p.user_id),
-		       c.e2ee_server_gen, c.server_assist
+		       c.e2ee_server_gen, c.server_assist,
+		       e2ee_member_catching_up(p.circle_id, p.user_id), COALESCE(nk.fingerprint, ''), nk.revoked_at,
+		       COALESCE(pk.device_id::text, ''), sd.set_at, c.e2ee_server_gen_at
 		FROM e2ee_processing_pref p
 		JOIN circles c ON c.id = p.circle_id
 		JOIN device_keys ak ON ak.device_id = p.approver_device_id AND ak.user_id = p.user_id AND ak.kind = 'device' AND ak.revoked_at IS NULL
+		LEFT JOIN device_keys nk ON nk.device_id = p.server_device_id
+		LEFT JOIN e2ee_server_device sd ON TRUE
+		LEFT JOIN device_keys pk ON pk.device_id = sd.device_id AND pk.kind = 'server' AND pk.revoked_at IS NULL
 		WHERE p.circle_id = $1 AND ($2 = '' OR p.user_id::text = $2) AND (p.valid_until IS NULL OR p.valid_until > now())`, circleID, userID)
 	if err != nil {
 		return nil, err
@@ -122,7 +135,8 @@ func loadPrefs(ctx context.Context, q querier, circleID, userID string) (map[str
 		var p prefRow
 		var srv *string
 		if err := rows.Scan(&p.UserID, &p.Lane, &p.SKGen, &srv, &p.ServerFP, &p.Nonce, &p.Sig, &p.Legacy, &p.LogSeq,
-			&p.ApproverID, &p.ApproverPub, &p.SignedAt, &p.SQLServerOK, &p.CircleSKGen, &p.CircleAssist); err != nil {
+			&p.ApproverID, &p.ApproverPub, &p.SignedAt, &p.SQLServerOK, &p.CircleSKGen, &p.CircleAssist,
+			&p.SQLCatchingUp, &p.NamedFP, &p.NamedRevokedAt, &p.PinnedID, &p.PinnedSetAt, &p.GenAt); err != nil {
 			return nil, err
 		}
 		if srv != nil {
@@ -185,10 +199,18 @@ func prefLogMatches(p prefRow, l logRef, haveLog bool, circleID, userID string, 
 	if p.Legacy {
 		return true
 	}
-	if p.LogSeq == nil || dev == nil || !haveLog || l.seq != *p.LogSeq {
+	if dev == nil {
 		return false
 	}
-	msg, err := e2ee.ProcessingPrefMessage(circleID, userID, e2ee.LineServer, uint32(p.SKGen), dev.DeviceID, dev.fp, p.Nonce)
+	return prefLogMatchesFor(p, l, haveLog, circleID, userID, dev.DeviceID, dev.fp)
+}
+
+// prefLogMatchesFor is prefLogMatches for the server key the pref itself names.
+func prefLogMatchesFor(p prefRow, l logRef, haveLog bool, circleID, userID, serverDeviceID string, fp []byte) bool {
+	if p.LogSeq == nil || !haveLog || l.seq != *p.LogSeq {
+		return false
+	}
+	msg, err := e2ee.ProcessingPrefMessage(circleID, userID, e2ee.LineServer, uint32(p.SKGen), serverDeviceID, fp, p.Nonce)
 	return err == nil && bytes.Equal(l.ref, e2ee.ProcessingRef(msg))
 }
 
@@ -216,6 +238,95 @@ func verifiedLaneSet(ctx context.Context, q querier, circleID, userID string, de
 		}
 	}
 	return out, nil
+}
+
+// catchUpWindow is how long after a server-key replacement a member whose signed pref still names the
+// old key may keep delivering on the phone line in a required_server circle. It is measured from a
+// server-side record of the replacement (never from anything the member sends) and mirrors the 72 hours
+// in the SQL function e2ee_member_catching_up. No open-ended exemption.
+const catchUpWindow = 72 * time.Hour
+
+// prefStaleGenuine is the Go side of "catching up" (the SQL side is e2ee_member_catching_up). It is true
+// only for a pref that is GENUINE: lane server, not a legacy conversion, signed by the member's own live
+// phone key over the server key and generation it names (re-verified here, SQL cannot do that), and the
+// member's latest in the key log; and STALE: that server key is no longer the pinned one, or is revoked,
+// or its SK generation is older than the circle's. since is the oldest server-side record of such a
+// replacement (the zero time when a cause has no recorded time, which is never recent).
+func prefStaleGenuine(p prefRow, l logRef, haveLog bool, circleID, userID string) (stale bool, since time.Time) {
+	if p.Lane != "server" || p.Legacy || !p.CircleAssist || p.ServerDevice == "" || p.SKGen < 1 || len(p.ServerFP) != 32 || len(p.Nonce) != e2ee.ProcessingNonceLen {
+		return false, time.Time{}
+	}
+	named, err := hex.DecodeString(p.NamedFP)
+	if err != nil || !e2ee.ConstEq(named, p.ServerFP) {
+		return false, time.Time{}
+	}
+	if e2ee.VerifyProcessingPref(p.ApproverPub, circleID, userID, e2ee.LineServer, uint32(p.SKGen), p.ServerDevice, p.ServerFP, p.Nonce, p.Sig) != nil ||
+		!prefLogMatchesFor(p, l, haveLog, circleID, userID, p.ServerDevice, p.ServerFP) {
+		return false, time.Time{}
+	}
+	var times []*time.Time
+	if p.PinnedID != "" && p.PinnedID != p.ServerDevice {
+		times = append(times, p.PinnedSetAt)
+	}
+	if p.NamedRevokedAt != nil {
+		times = append(times, p.NamedRevokedAt)
+	}
+	if p.SKGen < p.CircleSKGen {
+		times = append(times, p.GenAt)
+	}
+	if len(times) == 0 {
+		return false, time.Time{}
+	}
+	for _, t := range times {
+		if t == nil {
+			return true, time.Time{}
+		}
+		if since.IsZero() || t.Before(since) {
+			since = *t
+		}
+	}
+	return true, since
+}
+
+// memberStates is the one definition behind both enforcement and the state API: for the members in the
+// circle (all, or just userID) it returns who has a genuine stale pref (pref_stale) and who of those is
+// still inside the catch-up window and also agrees with the SQL function (catching_up).
+func memberStates(ctx context.Context, q querier, circleID, userID string) (stale, catching map[string]bool, err error) {
+	stale, catching = map[string]bool{}, map[string]bool{}
+	if e2ee.CheckID(circleID) != nil {
+		return stale, catching, nil
+	}
+	prefs, err := loadPrefs(ctx, q, circleID, userID)
+	if err != nil || len(prefs) == 0 {
+		return stale, catching, err
+	}
+	logs, err := latestPrefLog(ctx, q, circleID, userID)
+	if err != nil {
+		return stale, catching, err
+	}
+	now := time.Now()
+	for u, p := range prefs {
+		l, have := logs[u]
+		st, since := prefStaleGenuine(p, l, have, circleID, u)
+		if !st {
+			continue
+		}
+		stale[u] = true
+		if !since.IsZero() && now.Sub(since) < catchUpWindow && p.SQLCatchingUp {
+			catching[u] = true
+		}
+	}
+	return stale, catching, nil
+}
+
+// memberCatchingUp answers whether userID may deliver on the phone line in a required_server circle
+// although their own lane is not (verified) server. Any error means no.
+func (s *Server) memberCatchingUp(ctx context.Context, q querier, circleID, userID string) bool {
+	if e2ee.CheckID(userID) != nil {
+		return false
+	}
+	_, catching, err := memberStates(ctx, q, circleID, userID)
+	return err == nil && catching[userID]
 }
 
 // verifiedLaneServer answers whether userID's lane in the circle is VERIFIED server.
@@ -393,11 +504,14 @@ type processingMemberOut struct {
 	SKGenOK   bool       `json:"sk_gen_ok"`
 	Lanes2    bool       `json:"lanes2"`
 	Processed string     `json:"processing"` // "server" | "phone" (what the UI shows)
-	// PrefStale: the member signed a server lane that no longer counts (it names an older or
-	// revoked server key, or an SK generation that is gone). Their phone re-signs it by itself.
+	// PrefStale: the member signed a server lane (genuine: signed by their own live phone key, in the key
+	// log) that no longer counts because it names another or a revoked server key, or an SK generation older
+	// than the circle's. Their phone re-signs it by itself.
 	PrefStale bool `json:"pref_stale"`
-	// CatchingUp: the circle requires server processing and this member is not on the server
-	// lane yet (their data travels on the phone line meanwhile). The owner screen says so in words.
+	// CatchingUp: PrefStale, the circle requires server processing, and the replacement happened less than
+	// 72 hours ago (server-side record). Only then does the server still relay this member's phone-line
+	// items (the exact rule checkE2EEItemLine and the e2ee_item_guard trigger enforce). Everybody else who
+	// is not on the server lane in a required circle is refused, not "catching up".
 	CatchingUp bool `json:"catching_up"`
 	// The member's signed statement, so phones verify it against the key log.
 	Pref *prefStatementOut `json:"pref,omitempty"`
@@ -539,6 +653,14 @@ func (s *Server) E2EEProcessingState(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	policyOK := assist && !legacy && s.policyVerified(ctx, s.Pool, m.CircleID)
+	// The same definition enforcement uses (memberStates): a genuine, stale pref; and, inside the 72 h window, catching up.
+	staleSet, catchingSet := map[string]bool{}, map[string]bool{}
+	if assist && !legacy {
+		if staleSet, catchingSet, err = memberStates(ctx, s.Pool, m.CircleID, ""); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to load preferences")
+			return
+		}
+	}
 	for _, mo := range members {
 		if !mo.Lanes2 {
 			notReady = append(notReady, mo.UserID)
@@ -571,10 +693,8 @@ func (s *Server) E2EEProcessingState(w http.ResponseWriter, r *http.Request) {
 		if mo.Processed == "server" {
 			serverCount++
 		} else {
-			if p, found := prefs[mo.UserID]; found && p.Lane == "server" && mo.Lane != "server" {
-				mo.PrefStale = true
-			}
-			mo.CatchingUp = assist && optOut == "required_server"
+			mo.PrefStale = staleSet[mo.UserID] && mo.Lane != "server"
+			mo.CatchingUp = assist && optOut == "required_server" && catchingSet[mo.UserID] && mo.Lane != "server"
 		}
 	}
 	myLane := "phone"

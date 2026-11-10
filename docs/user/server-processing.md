@@ -76,11 +76,12 @@ it is on:
   circle's key log, exactly as if they had tapped. Nobody (not the admin, not the server) can sign it for them.
 * Members see **"Your family admin requires server processing."** in their settings, with no opt-out control. A
   child's account works the same way.
-* While a phone has not switched over yet (a new phone, a new server key, an update that has not reached it), its
-  positions **keep arriving, encrypted for the family** (on the phone key). Nothing is ever held back and nothing is
-  ever sent in the clear.
-* The owner's screen (**Encryption keys > Server processing**) says in plain words **who is on the server** and
-  **who is still catching up**.
+* A phone signs its choice by itself. Until it has, the server **does not accept its positions** (check-ins,
+  emergency alerts, events and chat always go through). The one exception: after the server's key was replaced, a
+  member who had already chosen the server keeps delivering, encrypted for the family (on the phone key), for up to
+  72 hours while their phone signs again. Nothing is ever sent in the clear.
+* The owner's screen (**Encryption keys > Server processing**) says in plain words **who is on the server**,
+  **who is still catching up** (inside those 72 hours) and who holds an out-of-date choice.
 * A member whose Orbitly app is **older than 0.26.27** cannot switch over by itself. Their phone keeps sending nothing
   new to this circle until they update; the circle name shows "(update the app to keep sharing with this circle)" on
   their phone and your screen lists them as needing the new app. Ask them to update.

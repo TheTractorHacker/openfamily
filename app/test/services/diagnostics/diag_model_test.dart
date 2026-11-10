@@ -356,9 +356,11 @@ void main() {
 
       c = check(const PrivateCircleDelivery(laneKind: 'pending'));
       expect(c.detail, contains('requires server processing'));
-      expect(c.detail, contains('keeps sending'));
+      expect(c.detail, contains('refuses your positions'));
       plain(c.detail);
 
+      expect(plainDeliveryProblem('required_server'), contains('has not signed its server choice'));
+      expect(plainDeliveryProblem('rejected_required_server'), contains('update the app'));
       expect(plainDeliveryProblem('rejected_lane_not_server'), contains('family copy'));
       expect(plainDeliveryProblem('http_403'), contains('replaced'));
       expect(plainDeliveryProblem('offline'), contains('no connection'));

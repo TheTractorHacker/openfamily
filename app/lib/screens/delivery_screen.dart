@@ -90,7 +90,10 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
           '${l.sealProblem.isEmpty ? ' (for the circle key)' : ''}.');
     }
     if (l.queued > 0) out.add('${l.queued} update${l.queued == 1 ? ' is' : 's are'} waiting for a connection.');
-    if (l.undelivered > 0) {
+    if (l.undelivered > 0 && l.undeliveredCode == 'required_server') {
+      out.add('${l.undelivered} update${l.undelivered == 1 ? ' was' : 's were'} refused: your family admin requires server processing and this phone has not signed its server choice yet. '
+          'The phone signs it by itself; if it does not, update the app.');
+    } else if (l.undelivered > 0) {
       out.add('${l.undelivered} update${l.undelivered == 1 ? ' was' : 's were'} refused by the server (${l.undeliveredCode}). Updating the app or asking an admin to approve this phone usually fixes it.');
     }
     final MemberDelivery? me = _report?.members.cast<MemberDelivery?>().firstWhere((MemberDelivery? m) => m!.you, orElse: () => null);

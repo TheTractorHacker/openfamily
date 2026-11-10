@@ -673,8 +673,8 @@ class LanesService {
   ///
   /// It signs only what this phone verified itself: a pinned server key that is active, approved, matches the server's
   /// fingerprint and survived every key reset of its owner; a verified policy that is on and requires it; and the SK of
-  /// the policy's generation held on this phone. If any of that is missing it signs nothing and the phone keeps sending
-  /// on the phone line (the sealer never seals nothing). A queued older opt-out is dropped: the admin's rule wins.
+  /// the policy's generation held on this phone. If any of that is missing it signs nothing and the phone seals on the phone
+  /// line (the sealer never seals nothing), which the relay refuses for positions in a required circle. A queued older opt-out is dropped: the admin's rule wins.
   /// Safe to call often; a signature for the same (phone, server key, generation) is not repeated within [resignAfter].
   Future<AutoApplyOutcome> signRequiredLaneIfDue(String circleId, {CircleLanes? known, Duration resignAfter = const Duration(minutes: 10)}) async {
     final LocalIdentity? me = await service.identity();

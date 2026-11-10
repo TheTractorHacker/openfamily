@@ -742,6 +742,7 @@ class SealedQueue {
       LaneSource? lanes,
       void Function(String circleId)? onNeedKeySync,
       Future<void> Function(String circleId, String code)? onLaneRefused,
+      Future<void> Function(String circleId)? onRequiredServerRefused,
       void Function()? onIdentityRefused}) async {
     int delivered = 0;
     final Set<String> laneRetried = <String>{}; // one immediate re-send per circle and call: no hot loop
@@ -798,6 +799,7 @@ class SealedQueue {
       String? laneCode;
       bool needSync = false;
       String? rejectedCode;
+      final Set<String> requiredRefused = <String>{};
       for (final BatchResult r in results) {
         if (r.status != 'rejected') {
           // stored/duplicate: the server has it.
@@ -820,12 +822,22 @@ class SealedQueue {
           laneCode ??= code;
           continue;
         }
-        // Permanent. A required_server refusal is NOT silent: the user is told the data was not delivered.
-        if (code == 'required_server') await noteUndelivered(circle, code);
+        // Permanent. A required_server refusal is NOT silent: the user is told the data was not delivered, and
+        // the phone is asked to sign its OWN server lane now (bounded by its own re-sign interval, so this
+        // cannot loop). The phone line is no longer a fallback in a circle that requires the server.
+        if (code == 'required_server') {
+          await noteUndelivered(circle, code);
+          requiredRefused.add(circle);
+        }
         done.add(r.seq);
       }
       if (rejectedCode != null) await noteUpload(code: rejectedCode);
       if (needSync) onNeedKeySync?.call(circle);
+      if (requiredRefused.isNotEmpty && onRequiredServerRefused != null) {
+        try {
+          await onRequiredServerRefused(circle);
+        } catch (_) {}
+      }
       if (laneSeqs.isNotEmpty) {
         if (onLaneRefused != null) {
           try {

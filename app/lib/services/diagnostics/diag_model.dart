@@ -714,7 +714,8 @@ String plainDeliveryProblem(String code) {
         'and renews its server processing choice by itself';
   }
   if (c == 'required_server' || c == 'rejected_required_server') {
-    return 'the family admin requires server processing and this phone is still setting that up; it keeps sending meanwhile';
+    return 'the family admin requires server processing and this phone has not signed its server choice (or its choice is for an older server key), so the server refuses these positions; '
+        'check-ins and alerts still go through. The phone signs its choice by itself; update the app if it does not';
   }
   if (c == 'rejected_bad_epoch' || c == 'rejected_legacy_epoch_closed') {
     return 'the family\'s encryption key changed; the phone fetches the new one and sends again';
@@ -741,8 +742,8 @@ DiagCheck? privateDeliveryCheck(DiagFacts f) {
     n++;
     final String name = p.circles.length == 1 ? 'your Private circle' : 'Private circle $n';
     if (c.laneKind == 'pending') {
-      problems.add('The family admin requires server processing in $name. This phone signs that choice by itself and '
-          'keeps sending your position to the family meanwhile.');
+      problems.add('The family admin requires server processing in $name. This phone signs that choice by itself; until it has, '
+          'the server refuses your positions there (check-ins and alerts still go through). Update the app if this stays.');
     }
     final DateTime? s = c.lastSealedAt;
     final bool stuck = gettingFixes && (s == null || f.now.difference(s) > kNoSealWarn);

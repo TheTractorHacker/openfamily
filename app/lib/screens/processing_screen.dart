@@ -263,8 +263,8 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
                     icon: Icons.report_problem_outlined,
                     color: AppColors.statusRed,
                     text: '${s.undeliveredCount} ${s.undeliveredCount == 1 ? 'item was' : 'items were'} not delivered to this circle'
-                        '${s.undeliveredCode == 'required_server' ? ' before this phone had switched over to server processing' : ''}. '
-                        'They are not kept. New positions are sent normally.'),
+                        '${s.undeliveredCode == 'required_server' ? ' because your family admin requires server processing and this phone had not signed its server choice yet' : ''}. '
+                        '${s.undeliveredCode == 'required_server' ? 'They are not kept. This phone signs its choice by itself; if that does not happen, update the app.' : 'They are not kept. New positions are sent normally.'}'),
               ),
             if (s.required && s.members.any((ProcessingMember m) => m.isChild))
               const Padding(

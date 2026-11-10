@@ -1037,7 +1037,7 @@ class PrivateRuntime {
       final SenderIdentity? me = await _me();
       if (me == null) return 0;
       // What is already sealed goes first: the newest position must not wait for old parked fixes.
-      int n = await queue.flush(channel, deviceFor: (_) => me.deviceId, lanes: lanes, onNeedKeySync: (String c) => unawaited(_syncKeys(c)), onLaneRefused: _laneRefused, onIdentityRefused: service.forgetCachedIdentity);
+      int n = await queue.flush(channel, deviceFor: (_) => me.deviceId, lanes: lanes, onNeedKeySync: (String c) => unawaited(_syncKeys(c)), onLaneRefused: _laneRefused, onRequiredServerRefused: _requiredServerRefused, onIdentityRefused: service.forgetCachedIdentity);
       // Fixes parked for want of a key are sealed as soon as the key is here, whichever path brought it.
       final DateTime now = clock.now();
       final DateTime? tried = _parkedTriedAt;
@@ -1045,7 +1045,7 @@ class PrivateRuntime {
           (await kv.getFresh(_parkedKey) ?? '').isNotEmpty) {
         _parkedTriedAt = now;
         if (await drainParked() > 0) {
-          n += await queue.flush(channel, deviceFor: (_) => me.deviceId, lanes: lanes, onNeedKeySync: (String c) => unawaited(_syncKeys(c)), onLaneRefused: _laneRefused, onIdentityRefused: service.forgetCachedIdentity);
+          n += await queue.flush(channel, deviceFor: (_) => me.deviceId, lanes: lanes, onNeedKeySync: (String c) => unawaited(_syncKeys(c)), onLaneRefused: _laneRefused, onRequiredServerRefused: _requiredServerRefused, onIdentityRefused: service.forgetCachedIdentity);
         }
       }
       return n;
@@ -1465,6 +1465,20 @@ class PrivateRuntime {
       try {
         await _declareCaps();
         await lanesService.selfHeal(circleId);
+      } catch (_) {}
+    }());
+  }
+
+  /// The relay refused phone-line items because the circle requires server processing and this member has no valid
+  /// server lane (it never signed, or the 72 hour catch-up after a server key change is over). The phone-line twin
+  /// is NOT a fallback here: this phone signs its own server lane for the current server key (bounded by the
+  /// re-sign interval, no loop). If it cannot (an app that predates `required_server`, no server key held), the
+  /// processing screen and the delivery check say so in words.
+  Future<void> _requiredServerRefused(String circleId) async {
+    unawaited(() async {
+      try {
+        await _declareCaps();
+        await lanesService.signRequiredLaneIfDue(circleId);
       } catch (_) {}
     }());
   }

@@ -144,7 +144,7 @@ void main() {
       expect(find.byKey(const Key('proc-required-notice')), findsOneWidget);
       expect(find.text('Your family admin requires server processing.'), findsOneWidget);
       expect(find.byKey(const Key('proc-required-catching-up')), findsOneWidget);
-      expect(txt('still reaches your family'), findsOneWidget);
+      expect(txt('not delivered (check-ins and emergency alerts still are)'), findsOneWidget);
       expect(find.byKey(const Key('my-lane-switch')), findsNothing);
       expect(find.byKey(const Key('proc-choose')), findsNothing);
       expect(find.byKey(const Key('proc-consent-required')), findsNothing);
@@ -445,7 +445,7 @@ void main() {
       await pumpScreen(t, ProcessingScreen(circle: memberCircle, controller: c));
       expect(find.byKey(const Key('proc-undelivered')), findsOneWidget);
       expect(txt('3 items were not delivered'), findsOneWidget);
-      expect(txt('before this phone had switched over'), findsOneWidget);
+      expect(txt('requires server processing and this phone had not signed its server choice yet'), findsOneWidget);
     });
 
     testWidgets('required_server with a child account says the rule applies to the child', (t) async {
@@ -493,7 +493,7 @@ void main() {
       expect(find.byKey(Key('catching-up-$pC')), findsOneWidget);
       expect(find.byKey(const Key('remind-copy')), findsNothing);
       expect(find.byKey(Key('remind-$pC')), findsNothing);
-      expect(txt('positions still arrive'), findsWidgets);
+      expect(txt('positions may not arrive'), findsWidgets);
       expect(txt('not choosing yet'), findsNothing);
       expect(txt('Not chosen yet'), findsNothing);
     });

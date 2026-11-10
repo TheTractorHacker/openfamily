@@ -180,15 +180,17 @@ func TestProductionResetStateConvergesWithTheSameServerKey(t *testing.T) {
 	}
 
 	// The symptom of the production incident: the policy is signed by a revoked phone, so the server line
-	// is closed. The phone line is NOT: nothing is dropped, nothing is refused as required_server.
+	// is closed. B's pref is NOT stale (same server key), so B is not "catching up": the owner's rule is
+	// unchanged and a phone-line fix is refused as required_server until an admin phone signs the policy
+	// again (check-ins, events and chat still go through).
 	if st, why := e.itemCode("B", e.b, e.serverLine(), 1); st != "rejected" || why != "lane_not_server" {
 		t.Fatalf("server line before the policy is signed again: %s %s", st, why)
 	}
-	if st, why := e.itemCode("B", e.b, e.phoneLine(), 2); st != "stored" {
-		t.Fatalf("B's phone-line item was refused: %s %s", st, why)
+	if st, why := e.itemCode("B", e.b, e.phoneLine(), 2); st != "rejected" || why != "required_server" {
+		t.Fatalf("B's phone-line fix before the policy is verified: %s %s", st, why)
 	}
 	mo, st := e.memberOut("B", "B")
-	if st["policy_verified"] != false || mo["processing"] != "phone" || mo["catching_up"] != true {
+	if st["policy_verified"] != false || mo["processing"] != "phone" || mo["catching_up"] == true || mo["pref_stale"] == true {
 		t.Fatalf("state before the repair: policy_verified=%v member=%v", st["policy_verified"], mo)
 	}
 
@@ -205,15 +207,15 @@ func TestProductionResetStateConvergesWithTheSameServerKey(t *testing.T) {
 	if st["policy_verified"] != true || mo["processing"] != "server" || mo["catching_up"] == true || mo["pref_stale"] == true {
 		t.Fatalf("state after the repair: policy_verified=%v member=%v", st["policy_verified"], mo)
 	}
-	// C never chose: still on the phone line, said so in the state, and still relayed there.
-	if mo, _ := e.memberOut("A", "C"); mo["catching_up"] != true || mo["processing"] != "phone" {
+	// C never chose: on the phone line, NOT catching up (no pref at all), and refused there.
+	if mo, _ := e.memberOut("A", "C"); mo["catching_up"] == true || mo["pref_stale"] == true || mo["processing"] != "phone" {
 		t.Fatalf("C: %v", mo)
 	}
 	if st, why := e.itemCode("C", e.c, e.serverLine(), 4); st != "rejected" || why != "lane_not_server" {
 		t.Fatalf("C's server line must stay closed until C's own phone signs: %s %s", st, why)
 	}
-	if st, why := e.itemCode("C", e.c, e.phoneLine(), 5); st != "stored" {
-		t.Fatalf("C's phone-line item was refused: %s %s", st, why)
+	if st, why := e.itemCode("C", e.c, e.phoneLine(), 5); st != "rejected" || why != "required_server" {
+		t.Fatalf("C never consented, so the phone-line fix must be refused: %s %s", st, why)
 	}
 
 	// The log, as the verifier sees it: the old phones stay retired, the server key is kept.
@@ -487,11 +489,12 @@ func TestServerKeyAcrossResetMigrationIdempotentAndDown(t *testing.T) {
 	e.sql(string(down))
 	e.sql(string(down))
 	e.sql(string(up))
-	// After the up migration a phone-line item of a required_server circle is accepted by the database itself.
+	// After the up migration the database itself refuses a phone-line fix of a member without a server lane ...
 	e.enableAssist("required_server")
-	if err := e.sqlErr(`INSERT INTO e2ee_items (circle_id, device_id, seq, purpose, epoch, size_bucket, ciphertext, received_at)
-		VALUES ($1,$2,99,'fix',1,256,'\x00',now())`, e.circle, e.b.id); err != nil {
-		t.Fatalf("the database still refuses phone-line items of a required_server circle: %v", err)
+	err = e.sqlErr(`INSERT INTO e2ee_items (circle_id, device_id, seq, purpose, epoch, size_bucket, ciphertext, received_at)
+		VALUES ($1,$2,99,'fix',1,256,'\x00',now())`, e.circle, e.b.id)
+	if err == nil || !strings.Contains(err.Error(), "e2ee_required_server") {
+		t.Fatalf("the database accepts a phone-line item of a required_server circle: %v", err)
 	}
 	// ... and a chat item is still phone-line only.
 	err = e.sqlErr(`INSERT INTO e2ee_items (circle_id, device_id, seq, purpose, epoch, size_bucket, ciphertext, received_at, key_line)

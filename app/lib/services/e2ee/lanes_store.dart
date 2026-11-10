@@ -23,8 +23,9 @@ enum LaneStatus {
 
   /// The family admin requires server processing (`required_server`) and this member's phone has not signed its own
   /// server choice for the CURRENT server key yet (first run, a new server key, a new key generation, or the phone
-  /// still waits for the key). The phone signs it by itself as soon as it can; until then it keeps sending on the
-  /// phone line, so nothing is ever held back. There is no prompt and nothing for the member to do.
+  /// still waits for the key). The phone signs it by itself as soon as it can; until then the relay refuses its
+  /// phone-line positions in that circle (check-ins, events and chat still go through; for 72 hours after the server key
+  /// was replaced a stale signed choice is still relayed). There is no prompt and nothing for the member to do.
   serverPending,
 
   /// The key log or the processing records failed verification; the phone lane is used.

@@ -42,4 +42,8 @@ CREATE OR REPLACE FUNCTION e2ee_device_approved(dev UUID, circ UUID) RETURNS BOO
     ), FALSE) FROM chain c
 $$ LANGUAGE sql STABLE;
 
+DROP TRIGGER IF EXISTS trg_e2ee_server_gen_stamp ON circles;
+DROP FUNCTION IF EXISTS e2ee_server_gen_stamp();
+DROP FUNCTION IF EXISTS e2ee_member_catching_up(UUID, UUID);
+ALTER TABLE circles DROP COLUMN IF EXISTS e2ee_server_gen_at;
 DROP TABLE IF EXISTS e2ee_server_attach;

@@ -106,6 +106,26 @@ void main() {
       expect(await q.undelivered('c1'), isNull);
     });
 
+    test('required_server asks the phone to sign its own server lane once per flush, and never loops', () async {
+      final SealedQueue q = SealedQueue(kv: MemoryKv());
+      await q.enqueue(item(1));
+      await q.enqueue(item(2));
+      int posts = 0;
+      final _Api api = _Api((List<WireItem> b) {
+        posts++;
+        return <BatchResult>[for (final WireItem w in b) BatchResult(w.seq, 'rejected', error: 'required_server')];
+      });
+      final List<String> asked = <String>[];
+      await q.flush(api, deviceFor: (_) => 'd1', onRequiredServerRefused: (String c) async => asked.add(c));
+      expect(asked, <String>['c1']);
+      expect(posts, 1);
+      expect(await q.length(), 0);
+      // Nothing left to send: another flush does not post and does not ask again.
+      await q.flush(api, deviceFor: (_) => 'd1', onRequiredServerRefused: (String c) async => asked.add(c));
+      expect(asked, <String>['c1']);
+      expect(posts, 1);
+    });
+
     test('other permanent rejections are dropped as before', () async {
       final SealedQueue q = SealedQueue(kv: MemoryKv());
       await q.enqueue(item(1));

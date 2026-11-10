@@ -60,12 +60,12 @@ class ProcessingCopy {
   static const String requiredNoticeBody =
       'Your phone sends your location to your Orbitly server for processing. Members cannot turn it off. $operatorCanRead';
   static const String requiredCatchingUp =
-      'Your phone is switching over by itself. Until it has, your position still reaches your family, encrypted.';
+      'Your phone is switching over by itself. Until it has, positions from this phone are not delivered (check-ins and emergency alerts still are). If this does not clear up soon, update the app.';
 
   /// A member whose phone has not switched over yet while the admin requires it.
   static const String catchingUp = 'Catching up';
   static const String catchingUpInfo =
-      'Their phone signs the choice the next time it runs. Until then their positions still arrive, encrypted for the family.';
+      'Their phone signs the choice the next time it runs. Until then their positions may not arrive (check-ins and emergency alerts still do). An app that is too old needs an update first.';
 
   // ---- member: opt out / opt in
   static const String optOutTitle = 'Keep your data on your phone only?';
