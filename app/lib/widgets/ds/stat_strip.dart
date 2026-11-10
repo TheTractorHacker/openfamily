@@ -80,10 +80,15 @@ class DsStatStrip extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: Alignment.centerLeft,
-            child: Text(s.value, maxLines: 1, style: AppType.headline),
+          // A long value shrinks to fit its column; the fixed line height keeps every label of
+          // a row on one baseline whether or not its neighbour shrank.
+          SizedBox(
+            height: MediaQuery.textScalerOf(context).scale(AppType.headline.fontSize! * AppType.headline.height!) + 2,
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.topLeft,
+              child: Text(s.value, maxLines: 1, style: AppType.headline),
+            ),
           ),
           Text(s.label, style: AppType.secondary.copyWith(color: cs.onSurfaceVariant)),
         ],

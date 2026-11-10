@@ -175,33 +175,43 @@ class _TripsScreenState extends State<TripsScreen> {
     ];
     return Scaffold(
       appBar: AppBar(title: Text('$name\'s trips')),
-      body: SafeArea(
-        child: ValueListenableBuilder<UnitSystem>(
-          valueListenable: UnitPreferenceService.units,
-          builder: (BuildContext context, UnitSystem units, _) => ListView(
-            key: const Key('trips-phone-only'),
-            padding: const EdgeInsets.all(AppSpace.lg),
-            children: <Widget>[
-              Row(children: <Widget>[const LaneChip(server: false), const SizedBox(width: AppSpace.sm), Expanded(child: ComputedOnPhoneNote(name: name, updatedAt: p.updatedAt))]),
-              const SizedBox(height: AppSpace.md),
-              DsSegmentedTabs(
-                labels: const <String>['7 days', '30 days'],
-                selected: _days == 7 ? 0 : 1,
-                onChanged: (int i) => setState(() => _days = i == 0 ? 7 : 30),
+      body: DsBody(
+        child: Column(
+          children: <Widget>[
+            const SizedBox(height: AppSpace.sm),
+            DsSegmentedTabs(
+              labels: const <String>['7 days', '30 days'],
+              selected: _days == 7 ? 0 : 1,
+              onChanged: (int i) => setState(() => _days = i == 0 ? 7 : 30),
+            ),
+            Expanded(
+              child: ValueListenableBuilder<UnitSystem>(
+                valueListenable: UnitPreferenceService.units,
+                builder: (BuildContext context, UnitSystem units, _) => ListView(
+                  key: const Key('trips-phone-only'),
+                  padding: const EdgeInsets.fromLTRB(AppSpace.lg, AppSpace.md, AppSpace.lg, AppSpace.xxl),
+                  children: <Widget>[
+                    const DsChipRow(children: <Widget>[LaneChip(server: false)]),
+                    const SizedBox(height: AppSpace.xs),
+                    ComputedOnPhoneNote(name: name, updatedAt: p.updatedAt),
+                    const SizedBox(height: AppSpace.md),
+                    if (p.placeholder != null)
+                      WaitingForPhoneCard(name: name)
+                    else if (trips.isEmpty)
+                      const TripsMessageView(
+                          icon: Icons.route_rounded,
+                          title: 'No trips in this period',
+                          message: 'Trips shared by their phone for this period appear here.')
+                    else
+                      for (final Trip t in trips)
+                        Padding(padding: const EdgeInsets.only(bottom: AppSpace.md), child: TripCard(trip: t, units: units, onTap: null)),
+                    const SizedBox(height: AppSpace.sm),
+                    const GpsSpeedNote(),
+                  ],
+                ),
               ),
-              const SizedBox(height: AppSpace.md),
-              if (p.placeholder != null)
-                WaitingForPhoneCard(name: name)
-              else if (trips.isEmpty)
-                const TripsMessageView(
-                    icon: Icons.route_rounded, title: 'No trips in this period', message: 'Trips shared by their phone for this period appear here.')
-              else
-                for (final Trip t in trips)
-                  Padding(padding: const EdgeInsets.only(bottom: AppSpace.md), child: TripCard(trip: t, units: units, onTap: null)),
-              const SizedBox(height: AppSpace.sm),
-              const GpsSpeedNote(),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
@@ -239,11 +249,8 @@ class _TripsScreenState extends State<TripsScreen> {
       body: DsBody(child: Column(
         children: <Widget>[
           const SizedBox(height: AppSpace.sm),
-          if (_proc != null)
-            const Padding(
-              padding: EdgeInsets.only(bottom: AppSpace.sm),
-              child: Align(alignment: Alignment.centerLeft, child: LaneChip(server: true)),
-            ),
+          // Only the 7 / 30 day tabs stay put. The lane chip and the report row scroll with the
+          // list, so a card can never slide under a pinned control.
           DsSegmentedTabs(
             labels: const <String>['7 days', '30 days'],
             selected: _days == 7 ? 0 : 1,
@@ -252,27 +259,36 @@ class _TripsScreenState extends State<TripsScreen> {
               _load();
             },
           ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(
-              AppSpace.lg,
-              AppSpace.sm,
-              AppSpace.lg,
-              0,
-            ),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: DsPillButton(
-                label: 'Driving report',
-                icon: Icons.insights_rounded,
-                style: DsPillStyle.tonal,
-                semanticLabel: 'Report',
-                onPressed: _openReport,
-              ),
-            ),
-          ),
           Expanded(child: _body()),
         ],
       )),
+    );
+  }
+
+  /// First thing in the list, on the page gutter: where the data comes from (private circles
+  /// only) and the way into the driving report.
+  Widget _header() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        if (_proc != null) ...<Widget>[
+          const DsChipRow(children: <Widget>[LaneChip(server: true)]),
+          const SizedBox(height: AppSpace.sm),
+        ],
+        DsRowGroup(
+          children: <Widget>[
+            Builder(
+              builder: (BuildContext context) => DsListRow(
+                title: 'Driving report',
+                leading: DsListRow.iconTile(context, Icons.insights_rounded),
+                chevron: true,
+                semanticLabel: 'Report',
+                onTap: _openReport,
+              ),
+            ),
+          ],
+        ),
+      ],
     );
   }
 
@@ -280,9 +296,14 @@ class _TripsScreenState extends State<TripsScreen> {
     if (_loading) {
       return Semantics(
         label: 'Loading trips',
-        child: const Padding(
-          padding: EdgeInsets.all(AppSpace.lg),
-          child: DsSkeletonList(rows: 4, avatar: false),
+        child: ListView(
+          physics: const NeverScrollableScrollPhysics(),
+          padding: const EdgeInsets.fromLTRB(AppSpace.lg, AppSpace.md, AppSpace.lg, 0),
+          children: <Widget>[
+            _header(),
+            const SizedBox(height: AppSpace.sm),
+            const DsSkeletonList(rows: 4, avatar: false),
+          ],
         ),
       );
     }
@@ -294,7 +315,7 @@ class _TripsScreenState extends State<TripsScreen> {
 
   Widget _content() {
     if (_error != null && _trips == null) {
-      return TripsMessageView.error(_error!, onRetry: _load);
+      return TripsMessageView.error(_error!, onRetry: _load, header: _header());
     }
     final List<Trip> trips = _trips ?? const <Trip>[];
     if (trips.isEmpty) {
@@ -303,6 +324,7 @@ class _TripsScreenState extends State<TripsScreen> {
         title: 'No trips yet',
         message: 'Trips appear here after ${widget.member.name} has been '
             'moving for a few minutes with location sharing on.',
+        header: _header(),
       );
     }
     final List<TripDay> days = groupTripsByDay(trips);
@@ -313,19 +335,20 @@ class _TripsScreenState extends State<TripsScreen> {
           physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.fromLTRB(
             AppSpace.lg,
-            AppSpace.xs,
+            AppSpace.md,
             AppSpace.lg,
             AppSpace.xxl,
           ),
           children: <Widget>[
+            _header(),
             if (_error != null)
               _StaleBanner(message: _error!.message, onRetry: _load),
             for (final TripDay d in days) ...<Widget>[
               Padding(
                 padding: const EdgeInsets.fromLTRB(
-                  AppSpace.xs,
+                  0,
                   AppSpace.lg,
-                  AppSpace.xs,
+                  0,
                   AppSpace.sm,
                 ),
                 child: Semantics(

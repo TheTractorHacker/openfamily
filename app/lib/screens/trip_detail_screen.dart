@@ -191,42 +191,21 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Row(
-            children: <Widget>[
-              TripModeBadge(mode: t.mode),
-              const SizedBox(width: AppSpace.md),
-              Expanded(
-                child: Text(
-                  '${tripClock(context, t.startedAt)} - '
-                  '${tripClock(context, t.endedAt)}',
-                  style: AppType.headline,
-                ),
-              ),
-            ],
-          ),
+          // Large text: the time range goes under the badge instead of wrapping beside it.
+          if (MediaQuery.textScalerOf(context).scale(1) > 1.3) ...<Widget>[
+            Align(alignment: Alignment.centerLeft, child: TripModeBadge(mode: t.mode)),
+            const SizedBox(height: AppSpace.sm),
+            Text(tripTimeRange(context, t), style: AppType.headline),
+          ] else
+            Row(
+              children: <Widget>[
+                TripModeBadge(mode: t.mode),
+                const SizedBox(width: AppSpace.md),
+                Expanded(child: Text(tripTimeRange(context, t), style: AppType.headline)),
+              ],
+            ),
           const SizedBox(height: 16),
-          Wrap(
-            spacing: AppSpace.xxl,
-            runSpacing: AppSpace.md,
-            children: <Widget>[
-              TripStat(
-                label: 'Distance',
-                value: units.formatDistance(t.distanceM),
-              ),
-              TripStat(
-                label: 'Duration',
-                value: formatTripDuration(t.duration),
-              ),
-              TripStat(
-                label: 'Max GPS speed',
-                value: units.formatSpeed(t.maxSpeedMps),
-              ),
-              TripStat(
-                label: 'Avg GPS speed',
-                value: units.formatSpeed(t.avgSpeedMps),
-              ),
-            ],
-          ),
+          DsStatStrip(stats: tripStats(t, units)),
           if (_isSelf && t.mode == TripMode.driving)
             ..._passengerSection(context),
           if (_actionError != null)

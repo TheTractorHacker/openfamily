@@ -155,7 +155,8 @@ void main() {
     expect(find.text('Driving'), findsOneWidget);
     expect(find.text('Walking'), findsOneWidget);
     expect(find.text('10 mi'), findsNWidgets(2));
-    expect(find.text('Max GPS speed'), findsWidgets);
+    // The cards show the short label; a screen reader still hears "Max GPS speed".
+    expect(find.text('Top speed'), findsWidgets);
     expect(find.text('60 mph'), findsWidgets);
     expect(t.takeException(), isNull);
   });
@@ -209,7 +210,7 @@ void main() {
       ),
     );
     expect(find.text('Driving trip'), findsOneWidget);
-    expect(find.text('Avg GPS speed'), findsOneWidget);
+    expect(find.text('Average'), findsOneWidget);
     expect(find.byIcon(Icons.play_arrow_rounded), findsOneWidget);
     expect(find.byIcon(Icons.flag_rounded), findsOneWidget);
   });
