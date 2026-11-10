@@ -3,8 +3,12 @@
 # are separate from a production stack on the same host. Nothing here is for production use.
 services:
   api:
-    # NOT openfamily-api:local: that tag belongs to the production stack on a shared host.
-    image: openfamily-api:devstack
+    # NOT openfamily-api:local: that tag belongs to the production stack on a shared host. The tag is per
+    # worktree (dev-stack.sh writes it into stack.env as DEV_API_IMAGE).
+    image: ${DEV_API_IMAGE:?}
+    build:
+      labels:
+        org.orbitly.devstack.commit: ${GIT_COMMIT:-}
     restart: "no"
     # Only loopback, on a port the script found free.
     ports: !override
@@ -24,5 +28,5 @@ services:
       retries: 120
     ports:
       - "127.0.0.1:${DEV_DB_PORT:?}:5432"
-    # The prod command plus fsync off (a throwaway database: speed, not durability).
-    command: !override ["postgres", "-c", "max_connections=${PG_MAX_CONNECTIONS:-60}", "-c", "fsync=off", "-c", "synchronous_commit=off", "-c", "full_page_writes=off"]
+    # No `command` here on purpose: the container runs docker-compose.yml's own command (the production
+    # max_connections). dev-stack.sh turns fsync off with ALTER SYSTEM after start instead.

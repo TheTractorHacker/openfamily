@@ -223,6 +223,7 @@ void main() {
     late int statementsBefore;
     late String annaServerLanePref;
     late KeyResetResult reset;
+    late int resetMark;
 
     test('before: the state the reset starts from', () async {
       epochBefore = (await q("SELECT e2ee_epoch FROM circles WHERE id = '$circle'")).single.single as int;
@@ -234,23 +235,30 @@ void main() {
       expect(await db.count("SELECT count(*) FROM e2ee_processing_pref WHERE circle_id = '$circle'"), 2, reason: 'Anna and Ben signed the server lane; Cleo\'s phone lane is the default');
     });
 
-    test('Anna resets her keys on a new phone: it registers a new root key, the built-in server key is revoked and replaced, the new phone approves the new server key', () async {
-      final int mark = log.mark();
+    test('Anna resets her keys on a new phone: it registers a new root key, the built-in server key is revoked and replaced, and the new server key is registered under the new phone\'s key', () async {
       // "Reset my keys" is what an owner does on a phone that no longer has its key (a new phone, a reinstall without
       // restore): an empty key store, same account. On a phone whose key is still active it does nothing.
+      resetMark = log.mark();
       annaNew = Phone('Anna-new-phone', env.ownerEmail, env.ownerPassword)..ip = nextIp();
       await annaNew.loginExisting(env.e2e, anna.userId);
       annaNew.startRuntime();
       reset = await annaNew.run(() => annaNew.service.resetThisDevice(serverWait: const Duration(seconds: 60)));
       expect(reset.serverKeyRevoked, isTrue, reason: 'the account held the server key');
       // The reset phone approves the server's new key without asking. On a busy disk the approval answer can
-      // miss the app's 15 second limit while the server still finishes it, so the end state decides.
+      // miss the app's 15 second limit while the server still finishes it, so the END STATE decides, not
+      // reset.serverRejoined (printed for the record).
       final DateTime end = DateTime.now().add(const Duration(seconds: 90));
-      while (await activeServerKey() == null && DateTime.now().isBefore(end)) {
+      while ((await activeServerKey()) == null && DateTime.now().isBefore(end)) {
         await Future<void>.delayed(const Duration(seconds: 2));
       }
-      expect(await activeServerKey(), isNotNull, reason: 'the new server key was approved (serverRejoined=${reset.serverRejoined})');
-      expect(log.since(mark), isNot(contains('level=ERROR')));
+      final String? now = await activeServerKey();
+      // ignore: avoid_print
+      print('reset result: serverKeyRevoked=${reset.serverKeyRevoked} serverRejoined=${reset.serverRejoined}');
+      expect(now, isNotNull, reason: 'a new server key exists (serverRejoined=${reset.serverRejoined})');
+      final String newPhone = await deviceOf(annaNew);
+      expect(await q("SELECT registered_by_device_id::text, user_id::text FROM device_keys WHERE device_id = '$now'"),
+          <List<dynamic>>[<dynamic>[newPhone, anna.userId]],
+          reason: 'the new server key is approved by the owner\'s NEW phone key (serverRejoined=${reset.serverRejoined})');
     });
 
     test('devices: every older key of the owner is revoked (reason "revoked"); the new key is a root that is not approved anywhere yet', () async {
@@ -283,6 +291,12 @@ void main() {
         await Future<void>.delayed(const Duration(seconds: 3));
       }
       expect(pinned, now, reason: 'the built-in device pins its new key on its next pass (within ~30 s)');
+      // The server settled: every ERROR line of the whole reset must be one of the built-in device's own, announced
+      // transitions. The log stream is followed by `docker logs -f`, so wait until it stopped growing first.
+      await log.settle();
+      final List<String> errors = log.since(resetMark).split('\n').where((String l) => l.contains('level=ERROR')).toList();
+      expect(errors.where((String l) => !l.contains('STOPPING:')).toList(), isEmpty,
+          reason: 'an ERROR other than the built-in device\'s "STOPPING:" transition during the reset');
     });
 
     test('wraps, rekey flags, prefs and statements: the revoked keys\' wraps and the owner\'s server-lane pref are gone, the policy statements stay (append-only)', () async {
@@ -358,6 +372,9 @@ void main() {
 
     expectedFailing('stable server key: the server key survives an owner reset (same device id, still active, wraps intact)',
         'stable server key (the server key no longer depends on the key of whoever approved it)', () async {
+      // The set-up must hold with and without the feature: the owner's reset happened (her old phone key is revoked).
+      precondition(await db.count("SELECT count(*) FROM device_keys WHERE device_id = '$annaOldDevice' AND revoked_at IS NOT NULL") == 1, 'the owner reset did not run');
+      precondition(await activeServerKey() != null, 'the server has an active key after the reset');
       expect(await activeServerKey(), serverKeyBefore, reason: 'the original server key must still be the active one');
       expect(await db.count("SELECT count(*) FROM circle_key_wraps WHERE circle_id = '$circle' AND recipient_device_id = '$serverKeyBefore'"), greaterThan(0));
       expect(await db.count("SELECT count(*) FROM e2ee_processing_pref WHERE circle_id = '$circle' AND user_id = '${anna.userId}'"), 1,
@@ -383,16 +400,33 @@ void main() {
 
     expectedFailing('forced server processing: an admin-forced server lane puts a member on it without the member signing anything',
         'forced server processing', () async {
-      await Future<void>.delayed(const Duration(seconds: 20));
-      expect(await db.count("SELECT count(*) FROM e2ee_processing_pref WHERE circle_id = '$circle' AND user_id = '${dan.userId}' AND lane = 'server'"), 1,
-          reason: 'the server put the member on the server lane');
+      // Set-up that holds with and without the feature: Dan is a member of the Private circle and never opened the
+      // app (no device key of his own), so nothing he signed can put him on the server lane.
+      precondition(await db.count("SELECT count(*) FROM circle_members WHERE circle_id = '$circle' AND user_id = '${dan.userId}'") == 1, 'Dan is a member of the circle');
+      precondition(await db.count("SELECT count(*) FROM device_keys WHERE user_id = '${dan.userId}'") == 0, 'Dan has no device key');
+      // Poll instead of a fixed sleep: the feature has until the deadline (two passes of the built-in device).
+      final String prefSql = "SELECT count(*) FROM e2ee_processing_pref WHERE circle_id = '$circle' AND user_id = '${dan.userId}' AND lane = 'server'";
+      final DateTime end = DateTime.now().add(const Duration(seconds: 40));
+      while (await db.count(prefSql) == 0 && DateTime.now().isBefore(end)) {
+        await Future<void>.delayed(const Duration(seconds: 2));
+      }
+      expect(await db.count(prefSql), 1, reason: 'the server put the member on the server lane');
     });
 
     expectedFailing('reinstall restore: a reinstalled app (empty key store) gets its device identity back without a new key',
         'reinstall restore', () async {
       final String id = await deviceOf(cleo);
+      precondition(await db.count("SELECT count(*) FROM device_keys WHERE device_id = '$id' AND revoked_at IS NULL") == 1, 'Cleo\'s original device key is active');
+      precondition(cleoReinstalled.token != null, 'the reinstalled phone is signed in');
       final int keysBefore = await db.count("SELECT count(*) FROM device_keys WHERE user_id = '${cleo.userId}'");
-      final DeviceKey restored = await cleoReinstalled.run(() => cleoReinstalled.service.registerThisDevice());
+      final DeviceKey restored;
+      try {
+        restored = await cleoReinstalled.run(() => cleoReinstalled.service.registerThisDevice());
+      } on NeedsCrossSignatureException {
+        // Today's observable outcome: an empty key store cannot take its old identity back, the app asks to link
+        // from another phone, restore with a phrase or reset. THIS (and nothing else) is the missing feature.
+        fail('the reinstalled app cannot get its device identity back: registerThisDevice demands a cross-signature');
+      }
       expect(restored.deviceId, id, reason: 'the same device identity comes back');
       expect(await db.count("SELECT count(*) FROM device_keys WHERE user_id = '${cleo.userId}'"), keysBefore, reason: 'no additional key is registered');
     });

@@ -265,9 +265,24 @@ class ServerDevice {
   }
 }
 
+/// Throws unless [url] points at this machine (127.0.0.0/8, ::1 or localhost). The scenarios WRITE to the
+/// database (the probe runs any statement), so a mis-set E2E_DATABASE_URL (a production .env sourced by hand)
+/// must stop here instead of reaching a real server. The probe binary checks the same.
+void requireLoopbackUrl(String name, String url) {
+  final Uri? u = Uri.tryParse(url);
+  final String host = (u?.host ?? '').toLowerCase();
+  final bool local = host == 'localhost' || host == '::1' || RegExp(r'^127\.\d+\.\d+\.\d+$').hasMatch(host);
+  if (!local) {
+    throw StateError('$name must point at this machine (loopback), not "${host.isEmpty ? url : host}": '
+        'these tests write to the database and are only for a throwaway stack');
+  }
+}
+
 /// SQL against the throwaway database through the probe binary (reads; `exec` for deliberate test plumbing).
 class Db {
-  Db(this.env);
+  Db(this.env) {
+    requireLoopbackUrl('E2E_DATABASE_URL', env.dbUrl);
+  }
   final E2eEnv env;
 
   Future<List<List<dynamic>>> query(String sql) async {
