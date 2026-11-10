@@ -426,8 +426,9 @@ void main() {
       await tester.pump();
       await tester.tap(find.text('Frank Family'));
       await tester.pumpAndSettle();
-      expect(find.text('Open circle details'), findsOneWidget);
-      await tester.tap(find.text('Open circle details'));
+      // Named after the circle it opens (UI polish 2 review): it is not a second general action.
+      expect(find.text('Details for Frank Family'), findsOneWidget);
+      await tester.tap(find.text('Details for Frank Family'));
       await tester.pumpAndSettle();
       expect(calls.log, <String>['circle:c1']);
       expect(find.text('Your circles'), findsNothing);
@@ -481,7 +482,7 @@ void main() {
       await tester.pump();
       await tester.tap(find.text('Frank Family'));
       await tester.pumpAndSettle();
-      expect(find.text('Open circle details'), findsNothing);
+      expect(find.textContaining('Details for '), findsNothing);
       expect(find.byTooltip('Open details for Soccer team'), findsOneWidget);
     });
 
@@ -493,7 +494,7 @@ void main() {
       await tester.pump();
       await tester.tap(find.text('Frank Family'));
       await tester.pumpAndSettle();
-      expect(find.text('Open circle details'), findsOneWidget);
+      expect(find.text('Details for Frank Family'), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
   });

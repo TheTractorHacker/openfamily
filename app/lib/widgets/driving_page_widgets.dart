@@ -12,27 +12,16 @@ import 'member_avatar_bubble.dart';
 /// Corner radius of the big rounded cards on the Driving pages.
 const double kDriveCardRadius = 28;
 
-/// Soft elevated card used across the Driving area: large radius, a faint
-/// shadow in light theme and a hairline border in dark theme.
+/// Flat card used across the Driving area, the same surface as a [DsRowGroup]: the sheet
+/// colour on the page, rounded, no border and no shadow (an offset shadow left a grey crescent
+/// at the bottom corners of every card in the light theme).
 BoxDecoration driveCardDecoration(
   BuildContext context, {
   double radius = kDriveCardRadius,
 }) {
-  final ColorScheme cs = Theme.of(context).colorScheme;
-  final bool dark = Theme.of(context).brightness == Brightness.dark;
   return BoxDecoration(
     color: BrandTheme.of(context).sheet,
     borderRadius: BorderRadius.circular(radius),
-    border: dark ? Border.all(color: cs.outlineVariant) : null,
-    boxShadow: dark
-        ? null
-        : <BoxShadow>[
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.07),
-              blurRadius: 18,
-              offset: const Offset(0, 6),
-            ),
-          ],
   );
 }
 

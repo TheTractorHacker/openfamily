@@ -277,7 +277,7 @@ class _SecurityScreenState extends State<SecurityScreen> {
                       _tile(
                         icon: Icons.lock_reset,
                         title: 'Issue a reset code',
-                        subtitle: 'For a member who forgot theirs',
+                        subtitle: 'If a member forgot their password',
                         onTap: () => _push(IssueResetCodeScreen(
                           selfId: a.id,
                           api: widget.api,
@@ -310,8 +310,7 @@ class _SecurityScreenState extends State<SecurityScreen> {
                     _tile(
                       icon: Icons.download_outlined,
                       title: 'Download my data',
-                      subtitle: 'A JSON file of your data',
-                      info: 'A JSON file with your profile, devices, places and location history.',
+                      subtitle: 'Profile, places and location history',
                       busy: _exporting,
                       onTap: _export,
                     ),
@@ -340,7 +339,6 @@ class _SecurityScreenState extends State<SecurityScreen> {
     required String title,
     required String subtitle,
     required VoidCallback onTap,
-    String? info,
     bool danger = false,
     bool busy = false,
   }) {
@@ -365,9 +363,8 @@ class _SecurityScreenState extends State<SecurityScreen> {
             ),
       title: title,
       subtitle: busy ? 'Preparing your file...' : subtitle,
-      info: busy ? null : info,
       destructive: danger,
-      chevron: !busy && info == null,
+      chevron: !busy,
       onTap: busy ? null : onTap,
     );
   }

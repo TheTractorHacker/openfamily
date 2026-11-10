@@ -26,6 +26,9 @@ class DsSegmentedTabs extends StatelessWidget {
       decoration: BoxDecoration(
         color: brand.paper,
         borderRadius: BorderRadius.circular(AppRadius.pill),
+        // A hairline makes the track's own edge (on the 16 dp page gutter) visible, so the
+        // selected pill inside it does not read as the left edge.
+        border: Border.all(color: cs.outlineVariant),
       ),
       child: Row(
         children: <Widget>[

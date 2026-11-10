@@ -77,7 +77,6 @@ class _MyProcessingScreenState extends State<MyProcessingScreen> {
                   DsSectionHeader(
                     'Private circles',
                     padding: EdgeInsets.fromLTRB(DsRowScope.insetFor(context), AppSpace.sm, AppSpace.sm, AppSpace.sm),
-                    caption: 'Tap one to change where your data is processed.',
                     trailing: const InfoHint(
                       title: 'Where my data is processed',
                       body: 'In each Private circle you decide whether the Orbitly server may process your data. '

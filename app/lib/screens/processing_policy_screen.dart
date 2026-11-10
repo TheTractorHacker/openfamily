@@ -125,7 +125,7 @@ class _ProcessingPolicyScreenState extends State<ProcessingPolicyScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Circle processing setting')),
+      appBar: AppBar(title: const Text('Processing rules')),
       body: SafeArea(
         child: _loading
             ? const Center(child: CircularProgressIndicator())
@@ -170,13 +170,14 @@ class _ProcessingPolicyScreenState extends State<ProcessingPolicyScreen> {
           DsToggleRow(
             key: const Key('policy-assist-switch'),
             icon: Icons.dns_outlined,
-            title: 'Server assistance',
+            title: 'Server help',
             subtitle: s.assistOn ? 'On' : 'Off: phones do the work',
             info: '${s.assistOn ? _assistInfoOn : _assistInfoOff} ${ProcessingCopy.operatorCanRead}',
             value: s.assistOn,
             onChanged: canTurnOn ? _toggleAssist : null,
           ),
         ]),
+        if (s.assistOn && !(admin && blocked != null)) const DsFootnote('The server can read data of members who allow it.'),
         if (admin && blocked != null)
           Padding(
             padding: EdgeInsets.fromLTRB(inset, AppSpace.sm, inset, AppSpace.xs),
@@ -200,9 +201,8 @@ class _ProcessingPolicyScreenState extends State<ProcessingPolicyScreen> {
           DsRowGroup(children: <Widget>[
             DsRadioRow(
               key: const Key('opt-allowed'),
-              title: 'Members may opt out',
+              title: 'Members can opt out',
               subtitle: 'Default. Their choice in Settings.',
-              info: 'Keeping your location on your own phone is the member\'s choice. They switch it off in Settings > Server processing.',
               selected: s.policy.memberOptOut == E2ee.optOutAllowed,
               onTap: canEdit ? () => _setOptOut(E2ee.optOutAllowed) : null,
             ),
@@ -222,7 +222,6 @@ class _ProcessingPolicyScreenState extends State<ProcessingPolicyScreen> {
               key: const Key('default-server'),
               title: 'Server processing',
               subtitle: 'Recommended. Phones show a notice.',
-              info: 'Each member\'s own phone switches it on the next time they open the app and shows a notice. Anyone can switch it off.',
               selected: s.policy.defaultForNew == E2ee.lineServer,
               onTap: canEdit ? () => _setDefault(E2ee.lineServer) : null,
             ),
@@ -239,7 +238,7 @@ class _ProcessingPolicyScreenState extends State<ProcessingPolicyScreen> {
           DsRowGroup(children: <Widget>[
             DsListRow(
               key: const Key('policy-how'),
-              leading: DsListRow.iconTile(context, Icons.info_outline, decorative: true),
+              leading: DsListRow.iconTile(context, Icons.help_outline, decorative: true),
               title: 'How this works',
               chevron: true,
               onTap: () => showInfoSheet(context, title: 'How this works', body: _howItWorks),
@@ -247,7 +246,7 @@ class _ProcessingPolicyScreenState extends State<ProcessingPolicyScreen> {
           ]),
         ],
         const SizedBox(height: AppSpace.md),
-        const DsFootnote('Every change is a signed entry in the key log that all members can see.', icon: Icons.info_outline),
+        const DsFootnote('Every change is signed and visible to all members.', icon: Icons.info_outline),
       ],
     );
   }

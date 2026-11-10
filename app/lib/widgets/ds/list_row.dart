@@ -114,7 +114,9 @@ class DsListRow extends StatelessWidget {
             child: Padding(
               padding: EdgeInsets.symmetric(
                 horizontal: inset,
-                vertical: AppSpace.md,
+                // The 48 dp (i) button sets the row height; less padding then keeps a row with an
+                // (i) as tall as its neighbours without one.
+                vertical: info != null ? AppSpace.sm : AppSpace.md,
               ),
               child: Row(
                 children: <Widget>[

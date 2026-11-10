@@ -155,3 +155,24 @@ gutter, so untouched screens only change where they already used `DsRowGroup` (i
 screen at 390 and 344 / 1.5x, dark and light, and fails on any overflow. Widget tests:
 `test/widgets/ds_polish2_test.dart`. Not verifiable here: real device fonts (renders use Roboto),
 real Samsung font scaling, motion and scrolling feel, TalkBack.
+
+## Review round (critic findings, fixed)
+
+* **Link another phone** now sits on the same 16 dp gutter as the lists (`DsPage.gutter`), and its step
+  heading uses the 17 dp headline (`DsHeading(compact: true)`) instead of the 26 dp onboarding size.
+* **Trips.** The 7 / 30 day track has a hairline so its edge is visible on the gutter; 16 dp under the tabs and
+  12 dp between the lane chip and the report row. `DsStatStrip` shrinks every value of a strip together
+  (never one cell). Driving cards are flat (sheet colour, no shadow, no border), the same surface as a row
+  group; the light-theme shadow left a grey crescent at the bottom corners. Empty copy: "Trips show up after a
+  few minutes of movement with sharing on."
+* **Processing rules** (was "Circle processing setting"): "Server help" row, (i) only where a row hides a
+  consequence (the switch, "Server processing required", "Phone only"); the visible footnote says the server
+  can read data of members who allow it. A row with an (i) uses 8 dp vertical padding so it is as tall as a row
+  without one (the 48 dp button sets the height).
+* **Server processing (member / admin).** One signal per member row (chip or second line, not both); members
+  who chose the phone are listed once (Members), the "not yet" list keeps only members someone can still act on.
+  The reminder message is a row that copies it, with the text behind its (i). The status card uses the normal
+  card surface. "Positions may not arrive until then." and "Some phones have not switched over yet." replace two
+  flat claims (a catch-up window after a server key change means a position can still be relayed).
+* **Security.** Download my data has a chevron (it is an action) and a one-line second line.
+* **Circles sheet** uses the 16 dp inset; the details row is named after its circle ("Details for Foley Family").

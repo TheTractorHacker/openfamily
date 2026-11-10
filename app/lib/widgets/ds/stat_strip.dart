@@ -51,6 +51,7 @@ class DsStatStrip extends StatelessWidget {
     return LayoutBuilder(builder: (BuildContext context, BoxConstraints box) {
       final int cols = columnsFor(stats.length, box.maxWidth, minCol);
       if (cols == 1) return _stacked(context);
+      final double scale = _valueScale(context, (box.maxWidth / cols) - AppSpace.md);
       final List<Widget> rows = <Widget>[];
       for (int i = 0; i < stats.length; i += cols) {
         if (i > 0) rows.add(const SizedBox(height: AppSpace.md));
@@ -60,7 +61,7 @@ class DsStatStrip extends StatelessWidget {
             for (int j = i; j < i + cols; j++)
               Expanded(
                 child: j < stats.length
-                    ? Padding(padding: const EdgeInsets.only(right: AppSpace.sm), child: _cell(context, stats[j]))
+                    ? Padding(padding: const EdgeInsets.only(right: AppSpace.sm), child: _cell(context, stats[j], scale))
                     : const SizedBox.shrink(),
               ),
           ],
@@ -70,7 +71,29 @@ class DsStatStrip extends StatelessWidget {
     });
   }
 
-  Widget _cell(BuildContext context, DsStat s) {
+  /// One size for every value of the strip: 1 when the longest value fits its column, else
+  /// the factor (not below 0.8) that makes it fit. Shrinking one cell on its own made a single
+  /// figure of the row look smaller and higher than its neighbours.
+  double _valueScale(BuildContext context, double columnWidth) {
+    final TextScaler scaler = MediaQuery.textScalerOf(context);
+    // The style the value really paints with (the ambient font plus the headline style).
+    final TextStyle style = DefaultTextStyle.of(context).style.merge(AppType.headline);
+    double widest = 0;
+    for (final DsStat s in stats) {
+      final TextPainter tp = TextPainter(
+        text: TextSpan(text: s.value, style: style),
+        textDirection: Directionality.of(context),
+        textScaler: scaler,
+        maxLines: 1,
+      )..layout();
+      if (tp.width > widest) widest = tp.width;
+      tp.dispose();
+    }
+    if (widest <= columnWidth || widest == 0) return 1;
+    return (columnWidth / widest).clamp(0.8, 1.0);
+  }
+
+  Widget _cell(BuildContext context, DsStat s, double scale) {
     final ColorScheme cs = Theme.of(context).colorScheme;
     return Semantics(
       container: true,
@@ -80,14 +103,18 @@ class DsStatStrip extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
-          // A long value shrinks to fit its column; the fixed line height keeps every label of
-          // a row on one baseline whether or not its neighbour shrank.
+          // The strip's values share one size ([_valueScale]); the fixed line height keeps every
+          // label of a row on one baseline. FittedBox is only the last resort below 80%.
           SizedBox(
             height: MediaQuery.textScalerOf(context).scale(AppType.headline.fontSize! * AppType.headline.height!) + 2,
             child: FittedBox(
               fit: BoxFit.scaleDown,
               alignment: Alignment.topLeft,
-              child: Text(s.value, maxLines: 1, style: AppType.headline),
+              child: Text(
+                s.value,
+                maxLines: 1,
+                style: scale == 1 ? AppType.headline : AppType.headline.copyWith(fontSize: AppType.headline.fontSize! * scale),
+              ),
             ),
           ),
           Text(s.label, style: AppType.secondary.copyWith(color: cs.onSurfaceVariant)),

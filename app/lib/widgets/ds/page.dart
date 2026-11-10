@@ -19,6 +19,7 @@ class DsPage extends StatelessWidget {
     this.showBack = true,
     this.appBarActions,
     this.maxWidth = 600,
+    this.gutter = AppSpace.xxl,
   });
 
   final String title;
@@ -33,6 +34,11 @@ class DsPage extends StatelessWidget {
   final bool showBack;
   final List<Widget>? appBarActions;
   final double maxWidth;
+
+  /// Left and right space of the body and the pinned actions. 24 dp for form and onboarding
+  /// pages; a settings-style flow passes the 16 dp page gutter so it shares one left edge
+  /// with the lists around it.
+  final double gutter;
 
   @override
   Widget build(BuildContext context) {
@@ -69,12 +75,7 @@ class DsPage extends StatelessWidget {
               children: <Widget>[
                 Expanded(
                   child: ListView(
-                    padding: const EdgeInsets.fromLTRB(
-                      AppSpace.xxl,
-                      AppSpace.lg,
-                      AppSpace.xxl,
-                      AppSpace.lg,
-                    ),
+                    padding: EdgeInsets.fromLTRB(gutter, AppSpace.lg, gutter, AppSpace.lg),
                     children: <Widget>[
                       ...children,
                       if (inline && actions.isNotEmpty) ...<Widget>[
@@ -86,12 +87,7 @@ class DsPage extends StatelessWidget {
                 ),
                 if (!inline && actions.isNotEmpty)
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(
-                      AppSpace.xxl,
-                      AppSpace.sm,
-                      AppSpace.xxl,
-                      AppSpace.lg,
-                    ),
+                    padding: EdgeInsets.fromLTRB(gutter, AppSpace.sm, gutter, AppSpace.lg),
                     child: actionColumn,
                   ),
               ],
@@ -105,18 +101,22 @@ class DsPage extends StatelessWidget {
 
 /// Big friendly heading with a calmer supporting line.
 class DsHeading extends StatelessWidget {
-  const DsHeading(this.title, {super.key, this.subtitle, this.center = false});
+  const DsHeading(this.title, {super.key, this.subtitle, this.center = false, this.compact = false});
 
   final String title;
   final String? subtitle;
   final bool center;
+
+  /// The step heading of a settings-style flow: the shared headline size (17) instead of the
+  /// big 26 of onboarding, and less space under it.
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
     final ColorScheme cs = Theme.of(context).colorScheme;
     final TextAlign align = center ? TextAlign.center : TextAlign.start;
     return Padding(
-      padding: const EdgeInsets.only(bottom: AppSpace.xl),
+      padding: EdgeInsets.only(bottom: compact ? AppSpace.lg : AppSpace.xl),
       child: Column(
         crossAxisAlignment:
             center ? CrossAxisAlignment.center : CrossAxisAlignment.start,
@@ -126,7 +126,7 @@ class DsHeading extends StatelessWidget {
             child: Text(
               title,
               textAlign: align,
-              style: AppType.title.copyWith(fontSize: 26),
+              style: compact ? AppType.headline : AppType.title.copyWith(fontSize: 26),
             ),
           ),
           if (subtitle != null) ...<Widget>[

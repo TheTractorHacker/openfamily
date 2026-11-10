@@ -278,6 +278,8 @@ class _LinkDeviceScreenState extends State<LinkDeviceScreen> {
         // A new step starts at the top, not where the last step's list was scrolled to.
         key: ValueKey<LinkStep>(_step),
         title: 'Link another phone',
+        // The page gutter of the settings lists (16 dp, 12 narrow): one left edge with them.
+        gutter: DsListRow.compactFor(context) ? AppSpace.md : AppSpace.lg,
         actions: actions,
         children: <Widget>[
           ...body,
@@ -321,7 +323,7 @@ class _LinkDeviceScreenState extends State<LinkDeviceScreen> {
 
   (List<Widget>, List<Widget>) _choose() => (
         <Widget>[
-          const DsHeading('Which phone is this?',
+          const DsHeading('Which phone is this?', compact: true,
               subtitle: 'Linking takes a minute. Keep both phones in front of you, signed in to the same account.'),
           DsRowGroup(children: <Widget>[
             DsListRow(
@@ -349,7 +351,7 @@ class _LinkDeviceScreenState extends State<LinkDeviceScreen> {
 
   (List<Widget>, List<Widget>) _newStart() => (
         <Widget>[
-          const DsHeading('Link this phone',
+          const DsHeading('Link this phone', compact: true,
               subtitle: 'Your other phone approves this one, so your private circles open here too.'),
           const _Steps(<String>[
             'Make a code on this phone.',
@@ -372,7 +374,7 @@ class _LinkDeviceScreenState extends State<LinkDeviceScreen> {
 
   (List<Widget>, List<Widget>) _newWaiting() => (
         <Widget>[
-          const DsHeading('Send this code to your other phone',
+          const DsHeading('Send this code to your other phone', compact: true,
               subtitle: 'On your other phone open Settings, Devices, Link another phone, '
                   'and choose "This is the phone I already use".'),
           _CodeCard(
@@ -408,7 +410,7 @@ class _LinkDeviceScreenState extends State<LinkDeviceScreen> {
 
   (List<Widget>, List<Widget>) _existingPaste() => (
         <Widget>[
-          const DsHeading('Approve a new phone',
+          const DsHeading('Approve a new phone', compact: true,
               subtitle: 'On the new phone open Settings, Devices, Link another phone and choose "This is the new phone". '
                   'Send yourself its code and paste it here.'),
           _CodeField(
@@ -433,7 +435,7 @@ class _LinkDeviceScreenState extends State<LinkDeviceScreen> {
     final LinkRequestInfo info = _info!;
     return (
       <Widget>[
-        const DsHeading('Check it is your phone',
+        const DsHeading('Check it is your phone', compact: true,
             subtitle: 'Look at the new phone. Approve only if it shows the same check code.'),
         _CheckCode(short: info.short, shortKey: const Key('link-short')),
         const SizedBox(height: AppSpace.lg),
@@ -464,7 +466,7 @@ class _LinkDeviceScreenState extends State<LinkDeviceScreen> {
 
   (List<Widget>, List<Widget>) _existingApproved() => (
         <Widget>[
-          const DsHeading('Approved. One last step',
+          const DsHeading('Approved. One last step', compact: true,
               subtitle: 'Send this answer to the new phone and paste it there under "Then paste the answer".'),
           _CodeCard(
             code: _approval!,
@@ -488,7 +490,7 @@ class _LinkDeviceScreenState extends State<LinkDeviceScreen> {
           const SizedBox(height: AppSpace.xxl),
           Icon(Icons.check_circle, size: 64, color: BrandTheme.of(context).accentInk),
           const SizedBox(height: AppSpace.lg),
-          DsHeading(title, subtitle: text, center: true),
+          DsHeading(title, subtitle: text, center: true, compact: true),
         ],
         <Widget>[
           DsPillButton(

@@ -273,7 +273,7 @@ class _TripsScreenState extends State<TripsScreen> {
       children: <Widget>[
         if (_proc != null) ...<Widget>[
           const DsChipRow(children: <Widget>[LaneChip(server: true)]),
-          const SizedBox(height: AppSpace.sm),
+          const SizedBox(height: AppSpace.md),
         ],
         DsRowGroup(
           children: <Widget>[
@@ -298,7 +298,7 @@ class _TripsScreenState extends State<TripsScreen> {
         label: 'Loading trips',
         child: ListView(
           physics: const NeverScrollableScrollPhysics(),
-          padding: const EdgeInsets.fromLTRB(AppSpace.lg, AppSpace.md, AppSpace.lg, 0),
+          padding: const EdgeInsets.fromLTRB(AppSpace.lg, AppSpace.lg, AppSpace.lg, 0),
           children: <Widget>[
             _header(),
             const SizedBox(height: AppSpace.sm),
@@ -322,8 +322,7 @@ class _TripsScreenState extends State<TripsScreen> {
       return TripsMessageView(
         icon: Icons.route_rounded,
         title: 'No trips yet',
-        message: 'Trips appear here after ${widget.member.name} has been '
-            'moving for a few minutes with location sharing on.',
+        message: 'Trips show up after a few minutes of movement with sharing on.',
         header: _header(),
       );
     }
@@ -335,7 +334,7 @@ class _TripsScreenState extends State<TripsScreen> {
           physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.fromLTRB(
             AppSpace.lg,
-            AppSpace.md,
+            AppSpace.lg,
             AppSpace.lg,
             AppSpace.xxl,
           ),

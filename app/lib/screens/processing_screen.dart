@@ -160,8 +160,15 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
 
   /// Circle admin: who is not on the server yet. When the admin requires server processing nobody has to be asked:
   /// those members are "catching up" (their phone signs by itself). Otherwise the message to send them (section 23).
+  /// Members who are not on the server. Outside a required circle only those someone can still do something
+  /// about (not chosen yet, or an app that is too old); a member who chose the phone is already shown in Members.
+  static List<ProcessingMember> _notYetMembers(ProcessingSnapshot s) => <ProcessingMember>[
+        for (final ProcessingMember m in s.members)
+          if (!m.serverAssisted && (s.required || !m.verified || s.notReady.contains(m.name))) m,
+      ];
+
   List<Widget> _notYetOnServer(ProcessingSnapshot s) {
-    final List<ProcessingMember> rest = <ProcessingMember>[for (final ProcessingMember m in s.members) if (!m.serverAssisted) m];
+    final List<ProcessingMember> rest = _notYetMembers(s);
     if (s.required) {
       return <Widget>[
         const DsSectionHeader('Still catching up'),
@@ -178,7 +185,6 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
         ]),
       ];
     }
-    final double inset = DsRowScope.insetFor(context);
     return <Widget>[
       const DsSectionHeader('Members not yet on the server'),
       DsRowGroup(children: <Widget>[
@@ -209,27 +215,23 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
                 : null,
           ),
       ]),
-      Padding(
-        padding: EdgeInsets.fromLTRB(inset, AppSpace.md, inset, AppSpace.xs),
-        child: const Text('Message to send them:', style: AppType.secondary),
-      ),
-      Padding(
-        padding: EdgeInsets.symmetric(horizontal: inset),
-        child: const SelectableText(remindMessageText, key: Key('remind-message')),
-      ),
-      Padding(
-        padding: const EdgeInsets.only(top: AppSpace.sm),
-        child: Align(
-          alignment: Alignment.centerLeft,
-          child: DsPillButton(
+      const SizedBox(height: AppSpace.md),
+      DsRowGroup(children: <Widget>[
+        Builder(
+          builder: (BuildContext context) => DsListRow(
             key: const Key('remind-copy'),
-            label: 'Copy message',
-            style: DsPillStyle.outlined,
-            icon: Icons.copy,
-            onPressed: () => Clipboard.setData(const ClipboardData(text: remindMessageText)),
+            leading: DsListRow.iconTile(context, Icons.content_copy_outlined, decorative: true),
+            title: 'Copy a message to send them',
+            subtitle: 'Asks them to open the app once',
+            info: remindMessageText,
+            infoTitle: 'Message to send them',
+            onTap: () async {
+              await Clipboard.setData(const ClipboardData(text: remindMessageText));
+              if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Message copied. Paste it in a chat.')));
+            },
           ),
         ),
-      ),
+      ]),
     ];
   }
 
@@ -337,7 +339,7 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
             DsRowGroup(children: <Widget>[
               for (final ProcessingMember m in s.members) _memberRow(s, m),
             ]),
-            if (s.iAmAdmin && s.assistOn && !s.legacy && s.members.any((ProcessingMember m) => !m.serverAssisted)) ..._notYetOnServer(s),
+            if (s.iAmAdmin && s.assistOn && !s.legacy && _notYetMembers(s).isNotEmpty) ..._notYetOnServer(s),
             if (s.viewers.isNotEmpty && !s.legacy) ...<Widget>[
               const DsSectionHeader('Viewers and bridges'),
               DsRowGroup(children: <Widget>[
@@ -355,7 +357,7 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
               ]),
             ],
             if (s.assistOn || s.serverCount > 0) ...<Widget>[
-              const DsSectionHeader('Delete server copies', caption: 'Copies made while you allowed it stay until deleted.'),
+              const DsSectionHeader('Delete server copies'),
               DsRowGroup(children: <Widget>[
                 DsListRow(
                   key: const Key('delete-mine'),
@@ -391,7 +393,6 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
   }
 
   Widget _memberRow(ProcessingSnapshot s, ProcessingMember m) {
-    final bool undecided = s.assistOn && !m.verified && !m.serverAssisted;
     final bool catchingUp = s.required && !m.serverAssisted;
     // The lane is a chip on the right; on a narrow screen or at large text a chip would be cut off, so it becomes the
     // first part of the second line instead.
@@ -403,17 +404,13 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
         ? 'Not confirmed right now'
         : s.legacy
             ? 'Old mode: the server may read it'
-            : (!s.required && undecided ? 'Has not chosen' : null);
+            : null;
     final String subtitle = dsMeta(<String?>[asText ? lane : null, extra]);
     final String? info = s.unconfirmed
         ? null
         : s.legacy
             ? (m.isChild ? 'Child account. Old mode: the server may read it if everyone allowed it.' : 'Old mode: the server may read this circle if everyone allowed it.')
-            : (catchingUp
-                ? ProcessingCopy.catchingUpInfo
-                : (undecided
-                    ? '${m.name} has not chosen. Until they do, their data stays on their phone and is not sent to the server for processing.'
-                    : null));
+            : (catchingUp ? ProcessingCopy.catchingUpInfo : null);
     return DsListRow(
       key: Key('member-${m.userId}'),
       leading: DsListRow.iconTile(context, Icons.person_outline, decorative: true),
@@ -428,7 +425,7 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
   /// What the circle setting is, as the row's title (the state itself, not a label for a page).
   String _policyTitle(ProcessingSnapshot s) {
     if (s.legacy) return 'Old trusted-server mode';
-    if (!s.assistOn) return 'Server assistance is off';
+    if (!s.assistOn) return 'Server help is off';
     return s.required ? 'Required by the admin' : 'Members may opt out';
   }
 
@@ -456,7 +453,7 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
             Icons.dns_outlined,
             AppColors.accentInk,
             'Required by the admin (${s.serverCount} of ${s.members.length} on the server)',
-            s.serverCount == s.members.length ? 'Members cannot turn it off.' : 'Phones are switching over by themselves.',
+            s.serverCount == s.members.length ? 'Members cannot turn it off.' : 'Some phones have not switched over yet.',
             s.serverCount == s.members.length
                 ? ProcessingCopy.requireSwitchBody
                 : 'Everyone\'s phone switches over by itself. A phone that has not switched over cannot send positions until it has.'
@@ -470,6 +467,7 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
           );
     final bool dark = Theme.of(context).brightness == Brightness.dark;
     final bool compact = DsListRow.compactFor(context);
+    final bool problem = s.unconfirmed || s.legacy;
     final Color fg = dark ? Color.lerp(color, Colors.white, 0.45)! : Color.lerp(color, Colors.black, 0.35)!;
     final double inset = DsRowScope.insetFor(context);
     return Semantics(
@@ -478,9 +476,12 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
       child: Container(
         key: const Key('proc-status-card'),
         padding: EdgeInsets.fromLTRB(inset, AppSpace.md, more == null ? inset : AppSpace.xs, AppSpace.md),
+        // The same card surface as every group, so it does not read as a disabled row. The status
+        // colour is on the tile and, for a problem, on a thin outline.
         decoration: BoxDecoration(
-          color: color.withValues(alpha: dark ? 0.16 : 0.09),
+          color: BrandTheme.of(context).sheet,
           borderRadius: BorderRadius.circular(AppRadius.lg),
+          border: problem ? Border.all(color: color.withValues(alpha: 0.6)) : null,
         ),
         child: Row(children: <Widget>[
           if (!compact) ...<Widget>[
@@ -564,7 +565,7 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
               key: const Key('proc-required-catching-up'),
               leading: DsListRow.iconTile(context, Icons.sync, decorative: true),
               title: 'Your phone is switching over',
-              subtitle: 'Positions are not delivered until then.',
+              subtitle: 'Positions may not arrive until then.',
               info: ProcessingCopy.requiredCatchingUp,
               infoTitle: 'Your phone is switching over',
             ),
@@ -600,19 +601,20 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
                 const Text('Choose where your data is processed', style: AppType.body),
                 const SizedBox(height: AppSpace.xs),
                 Text(
-                    'Your phone does the processing until you choose. The admin suggests '
-                    '"${s.policy.defaultForNew == E2ee.lineServer ? 'Server processing' : 'Phone only'}"; that is only a suggestion. '
-                    'Nothing is shared with the server unless you confirm it yourself.',
+                    'Your phone does the work until you choose. The admin suggests '
+                    '"${s.policy.defaultForNew == E2ee.lineServer ? 'Server processing' : 'Phone only'}", only a suggestion.',
                     key: const Key('proc-default-hint'),
                     style: AppType.secondary.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant)),
                 const SizedBox(height: AppSpace.md),
-                Wrap(spacing: AppSpace.sm, runSpacing: AppSpace.sm, children: <Widget>[
+                // Two full-width buttons, one under the other: equal size at every width and text size.
+                Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: <Widget>[
                   DsPillButton(
                     key: const Key('choose-server'),
                     label: 'Server processing',
                     style: DsPillStyle.outlined,
                     onPressed: _busy || !s.hasServerKey ? null : () => _chooseUndecided(E2ee.lineServer),
                   ),
+                  const SizedBox(height: AppSpace.sm),
                   DsPillButton(
                     key: const Key('choose-phone'),
                     label: 'Phone only',
@@ -628,7 +630,7 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
         DsToggleRow(
           key: const Key('my-lane-switch'),
           icon: Icons.dns_outlined,
-          title: 'Let the server process my data',
+          title: 'Server processing',
           subtitle: why ?? (mine ? 'On' : 'Off'),
           info: whyFull ??
               (mine

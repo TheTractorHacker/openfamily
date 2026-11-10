@@ -303,7 +303,11 @@ class _LocationTabViewState extends State<LocationTabView> {
         return SafeArea(
           child: DsSheetScaffold(
             title: 'Your circles',
-            child: SingleChildScrollView(
+            // The page gutter (16 dp, 12 narrow), like the lists in the app's pages.
+            gutter: DsRowScope.insetFor(ctx),
+            child: DsRowScope(
+              inset: DsRowScope.insetFor(ctx),
+              child: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
@@ -379,14 +383,14 @@ class _LocationTabViewState extends State<LocationTabView> {
                     ),
                   // Actions: the same row as a circle, under a hairline.
                   if (circles.isNotEmpty || widget.onOpenCircle != null)
-                    const Divider(
+                    Divider(
                       height: 1,
-                      indent: AppSpace.xl,
-                      endIndent: AppSpace.xl,
+                      indent: DsRowScope.insetFor(ctx),
+                      endIndent: DsRowScope.insetFor(ctx),
                     ),
                   if (_activeCircle != null && widget.onOpenCircle != null)
                     DsListRow(
-                      title: 'Open circle details',
+                      title: 'Details for ${_activeCircle!.name}',
                       leading: DsListRow.iconTile(
                         ctx,
                         Icons.manage_accounts_outlined,
@@ -408,6 +412,7 @@ class _LocationTabViewState extends State<LocationTabView> {
                   ),
                   const SizedBox(height: AppSpace.sm),
                 ],
+              ),
               ),
             ),
           ),

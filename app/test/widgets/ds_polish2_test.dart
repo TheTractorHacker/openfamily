@@ -59,6 +59,20 @@ void main() {
       expect(t.takeException(), isNull);
     });
 
+    testWidgets('a long value shrinks every value of the strip together, not one cell', (WidgetTester t) async {
+      const List<DsStat> stats = <DsStat>[
+        DsStat(value: '1.3 mi', label: 'Distance'),
+        DsStat(value: '1 h 22 min', label: 'Duration'),
+        DsStat(value: '4 mph', label: 'Top speed'),
+        DsStat(value: '3 mph', label: 'Average'),
+      ];
+      await _pump(t, const Padding(padding: EdgeInsets.all(AppSpace.lg), child: DsStatStrip(stats: stats)));
+      final Set<double?> sizes = <double?>{
+        for (final DsStat s in stats) t.widget<Text>(find.text(s.value)).style?.fontSize,
+      };
+      expect(sizes.length, 1, reason: 'one value size for the whole strip');
+    });
+
     testWidgets('three stats that cannot fit stack as label / value lines', (WidgetTester t) async {
       await _pump(t, const Padding(padding: EdgeInsets.all(AppSpace.lg), child: DsStatStrip(stats: <DsStat>[
         DsStat(value: '28 mi', label: 'Distance'),

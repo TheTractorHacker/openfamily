@@ -56,6 +56,9 @@ void main() {
       expect(txt('Uses the phone (has not chosen)'), findsWidgets);
       expect(txt('not choosing yet'), findsNothing);
       expect(txt('Not chosen yet'), findsNothing);
+      // The message is behind the (i) of its row (UI polish 2 review); the row copies it.
+      expect(find.byKey(const Key('remind-copy')), findsOneWidget);
+      await openInfo(t, const Key('remind-copy'));
       expect(txt('Please open the Orbitly app once'), findsOneWidget);
       expect(c.calls.where((String x) => x.startsWith('lane') || x.startsWith('policy')), isEmpty);
     });
@@ -153,7 +156,8 @@ void main() {
       expect(find.text('Your family admin requires server processing.'), findsOneWidget);
       expect(find.byKey(const Key('proc-required-catching-up')), findsOneWidget);
       // The row says it short; the full sentence (check-ins and alerts still go through) is behind its (i).
-      expect(txt('Positions are not delivered until then.'), findsOneWidget);
+      // Softened in the review: the catch-up window means a position may still be relayed, so no flat "not delivered".
+      expect(txt('Positions may not arrive until then.'), findsOneWidget);
       await openInfo(t, const Key('proc-required-catching-up'));
       expect(txt('not delivered (check-ins and emergency alerts still are)'), findsOneWidget);
       await t.tapAt(const Offset(5, 5));

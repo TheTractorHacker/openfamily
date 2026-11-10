@@ -31,7 +31,12 @@ class DsSheetScaffold extends StatelessWidget {
     required this.child,
     this.title,
     this.header,
+    this.gutter = AppSpace.xl,
   });
+
+  /// Left and right space of the title (20 dp by default; a sheet of list rows passes the
+  /// rows' own inset so the title and the rows start on one edge).
+  final double gutter;
 
   final String? title;
 
@@ -54,12 +59,7 @@ class DsSheetScaffold extends StatelessWidget {
           Semantics(label: 'Drag handle', child: const DsDragHandle()),
           if (title != null)
             Padding(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpace.xl,
-                AppSpace.xs,
-                AppSpace.xl,
-                AppSpace.sm,
-              ),
+              padding: EdgeInsets.fromLTRB(gutter, AppSpace.xs, gutter, AppSpace.sm),
               child: Align(
                 alignment: Alignment.centerLeft,
                 child: Semantics(
