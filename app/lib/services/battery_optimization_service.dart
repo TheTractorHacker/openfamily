@@ -19,8 +19,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 class BatteryOptimizationService {
   BatteryOptimizationService._();
 
+  static const String _requestIgnoreBatteryOptimizations =
+      'android.settings.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS';
   static const String _ignoreBatteryOptimizationSettings =
       'android.settings.IGNORE_BATTERY_OPTIMIZATION_SETTINGS';
+
+  /// This app's Android package; the system dialog needs it to name Orbitly.
+  static const String _package = 'app.openfamily';
 
   static const String _promptShownKey = 'wb_suggested_battery_optimization';
 
@@ -28,26 +33,38 @@ class BatteryOptimizationService {
   static bool get isSupported =>
       defaultTargetPlatform == TargetPlatform.android;
 
-  /// Opens the system page where the user can set Orbitly to
-  /// "Don't optimize". Returns true if a settings screen was opened.
+  /// Takes the person to Orbitly's own battery choice, never to a list they
+  /// have to search. In order:
   ///
-  /// Prefers the general battery-optimization list (reliable across stock
-  /// Android and most OEMs without needing the app's package name), falling
-  /// back to the app's own settings page if that intent is unavailable.
+  /// 1. The system's one-tap dialog for THIS app ("Let Orbitly always run in
+  ///    the background?"). It needs no searching: some phones (Samsung's
+  ///    "Never sleeping apps" list, and the system list, which by default only
+  ///    shows apps that are already exempt) do not show Orbitly where people
+  ///    look. The final choice stays with the person.
+  /// 2. Orbitly's app-info page, where Battery is one row away
+  ///    (Settings > Apps > Orbitly > Battery > Unrestricted).
+  /// 3. The general battery-optimization list.
+  ///
+  /// Returns true if a settings screen or dialog was opened.
   static Future<bool> openSettings() async {
     if (!isSupported) return false;
     try {
-      await AndroidIntent(
+      await const AndroidIntent(
+        action: _requestIgnoreBatteryOptimizations,
+        data: 'package:$_package',
+      ).launch();
+      return true;
+    } catch (_) {}
+    try {
+      if (await openAppSettings()) return true;
+    } catch (_) {}
+    try {
+      await const AndroidIntent(
         action: _ignoreBatteryOptimizationSettings,
       ).launch();
       return true;
     } catch (_) {
-      try {
-        await openAppSettings();
-        return true;
-      } catch (_) {
-        return false;
-      }
+      return false;
     }
   }
 

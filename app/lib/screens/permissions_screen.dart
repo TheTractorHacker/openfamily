@@ -121,9 +121,10 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
     icon: Icons.battery_charging_full,
     title: 'Keep updates flowing',
     why: 'Phones put apps to sleep to save battery, which can pause your '
-        'location updates when the app is closed. Setting Orbitly to '
-        '"Don\'t optimize" keeps your family\'s map fresh. It only uses '
-        'a little extra battery.',
+        'location updates when the app is closed. Allowing Orbitly to run in '
+        'the background keeps your family\'s map fresh. It only uses '
+        'a little extra battery. If your phone shows a list instead, set '
+        'Orbitly to Unrestricted under Settings > Apps > Orbitly > Battery.',
     consequence: 'Without this, your location may go stale while the app is '
         'in the background on some phones.',
     buttonLabel: 'Open battery settings',

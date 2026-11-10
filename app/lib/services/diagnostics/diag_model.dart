@@ -291,9 +291,10 @@ String oemGuidance(String manufacturer) {
           'then Settings > Apps > Orbitly > Battery saver and choose "No restrictions". '
           'Also lock Orbitly in the recent-apps list (long-press its card, tap the lock).';
     case 'Samsung':
-      return 'On Samsung phones: open Settings > Battery > Background usage limits, remove Orbitly from '
-          '"Sleeping apps" and "Deep sleeping apps", and add it to "Never sleeping apps". '
-          'Then set Settings > Apps > Orbitly > Battery to "Unrestricted".';
+      return 'On Samsung phones: open Settings > Apps > Orbitly > Battery and choose "Unrestricted". '
+          'Then open Settings > Battery > Background usage limits and make sure Orbitly is not in '
+          '"Sleeping apps" or "Deep sleeping apps". If "Never sleeping apps" does not offer Orbitly when you search '
+          'its list, the Unrestricted choice above does the same job.';
     case 'OnePlus':
       return 'On OnePlus phones: open Settings > Battery > Battery optimization > Orbitly > "Don\'t optimize", '
           'then Settings > Apps > Orbitly > Battery > "Allow background activity". '
