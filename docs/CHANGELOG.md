@@ -10,9 +10,9 @@ for the **last 5 minor versions** of the app (see
 [API compatibility](api-compat.md)), so you can update the server first and
 the phones afterwards.
 
-## v0.26.27 (unreleased)
+## v0.26.28 (2026-11-10)
 
-Update the server first, then the phones. The server part works with every app version of the last five minors; phones on older versions keep today's behaviour (a reset replaces the server key and an admin phone approves the new one).
+**Update the server first, then the phones.** The server part works with every app version of the last five minors; phones on older versions keep today's behaviour (a reset replaces the server key and an admin phone approves the new one).
 
 - **An owner key reset no longer replaces the server's key.** After a reset the owner's new phone can keep the same server key by signing for it (a new key-log entry, "server key attached"). Only that exact key, only for the owner's own account, only with the new phone's signature; any other case revokes the key as before. The server's own files, keys and history are untouched, so the other family members' choices stay valid and nobody has to do anything. (Server part; the phone part is in the app.)
 - **"Require server processing" is enforced again, with one narrow catch-up window.** In a circle that requires server processing the server refuses the phone-line positions (and history, trips and other results) of a member whose own phone has not signed the server choice; check-ins, events and chat always go through. Only a member whose own signed server choice (their live phone key, not expired) became out of date because the server key was replaced is still relayed, and only for 72 hours after the replacement completed (measured by the server's own record of it; a server restart that pins the same key again does not count as a replacement). Never for a member who never chose, withdrew, or whose phone key was revoked, and never after the 72 hours. The server still reads only members whose own phone signed the server choice. (This reverts the first draft of this release, which let a catching-up member send on the phone line without limit.)
@@ -28,10 +28,6 @@ Update the server first, then the phones. The server part works with every app v
 - App compatibility: new features `server_attach` and `required_server` (0.26.27). A member on an older app in a circle that requires server processing sees "(update the app to keep sharing with this circle)" in the circle name and is listed as needing the new app on the owner's screen; the join text tells a new member that the phone switches over by itself.
 - The Server processing screen no longer promises to retry by itself, and when the settings cannot be confirmed it says "Not confirmed right now" instead of showing the last remembered state as current.
 - Database migration 000410 (adds `e2ee_server_attach`, follows the attach in `e2ee_device_approved`, adds `e2ee_member_catching_up` and `circles.e2ee_server_gen_at` for the 72 hour catch-up of `e2ee_item_guard`); it has a down file.
-
-## v0.26.28 (2026-11-10)
-
-App-only release (the server needs no change). Install over the current app.
 
 - **Your encryption key survives reinstalling the app.** Deleting Orbitly used to delete this phone's key for Private circles, so after a reinstall you had to reset your keys and everyone had to approve you again. Now a sealed copy of the phone's own key is kept outside the app (Android: Google Play services Block Store, which also stores it end-to-end encrypted in your Google account when the phone has a screen lock; iPhone: the keychain, carried by an encrypted iPhone backup, never synced to iCloud Keychain). When you install again and sign in to the same account, the key comes back by itself, with the same safety number and no approval. It only comes back when the server still lists that key as active; after **Reset my keys** or a revoked key, a new key is made as before. If the copy cannot be read for a moment, the app does not make a new key over it; it asks you to try again. **Set this phone up again** (for a key that cannot be read) keeps the copy, so the same key can come back. Trade-off: Google (or your iPhone backup) holds an encrypted copy of that one key; a restored new phone shares the key with the old one until you revoke the old one. Turn it off in **Settings, Security, Keep this phone's key safe through reinstalls** (this deletes the copy). Not yet tested on a real phone. See [Reinstalling Orbitly](user/reinstalling.md).
 
