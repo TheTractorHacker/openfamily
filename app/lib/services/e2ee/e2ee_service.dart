@@ -331,6 +331,7 @@ class E2eeService {
     if (kb == null) return;
     _backupSyncedFor = uid;
     try {
+      await kb.payPending();
       if (await kb.enabled()) {
         await kb.save(BackedUpIdentity(uid, deviceId, seed));
       } else {
@@ -346,14 +347,20 @@ class E2eeService {
     await kb.save(BackedUpIdentity(uid, deviceId, seed));
   }
 
-  /// Saves the live identity's copy now (the switch was turned on, or a reset). Never throws.
-  Future<void> backUpIdentityNow() async {
+  /// Saves the live identity's copy now (the switch was turned on, or a reset). Never throws. False when a copy
+  /// should exist but could not be saved (the caller says so); true when saved or when there is nothing to save yet.
+  Future<bool> backUpIdentityNow() async {
     try {
+      final KeyBackup? kb = keyBackup;
+      if (kb == null) return true;
       final LocalIdentity? id = await identity();
       final Uint8List? seed = await _readKey(_seedName);
-      if (id == null || seed == null) return;
-      await _saveBackup(id.userId, id.deviceId, seed);
-    } catch (_) {}
+      if (id == null || seed == null) return true;
+      _backupSyncedFor = id.userId;
+      return await kb.save(BackedUpIdentity(id.userId, id.deviceId, seed));
+    } catch (_) {
+      return false;
+    }
   }
 
   /// Brings this phone's identity back from its platform copy when, and only when:
@@ -375,6 +382,15 @@ class E2eeService {
     final KeyBackup? kb = keyBackup;
     if (kb == null || uid.isEmpty || _platformChecked.contains(uid)) return const _PlatformRestore(null);
     final BackedUpIdentity? copy = await kb.load(uid);
+    if (copy == null && kb.lastMiss == KeyBackupMiss.storeError) {
+      // The store exists but could not be read (a timeout, a Play services error): a good copy MAY be there. Not
+      // "no copy": the account is not marked as checked (the next try reads again) and a caller that would create a
+      // new identity fails instead, because that would replace the only copy of a key the server still lists.
+      return _PlatformRestore(null,
+          deferred: StateError("The saved copy of this phone's encryption key could not be checked right now "
+              '(Google Play services did not answer). Try again in a moment. If this keeps happening, turn off '
+              '"Keep this phone\'s key safe through reinstalls" in Settings, Security.'));
+    }
     if (copy == null || copy.userId != uid || copy.seed.length != 32) {
       _platformChecked.add(uid);
       if (copy != null) StorageEventLog.instance.record('keybackup_refused', store: 'keybackup', detail: 'reason=account');
@@ -459,10 +475,14 @@ class E2eeService {
   /// Key material is archived on this phone, not destroyed.
   ///
   /// The platform copy that survives a reinstall is removed too (an explicit erase must not come back by itself), and
-  /// this process does not look for it again. Only the copy of the account that owned the erased identity goes: when
-  /// that cannot be read (an unreadable vault) the signed-in account's copy is the one that goes. A copy of another
-  /// account is never touched.
-  Future<void> eraseLocalKeys() async {
+  /// this process does not look for it again. Only the copy of the account that owned the erased identity goes; when
+  /// no owner can be named every copy this app keeps goes. A copy of another account is never touched otherwise.
+  /// Returns false when the copy could not be removed: the removal is remembered and repeated before the copy is
+  /// next read or saved (it cannot be restored meanwhile), and the caller should tell the person.
+  ///
+  /// [keepReinstallCopy] leaves the copy alone: used when the local key is merely unreadable and the copy is the way
+  /// back to the very same key (it is only used if the server still lists that key as active).
+  Future<bool> eraseLocalKeys({bool keepReinstallCopy = false}) async {
     String owner = '';
     try {
       owner = await storedUserId();
@@ -470,16 +490,20 @@ class E2eeService {
     await _wipeIdentity();
     _backupSyncedFor = null;
     final KeyBackup? kb = keyBackup;
-    if (kb == null) return;
+    if (kb == null) return true;
+    if (keepReinstallCopy) {
+      // The copy is looked at again (it may have been judged unusable earlier in this process).
+      _platformChecked.clear();
+      return true;
+    }
     String target = owner;
     if (target.isEmpty) {
       try {
         target = await userIdProvider();
       } catch (_) {}
     }
-    if (target.isEmpty) return;
-    _platformChecked.add(target);
-    await kb.remove(target);
+    if (target.isNotEmpty) _platformChecked.add(target);
+    return kb.remove(target);
   }
 
   /// The newest archived identity of the signed-in account that still opens,

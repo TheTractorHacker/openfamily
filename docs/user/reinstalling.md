@@ -38,6 +38,10 @@ price is the old behaviour: deleting the app deletes the key.
 
 ## When the key does not come back
 
+If the Settings row says that this phone cannot keep a copy (for example a phone
+without Google Play services), nothing is stored and you set up encryption
+again after a reinstall.
+
 The app only brings the key back when the server still lists this phone's key
 as active for your account and the key matches exactly. It starts a new key
 instead (and you need your recovery phrase or another phone to get your circles
@@ -45,8 +49,10 @@ back, as before) when:
 
 - you or another of your phones used **Reset my keys**, or the key was revoked
   (for example "my phone was lost");
-- you used **Set this phone up again** in Encryption keys (that also removes the
-  copy, on purpose);
+- you deleted your keys on purpose (that also removes the copy; if the removal
+  fails, the app repeats it and does not use the copy meanwhile). **Set this phone
+  up again**, offered when the stored key cannot be read, keeps the copy: the same
+  key comes back if the server still lists it;
 - you turned the setting off before uninstalling;
 - the copy never reached this phone (Google backup was off, no screen lock for a
   new phone, a different app signature, a non-encrypted iPhone backup, or no

@@ -132,10 +132,14 @@ class MemoryPlatformKeyStore implements PlatformKeyStore {
   final Map<String, Uint8List> data = <String, Uint8List>{};
   String secret;
   bool failAll = false;
+
+  /// The error code [failAll] fails with: 'unavailable' is "no store on this phone" (as without Google Play
+  /// services); any other code is a failing store (a timeout, a Play services error).
+  String failCode = 'unavailable';
   int writes = 0;
 
   void _check() {
-    if (failAll) throw PlatformException(code: 'unavailable');
+    if (failAll) throw PlatformException(code: failCode);
   }
 
   @override
@@ -179,11 +183,17 @@ class MemoryPlatformKeyStore implements PlatformKeyStore {
 abstract class KeyBackupPrefs {
   Future<bool> enabled();
   Future<void> setEnabled(bool on);
+
+  /// Entries whose removal from the platform store failed (entry names, or [KeyBackup.allEntries]). They are
+  /// tried again before a copy is read or saved, so an erased key cannot come back by itself.
+  Future<Set<String>> pendingRemovals();
+  Future<void> setPendingRemovals(Set<String> names);
 }
 
 class SharedKeyBackupPrefs implements KeyBackupPrefs {
   const SharedKeyBackupPrefs();
   static const String key = 'e2ee_key_backup_on';
+  static const String pendingKey = 'e2ee_key_backup_pending';
 
   @override
   Future<bool> enabled() async {
@@ -195,15 +205,41 @@ class SharedKeyBackupPrefs implements KeyBackupPrefs {
   }
 
   @override
-  Future<void> setEnabled(bool on) async => (await SharedPreferences.getInstance()).setBool(key, on);
+  Future<void> setEnabled(bool on) async {
+    if (!await (await SharedPreferences.getInstance()).setBool(key, on)) throw StateError('prefs');
+  }
+
+  @override
+  Future<Set<String>> pendingRemovals() async =>
+      ((await SharedPreferences.getInstance()).getStringList(pendingKey) ?? const <String>[]).toSet();
+
+  @override
+  Future<void> setPendingRemovals(Set<String> names) async {
+    final SharedPreferences p = await SharedPreferences.getInstance();
+    if (names.isEmpty) {
+      await p.remove(pendingKey);
+    } else {
+      await p.setStringList(pendingKey, names.toList());
+    }
+  }
 }
 
 class MemoryKeyBackupPrefs implements KeyBackupPrefs {
   bool on = true;
+  bool failWrites = false;
+  Set<String> pending = <String>{};
   @override
   Future<bool> enabled() async => on;
   @override
-  Future<void> setEnabled(bool v) async => on = v;
+  Future<void> setEnabled(bool v) async {
+    if (failWrites) throw StateError('prefs');
+    on = v;
+  }
+
+  @override
+  Future<Set<String>> pendingRemovals() async => <String>{...pending};
+  @override
+  Future<void> setPendingRemovals(Set<String> names) async => pending = <String>{...names};
 }
 
 /// What a stored copy holds once opened.
@@ -215,7 +251,10 @@ class BackedUpIdentity {
 }
 
 /// Why [KeyBackup.load] found nothing usable (reason codes for the event log).
-enum KeyBackupMiss { off, none, storeError, otherPhoneOrDamaged, otherAccount }
+///  * [unavailable]: this phone has no such store (no Google Play services): there can be no copy.
+///  * [storeError]: the store exists but could not be read (a timeout, a Play services error): a copy MAY exist, so
+///    nothing may be created over it.
+enum KeyBackupMiss { off, none, unavailable, storeError, otherPhoneOrDamaged, otherAccount }
 
 /// Seals, stores, opens and removes the platform copy. Every method is best
 /// effort: failures are recorded and swallowed, never thrown into sign-in.
@@ -228,6 +267,9 @@ class KeyBackup {
   final Duration timeout;
 
   static const int version = 1;
+
+  /// The pending-removal marker for "every entry" (a removal for an owner that could not be named).
+  static const String allEntries = '*';
   static const String _domain = 'orbitly-keybackup-v1';
   static final Xchacha20 _aead = Xchacha20.poly1305Aead();
 
@@ -304,12 +346,68 @@ class KeyBackup {
 
   Future<bool> enabled() => prefs.enabled();
 
+  /// True for "this phone has no such store" (not a failing one).
+  static bool isUnavailable(Object e) =>
+      e is MissingPluginException || (e is PlatformException && e.code == 'unavailable');
+
+  /// Whether the store can be reached at all: [KeyBackupMiss.unavailable] (no copy can ever be kept here),
+  /// [KeyBackupMiss.storeError] (failing right now), or null (works). Never throws, reads nothing real.
+  Future<KeyBackupMiss?> reach() async {
+    try {
+      await store.read(await entryKey('probe')).timeout(timeout);
+      return null;
+    } catch (e) {
+      return isUnavailable(e) ? KeyBackupMiss.unavailable : KeyBackupMiss.storeError;
+    }
+  }
+
+  /// Tries the removals that failed earlier. True when nothing is left pending. Never throws.
+  Future<bool> payPending() async {
+    Set<String> pending;
+    try {
+      pending = await prefs.pendingRemovals();
+    } catch (_) {
+      return true;
+    }
+    if (pending.isEmpty) return true;
+    final Set<String> left = <String>{};
+    for (final String name in pending) {
+      try {
+        if (name == allEntries) {
+          await store.deleteAll().timeout(timeout);
+        } else {
+          await store.delete(name).timeout(timeout);
+        }
+        _log('keybackup_removed', '${store.name} pending');
+      } catch (e) {
+        // A phone with no such store has nothing to remove.
+        if (!isUnavailable(e)) left.add(name);
+      }
+    }
+    try {
+      await prefs.setPendingRemovals(left);
+    } catch (_) {
+      return false;
+    }
+    return left.isEmpty;
+  }
+
+  Future<void> _setPending(String name, bool pending) async {
+    try {
+      final Set<String> p = await prefs.pendingRemovals();
+      if (pending ? p.add(name) : p.remove(name)) await prefs.setPendingRemovals(p);
+    } catch (_) {}
+  }
+
   /// Stores (replaces) the copy of [id]. Never throws.
   Future<bool> save(BackedUpIdentity id) async {
     try {
       if (!await prefs.enabled()) return false;
       final String secret = await store.phoneSecret().timeout(timeout);
-      await store.write(await entryKey(id.userId), await seal(id, secret)).timeout(timeout);
+      final String name = await entryKey(id.userId);
+      await store.write(name, await seal(id, secret)).timeout(timeout);
+      // The entry now holds the live key: an earlier failed removal of the old one is moot.
+      await _setPending(name, false);
       _log('keybackup_saved', store.name);
       return true;
     } catch (e) {
@@ -326,7 +424,17 @@ class KeyBackup {
         lastMiss = KeyBackupMiss.off;
         return null;
       }
-      final Uint8List? blob = await store.read(await entryKey(userId)).timeout(timeout);
+      final String name = await entryKey(userId);
+      // A copy that was erased but could not be removed then is not a copy: never read it.
+      if (!await payPending()) {
+        final Set<String> p = await prefs.pendingRemovals();
+        if (p.contains(name) || p.contains(allEntries)) {
+          lastMiss = KeyBackupMiss.none;
+          _log('keybackup_erased_pending', store.name);
+          return null;
+        }
+      }
+      final Uint8List? blob = await store.read(name).timeout(timeout);
       if (blob == null || blob.isEmpty) {
         lastMiss = KeyBackupMiss.none;
         return null;
@@ -338,19 +446,29 @@ class KeyBackup {
       }
       return id;
     } catch (e) {
-      lastMiss = KeyBackupMiss.storeError;
+      lastMiss = isUnavailable(e) ? KeyBackupMiss.unavailable : KeyBackupMiss.storeError;
       _log('keybackup_read_error', '${store.name} ${e.runtimeType}');
       return null;
     }
   }
 
-  /// Removes the copy of [userId]. Never throws; returns false on a failure.
+  /// Removes the copy of [userId], or every copy when [userId] is empty (the owner could not be named). Never
+  /// throws. A failure is remembered and paid before the next read or save ([payPending]), and returned as false.
+  /// A phone with no such store has nothing to remove (true).
   Future<bool> remove(String userId) async {
+    final String name = userId.isEmpty ? allEntries : await entryKey(userId);
     try {
-      await store.delete(await entryKey(userId)).timeout(timeout);
+      if (userId.isEmpty) {
+        await store.deleteAll().timeout(timeout);
+      } else {
+        await store.delete(name).timeout(timeout);
+      }
+      await _setPending(name, false);
       _log('keybackup_removed', store.name);
       return true;
     } catch (e) {
+      if (isUnavailable(e)) return true;
+      await _setPending(name, true);
       _log('keybackup_remove_error', '${store.name} ${e.runtimeType}');
       return false;
     }

@@ -329,7 +329,10 @@ void main() {
       await tester.pumpWidget(_wrap(SecurityScreen(
         api: FakeSecurityApi(account: _on),
         keyBackup: kb,
-        backUpNow: () async => saves++,
+        backUpNow: () async {
+          saves++;
+          return true;
+        },
       )));
       await tester.pumpAndSettle();
       expect(find.text("Keep this phone's key safe through reinstalls"), findsOneWidget);
@@ -349,6 +352,54 @@ void main() {
       await tester.pumpAndSettle();
       expect(prefs.on, isTrue);
       expect(saves, 1);
+    });
+
+    testWidgets('the reinstall row says so when this phone cannot keep a copy', (tester) async {
+      _tall(tester);
+      final MemoryPlatformKeyStore store = MemoryPlatformKeyStore()..failAll = true; // no Play services
+      final KeyBackup kb = KeyBackup(store: store, prefs: MemoryKeyBackupPrefs());
+      await tester.pumpWidget(_wrap(SecurityScreen(api: FakeSecurityApi(account: _on), keyBackup: kb)));
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Google Play services is missing'), findsOneWidget);
+    });
+
+    testWidgets('turning the reinstall switch on says when the copy could not be saved', (tester) async {
+      _tall(tester);
+      final MemoryKeyBackupPrefs prefs = MemoryKeyBackupPrefs()..on = false;
+      final KeyBackup kb = KeyBackup(store: MemoryPlatformKeyStore(), prefs: prefs);
+      await tester.pumpWidget(_wrap(SecurityScreen(
+        api: FakeSecurityApi(account: _on),
+        keyBackup: kb,
+        backUpNow: () async => false,
+      )));
+      await tester.pumpAndSettle();
+      await tester.runAsync(() async {
+        await tester.tap(find.byKey(const Key('key-backup-switch')));
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      });
+      await tester.pumpAndSettle();
+      expect(find.textContaining('could not be saved right now'), findsWidgets);
+      expect(find.textContaining('could not be removed'), findsNothing);
+    });
+
+    testWidgets('a setting that could not be stored leaves the switch where it was, with the right message',
+        (tester) async {
+      _tall(tester);
+      final MemoryKeyBackupPrefs prefs = MemoryKeyBackupPrefs()
+        ..on = false
+        ..failWrites = true;
+      final KeyBackup kb = KeyBackup(store: MemoryPlatformKeyStore(), prefs: prefs);
+      await tester.pumpWidget(_wrap(SecurityScreen(api: FakeSecurityApi(account: _on), keyBackup: kb)));
+      await tester.pumpAndSettle();
+      await tester.runAsync(() async {
+        await tester.tap(find.byKey(const Key('key-backup-switch')));
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      });
+      await tester.pumpAndSettle();
+      expect(find.text('The setting could not be turned on. Nothing was changed.'), findsOneWidget);
+      expect(find.textContaining('could not be removed'), findsNothing);
+      expect(tester.widget<Switch>(find.byType(Switch).last).value, isFalse);
     });
 
     testWidgets('large text scale does not overflow', (tester) async {

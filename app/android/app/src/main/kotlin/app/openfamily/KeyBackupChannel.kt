@@ -25,14 +25,16 @@ import io.flutter.plugin.common.MethodChannel
  *   deleteAll()         -> null
  *
  * The bytes are already sealed by Dart. Nothing here logs them, and errors carry only an
- * exception class name. Without Google Play services every call fails with "unavailable",
- * which Dart treats as "no copy".
+ * exception class name. Without Google Play services (SERVICE_MISSING) every call fails with
+ * "unavailable", which Dart treats as "there can be no copy here". Any other Play services state
+ * (updating, disabled, ...) and any Block Store failure is a plain "blockstore" error: Dart treats
+ * that as "a copy may exist" and does not create a new identity over it.
  */
 class KeyBackupChannel(private val context: Context) {
-    private fun available(): Boolean = try {
-        GoogleApiAvailability.getInstance().isGooglePlayServicesAvailable(context) == ConnectionResult.SUCCESS
+    private fun playServicesState(): Int = try {
+        GoogleApiAvailability.getInstance().isGooglePlayServicesAvailable(context)
     } catch (_: Throwable) {
-        false
+        ConnectionResult.INTERNAL_ERROR
     }
 
     private fun fail(result: MethodChannel.Result, e: Throwable?) {
@@ -56,8 +58,14 @@ class KeyBackupChannel(private val context: Context) {
 
     fun handle(call: MethodCall, result: MethodChannel.Result) {
         try {
-            if (!available()) {
+            val state = playServicesState()
+            if (state == ConnectionResult.SERVICE_MISSING) {
                 result.error("unavailable", "no Google Play services", null)
+                return
+            }
+            if (state != ConnectionResult.SUCCESS) {
+                // Updating, disabled, outdated: may work again soon, so this is not "no copy".
+                result.error("blockstore", "play_services_$state", null)
                 return
             }
             val client = Blockstore.getClient(context)

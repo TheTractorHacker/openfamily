@@ -255,13 +255,53 @@ void main() {
       expect(phone.data, isEmpty);
     });
 
-    test('a channel without the native side (MissingPluginException) is a miss, not an error', () async {
+    test('a channel without the native side (MissingPluginException) means no store here, not a failing one', () async {
       TestWidgetsFlutterBinding.ensureInitialized();
       final KeyBackup kb = KeyBackup(store: const BlockStoreKeyStore(), prefs: MemoryKeyBackupPrefs());
       expect(await kb.load(uA), isNull);
-      expect(kb.lastMiss, KeyBackupMiss.storeError);
+      expect(kb.lastMiss, KeyBackupMiss.unavailable);
+      expect(await kb.reach(), KeyBackupMiss.unavailable);
       expect(await kb.save(BackedUpIdentity(uA, 'd', E2ee.randomBytes(32))), isFalse);
       expect(await kb.removeAll(), isFalse);
+    });
+
+    test('a store that fails to answer is not "no copy": no new identity replaces the copy, the next try restores',
+        () async {
+      final MemoryPlatformKeyStore phone = MemoryPlatformKeyStore();
+      final (Install _, LocalIdentity before) = await registered(phone);
+      final Map<String, Uint8List> kept = <String, Uint8List>{
+        for (final MapEntry<String, Uint8List> e in phone.data.entries) e.key: Uint8List.fromList(e.value)
+      };
+      final Install again = Install(server, uA, phone);
+      phone.failAll = true;
+      phone.failCode = 'blockstore'; // a Play services error or a timeout, not "no Play services"
+      expect(await again.svc.identity(), isNull);
+      await expectLater(again.svc.identity(create: true), throwsA(isA<StateError>()));
+      await expectLater(again.svc.registerThisDevice(label: 'This phone'), throwsA(isA<StateError>()));
+      expect(await again.svc.hasIdentity(), isFalse);
+      expect(again.api.myKeysCalls, 0, reason: 'nothing was read, so the server was not asked either');
+      // Play services answers again, in the same process: the check was not used up.
+      phone.failAll = false;
+      expect((await again.svc.identity(create: true))!.deviceId, before.deviceId);
+      expect(phone.data.keys, kept.keys);
+      expect(server.keys[uA]!.where((k) => k.isActive && k.kind == 'device'), hasLength(1),
+          reason: 'no orphan key was registered');
+    });
+
+    test('a store that is not there at all (no Play services) means no copy: a new identity is created', () async {
+      final MemoryPlatformKeyStore phone = MemoryPlatformKeyStore()
+        ..failAll = true
+        ..failCode = 'unavailable';
+      final Install i = Install(server, uA, phone);
+      expect((await i.svc.identity(create: true))!.userId, uA);
+    });
+
+    test('with the switch off a failing store is not consulted, so keys can still be created', () async {
+      final MemoryPlatformKeyStore phone = MemoryPlatformKeyStore()
+        ..failAll = true
+        ..failCode = 'blockstore';
+      final Install i = Install(server, uA, phone, prefs: MemoryKeyBackupPrefs()..on = false);
+      expect((await i.svc.identity(create: true))!.userId, uA);
     });
 
     test('offline with a copy present: no new identity is made over it, the next try restores', () async {
@@ -324,6 +364,59 @@ void main() {
       expect(await first.svc.identity(), isNull);
       final Install again = Install(server, uA, phone);
       expect(await again.svc.identity(), isNull);
+    });
+
+    test('an erase whose removal failed is reported, remembered and paid: the key does not come back', () async {
+      final MemoryPlatformKeyStore phone = MemoryPlatformKeyStore();
+      final (Install first, LocalIdentity _) = await registered(phone);
+      phone.failAll = true;
+      phone.failCode = 'blockstore';
+      expect(await first.svc.eraseLocalKeys(), isFalse);
+      phone.failAll = false;
+      expect(phone.data, isNotEmpty, reason: 'the copy is still there');
+      expect((first.prefs as MemoryKeyBackupPrefs).pending, isNotEmpty);
+      // A reinstall (or a restart) with the server still listing the key as active: the copy is not used and goes.
+      final Install again = Install(server, uA, phone, prefs: first.prefs);
+      expect(await again.svc.identity(), isNull);
+      expect(phone.data, isEmpty);
+      expect((first.prefs as MemoryKeyBackupPrefs).pending, isEmpty);
+      expect(server.keys[uA]!.where((k) => k.isActive && k.kind == 'device'), hasLength(1));
+    });
+
+    test('an erase whose removal keeps failing still does not restore the key, and a new key replaces the copy',
+        () async {
+      final MemoryPlatformKeyStore phone = MemoryPlatformKeyStore();
+      final (Install first, LocalIdentity old) = await registered(phone);
+      phone.failAll = true;
+      phone.failCode = 'blockstore';
+      await first.svc.eraseLocalKeys();
+      phone.failAll = false;
+      final Install again = Install(server, uA, phone, prefs: first.prefs);
+      phone.failAll = true; // the delete fails again at the next start
+      expect(await again.svc.identity(), isNull);
+      phone.failAll = false;
+      final KeyResetResult r = await again.svc.resetThisDevice();
+      expect(r.key.deviceId, isNot(old.deviceId));
+      expect((first.prefs as MemoryKeyBackupPrefs).pending, isEmpty);
+    });
+
+    test('erasing for an owner that cannot be named removes every copy of this app', () async {
+      final MemoryPlatformKeyStore phone = MemoryPlatformKeyStore();
+      await registered(phone);
+      final Install bob = Install(server, uB, phone);
+      await bob.svc.identity(create: true);
+      expect(phone.data, hasLength(2));
+      final Install nobody = Install(server, '', phone);
+      expect(await nobody.svc.eraseLocalKeys(), isTrue);
+      expect(phone.data, isEmpty);
+    });
+
+    test('"set this phone up again" for an unreadable vault keeps the copy: the same key comes back', () async {
+      final MemoryPlatformKeyStore phone = MemoryPlatformKeyStore();
+      final (Install first, LocalIdentity id) = await registered(phone);
+      expect(await first.svc.eraseLocalKeys(keepReinstallCopy: true), isTrue);
+      expect(phone.data, hasLength(1));
+      expect((await first.svc.identity())!.deviceId, id.deviceId);
     });
 
     test('erasing the keys removes only the copy of the account that owned them', () async {
