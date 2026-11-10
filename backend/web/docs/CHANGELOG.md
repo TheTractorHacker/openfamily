@@ -10,6 +10,12 @@ for the **last 5 minor versions** of the app (see
 [API compatibility](api-compat.md)), so you can update the server first and
 the phones afterwards.
 
+## v0.26.22 (2026-11-10)
+
+Server only: update the server, no app update needed.
+
+- **The server now says why it refuses an encrypted upload.** Until now a phone whose position uploads were rejected looked the same as a phone that sent nothing. The server log now has one line per refused batch with the reasons and counts (for example `e2ee items rejected ... rejected=map[lane_not_server:12]`), and a line when a whole device is refused (revoked, read-only or not approved in the circle). The log carries short ids only, never positions or content.
+
 ## v0.26.21 (2026-11-09)
 
 App-only release (the server needs no change). Install over the current app.

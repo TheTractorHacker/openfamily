@@ -393,14 +393,17 @@ func (s *Server) E2EEPostBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !active {
+		slog.Warn("e2ee upload refused", "user", short8(uid), "device", short8(req.DeviceID), "code", "device_revoked")
 		writeE2EECode(w, http.StatusForbidden, "device_revoked", "this device key is revoked")
 		return
 	}
 	if kind == "recovery" || !canUpload {
+		slog.Warn("e2ee upload refused", "user", short8(uid), "device", short8(req.DeviceID), "code", "device_read_only")
 		writeE2EECode(w, http.StatusForbidden, "device_read_only", "this device may read but not upload")
 		return
 	}
 	if !approved {
+		slog.Warn("e2ee upload refused", "user", short8(uid), "device", short8(req.DeviceID), "code", "device_not_approved")
 		writeE2EECode(w, http.StatusForbidden, "device_not_approved", "this device is not approved in this circle")
 		return
 	}
@@ -495,6 +498,11 @@ func (s *Server) E2EEPostBatch(w http.ResponseWriter, r *http.Request) {
 	if err := tx.Commit(ctx); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to commit")
 		return
+	}
+	// Why items were not stored. Without this a phone whose uploads are refused looked identical to a phone that
+	// sends nothing (the answer reaches only the phone, which drops the item).
+	if rej := rejectedCodes(results); len(rej) > 0 {
+		slog.Warn("e2ee items rejected", "user", short8(uid), "device", short8(req.DeviceID), "stored", len(stored), "rejected", rej)
 	}
 
 	if len(stored) > 0 {
@@ -867,4 +875,26 @@ func (s *Server) placePrivate(ctx context.Context, placeID string) bool {
 		SELECT EXISTS (SELECT 1 FROM places p JOIN circles c ON c.id = COALESCE(p.circle_id, p.family_id)
 		               WHERE p.id::text = $1 AND e2ee_plaintext_blocked(c.id))`, placeID).Scan(&private)
 	return err == nil && private
+}
+
+// rejectedCodes counts the rejection reasons of a batch (nil when everything was accepted).
+func rejectedCodes(results []e2eeItemResult) map[string]int {
+	var out map[string]int
+	for _, r := range results {
+		if r.Status != "rejected" {
+			continue
+		}
+		if out == nil {
+			out = map[string]int{}
+		}
+		out[r.Error]++
+	}
+	return out
+}
+
+func short8(id string) string {
+	if len(id) > 8 {
+		return id[:8]
+	}
+	return id
 }
