@@ -4,7 +4,11 @@
 <dict>
 	<!-- The watch app collects nothing itself and does not track. It keeps the
 	     last snapshot received from the iPhone in UserDefaults (required-reason
-	     API, reason CA92.1: data only this app reads). -->
+	     API, reason CA92.1: data only this app reads). The direction screen reads
+	     the watch compass (CoreLocation heading, plus one position request so the
+	     heading is relative to true north) on the device only while the screen
+	     is open; nothing of it is stored or sent, so no collected data type is
+	     declared. -->
 	<key>NSPrivacyTracking</key>
 	<false/>
 	<key>NSPrivacyTrackingDomains</key>

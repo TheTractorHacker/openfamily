@@ -21,6 +21,15 @@ func agoText(_ date: Date, now: Date = Date()) -> String {
     return "\(h / 24) d ago"
 }
 
+/// "Updated just now", "Updated 25 s ago", then minutes: the direction screen shows
+/// seconds because the arrow can only be as fresh as the other person's last fix.
+func updatedText(_ date: Date, now: Date = Date()) -> String {
+    let s = Int(now.timeIntervalSince(date))
+    if s < 5 { return "Updated just now" }
+    if s < 60 { return "Updated \(s) s ago" }
+    return "Updated \(agoText(date, now: now).lowercased())"
+}
+
 func distanceText(_ meters: Double) -> String {
     if Locale.current.usesMetricSystem {
         if meters < 1000 {
@@ -75,8 +84,8 @@ func compassWord(_ degrees: Double) -> String {
 /// The one-line status of a person. The phone writes `line` ("At Home",
 /// "Driving 42 mph") in its own units; a person standing still with no saved place
 /// shows how old the position is instead of an address.
-func statusLine(_ m: WMember, snapshot: WSnapshot, now: Date = Date()) -> String {
-    if m.you && snapshot.isPaused { return "Sharing paused" }
+func statusLine(_ m: WMember, paused: Bool, now: Date = Date()) -> String {
+    if m.you && paused { return "Sharing paused" }
     if m.state == "none" { return "No location yet" }
     if m.state == "still" && m.place.isEmpty, m.lineAt == nil, let d = m.fixDate { return agoText(d, now: now) }
     // "Left Work" + "25 min ago", counted on the watch so a minute passing needs no new snapshot.
@@ -99,3 +108,87 @@ func colorFromARGB(_ argb: UInt32) -> Color {
     let b = Double(argb & 0xFF) / 255.0
     return Color(red: r, green: g, blue: b)
 }
+
+// MARK: Smooth arrow (Precision Finding style)
+
+/// The shortest signed turn in degrees, in -180...180: 359 to 1 is +2, not -358.
+func shortestTurn(_ delta: Double) -> Double {
+    var x = delta.truncatingRemainder(dividingBy: 360)
+    if x > 180 { x -= 360 }
+    if x < -180 { x += 360 }
+    return x
+}
+
+/// Turns a stream of angles (any range, wrapping at 360) into one continuous angle
+/// that eases towards each new value. The angle is "unwrapped" (it may grow past 360
+/// or below 0), so a rotation effect never spins the long way round. The easing is
+/// exponential and uses the time between frames, so it looks the same at 15 or 30
+/// frames a second. A small dead band keeps the arrow still when the compass wobbles
+/// by a degree. Reference type on purpose: it is advanced from a TimelineView, which
+/// must not publish state changes. Main thread only.
+final class AngleSmoother {
+    private let tau: Double
+    private let deadBand: Double
+    private var primed = false
+    private var lastRaw = 0.0
+    private var target = 0.0
+    private var shown = 0.0
+    private var lastTime: Date? = nil
+
+    /// `tau`: seconds to cover about 63% of the way (smaller = snappier).
+    init(tau: Double = 0.14, deadBand: Double = 1.0) {
+        self.tau = tau
+        self.deadBand = deadBand
+    }
+
+    /// Feeds the newest raw angle and returns the angle to draw at `now`.
+    func step(raw: Double, now: Date) -> Double {
+        if !primed {
+            primed = true
+            lastRaw = raw
+            target = raw
+            shown = raw
+            lastTime = now
+            return shown
+        }
+        let turn = shortestTurn(raw - lastRaw)
+        if abs(turn) >= deadBand {
+            target += turn
+            lastRaw = raw
+        }
+        var dt = 0.0
+        if let t = lastTime { dt = now.timeIntervalSince(t) }
+        lastTime = now
+        if dt <= 0 { return shown }
+        if dt > 0.5 { dt = 0.5 }
+        let k = 1 - exp(-dt / tau)
+        shown += (target - shown) * k
+        if abs(target - shown) < 0.05 { shown = target }
+        return shown
+    }
+
+    /// The angle last returned (no time passes).
+    var current: Double { return shown }
+}
+
+/// The state of one direction screen, kept across frames: the two smoothers and the
+/// "you are close" flag with some hysteresis so it does not flicker at the edge.
+final class FindingState {
+    let arrow = AngleSmoother()
+    let north = AngleSmoother()
+    private var closeFlag = false
+
+    /// Below `kCloseEnterMeters` the bearing is noise (positions are coarse and the
+    /// other phone reports every few seconds), so the screen says "close".
+    func isClose(_ meters: Double) -> Bool {
+        if closeFlag {
+            if meters > kCloseLeaveMeters { closeFlag = false }
+        } else if meters < kCloseEnterMeters {
+            closeFlag = true
+        }
+        return closeFlag
+    }
+}
+
+let kCloseEnterMeters = 15.0
+let kCloseLeaveMeters = 30.0

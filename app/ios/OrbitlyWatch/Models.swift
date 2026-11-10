@@ -17,7 +17,7 @@ extension KeyedDecodingContainer {
     }
 }
 
-struct WScope: Decodable {
+struct WScope: Decodable, Equatable {
     var id: String = "all"
     var name: String = "Everyone"
     var priv: Bool = false
@@ -32,7 +32,7 @@ struct WScope: Decodable {
     }
 }
 
-struct WMe: Decodable {
+struct WMe: Decodable, Equatable {
     var sharing: String = "on"
     var pausedUntil: Double? = nil
 
@@ -45,7 +45,7 @@ struct WMe: Decodable {
     }
 }
 
-struct WMember: Decodable, Identifiable {
+struct WMember: Decodable, Equatable, Identifiable {
     var id: String = ""
     var name: String = ""
     var initials: String = "?"
@@ -97,7 +97,7 @@ struct WMember: Decodable, Identifiable {
     var hasPosition: Bool { return lat != nil && lon != nil }
 }
 
-struct WCircle: Decodable, Identifiable {
+struct WCircle: Decodable, Equatable, Identifiable {
     var id: String = ""
     var name: String = ""
     var unread: Int = 0
@@ -114,7 +114,7 @@ struct WCircle: Decodable, Identifiable {
     }
 }
 
-struct WAlert: Decodable, Identifiable {
+struct WAlert: Decodable, Equatable, Identifiable {
     var id: String = ""
     var kind: String = ""
     var from: String = ""
@@ -145,7 +145,7 @@ struct WAlert: Decodable, Identifiable {
     }
 }
 
-struct WLastCommand: Decodable {
+struct WLastCommand: Decodable, Equatable {
     var id: String = ""
     var cmd: String = ""
     var ok: Bool = false
@@ -162,7 +162,7 @@ struct WLastCommand: Decodable {
     }
 }
 
-struct WSnapshot: Decodable {
+struct WSnapshot: Decodable, Equatable {
     var version: Int = 1
     var ts: Double = 0
     var signedIn: Bool = true

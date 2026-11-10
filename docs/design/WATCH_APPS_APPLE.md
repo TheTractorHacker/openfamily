@@ -60,13 +60,32 @@ user's data. The same session-id idea would close it.
 ## Watch UI
 
 People list (initials avatar, name, "At Home" / "Driving 42 mph" / "2 min ago", battery), person
-detail (place, address, age, battery, Handoff note), **Distance and direction** (north-up arrow,
+detail (place, address, age, battery, Handoff note), **Distance and direction** (compass arrow,
 see below), SOS, I'm OK, Pause or Resume sharing, Quick replies with an unread badge, Alerts.
 Dynamic Type is respected (system text styles, line limits of 1 to 2 lines, scrolling views).
 Offline: the last snapshot is shown with "iPhone not reachable" and its age.
 
-Direction view limitation: the arrow is **north-up**, computed by the phone. It does not turn
-with your wrist (no heading sensor is read, to keep the battery). A live heading is future work.
+Direction view (v0.26.30, Precision Finding style): the arrow turns with your wrist. The watch reads
+its own compass (`CLLocationManager` heading, `headingFilter` 1 degree) only while the screen is
+open and awake: it starts in `onAppear`, and stops in `onDisappear` and whenever
+`isLuminanceReduced` is true (wrist down, always-on). Arrow angle = bearing to the person (from the
+snapshot) minus the watch heading, using `trueHeading` when valid and `magneticHeading` otherwise;
+one `requestLocation()` is asked so the system can give a true-north heading. This needs
+`NSLocationWhenInUseUsageDescription` in `OrbitlyWatch/Info.plist`; the watch position itself is
+neither used nor stored. The angle is drawn by a `TimelineView(.animation(minimumInterval: 1/30))`
+that is paused while dimmed. `AngleSmoother` (Format.swift) keeps an unwrapped angle (359 to 1
+degrees turns 2 degrees, not 358), eases it with a frame-rate independent exponential (tau 0.14 s)
+and ignores changes under 1 degree. The ring and its N counter-rotate so north stays where it is.
+Without a compass reading (not available, not yet ready, refused) the arrow is north-up as before.
+Under 15 m (left again above 30 m) the bearing is noise, so the screen says "<name> is close" and
+dims the arrow. "Updated N s ago" shows how old the other person's fix is.
+
+Opening the screen sends `visible` with arg `finding` (still repeated once a minute); the iPhone then
+sends at most every 2 s instead of 5 s (`WatchBridge.findingInterval`), `finding` ends with any other
+presence command or with the 150 s expiry. The origin of the bearing is still the signed-in person's
+position from the family roster (the iPhone), and the other person's position is only as fresh as
+their phone's reports and `updateApplicationContext` delivery; positions are rounded to 5 decimals
+(about 1 m). None of this was measured on a watch.
 
 ## Complications: not shipped
 

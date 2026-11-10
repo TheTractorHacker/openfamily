@@ -18,7 +18,7 @@ struct RootView: View {
                         }
                         ForEach(snap.members) { member in
                             NavigationLink(destination: PersonDetailView(memberId: member.id)) {
-                                MemberRow(member: member, snapshot: snap)
+                                MemberRow(member: member, isPaused: snap.isPaused).equatable()
                             }
                         }
                     }
@@ -113,9 +113,11 @@ struct Avatar: View {
     }
 }
 
-struct MemberRow: View {
+/// Takes only what it draws, and is Equatable, so a new snapshot redraws just the
+/// rows whose person changed (the minute ticker inside still updates the age).
+struct MemberRow: View, Equatable {
     let member: WMember
-    let snapshot: WSnapshot
+    let isPaused: Bool
 
     var body: some View {
         HStack(spacing: 8) {
@@ -125,7 +127,7 @@ struct MemberRow: View {
                     .font(.headline)
                     .lineLimit(1)
                 TimelineView(.everyMinute) { context in
-                    Text(statusLine(member, snapshot: snapshot, now: context.date))
+                    Text(statusLine(member, paused: isPaused, now: context.date))
                         .font(.caption)
                         .foregroundColor(.secondary)
                         .lineLimit(2)
