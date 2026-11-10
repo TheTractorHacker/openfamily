@@ -30,10 +30,13 @@ void main() {
     expect(InvitePreview.tryParse(<String, dynamic>{'private': true, 'server_assist': true, 'member_opt_out': 'allowed', 'default_for_new': 'server'})!.autoApply, isFalse);
   });
 
-  testWidgets('required: the disclosure says consent is needed to take part', (t) async {
+  testWidgets('required: the disclosure says the phone switches over by itself and members cannot turn it off', (t) async {
     await pumpJoin(t, (_) async => const InvitePreview(isPrivate: true, serverAssist: true, required: true, defaultServer: false));
     expect(note(t), contains('Server processing: required'));
-    expect(note(t), contains('your own consent'));
+    expect(note(t), contains('switches over by itself'));
+    expect(note(t), contains('cannot turn it off'));
+    expect(note(t), contains('do not want that, do not join'));
+    expect(note(t), isNot(contains('your own consent')));
   });
 
   testWidgets('private without assistance and a normal circle', (t) async {
@@ -47,6 +50,8 @@ void main() {
   testWidgets('no preview (404, offline, old server) keeps the generic note', (t) async {
     await pumpJoin(t, (_) async => null);
     expect(note(t), contains('If the circle is a Private circle'));
+    expect(note(t), contains('switches over by itself'));
+    expect(note(t), isNot(contains('your own consent')));
     await t.pumpWidget(const SizedBox());
     await pumpJoin(t, (_) async => throw Exception('offline'));
     expect(note(t), contains('If the circle is a Private circle'));

@@ -68,9 +68,9 @@ func TestChatRelayedInRequiredServerCircle(t *testing.T) {
 	e.enableAssist("required_server")
 	e.setLane("A", e.a, "server", 1, 200)
 	e.wrapSKToServer(1, 200)
-	// C never consented to the server lane: fixes are refused, chat is not.
+	// C has no server lane yet: fixes on the phone line and chat are both relayed.
 	if r := results(e.mustCode("C", "POST", "/circles/"+e.circle+"/e2ee/batch", map[string]any{"sender_device_id": e.c.id,
-		"items": []any{e.sealV2(e.c, e.phoneLine(), 1, 1, "fix")}}, 200)); r[0]["error"] != "required_server" {
+		"items": []any{e.sealV2(e.c, e.phoneLine(), 1, 1, "fix")}}, 201)); r[0]["status"] != "stored" {
 		t.Fatalf("%v", r)
 	}
 	if r := results(e.post("C", e.c, e.circle, 201, e.sealV2(e.c, e.phoneLine(), 1, 2, "chat"))); r[0]["status"] != "stored" {

@@ -164,12 +164,11 @@ void main() {
     });
   });
 
-  group('a stale "consent required" status', () {
-    test('no longer silences the phone when the verified policy allows opting out', () async {
+  group('the family admin requires server processing', () {
+    test('a stale "pending" status with an allowed policy changes nothing: the phone line as usual', () async {
       final LaneStore store = rt.lanes.store;
       await store.setPolicy(priv, const StoredPolicy(assist: true, skGen: 3, defaultForNew: E2ee.linePhone, memberOptOut: E2ee.optOutAllowed));
-      await store.setStatus(priv, LaneStatus.consentRequired);
-      expect(await rt.consentBlocks(priv), isFalse);
+      await store.setStatus(priv, LaneStatus.serverPending);
       await rt.routeFix(loc(52.54));
       await settle();
       final List<WireItem> q = await rt.queue.peek();
@@ -177,19 +176,20 @@ void main() {
       expect(q.single.line, E2ee.linePhone, reason: 'no own server pref: the phone line, readable by members only');
     });
 
-    test('still seals nothing while the verified policy requires server processing, and says so', () async {
+    test('while the phone has not signed yet it still seals on the phone line: never nothing, and the report says what happens', () async {
       final LaneStore store = rt.lanes.store;
       await store.setPolicy(priv, const StoredPolicy(assist: true, skGen: 3, defaultForNew: E2ee.lineServer, memberOptOut: E2ee.optOutRequiredServer));
-      await store.setStatus(priv, LaneStatus.consentRequired);
-      expect(await rt.consentBlocks(priv), isTrue);
+      await store.setStatus(priv, LaneStatus.serverPending);
       await rt.routeFix(loc(52.55));
       await settle();
-      expect(await rt.queue.length(), 0);
+      final List<WireItem> q = await rt.queue.peek();
+      expect(q.length, 1, reason: 'the old "consent required" state sealed nothing');
+      expect(q.single.line, E2ee.linePhone);
       final PrivateDeliveryFacts f = await rt.deliveryFacts();
-      expect(f.circles.single.laneKind, 'consent');
+      expect(f.circles.single.laneKind, 'pending');
       final DiagCheck c = privateDeliveryCheck(DiagFacts(now: clock.t, privateDelivery: f))!;
-      expect(c.status, DiagStatus.warn);
       expect(c.detail, contains('requires server processing'));
+      expect(c.detail, contains('by itself'));
     });
   });
 

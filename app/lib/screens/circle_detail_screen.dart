@@ -9,11 +9,13 @@ import 'delivery_screen.dart';
 import '../services/e2ee/private_runtime.dart';
 import '../services/e2ee/e2ee_models.dart';
 import '../services/e2ee/e2ee_service.dart';
+import '../services/e2ee/processing_controller.dart';
 import '../services/server_config.dart';
 import '../theme/app_theme.dart';
 import '../widgets/ds/ds.dart';
 import '../widgets/circle_widgets.dart';
 import '../widgets/add_server_sheet.dart';
+import '../widgets/processing_widgets.dart';
 import '../widgets/trusted_server_prompt.dart';
 import 'processing_screen.dart';
 import 'encryption_keys_screen.dart';
@@ -28,10 +30,14 @@ const Map<String, int> kTempCircleExtensions = <String, int>{
 /// One circle: my sharing switch, members (with role changes and removal for
 /// admins), invite codes (admins), leave and delete.
 class CircleDetailScreen extends StatefulWidget {
-  const CircleDetailScreen({super.key, required this.circle, this.service});
+  const CircleDetailScreen({super.key, required this.circle, this.service, this.processing});
 
   final Circle circle;
   final CircleService? service;
+
+  /// Server processing of a Private circle (the "Require server processing" switch). Null: the app's own controller
+  /// in the real app, nothing in tests and previews that pass a [service].
+  final ProcessingController? processing;
 
   @override
   State<CircleDetailScreen> createState() => _CircleDetailScreenState();
@@ -52,6 +58,62 @@ class _CircleDetailScreenState extends State<CircleDetailScreen> {
   // Private circle (end-to-end encryption, phase 1). Only loaded in the real
   // app (widget.service == null); tests and previews never touch it.
   E2eeService? get _e2ee => widget.service == null ? E2eeApp.service : null;
+  ProcessingController? get _proc => widget.processing ?? (widget.service == null ? LanesProcessingController.instance : null);
+  ProcessingSnapshot? _procSnap;
+  bool _procBusy = false;
+
+  /// The verified server processing state, for the owner's "Require server processing" switch. Silent on failure: the
+  /// switch is simply not shown (the Server processing screen explains any problem).
+  Future<void> _loadProcessing() async {
+    final ProcessingController? c = _proc;
+    if (c == null || !_circle.isAdmin || !_circle.isPrivate) return;
+    try {
+      final ProcessingSnapshot s = await c.load(_circle.id);
+      if (mounted) setState(() => _procSnap = s);
+    } catch (_) {}
+  }
+
+  Future<void> _setRequireServer(bool on) async {
+    final ProcessingController? c = _proc;
+    if (c == null || _procBusy) return;
+    setState(() => _procBusy = true);
+    try {
+      await c.setRequireServer(_circle.id, on);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(on
+                ? 'Server processing is now required. Every member\'s phone switches over by itself.'
+                : 'Server processing is no longer required. Members can choose again.')));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(processingErrorText(e, step: 'The setting was not saved.').message)));
+      }
+    } finally {
+      if (mounted) setState(() => _procBusy = false);
+    }
+    await _loadProcessing();
+  }
+
+  /// Owner/admin only, Private circles with an approved server key: the one switch.
+  Widget _requireServerCard() {
+    final ProcessingSnapshot? s = _procSnap;
+    if (s == null || !s.isPrivate || !s.iAmAdmin || s.legacy || !(s.hasServerKey || s.assistOn)) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(top: AppSpace.md),
+      child: DsRowGroup(children: <Widget>[
+        DsToggleRow(
+          key: const Key('circle-require-server'),
+          icon: Icons.dns_outlined,
+          title: ProcessingCopy.requireSwitchTitle,
+          subtitle: ProcessingCopy.requireSwitchBody,
+          value: s.required,
+          onChanged: _procBusy ? null : _setRequireServer,
+        ),
+      ]),
+    );
+  }
   CircleE2eeState? _e2eeState;
   bool _e2eeBusy = false;
 
@@ -278,6 +340,7 @@ class _CircleDetailScreenState extends State<CircleDetailScreen> {
         );
         _loading = false;
       });
+      _loadProcessing(); // after the role is known: the switch is for admins only
     } on SessionExpiredException {
       rethrow;
     } catch (e) {
@@ -601,6 +664,7 @@ class _CircleDetailScreenState extends State<CircleDetailScreen> {
               if (_circle.expiresAt != null) _lifetimeCard(),
               _sharingCard(),
               _privateCard(),
+              _requireServerCard(),
               _sectionTitle('Members (${_members.length})'),
               if (_members.isEmpty)
                 const DsEmptyState(

@@ -46,6 +46,28 @@ mv "$tmp" "$out"
 trap - EXIT
 echo "Backup written: $out ($(du -h "$out" | cut -f1))"
 
+# The server's own identity (/data/server-device: the key every phone pinned, its circle keys, the
+# ingest token). It is NEVER written unencrypted: only when BACKUP_PASSPHRASE_FILE is set, next to the
+# dump, with the same cipher. A failure only warns: the dump above stays valid and a lost server key is
+# replaced (an admin phone approves the new one, see docs/admin/backups.md).
+keyout=""
+if [ -n "${BACKUP_PASSPHRASE_FILE:-}" ]; then
+  base="${out%.dump.enc}"; [ "$base" = "$out" ] && base="${out%.enc}"
+  keyout="${base}.server-key.tar.enc"
+  if docker compose ps --status running --services 2>/dev/null | grep -qx api \
+     && docker compose exec -T api tar -C /data/server-device -cf - . 2>/dev/null \
+        | openssl enc -aes-256-cbc -pbkdf2 -iter 600000 -salt -pass "file:$BACKUP_PASSPHRASE_FILE" -out "${keyout}.partial" \
+     && [ -s "${keyout}.partial" ]; then
+    mv "${keyout}.partial" "$keyout"
+    echo "Server key written: $keyout (encrypted; restore with scripts/restore-server-key.sh)"
+  else
+    rm -f "${keyout}.partial"; keyout=""
+    echo "warning: the server's key directory was not backed up (is the api service running?)" >&2
+  fi
+else
+  echo "note: the server's own key is not in this backup (it is only saved when the backup is encrypted: set BACKUP_PASSPHRASE_FILE)" >&2
+fi
+
 # Record a heartbeat so the admin System health page can show the last backup
 # and flag a missing recent one. Best effort: a failure never fails the backup.
 size="$(wc -c <"$out" | tr -d ' ')"
@@ -61,4 +83,5 @@ docker compose exec -T postgres sh -c \
 if [ -n "${BACKUP_KEEP:-}" ] && [ -z "${1:-}" ]; then
   # shellcheck disable=SC2012
   ls -1t backups/openfamily-*.dump backups/openfamily-*.dump.enc 2>/dev/null | tail -n "+$((BACKUP_KEEP + 1))" | xargs -r rm -f --
+  ls -1t backups/openfamily-*.server-key.tar.enc 2>/dev/null | tail -n "+$((BACKUP_KEEP + 1))" | xargs -r rm -f --
 fi

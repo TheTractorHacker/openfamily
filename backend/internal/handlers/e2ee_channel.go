@@ -323,13 +323,12 @@ func checkE2EEItemLine(it e2eeItemIn, c itemCircle, laneServer, devLanes2 bool) 
 	if c.LegacyMax > 0 && it.Epoch <= c.LegacyMax {
 		return nil, 0, "legacy_epoch_closed"
 	}
-	// Check-ins (SOS) and events are exempt: help requests must never be blocked
-	// by a consent or server-key problem.
-	if c.OptOut == "required_server" && !laneServer && it.Purpose != "checkin" && it.Purpose != "event" && it.Purpose != "chat" {
-		// The owner decision of ADR 16.1: the server does not relay phone-lane
-		// items from members of a required_server circle.
-		return nil, 0, "required_server"
-	}
+	// Phone line: always relayed (ciphertext the server cannot read). A required_server
+	// circle used to refuse these from a member who had no verified server lane yet; that
+	// left a member who is merely catching up (a new server key, a reset, a stale pref)
+	// with NO delivery at all. The owner's requirement is enforced where it matters: the
+	// server only ever ingests members whose OWN signed lane is server (ingestLanes), and
+	// the member's phone signs that lane by itself. Chat stays phone-line only (above).
 	return ct, declared, ""
 }
 

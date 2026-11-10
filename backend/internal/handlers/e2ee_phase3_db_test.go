@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -89,16 +90,24 @@ func TestE2EELogNeverRedactsCoMemberRevokes(t *testing.T) {
 	e.mustCode("B", "POST", "/e2ee/devices", regBody(t, web, "web", e.b, e2ee.ActRegister, false), 201)
 	e.mustCode("B", "DELETE", "/e2ee/devices/"+web.id, simpleAction(t, e2ee.ActRevoke, e.b, "", 0, web.id, web.fp), 200)
 	for _, reader := range []string{"A", "C"} {
-		got := e.mustCode(reader, "GET", "/e2ee/log?after=0", nil, 200)
+		// The log is shared by every test and served 500 entries at a time: page through it.
 		found := false
-		for _, raw := range got["entries"].([]any) {
-			en := raw.(map[string]any)
-			if en["subject_id"] == web.id && en["action"] == float64(e2ee.ActRevoke) {
-				found = true
-				if en["redacted"] == true || en["actor_ed25519_pub"] == nil || en["signature"] == nil {
-					t.Fatalf("%s: revoke entry of a co-member was redacted: %v", reader, en)
+		for after := int64(0); ; {
+			got := e.mustCode(reader, "GET", fmt.Sprintf("/e2ee/log?after=%d", after), nil, 200)
+			entries := got["entries"].([]any)
+			for _, raw := range entries {
+				en := raw.(map[string]any)
+				if en["subject_id"] == web.id && en["action"] == float64(e2ee.ActRevoke) {
+					found = true
+					if en["redacted"] == true || en["actor_ed25519_pub"] == nil || en["signature"] == nil {
+						t.Fatalf("%s: revoke entry of a co-member was redacted: %v", reader, en)
+					}
 				}
 			}
+			if len(entries) < 500 {
+				break
+			}
+			after = int64(entries[len(entries)-1].(map[string]any)["seq"].(float64))
 		}
 		if !found {
 			t.Fatalf("%s: revoke entry not served", reader)

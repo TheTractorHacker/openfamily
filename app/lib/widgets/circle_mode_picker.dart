@@ -60,7 +60,7 @@ class CircleModePicker extends StatelessWidget {
           value: NewCircleMode.privateServer,
           title: 'Private, with your server (recommended)',
           body: 'End-to-end encrypted. Your server joins as its own device so maps, history and driving reports just work. '
-              'Everyone is on the server by default and can switch it off for themselves.',
+              'Everyone is on the server by default; below you decide whether members can switch it off.',
         ),
       if (serverAvailable && mode == NewCircleMode.privateServer)
         Padding(
@@ -71,9 +71,9 @@ class CircleModePicker extends StatelessWidget {
             controlAffinity: ListTileControlAffinity.leading,
             value: requireServer,
             onChanged: enabled ? (bool? v) => onRequireServer(v ?? false) : null,
-            title: const Text('Everyone must use the server'),
-            subtitle: const Text('For example children\'s phones. Nobody in this circle can keep their data from the server; '
-                'each member confirms it once on their own phone or leaves.'),
+            title: const Text('Require server processing'),
+            subtitle: const Text('Everyone\'s phone sends its location to your Orbitly server for processing. Members cannot turn it off '
+                'and are not asked; their phones switch over by themselves. You can change this later in the circle settings.'),
           ),
         ),
       _tile(
@@ -158,7 +158,7 @@ Future<NewCircleResult> finishNewCircle(
         try {
           await setup.requireForEveryone(circle.id);
         } catch (_) {
-          say('The server is on, but "Everyone must use the server" could not be saved. Set it in Server processing.');
+          say('The server is on, but "Require server processing" could not be saved. Set it in the circle settings.');
         }
       }
       return const NewCircleResult(isPrivate: true, serverOn: true);

@@ -399,7 +399,7 @@ Open questions Q1 to Q7 are resolved with the recommendations above: Q1 places f
 The circle admin's signed `processing_policy` carries `member_opt_out`: `allowed` (DEFAULT for every circle) or `required_server`.
 
 * `allowed`: any member may keep their own data phone-only (their own signed `processing_pref`). This is the default because keeping your location on your own phone is the member's choice, not an admin's.
-* `required_server`: for circles that need full server processing (for example a parent managing a child's phone). Joining means accepting server processing; this is shown on the join screen and in the circle. Existing members are notified, and each must sign their own consent or leave. The server refuses to relay phone-lane items from members of such a circle, so the rule is enforced rather than advisory.
+* `required_server`: for circles that need full server processing (for example a parent managing a child's phone). Joining means accepting server processing; this is shown on the join screen and in the circle. Existing members are notified. **Revised in v0.26.27:** the member's own approved phone signs its lane pref for the current server key by itself (no prompt, no opt-out control), and the server NO LONGER refuses phone-lane items from a member who has not got there yet (a new server key, a reset, a stale pref): those items are ciphertext the server cannot read, and refusing them left the family with no delivery. The requirement is enforced where it matters: the server only ever reads and ingests members whose OWN verified server lane exists (item 1 of the adversarial pass below), and the owner's screen lists who is still catching up. The honest consequence: an admin can force server processing on every member; a member who does not want it must leave the circle, and a modified app can still stay on the phone line (nothing can force that).
 * In both modes only the member's own phone signature puts their data on the server. The admin cannot opt anyone in. Switching to `required_server` and every member decision are signed log entries, visible in the key log, so coercion is visible even if it cannot be prevented.
 * Children (Q3): the pairing-time choice stands; a circle in `required_server` mode applies the same rule to child members.
 * Opted-out members compute trips, driving reports and weekly figures on their own phone (section 9 option a). No load sharing between phones is built.
@@ -460,7 +460,7 @@ Migration `000220_processing_lanes` (up and down, idempotent; the number differs
 * `circles`: `server_assist`, `server_assist_default`, `member_opt_out` (`allowed` | `required_server`, needs `server_assist`), `e2ee_server_gen`, `e2ee_server_commitment`, `e2ee_server_rekey_required`, `server_legacy_ck`, `server_legacy_epoch_max`. They mirror signed statements; nothing sets them but the verified handlers.
 * `circle_key_wraps.key_line` and `e2ee_items.key_line` (`phone` | `server`); PK of wraps is `(circle_id, key_line, epoch, recipient_device_id)`; for the server line `epoch` is the SK generation. `device_keys.caps TEXT[]` (`lanes2`).
 * `e2ee_processing_pref` (current lane per member; no row = phone) and `e2ee_processing_statements` (append-only copy of every signed pref/policy with its log seq).
-* Trigger `e2ee_wrap_guard`: `CK` is refused for any `kind='server'` recipient (INSERT and UPDATE) unless the circle still carries the legacy flag; `SK` to a server key only while `server_assist` and at least one pref has `lane='server'`. `device_keys.kind` is immutable. Trigger `e2ee_item_guard`: a `server` item needs policy on and an author in lane server; in a `required_server` circle every phone-line item needs an author in lane server; epochs closed by the legacy upgrade accept nothing. Last server-lane pref gone, policy turned off, mode change, member removed, key revoked: SK wraps of the server key / prefs are removed and `e2ee_server_rekey_required` is set (member removal, revoke) so both lines rotate.
+* Trigger `e2ee_wrap_guard`: `CK` is refused for any `kind='server'` recipient (INSERT and UPDATE) unless the circle still carries the legacy flag; `SK` to a server key only while `server_assist` and at least one pref has `lane='server'`. `device_keys.kind` is immutable. Trigger `e2ee_item_guard`: a `server` item needs policy on and an author in lane server (phone-line items of a `required_server` circle are relayed since migration 000410); epochs closed by the legacy upgrade accept nothing. Last server-lane pref gone, policy turned off, mode change, member removed, key revoked: SK wraps of the server key / prefs are removed and `e2ee_server_rekey_required` is set (member removal, revoke) so both lines rotate.
 * Copies end with the lane: leaving the server lane, policy off, mode change, member removal, revocation of the key that signed a pref (and legacy consent withdrawal) call `e2ee_purge_user_server_copies(circle, user)` in the same transaction: the member's `locations` tagged with that circle, a last position that was one of those points (recomputed from what remains, else removed), and ALL of their server-line items of every purpose (under SK the server can read check-ins, events and places too; chat is never on the server line, see E2EE_CHAT.md). Phones keep what they already pulled; members who had not pulled those items yet lose them. Locking scheme: every purge path first takes the circle row `FOR UPDATE` (inside the purge function; the revocation trigger locks all the user's private circles in id order first), and ingest holds the circle row `FOR SHARE` for its whole batch, so a purge waits for an in-flight batch and removes what it wrote, and a later batch waits for the purge and then sees the lane gone. Order everywhere: circles (by id) before other rows.
 * Down migration: refuses to run while server-line items or wraps, prefs or upgraded circles exist (it would delete them silently); clean up first.
 * Functions: `e2ee_server_assist(circle)` (policy on, pinned key active and approved, holds the CURRENT SK generation, no SK rotation pending), `e2ee_pref_lane_server`, `e2ee_member_server_ok(circle, user)` (legacy all-consent rule OR assist AND own lane), `e2ee_member_plaintext_ok(circle, user)` (normal circle OR server ok), `e2ee_server_member_legacy` (the old rule, only for circles flagged `server_legacy_ck`). `e2ee_plaintext_blocked(circle)` stays circle-level (places, geofences, bubbles) and is lifted only for a legacy circle: in a lanes circle phones evaluate places. `e2ee_server_member` is a compatibility alias, no longer an authorization gate.
@@ -514,7 +514,7 @@ An app without `lanes2` cannot parse log actions 10 and 11: it would stop pinnin
 1. Whether the server may WRITE or READ a member's plaintext is decided per user. Writers (`/internal/e2ee/ingest`, item relay) re-verify in Go, inside the transaction that writes and with the circle row locked (ingest takes it `FOR SHARE`, a pref change or item batch takes it `FOR UPDATE`, so a lane withdrawal either commits before the check or waits for the batch): (a) the latest signed `processing_policy` against the circle columns, its signer still being a circle admin and its key not revoked; (b) the member's pref signature against an active phone key, naming exactly the pinned server key; (c) that the pref is the member's latest `processing_pref` entry in the key log. A planted or replayed row fails (c). Legacy-converted prefs have no log entry; they are covered by their consent signature, a 30-day validity and the revocation of their signing key. SQL (`e2ee_member_plaintext_ok`) gates READS (Authz visibility, live fan-out circles, check-in and SOS positions, crash alerts, geofencing, Home Assistant, admin map) and does not verify signatures, so a database writer can make a planted pref look "visible" but cannot make the server ingest anything.
 2. No endpoint writes another user's pref; circle-wide settings need the circle admin role (server-enforced). The platform admin has no circle power. The platform admin does see which members keep data on their phone (`keeps_data_on_phone`, owner decision Q2) and per-circle counts; the admin map, stream, history and export hide such members' data.
 3. The phone key is never wrapped to a server key (legacy circles excepted until upgraded); the server key only by a phone, while policy is on and a member chose the server lane.
-4. `required_server`: the server refuses to relay phone-line items from members who have not signed the server lane, EXCEPT `checkin` and `event` purposes (help requests must never be blocked by a consent or server-key problem). The rule depends on the pinned server key staying available: if it is revoked while the policy stays `required_server`, phone-lane members can only send check-ins and events until the admin turns the rule off. Withdrawal of consent is always accepted.
+4. `required_server` (revised v0.26.27, migration 000410): phone-line items are always relayed (ciphertext only). The server line stays closed to an author whose own verified lane is not server (`lane_not_server`); the phone then re-sends the phone-line twin of the item, so no position is dropped. The state API (`GET /circles/{id}/e2ee/processing`) reports `policy_verified`, and per member `pref_stale` and `catching_up`, so the owner screen can say in words who is on the server and who is catching up. Withdrawal of a pref is always accepted.
 5. Capability gate: `lanes2` is self-declared and unsigned and can only be added, never removed (an empty list changes nothing). It protects against honest old apps (they stay phone-only, are never counted ready, cannot choose the server lane) and is not a security boundary. Residual: a stolen session can add `lanes2` to an old app, which only makes that user's own app the weak link.
 6. Replay: every signed statement carries a nonce that is stored with a unique index; a replayed pref or policy is refused (409 `nonce_reused`). Its log entry is newer than the current pref by construction.
 
@@ -536,7 +536,7 @@ Done:
 * Queue: a server-line item is re-sealed (replaced by its twin) or dropped when the member opts out, the policy goes off, the log fails verification or no lane source exists. The pref is read at seal time AND right before every upload request.
 * Receiver: key chosen from the signed header, server `key_line` must agree, per-line rollback state, badges (`ProcessingBadge`) from header + verified pref history + verified policy.
 * `caps: ['lanes2']` in device registration; admin turn-on refuses (`LanesNotReady`) while a member app lacks it.
-* `member_opt_out`: `required_server` yields `LaneStatus.consentRequired` for a member without a server pref; the phone seals and sends nothing to that circle until the member signs consent (explicit act with fingerprint comparison) or leaves.
+* `member_opt_out`: `required_server` yielded `LaneStatus.consentRequired` for a member without a server pref (the phone sealed and sent nothing until the member consented). **Replaced in v0.26.27 by `LaneStatus.serverPending` and automatic signing, see section 25.**
 * On-device processing wired: phone-only members' fixes feed `OnDeviceProcessor` (Phase 0 segmenter and weekly functions) and publish `trip`, `drive`, `week` items; `ResultStore` + `ProcessingSource` are the data-access layer for screens (server source, phone source, explicit placeholders).
 
 Open / not done (see also the report that accompanied this change): the server contract names in `lanes_wire.dart` and the fake must be aligned with the real server (paths, `key_line`, `caps`, statement JSON, `sk_wrapped_device_ids`, `policy_history`), including accepting purposes `trip`/`drive`/`week` with buckets 1024/4096/1024; SK is not part of recovery-phrase restore (a restored phone gets SK when an admin phone next wraps it); screens, dialogs and legacy trusted-server upgrade are Phases 6 and 7; battery/CPU of on-device processing is unmeasured; the on-device segmenter keeps its buffers in memory and is rebuilt from the local history (derived speeds) after a restart.
@@ -602,7 +602,7 @@ Tests: `handlers/e2ee_dawarich_lanes_db_test.go` (planted rows: Dawarich, histor
 * Legacy upgrade: consents of the old mode are **not** carried over by phones (a carried-over consent has no log entry, so `_verifiedPref` ignores it). After the upgrade every member signs their own choice again; server processing for a member starts only then. The admin screen says so, including that server-side features pause for a member until they have signed.
 * Policy history: a pref is void when it is older than the newest policy entry that is OFF or does not verify. The phone verifies the newest statement and `policy.history` (up to 30). Policy entries older than the served history are treated as unverified (fail closed); they only void prefs signed before them.
 * Phone-key wraps in circles with server processing: a bridge (`service` key) never receives a phone-key epoch wrap, only the server key, because `e2ee-bridge` reads the server line only. A web viewer gets one only after the owner confirms a dedicated warning for that circle; other members see "X has a web viewer" on the Server processing screen. Bulk wraps (`wrapHeldKeysTo`) go to phones and the recovery identity only.
-* Queue: stored as a versioned record with read-back checks (SharedPreferences has no atomic compare-and-swap, so two isolates can still race in a very narrow window; items are idempotent by (circle, device, seq)). Lane facts are always read fresh in the sealer and flush path. Relay rejections `legacy_epoch_closed` and `bad_epoch` keep the item and trigger a key sync (an item sealed under a closed epoch cannot be re-sealed, it is dropped after 20 failed tries); `required_server` is surfaced to the user as "not delivered".
+* Queue: stored as a versioned record with read-back checks (SharedPreferences has no atomic compare-and-swap, so two isolates can still race in a very narrow window; items are idempotent by (circle, device, seq)). Lane facts are always read fresh in the sealer and flush path. Relay rejections `legacy_epoch_closed` and `bad_epoch` keep the item and trigger a key sync (an item sealed under a closed epoch cannot be re-sealed, it is dropped after 20 failed tries); `required_server` no longer exists as a relay refusal (v0.26.27).
 * iOS backups: the sensitive stores (trails and buffers, the sealed queue, lane facts and pref history, results, sequence numbers, cursors, places) are NOT in SharedPreferences on iOS. `PrefsChannelKv` stores them as one file per key in `Application Support/openfamily-private`, written as temp file + rename in the same directory. Swift (`PrivateStoreDirectory.prepare`, called through the `app.openfamily/store` channel, which is registered for the headless background engine too) creates that directory on every engine start, sets `isExcludedFromBackup` on the DIRECTORY and reads it back. The result goes to Diagnostics; if it cannot be confirmed the store still works and Diagnostics says "backup exclusion NOT confirmed". Old SharedPreferences keys are copied once (never over newer file data), verified, then deleted. A flag on the SharedPreferences plist was rejected: NSUserDefaults rewrites the file atomically and the flag is lost. Android keeps SharedPreferences (`allowBackup=false`).
 
 ## 21. Deployment profiles and one-tap server add
@@ -766,10 +766,10 @@ It adds NO new cryptography, no wire format and no key line: every rule of secti
   re-sent until the server has it), asks the server to delete this member's copies (existing purge), and records
   "declined". After any explicit pref nothing is ever re-applied, including after the admin turns assistance off and on
   again: the member then sees the ordinary "Use the server?" question.
-* **Not auto-signed, on purpose.** `required_server` circles keep their explicit, informed consent card (a signature
-  the member did not knowingly give is worth less where leaving is the only alternative). Child accounts keep the
-  pairing-time choice. A phone that does not hold SK yet, or cannot reach the server, does nothing and tries at the
-  next open. Old apps (no `lanes2`): unchanged "needs update"; once updated they auto-apply on first open.
+* **`required_server` circles: superseded in v0.26.27 (section 25).** They used to keep an explicit consent card;
+  now the member's own phone signs by itself. Child accounts in a required circle follow the same rule (an optional
+  circle still keeps the pairing-time choice). A phone that does not hold SK yet, or cannot reach the server, does
+  nothing and tries at the next open. Old apps (no `lanes2`): unchanged "needs update"; once updated they sign on first open.
 * **No per-circle override in the protocol.** The signed policy already carries `default_for_new`, but its meaning
   ("what the sheet suggests") is also what a cloud-profile admin wrote into every existing policy, so treating it as an
   opt-out of auto-apply would silently exempt the circles of exactly the people this feature is for. The circle
@@ -834,8 +834,8 @@ signature, key line, trigger or purge rule changes.
 * **New circles are Private with the server.** When the server can take part (a pinned key, the built-in device, or a
   pending "Your server wants to join"), the create screens (onboarding "Create a family" and "New circle") preselect
   **Private, with your server**. One tap on Create: the creator's phone enables the circle (existing `enableCircle`),
-  publishes the policy (assistance on, `default_for_new = server`, `member_opt_out = allowed`, or `required_server`
-  when "Everyone must use the server" is ticked) and signs the creator's **own** server lane with the fingerprint this
+  publishes the policy (assistance on, `default_for_new = server`, `member_opt_out = required_server` by default
+  since v0.26.27, or `allowed` when "Require server processing" is unticked) and signs the creator's **own** server lane with the fingerprint this
   phone verified (the same path as `AddServerFlow.confirm`). If the server key still needs approval by this phone, the
   add-server sheet opens at once (compare the code, approve, OK); if only another server administrator can approve, or
   the server has no device, the circle is created Private, phones only, with a message, and the existing "Let the server
@@ -857,9 +857,9 @@ signature, key line, trigger or purge rule changes.
   warnings of section 21). The admin can choose "Phone only" afterwards.
 * **Opt-out where people look.** Settings > Server & data > **Server processing** (was "Where my data is processed");
   the Encryption keys screen row shows the real state from this phone's verified lane facts ("On for you", "Phone only
-  for you (you can switch it on)", "Phone only (off for this circle)", "Required in this circle: needs your OK").
-* **Not done, on purpose.** The admin still cannot opt anyone in: "required" means every member consents on their own
-  phone or leaves, as in 16.1. `required_server` is not the default (16.1 owner decision). The deployment profile's
+  for you (you can switch it on)", "Phone only (off for this circle)", "Switching on for you (positions keep arriving)").
+* **The admin still cannot sign for anyone.** Each member's own approved phone signs their own pref, also under
+  "required" (section 25, which replaces the explicit consent card of earlier versions). The deployment profile's
   meaning (unset = cloud wording) is unchanged.
 
 Tests: Go `TestMemberDefaultsAPI` (`follow_circle_default` while derived, false after an admin choice),
@@ -868,3 +868,75 @@ Tests: Go `TestMemberDefaultsAPI` (`follow_circle_default` while derived, false 
 `required_server`, app-open path follows only when the server says so), `new_circle_setup_test.dart` (create screens,
 approve path, required, phones only, no server, onboarding), `add_server_sheet_test.dart`, `processing_screens_test.dart`,
 `trusted_default_test.dart` (Encryption keys row).
+
+## 25. Forced server processing as one owner switch, and self-healing after a reset (v0.26.27, app part)
+
+Evidence (production, 2026-11-10 right after an owner reset): the policy was signed by the owner's old phone, which the
+reset revoked, so nobody counted it and the server refused every server copy (`lane_not_server`); the other member's
+pref named a server key that was gone; the owner's pref had been deleted with the old key; a stale background process
+kept uploading with the revoked key (`device_revoked`); and a circle that required server processing left phones
+sealing nothing ("has not encrypted one for the Private circle"). This section is the phone's side of the fix; the
+server part (keeping the server key across a reset with a signed re-attachment, relaying phone-line items) is in
+E2EE.md and section 16.1.
+
+**One owner toggle, no member action.** The circle settings screen (admins, Private circles with a server key) has
+**Require server processing**. It is one admin-signed policy statement (`member_opt_out = required_server`, default
+for new = server). It is ON by default for a new circle with the server (the creation screen shows it ticked). An
+existing circle keeps its setting. When on:
+
+* `LaneStatus.consentRequired` is gone. A member whose pref is not effective for the CURRENT server key is
+  `LaneStatus.serverPending`: the sealer keeps using the phone line, so the phone never seals nothing and never
+  sends plaintext. `PrivateRuntime.consentBlocks` and its four call sites are removed.
+* `LanesService.signRequiredLaneIfDue` signs the member's OWN pref, with the member's own approved phone key, for the
+  pinned server key and the policy's generation, on first run and whenever the pref is not effective. It signs only what
+  the phone verified itself (an active, approved server key of a circle admin that matches the server's fingerprint and
+  survived every owner reset; a verified policy that requires it; the SK of that generation in its own vault), clears a
+  queued older phone opt-out (the rule wins), never repeats the same (phone, server key, generation) within ten
+  minutes, and carries the fingerprint from verified state, never from user input. Members see "Your family admin
+  requires server processing." with no control. Nothing signs for another member.
+* The owner's screen lists who is "On the server" and who is "Catching up" (a plain word, from the phones' verified
+  lanes, not from a server flag).
+
+**Self-healing (`LanesService.selfHeal`, run when the app opens or resumes, from the Server processing screen and after
+a refused upload; serialised per circle; best effort; idempotent):**
+
+1. Admin phone, policy lost: when the server holds a policy statement that is on but its signer is a revoked key of the
+   SAME account (read from the account's own key list, which includes revoked keys; the circle list shows only live
+   keys), the approved admin phone signs the same settings again with a new SK generation wrapped to every member's
+   approved phone. It never turns server processing on where it was off, never copies settings from a statement it
+   cannot tie to its own account, and never changes who is required.
+2. Own pref: required circle: `signRequiredLaneIfDue`. Optional circle: only when the member's newest signed choice is the
+   SERVER lane and names a key that is not the current one (the old key was revoked or replaced) and was signed by a
+   live key of the member; a phone choice is never touched; a choice lost to the member's own reset keeps its existing
+   one-tap re-offer.
+3. `maintain`: wraps the new generation to the phones that lack it and, once a member's pref is effective, to the
+   server key.
+
+**Refused server copies never drop a position.** `SealedQueue.flush` treats `lane_not_server`, `server_line_off` and
+`device_lacks_lanes2` as lane refusals, not permanent ones: every server copy of that circle waiting in the queue is
+replaced in place by its phone-line twin (same seq and time) and re-sent at once; the lane is suspended on this phone for
+up to 30 minutes (`LaneStore.suspendServerLane`; new items are sealed on the phone line) or until the policy entry or
+the member's own pref entry changes, and `selfHeal` runs. An item without a twin stays queued (nothing can be re-sealed
+from plaintext, none is kept). A `403` (revoked key) makes the process forget its cached identity and read the
+vault's current one; items sealed under the revoked key are dropped (the server can never accept them). On app open a
+cached identity that differs from the vault's is dropped.
+
+**Phone side of keeping the server key.** `E2eeService.resetThisDevice` sends `keep_server` only for an active
+`server` key of this account that is in its own pre-reset key list, whose registration verifies and was signed by one of
+the account's own keys, and that the server itself reports as its pinned built-in device (same id and fingerprint). The
+new phone signs log action 13 over exactly that key. A server that does not keep it revokes it as before and the
+existing silent re-approval runs. Phones accept a server key only if the verified key log vouches for it
+(`serverKeyVouched`; the log is requested with `server_attach=1`): its registration is logged and matches, its voucher
+chain reaches the owner's self-registered root, the owner is a circle admin (or a circle admin logged an approval of the
+key), and after an owner reset the owner's newest root phone signed the action-13 entry. A reset the server serves
+redacted is recognised from the key list and still needs the attach. A server that withholds, redacts or invents entries
+makes the key unusable (fail closed): no phone then signs a lane pref for it or wraps the server line key to it.
+
+**What can still go wrong, honestly.** An admin can force server processing; a member who does not want it can only
+leave. A modified app can still stay on the phone line (nothing can force that). A phone that never gets the SK wrap (no
+admin online) stays on the phone line until it does. The "Replace the server key" action exists on the server only
+(`POST /e2ee/server-device/replace`); the app has no screen for it yet.
+
+Tests: `reset_recovery_test.dart` (the production state rebuilt: kept and replaced server key, convergence with no
+user action, queue fallback, stale isolate, required circle, negatives), `auto_apply_test.dart`, `lanes_service_test.dart`
+(required_server), `silent_pipeline_test.dart`, `new_circle_setup_test.dart`, `processing_screens_test.dart`.

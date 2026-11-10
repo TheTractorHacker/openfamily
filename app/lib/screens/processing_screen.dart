@@ -13,7 +13,6 @@ import '../widgets/processing_widgets.dart';
 import '../widgets/server_prompts.dart' show remindMessageText;
 import 'legacy_upgrade_screen.dart';
 import 'processing_policy_screen.dart';
-import 'security_widgets.dart';
 import 'trusted_server_screen.dart';
 
 /// Circle > Encryption keys > this circle > Server processing.
@@ -39,7 +38,7 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
   ProcessingSnapshot? _s;
   bool _loading = true;
   bool _busy = false;
-  String? _error;
+  ProcessingErrorText? _error;
 
   @override
   void initState() {
@@ -65,7 +64,7 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _error = errorText(e);
+        _error = processingErrorText(e);
       });
     }
   }
@@ -80,7 +79,7 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
       await f();
       _say(done);
     } catch (e) {
-      _say(e is StateError ? e.message : errorText(e));
+      _say(processingErrorText(e, step: 'That did not go through.').message);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -149,7 +148,7 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
       final int n = await _c.deleteCopies(widget.circle.id, wholeCircle: whole);
       _say('Deleted $n server copies');
     } catch (e) {
-      _say(errorText(e));
+      _say(processingErrorText(e, step: 'The copies could not be deleted.').message);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -157,9 +156,24 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
 
   // ------------------------------------------------------------------ build
 
-  /// Circle admin: who is not on the server yet and the message to send them (section 23). Nothing here switches anyone.
+  /// Circle admin: who is not on the server yet. When the admin requires server processing nobody has to be asked:
+  /// those members are "catching up" (their phone signs by itself). Otherwise the message to send them (section 23).
   List<Widget> _notYetOnServer(ProcessingSnapshot s) {
     final List<ProcessingMember> rest = <ProcessingMember>[for (final ProcessingMember m in s.members) if (!m.serverAssisted) m];
+    if (s.required) {
+      return <Widget>[
+        const DsSectionHeader('Still catching up', padding: EdgeInsets.fromLTRB(0, AppSpace.xl, 0, AppSpace.xs)),
+        DsRowGroup(children: <Widget>[
+          for (final ProcessingMember m in rest)
+            DsListRow(
+              key: Key('catching-up-${m.userId}'),
+              leading: DsListRow.iconTile(context, Icons.sync),
+              title: m.isMe ? '${m.name} (you)' : m.name,
+              subtitle: s.notReady.contains(m.name) ? 'Needs to update the app first' : ProcessingCopy.catchingUpInfo,
+            ),
+        ]),
+      ];
+    }
     return <Widget>[
       const DsSectionHeader('Members not yet on the server', padding: EdgeInsets.fromLTRB(0, AppSpace.xl, 0, AppSpace.xs)),
       DsRowGroup(children: <Widget>[
@@ -170,7 +184,7 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
             title: m.isMe ? '${m.name} (you)' : m.name,
             subtitle: s.notReady.contains(m.name)
                 ? 'Needs to update the app first'
-                : (m.verified ? 'Chose to keep data on their phone. Nobody can change that for them.' : 'No choice yet. Asked on their next app open.'),
+                : (m.verified ? 'Chose to keep data on their phone. Nobody can change that for them.' : 'Uses the phone (has not chosen)'),
           ),
       ]),
       const SizedBox(height: AppSpace.sm),
@@ -195,7 +209,12 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
         child: _loading
             ? const Center(child: CircularProgressIndicator())
             : _error != null && _s == null
-                ? LoadStateView(error: _error, offline: false, onRetry: _load)
+                ? DsErrorState(
+                    key: const Key('proc-load-error'),
+                    icon: _error!.icon,
+                    title: _error!.title,
+                    message: _error!.message,
+                    onRetry: () => _load(force: true))
                 : _body(_s!),
       ),
     );
@@ -220,6 +239,11 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
                     'Turn on "Private circle" in the circle settings (admins only) to use end-to-end encryption.')
           else ...<Widget>[
             _statusCard(s),
+            if (s.problem != null)
+              Padding(
+                padding: const EdgeInsets.only(top: AppSpace.lg),
+                child: ProcessingNote(noteKey: const Key('proc-problem'), icon: Icons.sync_problem, color: AppColors.statusOrange, text: s.problem!),
+              ),
             if (s.legacy) ...<Widget>[const SizedBox(height: AppSpace.lg), _legacyCard(s)],
             if (s.optOutPendingSince != null)
               const Padding(
@@ -239,8 +263,8 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
                     icon: Icons.report_problem_outlined,
                     color: AppColors.statusRed,
                     text: '${s.undeliveredCount} ${s.undeliveredCount == 1 ? 'item was' : 'items were'} not delivered to this circle'
-                        '${s.undeliveredCode == 'required_server' ? ' because it requires server processing and you have not consented yet' : ''}. '
-                        'They are not kept.'),
+                        '${s.undeliveredCode == 'required_server' ? ' before this phone had switched over to server processing' : ''}. '
+                        'They are not kept. New positions are sent normally.'),
               ),
             if (s.required && s.members.any((ProcessingMember m) => m.isChild))
               const Padding(
@@ -248,8 +272,8 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
                 child: ProcessingNote(
                     noteKey: Key('proc-child-note'),
                     icon: Icons.child_care,
-                    text: 'This circle requires server processing and the rule applies to child accounts too. A child\'s phone sends nothing '
-                        'to this circle (except help requests) until it has consented; the choice is made when the child\'s phone is paired.'),
+                    text: 'This circle requires server processing and the rule applies to child accounts too. A child\'s phone switches '
+                        'over by itself, like everyone else\'s.'),
               ),
             if (s.status == LaneStatus.verificationFailed)
               const Padding(
@@ -289,37 +313,46 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
                   key: Key('member-${m.userId}'),
                   leading: DsListRow.iconTile(context, Icons.person_outline),
                   title: m.isMe ? '${m.name} (you)' : m.name,
-                  subtitle: s.legacy
+                  subtitle: s.unconfirmed
+                      ? 'Not confirmed right now'
+                      : s.legacy
                       ? 'Old mode: the server may read it'
                       : m.serverAssisted
-                          ? 'Allowed server processing'
-                          : (s.assistOn && !m.verified ? 'Not chosen yet' : 'Keeps data on their phone'),
-                  info: s.legacy
-                      ? (m.isChild ? 'Child account. Old mode: the server may read it if everyone allowed it.' : 'Old mode: the server may read this circle if everyone allowed it.')
-                      : (s.assistOn && !m.verified && !m.serverAssisted
-                          ? '${m.name} has not chosen yet. Until they do, their data stays on their phone and is not sent to the server for processing.'
-                          : null),
-                  trailing: s.legacy
+                          ? (s.required ? 'On the server' : 'Allowed server processing')
+                          : (s.required
+                              ? ProcessingCopy.catchingUp
+                              : (s.assistOn && !m.verified ? 'Uses the phone (has not chosen)' : 'Keeps data on their phone')),
+                  info: s.unconfirmed
                       ? null
-                      : (s.assistOn && !m.verified && !m.serverAssisted
-                          ? Wrap(spacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: <Widget>[
-                              const NotChosenChip(),
-                              if (s.iAmAdmin && !m.isMe)
-                                IconButton(
-                                  key: Key('remind-${m.userId}'),
-                                  tooltip: 'Copy a reminder for ${m.name}',
-                                  constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
-                                  icon: const Icon(Icons.notifications_active_outlined),
-                                  onPressed: () async {
-                                    await Clipboard.setData(ClipboardData(
-                                        text: 'Hi ${m.name}, please open Orbitly > Settings > Server processing and choose how our circle "${widget.circle.name}" should handle your data.'));
-                                    if (context.mounted) {
-                                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Reminder copied. Paste it in a message.')));
-                                    }
-                                  },
-                                ),
-                            ])
-                          : LaneChip(server: m.serverAssisted)),
+                      : s.legacy
+                      ? (m.isChild ? 'Child account. Old mode: the server may read it if everyone allowed it.' : 'Old mode: the server may read this circle if everyone allowed it.')
+                      : (s.required && !m.serverAssisted
+                          ? ProcessingCopy.catchingUpInfo
+                          : (s.assistOn && !m.verified && !m.serverAssisted
+                              ? '${m.name} has not chosen. Until they do, their data stays on their phone and is not sent to the server for processing.'
+                              : null)),
+                  trailing: s.unconfirmed || s.legacy
+                      ? null
+                      : (s.required && !m.serverAssisted
+                          ? const CatchingUpChip()
+                          : (s.assistOn && !m.verified && !m.serverAssisted && s.iAmAdmin && !m.isMe
+                              ? Wrap(spacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: <Widget>[
+                                  const LaneChip(server: false),
+                                  IconButton(
+                                    key: Key('remind-${m.userId}'),
+                                    tooltip: 'Copy a reminder for ${m.name}',
+                                    constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+                                    icon: const Icon(Icons.notifications_active_outlined),
+                                    onPressed: () async {
+                                      await Clipboard.setData(ClipboardData(
+                                          text: 'Hi ${m.name}, please open Orbitly > Settings > Server processing and choose how our circle "${widget.circle.name}" should handle your data.'));
+                                      if (context.mounted) {
+                                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Reminder copied. Paste it in a message.')));
+                                      }
+                                    },
+                                  ),
+                                ])
+                              : LaneChip(server: m.serverAssisted))),
                 ),
             ]),
             if (s.iAmAdmin && s.assistOn && !s.legacy && s.members.any((ProcessingMember m) => !m.serverAssisted)) ..._notYetOnServer(s),
@@ -382,15 +415,26 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
     if (s.legacy) return 'Old mode. An admin can upgrade it.';
     if (!s.assistOn) return 'Off: phones do the work';
     return s.required
-        ? 'On, and required'
+        ? 'Required by the admin: ${s.serverCount} of ${s.members.length} on the server'
         : 'On: ${s.serverCount} of ${s.members.length} use the server';
   }
 
   Widget _statusCard(ProcessingSnapshot s) {
-    final (IconData icon, Color color, String title, String sub) = s.legacy
+    final (IconData icon, Color color, String title, String sub) = s.unconfirmed
+        ? (Icons.sync_problem, AppColors.statusOrange, 'Not confirmed right now', 'Your phone keeps sending your position to the family, encrypted.')
+        : s.legacy
         ? (Icons.dns_outlined, AppColors.sosRed, ProcessingCopy.legacyStatusTitle, ProcessingCopy.legacyStatusBody)
         : !s.assistOn
         ? (Icons.smartphone, AppColors.sky, 'Phones only', 'The server cannot read this circle.')
+        : s.required
+        ? (
+            Icons.dns_outlined,
+            AppColors.accentInk,
+            'Required by the admin (${s.serverCount} of ${s.members.length} on the server)',
+            s.serverCount == s.members.length
+                ? ProcessingCopy.requireSwitchBody
+                : 'Everyone\'s phone switches over by itself. Positions keep arriving meanwhile.'
+          )
         : (
             Icons.dns_outlined,
             AppColors.accentInk,
@@ -470,7 +514,31 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
   List<Widget> _myChoice(ProcessingSnapshot s, ProcessingMember? me) {
     final ColorScheme cs = Theme.of(context).colorScheme;
     final bool mine = me?.serverAssisted ?? false;
-    final bool undecided = s.assistOn && me != null && !me.verified && s.status != LaneStatus.consentRequired;
+    // Unknown state: no claim about the lane, no control (the note above says what is going on).
+    if (s.unconfirmed) return const <Widget>[];
+    // Required by the admin: no choice, no dead end. A calm notice; the phone signs by itself.
+    if (s.required && !s.legacy) {
+      return <Widget>[
+        Container(
+          key: const Key('proc-required-notice'),
+          padding: const EdgeInsets.all(AppSpace.lg),
+          decoration: BoxDecoration(
+            border: Border.all(color: cs.outlineVariant),
+            borderRadius: BorderRadius.circular(AppRadius.lg),
+          ),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[
+            const Text(ProcessingCopy.requiredNoticeTitle, style: AppType.headline),
+            const SizedBox(height: AppSpace.xs),
+            const Text(ProcessingCopy.requiredNoticeBody, style: AppType.secondary),
+            if (!mine) ...<Widget>[
+              const SizedBox(height: AppSpace.sm),
+              const Text(ProcessingCopy.requiredCatchingUp, key: Key('proc-required-catching-up'), style: AppType.secondary),
+            ],
+          ]),
+        ),
+      ];
+    }
+    final bool undecided = s.assistOn && me != null && !me.verified;
     String? why;
     if (!s.assistOn) {
       why = 'Server processing is off for this circle, so your phone does the processing.';
@@ -478,36 +546,9 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
       why = 'This circle is in the old trusted-server mode. Use the old settings above until an admin upgrades it.';
     } else if (!s.hasServerKey && !mine) {
       why = 'This server has no approved server key for this circle yet, so server processing cannot be chosen.';
-    } else if (s.required && mine) {
-      why = 'This circle requires server processing. You can only keep your data on your phone by leaving the circle.';
     }
     final bool canToggle = why == null && !_busy;
     return <Widget>[
-      if (s.status == LaneStatus.consentRequired)
-        Container(
-          key: const Key('proc-consent-required'),
-          margin: const EdgeInsets.only(bottom: AppSpace.md),
-          padding: const EdgeInsets.all(AppSpace.lg),
-          decoration: BoxDecoration(
-            color: AppColors.statusOrange.withValues(alpha: 0.12),
-            borderRadius: BorderRadius.circular(AppRadius.lg),
-            border: Border.all(color: AppColors.statusOrange.withValues(alpha: 0.55)),
-          ),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[
-            const Text('This circle requires server processing', style: AppType.headline),
-            const SizedBox(height: AppSpace.xs),
-            const Text(
-                'Your phone sends nothing to this circle (except help requests) until you give your own consent. '
-                'Or you can leave the circle.',
-                style: AppType.secondary),
-            const SizedBox(height: AppSpace.md),
-            DsPillButton(
-                key: const Key('proc-consent'),
-                label: 'Review and consent',
-                icon: Icons.lock_open,
-                onPressed: _busy || !s.hasServerKey ? null : _optIn),
-          ]),
-        ),
       if (undecided)
         Container(
           key: const Key('proc-choose'),

@@ -122,19 +122,20 @@ void main() {
           await launch(t, CircleCreateScreen(service: FakeCircleService(), setup: NewCircleSetup(c), makePrivate: (String id) async => madePrivate.add(id)));
       final Icon icon = t.widget<Icon>(find.descendant(of: find.byKey(const Key('mode-private-server')), matching: find.byType(Icon)));
       expect(icon.icon, Icons.radio_button_checked);
-      expect(find.textContaining('Everyone is on the server by default and can switch it off'), findsOneWidget);
+      expect(find.textContaining('Everyone is on the server by default'), findsOneWidget);
+      expect(t.widget<CheckboxListTile>(find.byKey(const Key('mode-require-server'))).value, isTrue, reason: 'Require server processing is ON by default for a new circle');
       expect(find.text('Normal, no end-to-end encryption'), findsOneWidget);
       await t.enterText(find.byType(TextField), 'Family');
       await t.tap(find.text('Create circle'));
       await t.pumpAndSettle();
       expect(madePrivate, <String>['new']);
-      expect(signed(c), <String>['policy:true:server:allowed', 'lane:server:fp=$fakeFp:del=false']);
+      expect(signed(c), <String>['policy:true:server:required_server', 'lane:server:fp=$fakeFp:del=false']);
       expect(popped.single?.isPrivate, isTrue);
       expect(popped.single?.serverAssist, isTrue);
       expect(find.textContaining('everyone who joins is on the server by default'), findsOneWidget);
     });
 
-    testWidgets('"Everyone must use the server" is offered under the server option and publishes required_server', (t) async {
+    testWidgets('"Require server processing" is on by default under the server option; unticking it lets members choose', (t) async {
       await big(t);
       final FakeProcessingController c = freshCircle();
       await t.pumpWidget(MaterialApp(home: CircleCreateScreen(service: FakeCircleService(), setup: NewCircleSetup(c), makePrivate: (String id) async {})));
@@ -144,7 +145,7 @@ void main() {
       await t.enterText(find.byType(TextField), 'Kids');
       await t.tap(find.text('Create circle'));
       await t.pumpAndSettle();
-      expect(signed(c).first, 'policy:true:server:required_server');
+      expect(signed(c).first, 'policy:true:server:allowed');
     });
 
     testWidgets('phones only: Private, nothing about the server is signed', (t) async {
@@ -233,7 +234,7 @@ void main() {
       await spin(t);
       expect(created, <String>['My Family']);
       expect(madePrivate, <String>['fam-1']);
-      expect(signed(c), <String>['policy:true:server:allowed', 'lane:server:fp=$fakeFp:del=false']);
+      expect(signed(c), <String>['policy:true:server:required_server', 'lane:server:fp=$fakeFp:del=false']);
       expect(next, 'My Family');
     });
 

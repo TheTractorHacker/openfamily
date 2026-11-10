@@ -99,6 +99,18 @@ func applyCircleCompat(ctx context.Context, c *circleOut) {
 			}
 		}
 	}
+	// "Require server processing": an app below required_server cannot sign its own lane and would seal nothing in
+	// this circle (its positions would not reach the family). It is told so in the circle name, which every app
+	// version shows; the circle itself stays usable (UpdateRequired is not set) and the owner's screen names the
+	// member as needing the new app.
+	if c.ServerAssist && c.MemberOptOut == "required_server" {
+		if v := compat.Features["required_server"]; c.MinAppVersion == "" || compat.MustParse(c.MinAppVersion).Less(compat.MustParse(v)) {
+			c.MinAppVersion = v
+		}
+		if !compatSupports(ctx, "required_server") && !strings.Contains(c.Name, "(update the app") {
+			c.Name += " (update the app to keep sharing with this circle)"
+		}
+	}
 }
 
 // refuseUnsupportedApp answers 426 Upgrade Required to an app below the

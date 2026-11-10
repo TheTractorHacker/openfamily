@@ -36,14 +36,16 @@ var Releases = []string{
 // An older app can use the server but not the feature; the API tells it so
 // (min_app_version on a circle) instead of showing an empty state.
 var Features = map[string]string{
-	"private_circles":     "0.15.0", // end-to-end encrypted circles (read side)
-	"private_channel":     "0.16.0", // sealed location channel
-	"trusted_server_mode": "0.18.0", // server as an approved E2EE member
-	"processing_lanes":    "0.22.0", // per-member privacy lanes: key-log actions 10/11, server key line
-	"chat_e2ee":           "0.23.0", // chat sealed phone to phone in Private circles
-	"wire_v2":             "0.25.0", // API wire efficiency: bootstrap, ETag, delta lists, compact views, history simplify
-	"owner_approval":      "0.26.3", // circle owner may approve their own replacement device (key-log action 12, opt-in via ?owner_approval=1)
+	"private_circles":     "0.15.0",  // end-to-end encrypted circles (read side)
+	"private_channel":     "0.16.0",  // sealed location channel
+	"trusted_server_mode": "0.18.0",  // server as an approved E2EE member
+	"processing_lanes":    "0.22.0",  // per-member privacy lanes: key-log actions 10/11, server key line
+	"chat_e2ee":           "0.23.0",  // chat sealed phone to phone in Private circles
+	"wire_v2":             "0.25.0",  // API wire efficiency: bootstrap, ETag, delta lists, compact views, history simplify
+	"owner_approval":      "0.26.3",  // circle owner may approve their own replacement device (key-log action 12, opt-in via ?owner_approval=1)
 	"member_charging":     "0.26.14", // optional `charging` flag on reports and member positions (sealed fixes: "chg"); older apps simply omit it
+	"server_attach":       "0.26.27", // server key kept across an owner reset (key-log action 13, opt-in via ?server_attach=1; keep_server / server_kept fields)
+	"required_server":     "0.26.27", // "Require server processing": the member's own phone signs its lane by itself (older apps seal nothing in such a circle)
 }
 
 // Version is a parsed x.y.z app version. Pre-release and build suffixes are
@@ -271,6 +273,8 @@ func MissingFeatures(v Version) []string {
 		"trusted_server_mode": "server-assisted private circles",
 		"processing_lanes":    "per-member privacy lanes",
 		"owner_approval":      "owner approval of a replacement phone",
+		"server_attach":       "keeping the server key when the owner resets their keys",
+		"required_server":     "the family's required server processing",
 	}
 	var out []string
 	for name, min := range Features {

@@ -56,6 +56,9 @@ class E2ee {
   // Owner approval (docs/design/E2EE.md "Owner approval"): the circle's
   // "owner may approve their own replacement device" rule switched on/off.
   static const int actOwnerApproval = 12;
+  // The built-in server key kept across an owner key reset: written right after the reset, signed by the NEW root phone,
+  // naming the exact server key (subject) and its fingerprint (ref). Must equal e2ee.ActServerAttach in Go.
+  static const int actServerAttach = 13;
 
   // Argon2id parameters for the optional recovery passphrase.
   static const int argon2MemKiB = 32 * 1024;
@@ -303,7 +306,7 @@ class E2ee {
       checkId(id);
     }
     final Bytes r = ref ?? Uint8List(32);
-    if (r.length != 32 || action < actRegister || action > actOwnerApproval) {
+    if (r.length != 32 || action < actRegister || action > actServerAttach) {
       throw const E2eeFormatException('bad log action');
     }
     return cat(<Bytes>[
