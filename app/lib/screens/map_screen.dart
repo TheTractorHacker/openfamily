@@ -61,6 +61,7 @@ import 'places_screen.dart';
 import '../services/diagnostics/diagnostics_reporter.dart';
 import 'settings_screen.dart';
 import 'sos_screen.dart';
+import '../services/error_copy.dart';
 
 /// Radius (meters) of the "broader zone" circle drawn around a member whose
 /// location is only approximate (GPS accuracy issue).
@@ -601,8 +602,8 @@ class _MapScreenState extends State<MapScreen>
   }
 
   String _friendlyError(Object e) {
-    if (e is ApiException) return e.message;
-    return 'Could not load your family. Check your connection and try again.';
+    if (e is ApiException && e.status != 0) return e.message;
+    return actionFailedMessage(e, 'load your family');
   }
 
   /// Detects whether location sharing is off (e.g. the user skipped it during

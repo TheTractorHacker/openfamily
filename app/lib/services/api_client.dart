@@ -798,7 +798,7 @@ class ApiClient {
         // tokens and let the caller retry later.
         throw const ApiException(
           0,
-          'Could not reach the server. Check your connection.',
+          'Could not reach the server.',
         );
       }
       if (refreshResult == _RefreshResult.ok) {
@@ -967,7 +967,7 @@ class ApiClient {
     } on http.ClientException {
       throw const ApiException(
         0,
-        'Could not reach the server. Check your connection.',
+        'Could not reach the server.',
       );
     } on ArgumentError {
       rethrow;
@@ -977,7 +977,7 @@ class ApiClient {
       // "no usable answer", never a crash and never a sign-out.
       throw const ApiException(
         0,
-        'Could not reach the server. Check your connection.',
+        'Could not reach the server.',
       );
     } finally {
       if (c is _NonClosingClient) c.closeInner();

@@ -9,6 +9,7 @@ import '../theme/app_theme.dart';
 import '../widgets/ds/ds.dart';
 import 'security_widgets.dart';
 import 'welcome_screen.dart';
+import '../services/error_copy.dart';
 
 /// Lists active sign-ins; revoke one or log out everywhere.
 class SessionsScreen extends StatefulWidget {
@@ -31,7 +32,7 @@ class SessionsScreen extends StatefulWidget {
 class _SessionsScreenState extends State<SessionsScreen> {
   List<SessionInfo>? _sessions;
   String? _loadError;
-  bool _offline = false;
+  ErrorCopy? _loadCopy;
   final Set<String> _revoking = <String>{};
   bool _loggingOut = false;
   bool _signingOutOthers = false;
@@ -46,7 +47,7 @@ class _SessionsScreenState extends State<SessionsScreen> {
   Future<void> _load() async {
     setState(() {
       _loadError = null;
-      _offline = false;
+      _loadCopy = null;
     });
     try {
       final List<Object?> r = await Future.wait<Object?>(<Future<Object?>>[
@@ -64,7 +65,7 @@ class _SessionsScreenState extends State<SessionsScreen> {
       if (!mounted) return;
       setState(() {
         _loadError = errorText(e);
-        _offline = isOfflineError(e);
+        _loadCopy = describeError(e);
       });
     }
   }
@@ -191,7 +192,7 @@ class _SessionsScreenState extends State<SessionsScreen> {
       return SecurityPage(
         title: 'Active sessions',
         children: <Widget>[
-          LoadStateView(error: _loadError, offline: _offline, onRetry: _load),
+          LoadStateView(error: _loadError, offline: _loadCopy?.connection ?? false, title: _loadCopy?.title, onRetry: _load),
         ],
       );
     }

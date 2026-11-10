@@ -38,6 +38,9 @@ class DsChoiceSetting<T> extends StatelessWidget {
   Widget build(BuildContext context) {
     final ColorScheme cs = Theme.of(context).colorScheme;
     final bool large = MediaQuery.textScalerOf(context).scale(16) > 16 * 1.3;
+    // Narrow screens (a folded phone's cover display) keep the words and drop
+    // the little icons, so three options still fit side by side.
+    final bool narrow = MediaQuery.sizeOf(context).width < 400;
     return Padding(
       padding: const EdgeInsets.fromLTRB(
         AppSpace.xl,
@@ -84,7 +87,7 @@ class DsChoiceSetting<T> extends StatelessWidget {
                     ButtonSegment<T>(
                       value: o.value,
                       label: Text(o.label),
-                      icon: o.icon == null ? null : Icon(o.icon, size: 18),
+                      icon: o.icon == null || narrow ? null : Icon(o.icon, size: 18),
                     ),
                 ],
                 selected: <T>{selected},

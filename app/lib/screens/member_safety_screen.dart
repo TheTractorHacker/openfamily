@@ -33,6 +33,9 @@ class _MemberSafetyScreenState extends State<MemberSafetyScreen> {
   Set<String> _ownerApproved = <String>{};
   TrustAssessment? _trust;
   String? _error;
+
+  /// What failed, so the error state can name the cause (see describeError).
+  Object? _errorCause;
   bool _loading = true;
   final TextEditingController _typed = TextEditingController();
   bool? _typedMatches;
@@ -53,6 +56,7 @@ class _MemberSafetyScreenState extends State<MemberSafetyScreen> {
     setState(() {
       _loading = true;
       _error = null;
+      _errorCause = null;
     });
     try {
       final r = await _svc.safetyWith(widget.userId);
@@ -70,6 +74,7 @@ class _MemberSafetyScreenState extends State<MemberSafetyScreen> {
       setState(() {
         _loading = false;
         _error = errorText(e);
+        _errorCause = e;
       });
     }
   }
@@ -89,7 +94,9 @@ class _MemberSafetyScreenState extends State<MemberSafetyScreen> {
         child: _loading
             ? const Center(child: CircularProgressIndicator())
             : _error != null
-                ? LoadStateView(error: _error, offline: false, onRetry: _load)
+                ? (_errorCause != null
+                    ? LoadStateView.forError(_errorCause!, onRetry: _load)
+                    : LoadStateView(error: _error, offline: false, onRetry: _load))
                 : ListView(padding: const EdgeInsets.all(AppSpace.xl), children: <Widget>[
                     if (t != null && t.level == TrustLevel.verifiedChanged)
                       AlarmBanner(

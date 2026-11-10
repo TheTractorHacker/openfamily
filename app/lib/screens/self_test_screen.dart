@@ -9,6 +9,7 @@ import '../services/e2ee/private_runtime.dart';
 import '../theme/app_theme.dart';
 import '../widgets/ds/ds.dart';
 import 'diagnostics_screen.dart' show statusColor, statusIcon, statusLabel;
+import '../services/error_copy.dart';
 
 /// Runs the automatic self-test and the background test. Be honest about
 /// what it proves: see [SelfTest].
@@ -122,10 +123,10 @@ class _SelfTestScreenState extends State<SelfTestScreen> with WidgetsBindingObse
         _leftAt = null;
         _bgArmedAt = null;
       });
-    } catch (_) {
+    } catch (e) {
       setState(() {
         _bgStatus = DiagStatus.warn;
-        _bgResult = 'Could not ask the server how it did. Check your connection and try again.';
+        _bgResult = actionFailedMessage(e, 'ask the server how it did');
       });
     }
   }

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:openfamily/models/security_models.dart';
 import 'package:openfamily/screens/sessions_screen.dart';
@@ -30,7 +31,10 @@ void expectShortSubtitles(WidgetTester t, {int max = 80}) {
 }
 
 void main() {
-  setUp(() => SharedPreferences.setMockInitialValues(<String, Object>{}));
+  setUp(() {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    FlutterSecureStorage.setMockInitialValues(<String, String>{});
+  });
 
   group('InfoHint', () {
     testWidgets('opens a sheet with the long text, is labelled and a 48 dp target', (t) async {
@@ -118,21 +122,54 @@ void main() {
   });
 
   group('Settings home', () {
-    testWidgets('grouped sections, short lines, search, no overflow at 360 dp and 1.5x text', (t) async {
+    testWidgets('six groups, short lines, search, rare things behind Advanced, no overflow at 360 dp and 1.5x text', (t) async {
       _size(t, 360, 5000);
       await t.pumpWidget(_wrap(const SettingsScreen(), scale: 1.5));
       await t.pump(const Duration(milliseconds: 300));
-      for (final String h in <String>['Account', 'Sharing & privacy', 'Notifications', 'Driving & safety', 'Server & data', 'Phone health', 'About']) {
+      for (final String h in <String>['Account', 'Circle', 'Notifications', 'Privacy and security', 'Devices', 'About']) {
         expect(find.text(h.toUpperCase()), findsOneWidget, reason: h);
       }
-      expectShortSubtitles(t);
+      // Nothing is lost: rare settings are one tap away under Advanced.
+      expect(find.byKey(const Key('settings-advanced')), findsOneWidget);
+      expect(find.text('Diagnostics'), findsNothing);
+      expect(find.text('Delete account'), findsNothing);
+      expectShortSubtitles(t, max: 40);
       expect(t.takeException(), isNull);
+
+      await t.tap(find.byKey(const Key('settings-advanced')));
+      await t.pumpAndSettle();
+      for (final String r in <String>['Diagnostics', 'Server address', 'Map style', 'Accent colour', 'Distance & speed units', 'Delete account']) {
+        expect(find.text(r), findsOneWidget, reason: r);
+      }
+      expectShortSubtitles(t, max: 40);
 
       await t.enterText(find.byKey(const Key('settings-search')), 'driving');
       await t.pump();
       expect(find.text('Driving detection'), findsOneWidget);
       expect(find.text('Profile'), findsNothing);
       expect(find.text('ACCOUNT'), findsNothing);
+    });
+
+    testWidgets('search finds rows inside Advanced and matches every word typed', (t) async {
+      _size(t, 412, 915);
+      await t.pumpWidget(_wrap(const SettingsScreen()));
+      await t.pump(const Duration(milliseconds: 300));
+      await t.enterText(find.byKey(const Key('settings-search')), 'delete');
+      await t.pump();
+      expect(find.text('Delete account'), findsOneWidget);
+      expect(find.text('ADVANCED'), findsOneWidget);
+      await t.enterText(find.byKey(const Key('settings-search')), 'server address');
+      await t.pump();
+      expect(find.text('Server address'), findsOneWidget);
+      expect(find.text('Server processing'), findsNothing);
+      await t.enterText(find.byKey(const Key('settings-search')), 'link phone');
+      await t.pump();
+      expect(find.text('Link another phone'), findsOneWidget);
+      await t.enterText(find.byKey(const Key('settings-search')), 'zzzz');
+      await t.pump();
+      expect(find.byType(DsSectionHeader), findsNothing);
+      expect(find.text('Profile'), findsNothing);
+      expect(find.text('Delete account'), findsNothing);
     });
   });
 }

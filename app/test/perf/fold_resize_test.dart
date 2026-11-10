@@ -10,9 +10,9 @@ import 'package:openfamily/widgets/location_tab_view.dart';
 import '../support/build_counter.dart';
 import '../support/location_fixtures.dart';
 
-// Galaxy Z Fold 4 in dp: cover, inner (portrait / landscape), and half-width
-// multi-window panes.
-const Size kCover = Size(412, 915);
+// Galaxy Z Fold 4 in dp: cover (the owner measured about 344 x 880), inner
+// (portrait / landscape), and half-width multi-window panes.
+const Size kCover = Size(344, 882);
 const Size kInner = Size(884, 1104);
 const Size kInnerL = Size(1104, 884);
 const Size kHalfPortrait = Size(442, 1104);

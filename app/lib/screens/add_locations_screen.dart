@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../models/place.dart';
-import '../services/api_client.dart';
 import '../services/family_service.dart';
 import '../services/geofence_service.dart';
 import '../services/place_service.dart';
@@ -9,6 +8,7 @@ import '../theme/app_theme.dart';
 import '../widgets/ds/ds.dart';
 import 'app_shell.dart';
 import 'place_picker_screen.dart';
+import '../services/error_copy.dart';
 
 /// Onboarding step: add home/work/school places to the map (shared with all
 /// family members), then land on the map.
@@ -276,9 +276,7 @@ class _AddLocationsScreenState extends State<AddLocationsScreen> {
       setState(() => _finishing = false);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text(
-            'Some places couldn\'t be saved. Check your connection and try again.',
-          ),
+          content: Text('Some places couldn\'t be saved. Try again.'),
         ),
       );
       return;
@@ -292,8 +290,7 @@ class _AddLocationsScreenState extends State<AddLocationsScreen> {
   }
 
   String _errorMessage(Object e) {
-    if (e is ApiException) return e.message;
-    return 'Please try again.';
+    return describeError(e).message;
   }
 
   @override

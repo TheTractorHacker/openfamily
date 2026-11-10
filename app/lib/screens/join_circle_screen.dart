@@ -9,6 +9,7 @@ import '../services/pending_invite.dart';
 import '../theme/app_theme.dart';
 import '../widgets/ds/ds.dart';
 import '../widgets/processing_widgets.dart';
+import '../services/error_copy.dart';
 
 /// The join-a-family flow, reached from the map's `+` action sheet, the
 /// family switcher's `+` chip, and onboarding.
@@ -115,11 +116,11 @@ class _JoinCircleScreenState extends State<JoinCircleScreen> {
       });
     } on SessionExpiredException {
       rethrow;
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       setState(() {
         _submitting = false;
-        _error = 'Could not join. Check your connection and try again.';
+        _error = actionFailedMessage(e, 'join');
       });
     }
   }

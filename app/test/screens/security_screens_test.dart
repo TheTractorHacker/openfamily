@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:openfamily/services/error_copy.dart';
 import 'package:openfamily/models/security_models.dart';
 import 'package:openfamily/screens/change_password_screen.dart';
 import 'package:openfamily/screens/delete_account_screen.dart';
@@ -140,7 +141,9 @@ void main() {
     testWidgets('offline load shows retry', (tester) async {
       _tall(tester);
       final FakeSecurityApi api = FakeSecurityApi(sessions: two)
-        ..fail = const ApiException(0, 'offline');
+        ..fail = const ApiException(0, 'Could not reach the server.');
+      DeviceNetwork.online = false;
+      addTearDown(() => DeviceNetwork.online = null);
       await tester.pumpWidget(_wrap(SessionsScreen(api: api)));
       await tester.pumpAndSettle();
       expect(find.textContaining('offline'), findsOneWidget);
@@ -307,7 +310,7 @@ void main() {
         (tester) async {
       _tall(tester);
       final FakeSecurityApi api = FakeSecurityApi(account: _off)
-        ..fail = const ApiException(0, 'x');
+        ..fail = const ApiException(0, 'Could not reach the server.');
       await tester.pumpWidget(_wrap(SecurityScreen(api: api)));
       await tester.pumpAndSettle();
       expect(find.byIcon(Icons.cloud_off), findsOneWidget);

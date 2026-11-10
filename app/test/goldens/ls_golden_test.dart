@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:openfamily/models/member.dart';
 import 'package:openfamily/screens/app_shell.dart';
@@ -172,6 +173,7 @@ Widget _picker() => const PlacePickerScreen(
 void main() {
   setUpAll(loadGoldenFonts);
   setUp(() {
+    FlutterSecureStorage.setMockInitialValues(<String, String>{});
     SharedPreferences.setMockInitialValues(<String, Object>{
       'driving_detection_disclosure_seen': true,
       'sos_intro_seen': true,

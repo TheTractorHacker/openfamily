@@ -158,7 +158,11 @@ class AuthService {
     // "Keep me signed in on this device": remember the password in the
     // Keystore for the silent re-login fallback. Never with a TOTP code (the
     // saved login could not complete it) and never at the cost of the login.
-    if (totpCode == null || totpCode.isEmpty) {
+    final bool twoFactor = totpCode != null && totpCode.isNotEmpty;
+    try {
+      await TokenStorage.setLastLoginUsedTwoFactor(twoFactor);
+    } catch (_) {}
+    if (!twoFactor) {
       try {
         await TokenStorage.saveCredentials(email: email, password: password);
       } catch (_) {}

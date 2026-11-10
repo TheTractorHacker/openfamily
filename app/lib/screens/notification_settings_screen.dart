@@ -4,11 +4,12 @@ import 'package:flutter/material.dart';
 
 import '../services/api_client.dart';
 import '../services/notification_prefs_service.dart' show NotificationNames;
-import '../services/security_format.dart';
+import '../theme/app_theme.dart';
 import '../widgets/ds/ds.dart';
 import '../widgets/reliability_alert_sections.dart';
 import 'place_alert_rules_screen.dart';
 import 'security_widgets.dart';
+import '../services/error_copy.dart';
 
 /// Which notifications this person wants. SOS and help alerts from family are
 /// not listed: they always come through.
@@ -21,39 +22,44 @@ class NotificationSettingsScreen extends StatefulWidget {
 }
 
 class _Pref {
-  const _Pref(this.key, this.icon, this.title, this.subtitle);
+  const _Pref(this.key, this.icon, this.title, this.subtitle, [this.info]);
   final String key;
   final IconData icon;
   final String title;
   final String subtitle;
+
+  /// Longer explanation behind the (i) button.
+  final String? info;
 }
 
 const List<_Pref> _places = <_Pref>[
   _Pref('place_alerts', Icons.place_outlined, 'Place alerts',
-      'When someone arrives at or leaves a saved place'),
+      'Arrivals and departures'),
   _Pref('check_in', Icons.check_circle_outline, 'Check-ins',
-      'When someone in your circle checks in'),
+      'When someone checks in'),
 ];
 
 const List<_Pref> _members = <_Pref>[
   _Pref('low_battery', Icons.battery_alert_outlined, 'Low battery',
-      "When a circle member's battery is low"),
+      'A member\'s battery is low'),
   _Pref('completed_drives', Icons.directions_car_outlined, 'Completed drives',
-      'When a circle member completes a drive'),
+      'A member finished a drive'),
   _Pref('safety_incidents', Icons.warning_amber_rounded, 'Safety incidents',
-      'Crashes and other incidents near your circle'),
+      'Crashes near your circle'),
   _Pref('weekly_summary', Icons.insights_outlined, 'Weekly driving summary',
-      'Sunday evening: your circle\'s drives, distance and hard braking'),
-  _Pref('severe_weather', Icons.thunderstorm_outlined, 'Severe weather alerts',
-      'Severe weather in your area'),
+      'Sunday evening',
+      'Sunday evening: your circle\'s drives, distance and hard braking.'),
+  _Pref('severe_weather', Icons.thunderstorm_outlined, 'Severe weather',
+      'Alerts for your area'),
   _Pref('phone_silent', Icons.phonelink_erase_outlined, 'Silent phone alerts',
-      'When a circle member\'s phone stops reporting for a long time'),
+      'A member\'s phone went quiet'),
 ];
 
 const _Pref _showNames = _Pref(
     'show_names',
     Icons.badge_outlined,
     'Show names in notifications',
+    'Off: "A family member"',
     'Notifications say who arrived, left, drove, checked in or sent a chat '
         'message, for example "Henry arrived at Home". Names then pass '
         'through the push provider (Google, Apple or your ntfy server). '
@@ -64,7 +70,7 @@ class _NotificationSettingsScreenState
     extends State<NotificationSettingsScreen> {
   Map<String, bool>? _prefs;
   String? _error;
-  bool _offline = false;
+  ErrorCopy? _loadCopy;
 
   @override
   void initState() {
@@ -75,7 +81,7 @@ class _NotificationSettingsScreenState
   Future<void> _load() async {
     setState(() {
       _error = null;
-      _offline = false;
+      _loadCopy = null;
     });
     try {
       final dynamic d = await ApiClient.get('/me/notifications');
@@ -95,7 +101,7 @@ class _NotificationSettingsScreenState
       if (!mounted) return;
       setState(() {
         _error = errorText(e);
-        _offline = isOfflineError(e);
+        _loadCopy = describeError(e);
       });
     }
   }
@@ -122,6 +128,7 @@ class _NotificationSettingsScreenState
         icon: p.icon,
         title: p.title,
         subtitle: p.subtitle,
+        info: p.info,
         value: _prefs![p.key] ?? (p.key != _showNames.key),
         onChanged: (bool v) => _set(p.key, v),
       );
@@ -131,32 +138,60 @@ class _NotificationSettingsScreenState
     final Map<String, bool>? prefs = _prefs;
     return Scaffold(
       appBar: AppBar(title: const Text('Notifications')),
-      body: SafeArea(
-        child: prefs == null
-            ? LoadStateView(error: _error, offline: _offline, onRetry: _load)
-            : ListView(
-                children: <Widget>[
-                  const DsSectionHeader('Places & check-ins'),
-                  for (final _Pref p in _places) _row(p),
-                  const QuietHoursSection(),
-                  const DsSectionHeader('Member notifications'),
-                  for (final _Pref p in _members) _row(p),
-                  const SilenceAlertsSection(),
-                  const ArrivalWatchSection(),
-                  const DsSectionHeader('Privacy'),
-                  _row(_showNames),
-                  const Padding(
-                    padding: EdgeInsets.all(16),
-                    child: Text(
-                      'SOS and help alerts from your circle always come '
-                      'through, whatever you choose here. Low battery, '
-                      'drives, safety incidents and weather are saved now and '
-                      'apply as the server starts sending them.',
-                    ),
-                  ),
-                ],
+      body: prefs == null
+          ? SafeArea(
+              child: LoadStateView(
+                error: _error,
+                offline: _loadCopy?.connection ?? false,
+                title: _loadCopy?.title,
+                onRetry: _load,
               ),
-      ),
+            )
+          // The whole page is built at once (about 15 rows). A lazy list
+          // threw the sections away when they scrolled out of view, and each
+          // one fetched itself again and popped in on the way back.
+          : DsBody(
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    const DsSectionHeader('Places & check-ins'),
+                    for (final _Pref p in _places) _row(p),
+                    const QuietHoursSection(),
+                    const DsSectionHeader('Member notifications'),
+                    for (final _Pref p in _members) _row(p),
+                    const _Reveal(child: SilenceAlertsSection()),
+                    const _Reveal(child: ArrivalWatchSection()),
+                    const DsSectionHeader('Privacy'),
+                    _row(_showNames),
+                    Padding(
+                      padding: const EdgeInsets.all(AppSpace.lg),
+                      child: Text(
+                        'SOS and help alerts always come through.',
+                        style: AppType.secondary.copyWith(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
     );
   }
+}
+
+/// Lets a section that only appears once its data is loaded (and only when
+/// there is something to show) grow in smoothly instead of jumping in.
+class _Reveal extends StatelessWidget {
+  const _Reveal({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => AnimatedSize(
+        duration: const Duration(milliseconds: 150),
+        alignment: Alignment.topCenter,
+        child: child,
+      );
 }

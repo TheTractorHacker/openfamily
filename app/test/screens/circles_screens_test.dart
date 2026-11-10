@@ -150,7 +150,7 @@ void main() {
     svc.listError = const CircleException('x', offline: true);
     await tester.pumpWidget(_app(CirclesScreen(key: UniqueKey(), service: svc)));
     await tester.pumpAndSettle();
-    expect(find.text('You\'re offline'), findsOneWidget);
+    expect(find.text('No connection'), findsOneWidget);
 
     svc.listError = const CircleException('Boom', status: 500);
     svc.circles = <Circle>[];

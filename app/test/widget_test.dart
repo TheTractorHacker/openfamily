@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:openfamily/models/member.dart';
 import 'package:openfamily/screens/families_screen.dart';
@@ -8,6 +9,8 @@ import 'package:openfamily/widgets/circle_switcher.dart';
 import 'package:openfamily/widgets/member_list_sheet.dart';
 
 void main() {
+  setUp(() => FlutterSecureStorage.setMockInitialValues(<String, String>{}));
+
   test('smoke test', () {
     expect(true, isTrue);
   });

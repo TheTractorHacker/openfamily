@@ -3,6 +3,7 @@ import 'dart:async';
 import '../models/trip.dart';
 import 'api_client.dart';
 import 'offline/offline_cache.dart';
+import 'error_copy.dart';
 
 /// Why a trips request failed, so screens can pick the right message.
 enum TripsFailure { forbidden, notFound, offline, other }
@@ -33,15 +34,12 @@ TripsException mapTripsError(Object e) {
       );
     }
     if (e.status == 0) {
-      return TripsException(TripsFailure.offline, e.message);
+      return TripsException(TripsFailure.offline, describeError(e).message);
     }
     return TripsException(TripsFailure.other, e.message);
   }
   if (e is TimeoutException) {
-    return const TripsException(
-      TripsFailure.offline,
-      'You appear to be offline.',
-    );
+    return TripsException(TripsFailure.offline, describeError(e).message);
   }
   return const TripsException(
     TripsFailure.other,

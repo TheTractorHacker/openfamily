@@ -192,7 +192,7 @@ void main() {
       expect(t.getRect(find.byKey(const Key('c'))).width, 412);
     });
 
-    testWidgets('DsPage form is capped at 560 dp on a wide screen', (t) async {
+    testWidgets('DsPage form is capped at 600 dp on a wide screen', (t) async {
       await pumpOnDevice(
         t,
         const DsPage(
@@ -202,8 +202,8 @@ void main() {
         spec: kFold600,
         chrome: false,
       );
-      // 560 minus 2 x 24 dp gutter.
-      expect(t.getRect(find.byKey(const Key('f'))).width, 560 - 48);
+      // 600 minus 2 x 24 dp gutter.
+      expect(t.getRect(find.byKey(const Key('f'))).width, 600 - 48);
     });
 
     test('rail breakpoint', () {

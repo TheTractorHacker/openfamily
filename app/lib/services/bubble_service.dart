@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 
 import '../models/bubble.dart';
 import 'api_client.dart';
+import 'error_copy.dart';
 
 /// Thin wrapper over the /bubbles endpoints (docs/bubbles.md). Screens take
 /// one so tests can fake it.
@@ -97,5 +98,5 @@ String bubbleErrorMessage(Object e, {String action = 'do that'}) {
     if (e.status == 400) return 'You cannot make a Bubble around yourself.';
     if (e.status >= 500) return 'The server had a problem. Try again shortly.';
   }
-  return 'Could not $action. Check your connection and try again.';
+  return actionFailedMessage(e, action);
 }

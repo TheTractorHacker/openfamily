@@ -6,6 +6,7 @@ import '../theme/app_theme.dart';
 import '../widgets/ds/ds.dart';
 import 'alert_received_screen.dart' show formatAlertTime;
 import 'app_shell.dart';
+import '../services/error_copy.dart';
 
 /// "Activity": check-ins other people sent you and live shares they started
 /// with you. Tapping a row focuses that person on the map.
@@ -51,11 +52,11 @@ class _InboxScreenState extends State<InboxScreen> {
         _items = l;
         _loading = false;
       });
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _error = 'Check your connection and try again.';
+        _error = actionFailedMessage(e, 'load your inbox');
       });
     }
   }

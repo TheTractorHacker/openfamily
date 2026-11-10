@@ -4,6 +4,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:latlong2/latlong.dart' show LatLng;
 import 'package:openfamily/models/chat_message.dart';
@@ -412,6 +413,7 @@ Widget _attentionHost() {
 void main() {
   setUpAll(loadDocsFonts);
   setUp(() {
+    FlutterSecureStorage.setMockInitialValues(<String, String>{});
     SharedPreferences.setMockInitialValues(<String, Object>{
       'sos_intro_seen': true,
     });

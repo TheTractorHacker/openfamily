@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 /// Widest a form, list or settings column gets on tablets, foldables and
 /// landscape. Phones (<= 412 dp) are narrower, so their layout is unchanged.
-const double kContentMaxWidth = 640;
+const double kContentMaxWidth = 600;
 
 /// Standard body wrapper for pushed routes and tab bodies: keeps content
 /// clear of a landscape cutout and the gesture bar (the app bar already

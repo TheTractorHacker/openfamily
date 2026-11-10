@@ -52,7 +52,7 @@ Chat in a Private circle stays end-to-end encrypted between the phones either wa
 You can do this at any time, for each circle separately:
 
 * **From the notice:** tap **Keep on my phone** on the notice you see after joining.
-* **From Settings:** open **Settings > Server processing**, tap the circle, and switch off **Let the server
+* **From Settings:** open **Settings > Privacy and security > Server processing**, tap the circle, and switch off **Let the server
   process my data**. Confirm with **Keep on my phone**.
 * **From the circle:** open the circle, then **Encryption keys > Server processing**. The row there says your
   real state ("On for you" or "Phone only").
@@ -107,7 +107,7 @@ The server then keeps readable locations for everyone in that circle.
 
 ## If you reset your encryption keys
 
-**Reset my keys** (Encryption keys > Link another phone > *No other phone and no recovery phrase?*) revokes every
+**Reset my keys** (Encryption keys > Link another phone > *No other phone?*) revokes every
 key of your account. If you are the person who approved the server, the server's own key belongs to your account,
 so the reset **removes the server's key too**. The reset confirmation says so before you tap **Reset keys**.
 

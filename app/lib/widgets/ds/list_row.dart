@@ -45,25 +45,26 @@ class DsListRow extends StatelessWidget {
   final String? semanticLabel;
 
   /// Icon tile used as [leading] for settings-style rows.
-  static Widget iconTile(BuildContext context, IconData icon, {Color? color}) {
-    final BrandTheme brand = BrandTheme.of(context);
-    final Color c = color ?? brand.accentInk;
-    return Container(
-      width: 40,
-      height: 40,
-      decoration: BoxDecoration(
-        color: c.withValues(alpha: 0.14),
-        borderRadius: BorderRadius.circular(AppRadius.md),
-      ),
-      child: Icon(icon, size: 22, color: c),
-    );
-  }
+  /// With [decorative] the tile only decorates (the words say the same), so
+  /// a compact row may leave it out. Without it the icon carries meaning
+  /// (a device kind, an alert type) and stays.
+  static Widget iconTile(BuildContext context, IconData icon, {Color? color, bool decorative = false}) =>
+      DsIconTile(icon, color: color, decorative: decorative);
+
+  /// Rows are compact on narrow screens (a folded phone's cover display is
+  /// about 344 dp) and at large text: icon tiles drop away and the gutter
+  /// shrinks, so the title and the switch get the room.
+  static bool compactFor(BuildContext context) =>
+      MediaQuery.sizeOf(context).width < 360 ||
+      MediaQuery.textScalerOf(context).scale(16) > 16 * 1.3;
 
   @override
   Widget build(BuildContext context) {
+    final bool compact = compactFor(context);
     final ColorScheme cs = Theme.of(context).colorScheme;
     final BrandTheme brand = BrandTheme.of(context);
     final Color titleColor = destructive ? AppColors.sosRed : cs.onSurface;
+    final Widget? lead = compact && leading is DsIconTile && (leading as DsIconTile).decorative ? null : leading;
     return Semantics(
       button: onTap != null,
       selected: selected,
@@ -78,14 +79,14 @@ class DsListRow extends StatelessWidget {
           child: ConstrainedBox(
             constraints: const BoxConstraints(minHeight: 56),
             child: Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: AppSpace.xl,
+              padding: EdgeInsets.symmetric(
+                horizontal: compact ? AppSpace.lg : AppSpace.xl,
                 vertical: AppSpace.md,
               ),
               child: Row(
                 children: <Widget>[
-                  if (leading != null) ...<Widget>[
-                    leading!,
+                  if (lead != null) ...<Widget>[
+                    lead,
                     const SizedBox(width: AppSpace.md),
                   ],
                   Expanded(
@@ -131,6 +132,31 @@ class DsListRow extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// The small rounded icon square at the start of a settings row.
+class DsIconTile extends StatelessWidget {
+  const DsIconTile(this.icon, {super.key, this.color, this.decorative = false});
+
+  final IconData icon;
+  final Color? color;
+
+  /// Purely decorative: compact rows may leave it out.
+  final bool decorative;
+
+  @override
+  Widget build(BuildContext context) {
+    final Color c = color ?? BrandTheme.of(context).accentInk;
+    return Container(
+      width: 40,
+      height: 40,
+      decoration: BoxDecoration(
+        color: c.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(AppRadius.md),
+      ),
+      child: Icon(icon, size: 22, color: c),
     );
   }
 }

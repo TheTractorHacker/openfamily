@@ -23,7 +23,7 @@ background.
 
 ## Self-test
 
-**Settings, Phone health** (self-test) checks permissions, battery exemptions
+**Settings, Advanced, Diagnostics** (self-test) checks permissions, battery exemptions
 and connectivity, and the server can warn the circle when a phone goes silent.
 See [Reliability](../reliability.md).
 

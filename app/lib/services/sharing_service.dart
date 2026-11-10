@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart' show ValueNotifier;
 
 import 'api_client.dart';
+import 'error_copy.dart';
 import 'e2ee/private_runtime.dart';
 import 'offline/offline_queue.dart';
 import 'offline/offline_sync.dart';
@@ -253,7 +254,7 @@ String sharingErrorMessage(Object e, {String action = 'do that'}) {
     if (e.status == 404) return 'That person or link is no longer available.';
     if (e.status == 409) return 'You have too many active links. Stop one first.';
     if (e.status >= 500) return 'The server had a problem. Try again shortly.';
-    if (e.message.isNotEmpty) return e.message;
+    if (e.message.isNotEmpty && e.status != 0) return e.message;
   }
-  return 'Could not $action. Check your connection and try again.';
+  return actionFailedMessage(e, action);
 }

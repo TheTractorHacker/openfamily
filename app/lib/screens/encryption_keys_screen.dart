@@ -48,6 +48,9 @@ class _EncryptionKeysScreenState extends State<EncryptionKeysScreen> {
   bool _loading = true;
   bool _busy = false;
   String? _error;
+
+  /// What failed, so the error state can name the cause (see describeError).
+  Object? _errorCause;
   ServerRecordCheck? _check;
   List<_CircleRow> _rows = <_CircleRow>[];
   List<E2eeAlarm> _alarms = <E2eeAlarm>[];
@@ -69,6 +72,7 @@ class _EncryptionKeysScreenState extends State<EncryptionKeysScreen> {
     setState(() {
       _loading = true;
       _error = null;
+      _errorCause = null;
       _keyProblem = null;
     });
     try {
@@ -188,12 +192,14 @@ class _EncryptionKeysScreenState extends State<EncryptionKeysScreen> {
         _loading = false;
         _keyProblem = LocalKeyProblem.locked;
         _error = const LocalKeyException(LocalKeyProblem.locked).message;
+        _errorCause = const LocalKeyException(LocalKeyProblem.locked);
       });
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _loading = false;
         _error = errorText(e);
+        _errorCause = e;
       });
     }
   }
@@ -213,7 +219,7 @@ class _EncryptionKeysScreenState extends State<EncryptionKeysScreen> {
     } on NeedsCrossSignatureException {
       if (!mounted) return;
       setState(() => _busy = false);
-      await Navigator.of(context).push<void>(MaterialPageRoute<void>(builder: (_) => LinkDeviceScreen(service: _svc)));
+      await Navigator.of(context).push<void>(MaterialPageRoute<void>(builder: (_) => LinkDeviceScreen(service: _svc, role: LinkRole.newPhone)));
       await _load();
     } catch (e) {
       if (mounted) {
@@ -269,7 +275,9 @@ class _EncryptionKeysScreenState extends State<EncryptionKeysScreen> {
             : _error != null
                 ? (_keyProblem == LocalKeyProblem.unreadable || _keyProblem == LocalKeyProblem.invalidated
                     ? _repairView()
-                    : LoadStateView(error: _error, offline: false, onRetry: _load))
+                    : (_errorCause != null
+                    ? LoadStateView.forError(_errorCause!, onRetry: _load)
+                    : LoadStateView(error: _error, offline: false, onRetry: _load)))
                 : _body(),
       ),
     );

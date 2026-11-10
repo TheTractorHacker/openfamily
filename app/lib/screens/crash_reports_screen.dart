@@ -5,6 +5,7 @@ import '../services/api_client.dart';
 import '../services/speed_units.dart';
 import '../theme/app_theme.dart';
 import '../widgets/ds/ds.dart';
+import '../services/error_copy.dart';
 
 /// Possible crashes detected from a sudden stop at driving speed, for you and
 /// your circle. Detection is an estimate from phone sensors and GPS; it never
@@ -70,11 +71,11 @@ class _CrashReportsScreenState extends State<CrashReportsScreen> {
         _enabled = m['detection_enabled'] != false;
         _loading = false;
       });
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _error = 'Could not load crash reports. Check your connection.';
+        _error = actionFailedMessage(e, 'load crash reports');
       });
     }
   }

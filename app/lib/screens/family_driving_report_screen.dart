@@ -374,7 +374,7 @@ class _State extends State<FamilyDrivingReportScreen> {
                       const SizedBox(height: AppSpace.md),
                       Text('Could not load the driving report', key: const Key('driving-lanes-failed'), style: AppType.headline, textAlign: TextAlign.center),
                       const SizedBox(height: AppSpace.sm),
-                      Text('Check your connection and try again. Your data is not affected.', style: AppType.secondary, textAlign: TextAlign.center),
+                      Text('Try again in a moment. Your data is not affected.', style: AppType.secondary, textAlign: TextAlign.center),
                       const SizedBox(height: AppSpace.lg),
                       DsPillButton(label: 'Try again', icon: Icons.refresh, onPressed: _loadLanes),
                     ]),
