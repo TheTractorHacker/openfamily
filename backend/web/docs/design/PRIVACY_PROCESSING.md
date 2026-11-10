@@ -925,10 +925,12 @@ cached identity that differs from the vault's is dropped.
 `server` key of this account that is in its own pre-reset key list, whose registration verifies and was signed by one of
 the account's own keys, and that the server itself reports as its pinned built-in device (same id and fingerprint). The
 new phone signs log action 13 over exactly that key. A server that does not keep it revokes it as before and the
-existing silent re-approval runs. Phones accept a server key only if it belongs to a circle admin and either it was
-registered after its owner's latest reset or a verified action-13 entry after that reset names it, signed by a listed
-approved phone of the same owner (`serverKeySurvivedResets`; the log is requested with `server_attach=1`). A server that
-withholds the entry makes the key unusable (fail closed).
+existing silent re-approval runs. Phones accept a server key only if the verified key log vouches for it
+(`serverKeyVouched`; the log is requested with `server_attach=1`): its registration is logged and matches, its voucher
+chain reaches the owner's self-registered root, the owner is a circle admin (or a circle admin logged an approval of the
+key), and after an owner reset the owner's newest root phone signed the action-13 entry. A reset the server serves
+redacted is recognised from the key list and still needs the attach. A server that withholds, redacts or invents entries
+makes the key unusable (fail closed): no phone then signs a lane pref for it or wraps the server line key to it.
 
 **What can still go wrong, honestly.** An admin can force server processing; a member who does not want it can only
 leave. A modified app can still stay on the phone line (nothing can force that). A phone that never gets the SK wrap (no

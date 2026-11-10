@@ -535,7 +535,7 @@ void main() {
     testWidgets('waiting for approval', (t) async {
       await pumpFailing(t, const ApiException(403, 'this device is not approved in this circle'));
       expect(find.text('Waiting for approval'), findsOneWidget);
-      expect(txt('updates by itself'), findsOneWidget);
+      expect(txt('pull down to check again'), findsOneWidget);
     });
 
     testWidgets('anything else names the step and keeps Try again', (t) async {
@@ -551,6 +551,12 @@ void main() {
       await pumpScreen(t, ProcessingScreen(circle: adminCircle, controller: c));
       expect(find.byKey(const Key('proc-problem')), findsOneWidget);
       expect(find.byKey(const Key('proc-status-card')), findsOneWidget);
+      // Honest about what it does not know: no lane claim in the status card or the member rows, no promise of a retry.
+      expect(txt('Not confirmed right now'), findsWidgets);
+      expect(txt('The server cannot read this circle'), findsNothing);
+      expect(txt('Keeps data on their phone'), findsNothing);
+      expect(txt('tries again by itself'), findsNothing);
+      expect(find.byKey(const Key('proc-required-notice')), findsNothing);
     });
   });
 

@@ -641,6 +641,25 @@ func (x *LogIndex) AttachVoucher(deviceID string) (actorID, actorPub string, seq
 	return *a.ActorDeviceID, *a.ActorPub, a.Seq, true
 }
 
+// KeptAnchor is the trust anchor a server key must use after an owner reset that KEPT it, derived only from the
+// verified log: the new root phone that signed the re-attachment of exactly this key (same user, same fingerprint as
+// the logged registration, which must be fingerprintHex). It is how a server device that missed the live
+// re-attachment (a restart or a failed write between the reset and the move of its anchor) finds its anchor again by
+// itself. False when the log shows no reset since the registration or no valid attach: the stored anchor stays.
+func (x *LogIndex) KeptAnchor(deviceID, fingerprintHex string) (*Anchor, bool) {
+	if x == nil {
+		return nil, false
+	}
+	if reg, ok := x.regs[deviceID]; !ok || reg.Ref == nil || *reg.Ref != fingerprintHex {
+		return nil, false
+	}
+	id, pub, _, ok := x.AttachVoucher(deviceID)
+	if !ok {
+		return nil, false
+	}
+	return &Anchor{DeviceID: id, EdPub: pub}, true
+}
+
 // Revoked reports whether the log retires the device at any point.
 func (x *LogIndex) Revoked(deviceID string) bool {
 	_, ok := x.RevokeSeq(deviceID)

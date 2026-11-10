@@ -130,18 +130,8 @@ class LanesService {
   Future<List<LogEntry>?> _verifiedLog({bool force = false}) async {
     final ({DateTime at, List<LogEntry> entries})? c = _logCache;
     if (!force && c != null && clock.now().difference(c.at) < logTtl) return c.entries;
-    final List<LogEntry> all = <LogEntry>[];
-    int after = 0;
-    LogHead head = LogHead(0, E2ee.genesisHash);
-    for (int page = 0; page < 200; page++) {
-      final ({List<LogEntry> entries, LogHead head}) r = await api.log(after);
-      head = r.head;
-      all.addAll(r.entries);
-      if (r.entries.isEmpty || r.entries.last.seq >= head.seq) break;
-      after = r.entries.last.seq;
-    }
-    final LogCheck check = await verifyLogSlice(pinned: await service.trust.pinnedHead(), entries: all, head: head);
-    if (!check.ok) {
+    final List<LogEntry>? all = await service.verifiedFullLog();
+    if (all == null) {
       _logCache = null;
       return null;
     }
@@ -225,14 +215,15 @@ class LanesService {
     DeviceKey? serverKey;
     if (proc.serverDeviceId != null) {
       final DeviceKey? k = deviceById[proc.serverDeviceId];
-      // Also: a server key registered before its owner's latest key reset only counts if the new root phone signed a
-      // re-attachment of exactly that key (log action 13). Without it the key is NOT the server key.
+      // What the server reports is not enough: the key must be vouched for in the verified log by an approved device of
+      // its owner (and, after an owner reset, re-attached by the owner's new root phone), or it is NOT the server key
+      // and no phone signs or wraps anything for it.
       if (k != null &&
           k.kind == 'server' &&
           k.isActive &&
           k.approved == true &&
           k.fingerprint == proc.serverFingerprint &&
-          serverKeySurvivedResets(log, k, deviceById, admins)) {
+          await serverKeyVouched(log, k, deviceById, admins: admins, circleId: circleId)) {
         serverKey = k;
       }
     }

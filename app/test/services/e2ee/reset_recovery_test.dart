@@ -323,6 +323,43 @@ void main() {
       expect(keep, isNull);
     });
 
+    test('a server key the key log does not vouch for (invented, or swapped under the real id) is never the server key', () async {
+      await productionBefore(keepSupported: true);
+      final FakeCircle c = server.circles[priv]!;
+      // The lying server keeps the real key but swaps its public keys and fingerprint for ones it holds, marks it approved and pinned.
+      final ViewerFixture mallory = await ViewerFixture.create(uA);
+      final DeviceKey real = server.keys[uA]!.firstWhere((DeviceKey k) => k.deviceId == srvId);
+      final DeviceKey fake = DeviceKey(
+          deviceId: real.deviceId, userId: uA, kind: 'server', edPub: mallory.edPub, xPub: mallory.xPub,
+          fingerprint: E2ee.hex(await E2ee.fingerprint(mallory.edPub, mallory.xPub)), digits: '', short: '',
+          registeredByDeviceId: real.registeredByDeviceId, registeredByPub: real.registeredByPub, registrationAction: real.registrationAction,
+          registrationSignature: real.registrationSignature, initial: true, label: 'Orbitly server', createdAt: real.createdAt, approved: true);
+      final int i = server.keys[uA]!.indexOf(real);
+      server.keys[uA]![i] = fake;
+      for (final Phone p in <Phone>[bob, alice1]) {
+        final CircleLanes v = await p.lanes.refresh(priv, force: true);
+        expect(v.serverKey, isNull, reason: 'the log shows another fingerprint for this id');
+      }
+      // An invented key under a new id, no log entry at all.
+      final DeviceKey invented = DeviceKey(
+          deviceId: 'abababab-abab-4bab-8bab-abababababab', userId: uA, kind: 'server', edPub: mallory.edPub, xPub: mallory.xPub,
+          fingerprint: fake.fingerprint, digits: '', short: '', registeredByDeviceId: real.registeredByDeviceId,
+          registeredByPub: real.registeredByPub, registrationAction: E2ee.actRegister, registrationSignature: Uint8List(64), initial: true,
+          label: 'Orbitly server', createdAt: DateTime.utc(2026, 11, 10), approved: true);
+      server.keys[uA]!.add(invented);
+      server.pinnedServerDevice = invented.deviceId;
+      final int prefsBefore = server.log.where((Map<String, dynamic> e) => e['action'] == E2ee.actProcessingPref).length;
+      c.skWraps.removeWhere((String k, _) => k.endsWith('/${invented.deviceId}'));
+      for (final Phone p in <Phone>[bob, alice1]) {
+        expect((await p.lanes.refresh(priv, force: true)).serverKey, isNull);
+        await p.lanes.signRequiredLaneIfDue(priv);
+        await p.lanes.renewServerChoiceIfDue(priv);
+        await p.lanes.maintain(priv);
+      }
+      expect(server.log.where((Map<String, dynamic> e) => e['action'] == E2ee.actProcessingPref).length, prefsBefore, reason: 'no phone signed a pref for it');
+      expect(c.skWraps.keys.where((String k) => k.endsWith('/${invented.deviceId}')), isEmpty, reason: 'no phone wrapped the server line key to it');
+    });
+
     test('a kept server key is NOT accepted without the new root phone\'s signed re-attachment', () async {
       await productionBefore(keepSupported: false);
       final String oldServer = srvId;

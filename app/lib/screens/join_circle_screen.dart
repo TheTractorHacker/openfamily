@@ -202,9 +202,9 @@ class _JoinCircleScreenState extends State<JoinCircleScreen> {
     String text;
     if (p == null) {
       text = 'If the circle is a Private circle, its admin may allow server processing. You then choose for your own data '
-          'after joining, and the safe choice (Phone only) is equal to the other. Some circles require server processing; '
-          'in that case you will be asked to give your own consent or leave. The server operator can read the data of '
-          'members who allow it.';
+          'after joining, and the safe choice (Phone only) is equal to the other. Some circles require server processing: '
+          'your phone then switches over by itself when you join, with no question, and members cannot turn it off. '
+          'If you do not want that, do not join. The server operator can read the data of members who use it.';
     } else if (!p.isPrivate) {
       text = 'This is a normal circle, not a Private circle: your position is sent to the server in readable form.';
     } else if (p.legacy) {
@@ -214,9 +214,10 @@ class _JoinCircleScreenState extends State<JoinCircleScreen> {
     } else if (!p.serverAssist) {
       text = 'Private circle. Server processing: off. Your phone does the processing and the server cannot read your location.';
     } else if (p.required) {
-      text = 'Private circle. Server processing: required. To take part you must give your own consent on your phone to let the '
-          'server read your location, trips and driving data, otherwise you cannot share with this circle. Anyone who runs or backs '
-          'up this server can read the data of members who allow it.';
+      text = 'Private circle. Server processing: required. The family admin requires it, so your phone switches over by itself as '
+          'soon as you join: you are not asked and members cannot turn it off. The server can then read your location, trips and '
+          'driving data. If you do not want that, do not join this circle. Anyone who runs or backs up this server can read '
+          'the data of members who use it.';
     } else if (p.autoApply) {
       text = 'This circle uses the server by default; you can opt out. When you open the app after joining, your phone turns on '
           'server processing for you, so maps, history and driving reports work, and you see a notice. One tap on "Keep on my phone" '

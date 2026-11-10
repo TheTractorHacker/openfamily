@@ -313,21 +313,25 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
                   key: Key('member-${m.userId}'),
                   leading: DsListRow.iconTile(context, Icons.person_outline),
                   title: m.isMe ? '${m.name} (you)' : m.name,
-                  subtitle: s.legacy
+                  subtitle: s.unconfirmed
+                      ? 'Not confirmed right now'
+                      : s.legacy
                       ? 'Old mode: the server may read it'
                       : m.serverAssisted
                           ? (s.required ? 'On the server' : 'Allowed server processing')
                           : (s.required
                               ? ProcessingCopy.catchingUp
                               : (s.assistOn && !m.verified ? 'Uses the phone (has not chosen)' : 'Keeps data on their phone')),
-                  info: s.legacy
+                  info: s.unconfirmed
+                      ? null
+                      : s.legacy
                       ? (m.isChild ? 'Child account. Old mode: the server may read it if everyone allowed it.' : 'Old mode: the server may read this circle if everyone allowed it.')
                       : (s.required && !m.serverAssisted
                           ? ProcessingCopy.catchingUpInfo
                           : (s.assistOn && !m.verified && !m.serverAssisted
                               ? '${m.name} has not chosen. Until they do, their data stays on their phone and is not sent to the server for processing.'
                               : null)),
-                  trailing: s.legacy
+                  trailing: s.unconfirmed || s.legacy
                       ? null
                       : (s.required && !m.serverAssisted
                           ? const CatchingUpChip()
@@ -416,7 +420,9 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
   }
 
   Widget _statusCard(ProcessingSnapshot s) {
-    final (IconData icon, Color color, String title, String sub) = s.legacy
+    final (IconData icon, Color color, String title, String sub) = s.unconfirmed
+        ? (Icons.sync_problem, AppColors.statusOrange, 'Not confirmed right now', 'Your phone keeps sending your position to the family, encrypted.')
+        : s.legacy
         ? (Icons.dns_outlined, AppColors.sosRed, ProcessingCopy.legacyStatusTitle, ProcessingCopy.legacyStatusBody)
         : !s.assistOn
         ? (Icons.smartphone, AppColors.sky, 'Phones only', 'The server cannot read this circle.')
@@ -508,6 +514,8 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
   List<Widget> _myChoice(ProcessingSnapshot s, ProcessingMember? me) {
     final ColorScheme cs = Theme.of(context).colorScheme;
     final bool mine = me?.serverAssisted ?? false;
+    // Unknown state: no claim about the lane, no control (the note above says what is going on).
+    if (s.unconfirmed) return const <Widget>[];
     // Required by the admin: no choice, no dead end. A calm notice; the phone signs by itself.
     if (s.required && !s.legacy) {
       return <Widget>[

@@ -180,7 +180,7 @@ class E2eeService {
   final Future<String> Function() userIdProvider;
 
   /// Capabilities advertised in device registration (see [kCapLanes]).
-  static const List<String> capabilities = <String>[kCapLanes, kCapChat];
+  static const List<String> capabilities = <String>[kCapLanes, kCapChat, kCapRequiredServer];
 
   static const String _seedName = 'identity_seed';
   static const String _deviceName = 'device_id';
@@ -420,9 +420,11 @@ class E2eeService {
   }
 
   /// The one server key a reset may KEEP, or null. Strict: it must be an active `server` key of THIS account from this
-  /// phone's own pre-reset key list, whose registration verifies and was signed by one of this account's own keys, and it
-  /// must be the key the server itself reports as its pinned built-in device (same id, same fingerprint). Anything else
-  /// (an unknown, foreign, unpinned or unsigned key) is never attached: it is revoked with the rest, as before.
+  /// phone's own pre-reset key list, which the VERIFIED key log shows vouched for by an approved key of this account
+  /// ([serverKeyVouched]: the registration entry is in the log and matches, the voucher chain reaches a self-registered
+  /// root), and it must be the key the server itself reports as its pinned built-in device (same id, same fingerprint).
+  /// Anything else (an unknown, foreign, unpinned, unlogged or unsigned key) is never attached: it is revoked with the
+  /// rest, as before. What the key list alone says never makes this phone sign.
   @visibleForTesting
   Future<DeviceKey?> serverKeyToKeep(List<DeviceKey> before) async {
     try {
@@ -430,16 +432,35 @@ class E2eeService {
       final ServerDeviceInfo? pinned = p.device;
       if (!p.builtin || pinned == null) return null;
       final LocalIdentity? me = await identity();
-      final Set<String> mineIds = <String>{for (final DeviceKey k in before) k.deviceId};
+      final Map<String, DeviceKey> byId = <String, DeviceKey>{for (final DeviceKey k in before) k.deviceId: k};
+      List<LogEntry>? log;
       for (final DeviceKey k in before) {
         if (!k.isActive || k.kind != 'server' || k.deviceId != pinned.deviceId) continue;
         if (me != null && k.userId != me.userId) continue;
         if (k.fingerprint != pinned.fingerprint.toLowerCase()) continue;
-        if (!mineIds.contains(k.registeredByDeviceId) || !await verifyRegistration(k)) continue;
+        log ??= await verifiedFullLog();
+        if (log == null || !await serverKeyVouched(log, k, byId)) continue;
         return k;
       }
     } catch (_) {}
     return null;
+  }
+
+  /// The whole key log, fetched from entry 1 and verified (chain, signatures, my pinned head). Null when it does not
+  /// verify. Throws on a transport error.
+  Future<List<LogEntry>?> verifiedFullLog() async {
+    final List<LogEntry> all = <LogEntry>[];
+    int after = 0;
+    LogHead head = LogHead(0, E2ee.genesisHash);
+    for (int page = 0; page < 200; page++) {
+      final ({List<LogEntry> entries, LogHead head}) r = await api.log(after);
+      head = r.head;
+      all.addAll(r.entries);
+      if (r.entries.isEmpty || r.entries.last.seq >= head.seq) break;
+      after = r.entries.last.seq;
+    }
+    final LogCheck check = await verifyLogSlice(pinned: await trust.pinnedHead(), entries: all, head: head);
+    return check.ok ? all : null;
   }
 
   /// Drops the identity this isolate cached, so the next [identity] call reads the vault again. A background isolate

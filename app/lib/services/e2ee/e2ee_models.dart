@@ -72,6 +72,10 @@ class DeviceKey {
   bool get supportsLanes => caps.contains(kCapLanes);
   bool get supportsChat => caps.contains(kCapChat);
 
+  /// Whether this phone signs its own lane by itself in a circle that requires server processing (an older app seals
+  /// nothing there until it updates).
+  bool get supportsRequiredServer => caps.contains(kCapRequiredServer);
+
   bool get isRecovery => kind == 'recovery';
   bool get isActive => revokedAt == null;
   bool get isRoot => registeredByDeviceId == deviceId;
@@ -116,6 +120,9 @@ class DeviceKey {
 
 /// Capability string of the processing-lanes format (v2 items, SK wraps).
 const String kCapLanes = 'lanes2';
+
+/// Capability string: signs its own server-lane choice by itself when the family admin requires server processing.
+const String kCapRequiredServer = 'reqsrv1';
 
 /// Capability string of encrypted chat (docs/design/E2EE_CHAT.md).
 const String kCapChat = 'chat2';

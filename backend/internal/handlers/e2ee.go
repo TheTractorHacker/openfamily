@@ -484,9 +484,11 @@ func (s *Server) E2EERegisterDevice(w http.ResponseWriter, r *http.Request) {
 		}
 		if keep != nil {
 			if err := s.ServerDevice.Reattach(req.DeviceID, p.ed, keep.sig); err != nil {
-				// The database keeps the key active and attached; the device re-reads its own
-				// anchor from the next successful attach or restart. No key material is logged.
-				slog.Error("the built-in server device could not move its anchor to the owner's new phone", "err", err.Error())
+				// The database keeps the key active and attached (that is what server_kept reports, and what
+				// every phone sees). The device does not depend on this live call: its trust derives the
+				// anchor from the verified key log (e2ee.LogIndex.KeptAnchor) on every cycle, so a failed
+				// write or a restart in this window heals by itself. No key material is logged.
+				slog.Error("the built-in server device could not move its stored anchor to the owner's new phone; it derives it from the key log", "err", err.Error())
 			}
 			serverKept = true
 		}

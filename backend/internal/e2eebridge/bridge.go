@@ -355,6 +355,14 @@ func (b *bridge) trust(st *circleState) e2ee.Trust {
 	if b.id.f.ApprovedBy != "" && b.id.f.ApproverEdPub != "" {
 		t.Anchor = &e2ee.Anchor{DeviceID: b.id.f.ApprovedBy, EdPub: b.id.f.ApproverEdPub}
 	}
+	// A server key kept across an owner reset hangs on the new root phone that re-attached it. The log says so on its
+	// own, so a device that missed the live move of its anchor (restart, failed write) still finds it: derived from
+	// the verified log only, for this very key and fingerprint, never from the API's say-so.
+	if b.id.f.RegisteredAt != "" {
+		if a, ok := b.logIdx.KeptAnchor(b.id.f.DeviceID, hex.EncodeToString(b.id.fp)); ok {
+			t.Anchor = a
+		}
+	}
 	return t
 }
 

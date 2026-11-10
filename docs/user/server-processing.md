@@ -81,6 +81,9 @@ it is on:
   ever sent in the clear.
 * The owner's screen (**Encryption keys > Server processing**) says in plain words **who is on the server** and
   **who is still catching up**.
+* A member whose Orbitly app is **older than 0.26.27** cannot switch over by itself. Their phone keeps sending nothing
+  new to this circle until they update; the circle name shows "(update the app to keep sharing with this circle)" on
+  their phone and your screen lists them as needing the new app. Ask them to update.
 * Turning the switch off is a signed policy change too. Members can then choose for themselves again.
 
 **The honest consequence: the admin can force it.** Someone who runs the circle can decide that everyone's location

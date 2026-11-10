@@ -306,7 +306,7 @@ ProcessingErrorText processingErrorText(Object e, {String step = "Could not chec
     if (e.status >= 500) return const ProcessingErrorText('The server had a problem', 'The server had a problem. Try again shortly.');
     if (e.status == 403 && e.message.toLowerCase().contains('approv')) {
       return const ProcessingErrorText('Waiting for approval',
-          'This phone is waiting to be approved in this circle. A circle admin approves it once; this screen updates by itself after that.',
+          'This phone is waiting to be approved in this circle. A circle admin approves it once; pull down to check again after that.',
           icon: Icons.hourglass_top);
     }
     if (e.status == 404) {
@@ -318,7 +318,7 @@ ProcessingErrorText processingErrorText(Object e, {String step = "Could not chec
   if (k != null) return ProcessingErrorText("This phone's encryption key cannot be opened right now", k.message, icon: Icons.key_off_outlined);
   if (e is StateError && e.message.toLowerCase().contains('approv')) {
     return const ProcessingErrorText('Waiting for approval',
-        'This phone is waiting to be approved in this circle. A circle admin approves it once; this screen updates by itself after that.',
+        'This phone is waiting to be approved in this circle. A circle admin approves it once; pull down to check again after that.',
         icon: Icons.hourglass_top);
   }
   if (e is StateError && e.message.isNotEmpty) return ProcessingErrorText('Could not finish', e.message);

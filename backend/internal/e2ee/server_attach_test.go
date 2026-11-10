@@ -151,3 +151,37 @@ func TestServerAttachActionIsPartOfTheSignedMessage(t *testing.T) {
 		t.Fatal("an unknown action code is accepted")
 	}
 }
+
+func TestKeptAnchorComesFromTheVerifiedLogAlone(t *testing.T) {
+	l := serverFlow(t)
+	srv := l.recs[tid(3)]
+	idx, c := l.index()
+	if !c.OK() {
+		t.Fatal(c.Detail)
+	}
+	if _, ok := idx.KeptAnchor(tid(3), srv.Fingerprint); ok {
+		t.Fatal("no reset yet: the stored anchor stays")
+	}
+	l.deviceAs(7, 0, ActReset)
+	idx, _ = l.index()
+	if _, ok := idx.KeptAnchor(tid(3), srv.Fingerprint); ok {
+		t.Fatal("a reset without an attach gives no anchor")
+	}
+	l.attach(7, 3)
+	idx, _ = l.index()
+	root := l.recs[tid(7)]
+	a, ok := idx.KeptAnchor(tid(3), srv.Fingerprint)
+	if !ok || a.DeviceID != root.DeviceID || a.EdPub != root.Ed25519Pub {
+		t.Fatalf("anchor = %+v %v", a, ok)
+	}
+	if _, ok := idx.KeptAnchor(tid(3), "00"+srv.Fingerprint[2:]); ok {
+		t.Fatal("an anchor was given for another fingerprint")
+	}
+	if _, ok := idx.KeptAnchor(tid(9), srv.Fingerprint); ok {
+		t.Fatal("an anchor was given for an unlogged key")
+	}
+	var nilIdx *LogIndex
+	if _, ok := nilIdx.KeptAnchor(tid(3), srv.Fingerprint); ok {
+		t.Fatal("nil index")
+	}
+}

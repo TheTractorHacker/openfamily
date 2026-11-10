@@ -80,7 +80,11 @@ class ProcessingSnapshot {
 
   /// Members whose app cannot yet read the server line (admin cannot turn on).
   final List<String> notReady;
+
+  /// Set when the processing records could not be checked right now. Everything else in the snapshot is then only what
+  /// this phone remembers: a screen must not present it as the current state.
   final String? problem;
+  bool get unconfirmed => problem != null;
 
   /// Web viewers and bridges that members approved for this circle (any member can see this).
   final List<ProcessingViewer> viewers;
@@ -155,7 +159,7 @@ class LanesProcessingController implements ProcessingController {
   /// failure or this phone's own key): the circle and its members from the server, the lane facts this phone verified
   /// earlier, and a plain [ProcessingSnapshot.problem]. Never a dead end: positions keep going to the family.
   static const String checkProblem = "Could not confirm this circle's server processing settings right now. Your phone keeps "
-      'sending your position to the family, encrypted. This screen tries again by itself; pull down to try now.';
+      'sending your position to the family, encrypted. Pull down to try again.';
 
   Future<ProcessingSnapshot> _degraded(String circleId, String me) async {
     final CircleE2eeState st = await lanes.api.circleState(circleId); // a transport failure here is the real error
@@ -252,7 +256,13 @@ class LanesProcessingController implements ProcessingController {
       serverKeyFingerprint: sk?.fingerprint,
       notReady: <String>[
         for (final CircleE2eeMember m in st.members)
-          if (m.devices.any((DeviceKey d) => d.kind == 'device' && d.approved == true && d.isActive && !d.supportsLanes)) (m.name.isEmpty ? m.userId : m.name)
+          // An app that predates `required_server` cannot sign its own lane: it needs the new app, not a wait.
+          if (m.devices.any((DeviceKey d) =>
+              d.kind == 'device' &&
+              d.approved == true &&
+              d.isActive &&
+              (!d.supportsLanes || (cl.policy.assist && cl.policy.memberOptOut == E2ee.optOutRequiredServer && !d.supportsRequiredServer))))
+            (m.name.isEmpty ? m.userId : m.name)
       ],
       problem: cl.problem,
       viewers: <ProcessingViewer>[

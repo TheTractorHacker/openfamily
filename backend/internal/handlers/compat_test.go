@@ -150,6 +150,30 @@ func TestPrivateCircleShimPerVersion(t *testing.T) {
 	}
 }
 
+// "Require server processing": apps below required_server are told in the circle name; the circle stays usable.
+func TestRequiredServerCircleNudgesOldApps(t *testing.T) {
+	mk := func(ver string, opt string) circleOut {
+		ctx := context.Background()
+		if v, ok := compat.Parse(ver); ok {
+			ctx = middleware.ContextWithAppInfo(ctx, middleware.AppInfo{Version: v, Known: true})
+		}
+		c := circleOut{Name: "Family", E2EEMode: "private", ServerAssist: true, MemberOptOut: opt}
+		applyCircleCompat(ctx, &c)
+		return c
+	}
+	if c := mk("0.26.26", "required_server"); c.UpdateRequired || !strings.Contains(c.Name, "update the app to keep sharing") || c.MinAppVersion != "0.26.27" {
+		t.Errorf("old app: %+v", c)
+	}
+	for _, v := range []string{"0.26.27", "0.27.0", ""} {
+		if c := mk(v, "required_server"); c.Name != "Family" || c.UpdateRequired {
+			t.Errorf("%q: %+v", v, c)
+		}
+	}
+	if c := mk("0.26.26", "allowed"); c.Name != "Family" {
+		t.Errorf("an optional circle must not nudge: %+v", c)
+	}
+}
+
 func TestRefuseUnsupportedAppEnforcement(t *testing.T) {
 	pinCompatReleases(t)
 	run := func(enforce bool, ver string) (refused bool, code int, body string) {

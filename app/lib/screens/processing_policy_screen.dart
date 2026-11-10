@@ -145,9 +145,11 @@ class _ProcessingPolicyScreenState extends State<ProcessingPolicyScreen> {
 
   Widget _body(ProcessingSnapshot s) {
     final bool admin = s.iAmAdmin;
-    final bool canEdit = admin && !_busy && s.isPrivate && !s.legacy;
+    final bool canEdit = admin && !_busy && s.isPrivate && !s.legacy && !s.unconfirmed;
     String? blocked;
-    if (!s.isPrivate) {
+    if (s.unconfirmed) {
+      blocked = 'The current settings could not be confirmed right now, so they cannot be changed. Pull down on the previous screen to try again.';
+    } else if (!s.isPrivate) {
       blocked = 'This is not a Private circle.';
     } else if (s.legacy) {
       blocked = 'This circle is in the old trusted-server mode. Upgrade it first (Server processing > Upgrade this circle).';

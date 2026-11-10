@@ -32,13 +32,14 @@ import (
 
 const (
 	capLanes2         = "lanes2"
-	capChat2          = "chat2" // understands encrypted chat (docs/design/E2EE_CHAT.md)
+	capChat2          = "chat2"   // understands encrypted chat (docs/design/E2EE_CHAT.md)
+	capRequired1      = "reqsrv1" // signs its own lane by itself in a circle that requires server processing
 	processingOpsHour = 60
 	upgradeOpsHour    = 10
 	maxStatementsOut  = 30
 )
 
-var knownCaps = map[string]bool{capLanes2: true, capChat2: true}
+var knownCaps = map[string]bool{capLanes2: true, capChat2: true, capRequired1: true}
 
 // cleanCaps keeps only known capability names (sorted, unique, at most 8).
 func cleanCaps(in []string) []string {
