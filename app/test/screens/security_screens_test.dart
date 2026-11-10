@@ -9,6 +9,8 @@ import 'package:openfamily/screens/security_screen.dart';
 import 'package:openfamily/screens/sessions_screen.dart';
 import 'package:openfamily/screens/two_factor_screen.dart';
 import 'package:openfamily/services/api_client.dart';
+import 'package:openfamily/services/e2ee/e2ee_crypto.dart';
+import 'package:openfamily/services/e2ee/key_backup.dart';
 import 'package:openfamily/widgets/ds/ds.dart';
 
 import '../support/fake_security_api.dart';
@@ -315,6 +317,89 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.textContaining('Off. Add'), findsOneWidget);
       expect(find.text('Issue a reset code'), findsNothing);
+    });
+
+    testWidgets('the reinstall switch: off removes the copy, on saves it again', (tester) async {
+      _tall(tester);
+      final MemoryPlatformKeyStore store = MemoryPlatformKeyStore();
+      final MemoryKeyBackupPrefs prefs = MemoryKeyBackupPrefs();
+      final KeyBackup kb = KeyBackup(store: store, prefs: prefs);
+      await tester.runAsync(() => kb.save(BackedUpIdentity('u', 'd', E2ee.randomBytes(32))));
+      int saves = 0;
+      await tester.pumpWidget(_wrap(SecurityScreen(
+        api: FakeSecurityApi(account: _on),
+        keyBackup: kb,
+        backUpNow: () async {
+          saves++;
+          return true;
+        },
+      )));
+      await tester.pumpAndSettle();
+      expect(find.text("Keep this phone's key safe through reinstalls"), findsOneWidget);
+      expect(find.textContaining('Turn off to keep the key only'), findsOneWidget);
+      await tester.runAsync(() async {
+        await tester.tap(find.byKey(const Key('key-backup-switch')));
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      });
+      await tester.pumpAndSettle();
+      expect(prefs.on, isFalse);
+      expect(store.data, isEmpty);
+      expect(tester.widget<Switch>(find.byType(Switch).last).value, isFalse);
+      await tester.runAsync(() async {
+        await tester.tap(find.byKey(const Key('key-backup-switch')));
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      });
+      await tester.pumpAndSettle();
+      expect(prefs.on, isTrue);
+      expect(saves, 1);
+    });
+
+    testWidgets('the reinstall row says so when this phone cannot keep a copy', (tester) async {
+      _tall(tester);
+      final MemoryPlatformKeyStore store = MemoryPlatformKeyStore()..failAll = true; // no Play services
+      final KeyBackup kb = KeyBackup(store: store, prefs: MemoryKeyBackupPrefs());
+      await tester.pumpWidget(_wrap(SecurityScreen(api: FakeSecurityApi(account: _on), keyBackup: kb)));
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Google Play services is missing'), findsOneWidget);
+    });
+
+    testWidgets('turning the reinstall switch on says when the copy could not be saved', (tester) async {
+      _tall(tester);
+      final MemoryKeyBackupPrefs prefs = MemoryKeyBackupPrefs()..on = false;
+      final KeyBackup kb = KeyBackup(store: MemoryPlatformKeyStore(), prefs: prefs);
+      await tester.pumpWidget(_wrap(SecurityScreen(
+        api: FakeSecurityApi(account: _on),
+        keyBackup: kb,
+        backUpNow: () async => false,
+      )));
+      await tester.pumpAndSettle();
+      await tester.runAsync(() async {
+        await tester.tap(find.byKey(const Key('key-backup-switch')));
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      });
+      await tester.pumpAndSettle();
+      expect(find.textContaining('could not be saved right now'), findsWidgets);
+      expect(find.textContaining('could not be removed'), findsNothing);
+    });
+
+    testWidgets('a setting that could not be stored leaves the switch where it was, with the right message',
+        (tester) async {
+      _tall(tester);
+      final MemoryKeyBackupPrefs prefs = MemoryKeyBackupPrefs()
+        ..on = false
+        ..failWrites = true;
+      final KeyBackup kb = KeyBackup(store: MemoryPlatformKeyStore(), prefs: prefs);
+      await tester.pumpWidget(_wrap(SecurityScreen(api: FakeSecurityApi(account: _on), keyBackup: kb)));
+      await tester.pumpAndSettle();
+      await tester.runAsync(() async {
+        await tester.tap(find.byKey(const Key('key-backup-switch')));
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      });
+      await tester.pumpAndSettle();
+      expect(find.text('The setting could not be turned on. Nothing was changed.'), findsOneWidget);
+      expect(find.textContaining('could not be removed'), findsNothing);
+      expect(tester.widget<Switch>(find.byType(Switch).last).value, isFalse);
     });
 
     testWidgets('large text scale does not overflow', (tester) async {

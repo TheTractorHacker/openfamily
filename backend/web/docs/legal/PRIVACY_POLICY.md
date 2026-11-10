@@ -64,7 +64,16 @@ The server stores what is needed to run your circle:
 
 The app itself stores a sign-in token, settings and an offline queue on your phone.
 Secrets for end-to-end encrypted circles stay on your phone (on iPhone wrapped by a
-key in the Secure Enclave where available) and are not in cloud backups.
+key in the Secure Enclave where available) and are not in cloud backups. So that you
+do not have to set up encryption again after reinstalling the app, a sealed copy of
+this phone's own key (not of your circle keys) is kept outside the app: on Android in
+Google Play services Block Store, and, when your phone has a screen lock, also in your
+Google account, end-to-end encrypted by Google (Orbitly's server never receives it);
+on iPhone in the keychain, which an encrypted iPhone backup can carry to a restored
+iPhone, and which is not synced through iCloud Keychain. Google or Apple therefore hold
+an encrypted copy of that one key. It is used only when you sign in to the same account
+and the server still lists that key as active. You can turn this off in Settings,
+Security, "Keep this phone's key safe through reinstalls", which deletes the copy.
 
 ## End-to-end encrypted ("Private") circles
 

@@ -77,6 +77,12 @@ class MainActivity : FlutterFragmentActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "app.openfamily/diagnostics")
             .setMethodCallHandler { call, result -> diagnostics.handle(call, result) }
 
+        // "Keep this phone's key safe through reinstalls": Block Store, local only
+        // (see KeyBackupChannel.kt). Main engine only: restore runs at sign-in.
+        val keyBackup = KeyBackupChannel(applicationContext)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "app.openfamily/key_backup")
+            .setMethodCallHandler { call, result -> keyBackup.handle(call, result) }
+
         // Wear OS companion bridge; a no-op without Play services or a paired
         // watch (see WatchBridgePlugin.kt).
         WatchBridgePlugin.register(applicationContext, flutterEngine.dartExecutor.binaryMessenger)

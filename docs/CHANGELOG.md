@@ -29,6 +29,12 @@ Update the server first, then the phones. The server part works with every app v
 - The Server processing screen no longer promises to retry by itself, and when the settings cannot be confirmed it says "Not confirmed right now" instead of showing the last remembered state as current.
 - Database migration 000410 (adds `e2ee_server_attach`, follows the attach in `e2ee_device_approved`, relaxes `e2ee_item_guard`); it has a down file.
 
+## v0.26.28 (2026-11-10)
+
+App-only release (the server needs no change). Install over the current app.
+
+- **Your encryption key survives reinstalling the app.** Deleting Orbitly used to delete this phone's key for Private circles, so after a reinstall you had to reset your keys and everyone had to approve you again. Now a sealed copy of the phone's own key is kept outside the app (Android: Google Play services Block Store, which also stores it end-to-end encrypted in your Google account when the phone has a screen lock; iPhone: the keychain, carried by an encrypted iPhone backup, never synced to iCloud Keychain). When you install again and sign in to the same account, the key comes back by itself, with the same safety number and no approval. It only comes back when the server still lists that key as active; after **Reset my keys** or a revoked key, a new key is made as before. If the copy cannot be read for a moment, the app does not make a new key over it; it asks you to try again. **Set this phone up again** (for a key that cannot be read) keeps the copy, so the same key can come back. Trade-off: Google (or your iPhone backup) holds an encrypted copy of that one key; a restored new phone shares the key with the old one until you revoke the old one. Turn it off in **Settings, Security, Keep this phone's key safe through reinstalls** (this deletes the copy). Not yet tested on a real phone. See [Reinstalling Orbitly](user/reinstalling.md).
+
 ## v0.26.26 (2026-11-10)
 
 App-only release (the server needs no change; v0.26.25 fixed the database connections and needs a server update). Install over the current app.
