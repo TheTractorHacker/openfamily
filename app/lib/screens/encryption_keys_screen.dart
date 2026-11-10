@@ -423,6 +423,9 @@ class _EncryptionKeysScreenState extends State<EncryptionKeysScreen> {
   Widget _repairView() {
     final bool ownerNote = _keyError?.ownerRepairable ?? false;
     final bool deviceNote = _keyError?.deviceIdRepairable ?? false;
+    // The stored key has the wrong size (the id note was found damaged first): there is nothing to check the server's
+    // key against, so Repair would only answer "could not be checked".
+    final bool canRepairDevice = deviceNote && _keyError?.repair != DeviceRepair.noKey.name;
     final bool intact = _keyError?.keyIntact ?? false;
     return ListView(
       padding: EdgeInsets.all(DsListRow.compactFor(context) ? AppSpace.md : AppSpace.lg),
@@ -431,7 +434,7 @@ class _EncryptionKeysScreenState extends State<EncryptionKeysScreen> {
             ownerNote
                 ? 'This phone lost the note of which account its key belongs to'
                 : deviceNote
-                    ? "This phone's key is stored, but the note of its id is damaged"
+                    ? "This phone's key is stored, but the note of its id is ${_keyError?.cause == KeyCause.deviceIdMissing ? 'missing' : 'damaged'}"
                     : "This phone's encryption key can't be read",
             key: const Key('keys-repair-title'), style: AppType.headline),
         const SizedBox(height: AppSpace.sm),
@@ -443,7 +446,7 @@ class _EncryptionKeysScreenState extends State<EncryptionKeysScreen> {
               'account. The key itself is never touched.',
               style: AppType.secondary),
         ],
-        if (deviceNote) ...<Widget>[
+        if (canRepairDevice) ...<Widget>[
           const SizedBox(height: AppSpace.sm),
           const Text(
               'Repair writes that id again, but only after the server confirms which id belongs to this phone\'s key. '
@@ -469,7 +472,7 @@ class _EncryptionKeysScreenState extends State<EncryptionKeysScreen> {
           ),
           const SizedBox(height: AppSpace.sm),
         ],
-        if (deviceNote) ...<Widget>[
+        if (canRepairDevice) ...<Widget>[
           DsPillButton(
             key: const Key('keys-repair-device'),
             label: 'Repair',
@@ -539,6 +542,8 @@ class _EncryptionKeysScreenState extends State<EncryptionKeysScreen> {
         DeviceRepair.otherAccount => 'The key on this phone belongs to another account, so nothing was changed.',
         DeviceRepair.noAccount => 'The app could not tell which account is signed in. Sign in again, then tap Repair.',
         DeviceRepair.noKey => 'The stored key could not be checked, so nothing was changed.',
+        DeviceRepair.notSaved => 'The server knows this key, but this phone could not save the id in its secure storage. Nothing was changed. '
+            'Restart the phone, then tap Repair again.',
       };
 
   /// "Repair" for a damaged id note: writes the id the server lists for this key (see [E2eeService.repairDeviceId]).

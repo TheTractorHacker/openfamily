@@ -52,7 +52,17 @@ class CountingApi extends FlakyApi {
   }
 }
 
-DeviceKey copyKey(DeviceKey k, {String? deviceId, String? userId, String? kind, Uint8List? edPub, Uint8List? xPub, bool? revoked}) => DeviceKey(
+DeviceKey copyKey(DeviceKey k,
+        {String? deviceId,
+        String? userId,
+        String? kind,
+        Uint8List? edPub,
+        Uint8List? xPub,
+        bool? revoked,
+        String? registeredByDeviceId,
+        Uint8List? registeredByPub,
+        Uint8List? registrationSignature}) =>
+    DeviceKey(
       deviceId: deviceId ?? k.deviceId,
       userId: userId ?? k.userId,
       kind: kind ?? k.kind,
@@ -61,16 +71,77 @@ DeviceKey copyKey(DeviceKey k, {String? deviceId, String? userId, String? kind, 
       fingerprint: k.fingerprint,
       digits: k.digits,
       short: k.short,
-      registeredByDeviceId: k.registeredByDeviceId,
-      registeredByPub: k.registeredByPub,
+      registeredByDeviceId: registeredByDeviceId ?? k.registeredByDeviceId,
+      registeredByPub: registeredByPub ?? k.registeredByPub,
       registrationAction: k.registrationAction,
-      registrationSignature: k.registrationSignature,
+      registrationSignature: registrationSignature ?? k.registrationSignature,
       initial: k.initial,
       label: k.label,
       createdAt: k.createdAt,
       revokedAt: revoked == true ? DateTime.now().toUtc() : k.revokedAt,
       caps: k.caps,
     );
+
+
+/// The key [k] (this phone's public keys) as a REAL registration under [deviceId]: signed by [signerSeed] as
+/// [signerId] (the phone's own seed and id for a root key).
+Future<DeviceKey> signedAs(DeviceKey k, String deviceId, {required Uint8List signerSeed, String? signerId}) async {
+  final String by = signerId ?? deviceId;
+  final (Uint8List es, Uint8List _) = await E2ee.deriveIdentity(signerSeed);
+  final Uint8List sig = await E2ee.sign(es, E2ee.logActionMessage(k.registrationAction, k.userId, by, subjectId: deviceId, ref: E2ee.unhex(k.fingerprint)));
+  return copyKey(k, deviceId: deviceId, registeredByDeviceId: by, registeredByPub: await E2ee.edPublicFromSeed(es), registrationSignature: sig);
+}
+
+/// A vault whose write of the device id fails (a Keystore that does not take the write).
+class FailingWriteVault extends MemoryVault {
+  @override
+  Future<void> write(String name, Uint8List value) async {
+    if (name == 'device_id') throw StateError('Could not save a key on this phone.');
+    return super.write(name, value);
+  }
+}
+
+/// A vault whose write of the device id succeeds but does not stick (the mirror took it, the primary keeps the old blob).
+class DroppingWriteVault extends MemoryVault {
+  @override
+  Future<void> write(String name, Uint8List value) async {
+    if (name == 'device_id') return;
+    return super.write(name, value);
+  }
+}
+
+/// On the first look at the device id another process replaces the whole identity by [other] (and the id reads as missing).
+class SwappingVault extends MemoryVault {
+  SwappingVault(this.other);
+  final Map<String, List<int>> other;
+  bool swapped = false;
+  @override
+  Future<Uint8List?> read(String name) async {
+    if (name == 'device_id' && !swapped) {
+      swapped = true;
+      data
+        ..clear()
+        ..addAll(<String, Uint8List>{for (final MapEntry<String, List<int>> e in other.entries) e.key: Uint8List.fromList(e.value)});
+      return null;
+    }
+    return super.read(name);
+  }
+}
+
+/// Erases the keys through [erase] the first time the account note is read after the server was asked.
+class EraseOnOwnerReadVault extends MemoryVault {
+  bool armed = false;
+  bool fired = false;
+  Future<void> Function()? erase;
+  @override
+  Future<Uint8List?> read(String name) async {
+    if (name == 'identity_user' && armed && !fired) {
+      fired = true;
+      await erase!();
+    }
+    return super.read(name);
+  }
+}
 
 /// 32 bytes that are not valid UTF-8 (the first byte is a continuation byte), like the damaged entry of the report.
 Uint8List garbage() => Uint8List.fromList(List<int>.generate(32, (int i) => 0x80 + i));
@@ -258,7 +329,9 @@ void main() {
     test('(f) two matching keys: ambiguous, nothing written', () async {
       final (MemoryVault v, Map<String, List<int>> before, _) = await phone(MemoryVault());
       final DeviceKey k = server.keys[uA]!.single;
-      final ListedApi api = ListedApi(server, uA, <DeviceKey>[k, copyKey(k, deviceId: 'a-second-id-for-the-same-keys')]);
+      final Uint8List seed = Uint8List.fromList(v.data['identity_seed']!);
+      final DeviceKey second = await signedAs(k, E2ee.newUuid(), signerSeed: seed);
+      final ListedApi api = ListedApi(server, uA, <DeviceKey>[k, second]);
       final E2eeService svc = svcOn(server, uA, v, api: api);
       final LocalKeyException e = await failure(svc);
       expect(e.repair, 'ambiguous');
@@ -562,6 +635,173 @@ void main() {
     });
   });
 
+
+  group('the id is only believed when the key is really registered under it', () {
+    void expectUntouched(MemoryVault v, Map<String, List<int>> before) {
+      expect(snapshot(v), before);
+      expect(v.archived, isEmpty);
+    }
+
+    test('this phone\'s public keys listed under another, unsigned id (a lying server): notOurs, nothing written', () async {
+      final (MemoryVault v, Map<String, List<int>> before, _) = await phone(MemoryVault());
+      final DeviceKey k = server.keys[uA]!.single;
+      final String sibling = E2ee.newUuid();
+      final E2eeService svc = svcOn(server, uA, v, api: ListedApi(server, uA, <DeviceKey>[copyKey(k, deviceId: sibling, registeredByDeviceId: sibling)]));
+      expect(await svc.repairDeviceId(), DeviceRepair.notOurs);
+      expectUntouched(v, before);
+      expect((await events()).any((String l) => l.contains('device_id_repair_refused') && l.contains('reason=unsigned')), isTrue);
+    });
+
+    test('a root key signed by somebody else\'s key (the server made it up) is refused', () async {
+      final (MemoryVault v, Map<String, List<int>> before, _) = await phone(MemoryVault());
+      final DeviceKey k = server.keys[uA]!.single;
+      final String id = E2ee.newUuid();
+      final DeviceKey forged = await signedAs(k, id, signerSeed: Uint8List.fromList(List<int>.generate(32, (int i) => 7 + i)));
+      final E2eeService svc = svcOn(server, uA, v, api: ListedApi(server, uA, <DeviceKey>[forged]));
+      expect(await svc.repairDeviceId(), DeviceRepair.notOurs);
+      expectUntouched(v, before);
+    });
+
+    test('an id that is not a lower-case UUID is refused even for the real key', () async {
+      final (MemoryVault v, Map<String, List<int>> before, _) = await phone(MemoryVault());
+      final DeviceKey k = server.keys[uA]!.single;
+      for (final String id in <String>['not-a-uuid', '', '${k.deviceId}-x', k.deviceId.toUpperCase(), 'a' * 5000]) {
+        final E2eeService svc = svcOn(server, uA, v, api: ListedApi(server, uA, <DeviceKey>[copyKey(k, deviceId: id, registeredByDeviceId: id)]));
+        expect(await svc.repairDeviceId(), DeviceRepair.notOurs, reason: id.length > 50 ? 'long id' : id);
+        expectUntouched(v, before);
+      }
+    });
+
+    test('a key added by another device (not a root) is accepted when that registrar is listed, refused when it is not', () async {
+      final (MemoryVault v, Map<String, List<int>> before, _) = await phone(MemoryVault());
+      final DeviceKey k = server.keys[uA]!.single;
+      final Uint8List regSeed = Uint8List.fromList(List<int>.generate(32, (int i) => 100 + i));
+      final String regId = E2ee.newUuid();
+      final (Uint8List regEs, Uint8List regXs) = await E2ee.deriveIdentity(regSeed);
+      final Uint8List regEd = await E2ee.edPublicFromSeed(regEs);
+      final Uint8List regX = await E2ee.xPublicFromSecret(regXs);
+      final Uint8List regFp = await E2ee.fingerprint(regEd, regX);
+      final DeviceKey regBase = DeviceKey(
+          deviceId: regId, userId: k.userId, kind: 'device', edPub: regEd, xPub: regX, fingerprint: E2ee.hex(regFp), digits: k.digits, short: k.short,
+          registeredByDeviceId: regId, registeredByPub: regEd, registrationAction: k.registrationAction, registrationSignature: Uint8List(64),
+          initial: k.initial, label: k.label, createdAt: k.createdAt);
+      final DeviceKey registrar = await signedAs(regBase, regId, signerSeed: regSeed);
+      final String ourId = E2ee.newUuid();
+      final DeviceKey linked = await signedAs(k, ourId, signerSeed: regSeed, signerId: regId);
+
+      final E2eeService without = svcOn(server, uA, v, api: ListedApi(server, uA, <DeviceKey>[linked]));
+      expect(await without.repairDeviceId(), DeviceRepair.notOurs, reason: 'the registrar is not one of the account\'s keys');
+      expectUntouched(v, before);
+
+      final E2eeService with_ = svcOn(server, uA, v, api: ListedApi(server, uA, <DeviceKey>[linked, registrar]));
+      expect(await with_.repairDeviceId(), DeviceRepair.repaired);
+      expect(utf8.decode(v.data['device_id']!), ourId);
+      expect(v.data['identity_seed'], before['identity_seed']);
+    });
+  });
+
+  group('a write that does not stick or fails', () {
+    test('the vault refuses the write: notSaved, not offline; identity() throws with repair=notSaved; the seed is untouched', () async {
+      final (MemoryVault p, Map<String, List<int>> before, _) = await phone(MemoryVault());
+      final FailingWriteVault v = FailingWriteVault()..data.addAll(p.data);
+      final E2eeService svc = svcOn(server, uA, v);
+      expect(await svc.repairDeviceId(), DeviceRepair.notSaved);
+      expect(snapshot(v), before);
+      expect((await failure(svc)).repair, 'notSaved');
+      expect((await events()).any((String l) => l.contains('device_repair_error') && l.contains('write StateError')), isTrue);
+    });
+
+    test('the write does not stick (reads back as the old bytes): notSaved, never "repaired"', () async {
+      final (MemoryVault p, Map<String, List<int>> before, _) = await phone(MemoryVault());
+      final DroppingWriteVault v = DroppingWriteVault()..data.addAll(p.data);
+      final E2eeService svc = svcOn(server, uA, v);
+      expect(await svc.repairDeviceId(), DeviceRepair.notSaved);
+      expect(snapshot(v), before);
+      expect((await events()).any((String l) => l.contains('device_id_repaired')), isFalse);
+      expect((await events()).any((String l) => l.contains('readback differs')), isTrue);
+    });
+
+    test('notSaved is held a minute like offline by identity(), and asked again at once after Try again', () async {
+      final (MemoryVault p, _, _) = await phone(MemoryVault());
+      final FailingWriteVault v = FailingWriteVault()..data.addAll(p.data);
+      final CountingApi api = CountingApi(server, uA);
+      DateTime now = DateTime.utc(2026, 11, 10, 17);
+      final E2eeService svc = svcOn(server, uA, v, api: api)..ownerClock = () => now;
+      expect((await failure(svc)).repair, 'notSaved');
+      expect((await failure(svc)).repair, 'notSaved');
+      expect(api.asked, 1);
+      svc.forgetRepairThrottle();
+      expect((await failure(svc)).repair, 'notSaved');
+      expect(api.asked, 2);
+      now = now.add(const Duration(minutes: 2));
+      expect((await failure(svc)).repair, 'notSaved');
+      expect(api.asked, 3);
+    });
+  });
+
+  group('what identity() and the epoch protect against another process or an erase', () {
+    test('another process replaced the whole identity right after the seed was read: identity() starts over with the new pair, never mixes them', () async {
+      final MemoryVault other = MemoryVault();
+      final LocalIdentity second = (await svcOn(server, uA, other).identity(create: true))!;
+      final Map<String, List<int>> otherData = snapshot(other);
+      final (MemoryVault first, _, _) = await phone(MemoryVault());
+      final SwappingVault v = SwappingVault(otherData)..data.addAll(first.data);
+      final E2eeService svc = svcOn(server, uA, v);
+      final LocalIdentity id = (await svc.identity())!;
+      expect(id.deviceId, second.deviceId);
+      expect(E2ee.constEq(id.edPub, second.edPub), isTrue, reason: 'the id belongs to the seed that is stored, not to the one read earlier');
+    });
+
+    test('erased while the last re-reads happen: the id is not written next to no key', () async {
+      final (MemoryVault p, _, _) = await phone(MemoryVault());
+      final EraseOnOwnerReadVault v = EraseOnOwnerReadVault()..data.addAll(p.data);
+      final GatedApi api = GatedApi(server, uA);
+      final E2eeService svc = svcOn(server, uA, v, api: api);
+      v.erase = () async {
+        await svc.eraseLocalKeys();
+      };
+      final Future<DeviceRepair> r = svc.repairDeviceId();
+      await until(() => api.asked == 1);
+      v.armed = true;
+      api.gate.complete();
+      expect(await r, DeviceRepair.noKey);
+      expect(v.fired, isTrue);
+      expect(v.data.containsKey('device_id'), isFalse, reason: 'an orphan id next to no key is never written');
+    });
+  });
+
+  group('the throttle after answers that will not change soon', () {
+    test('ambiguous is not asked again within 15 minutes by identity(), but at once after forgetRepairThrottle; another account is refused without asking the server', () async {
+      final (MemoryVault v, _, _) = await phone(MemoryVault());
+      final DeviceKey k = server.keys[uA]!.single;
+      final Uint8List seed = Uint8List.fromList(v.data['identity_seed']!);
+      final DeviceKey second = await signedAs(k, E2ee.newUuid(), signerSeed: seed);
+      final ListedApi api = ListedApi(server, uA, <DeviceKey>[k, second]);
+      DateTime now = DateTime.utc(2026, 11, 10, 18);
+      final E2eeService svc = svcOn(server, uA, v, api: api)..ownerClock = () => now;
+      expect((await failure(svc)).repair, 'ambiguous');
+      now = now.add(const Duration(minutes: 5));
+      expect((await failure(svc)).repair, 'ambiguous');
+      expect(api.asked, 1);
+      svc.forgetRepairThrottle();
+      expect((await failure(svc)).repair, 'ambiguous');
+      expect(api.asked, 2);
+      now = now.add(const Duration(minutes: 16));
+      expect((await failure(svc)).repair, 'ambiguous');
+      expect(api.asked, 3);
+
+      // The account note names another account: refused before the server is asked at all, and held the same way.
+      resetServer();
+      final (MemoryVault v2, _, _) = await phone(MemoryVault());
+      v2.data['identity_user'] = Uint8List.fromList(utf8.encode(uB));
+      final CountingApi api2 = CountingApi(server, uA);
+      final E2eeService svc2 = svcOn(server, uA, v2, api: api2)..ownerClock = () => now;
+      // (identity() archives a seed of another account instead of repairing; the repair itself says otherAccount)
+      expect(await svc2.repairDeviceId(), DeviceRepair.otherAccount);
+      expect(api2.asked, 0);
+    });
+  });
+
   group('the Encryption keys screen', () {
     Future<void> bigView(WidgetTester t) async {
       t.view.physicalSize = const Size(800, 3000);
@@ -633,6 +873,37 @@ void main() {
       await t.pumpAndSettle();
       expect(find.textContaining('server has no record of this key'), findsOneWidget);
       expect(snapshot(v), before);
+    });
+
+    testWidgets('the id note is missing: the title says missing, not damaged', (WidgetTester t) async {
+      await bigView(t);
+      final (MemoryVault v, _, _) = await phone(MemoryVault(), removeId: true);
+      final E2eeService svc = svcOn(server, uA, v, api: FlakyApi(server, uA)..online = false);
+      await t.pumpWidget(MaterialApp(home: EncryptionKeysScreen(service: svc)));
+      await t.pumpAndSettle();
+      expect(find.text("This phone's key is stored, but the note of its id is missing"), findsOneWidget);
+    });
+
+    testWidgets('a stored key of the wrong size: no Repair button (it could only answer "could not be checked")', (WidgetTester t) async {
+      await bigView(t);
+      final (MemoryVault v, _, _) = await phone(MemoryVault());
+      v.data['identity_seed'] = Uint8List(31);
+      await t.pumpWidget(MaterialApp(home: EncryptionKeysScreen(service: svcOn(server, uA, v))));
+      await t.pumpAndSettle();
+      expect(find.byKey(const Key('keys-repair-title')), findsOneWidget);
+      expect(find.byKey(const Key('keys-repair-device')), findsNothing);
+      expect(find.byKey(const Key('keys-repair-reset')), findsOneWidget);
+    });
+
+    testWidgets('the server knows the key but the phone cannot save the id: says so, not "check the connection"', (WidgetTester t) async {
+      await bigView(t);
+      final (MemoryVault p, _, _) = await phone(MemoryVault());
+      final FailingWriteVault v = FailingWriteVault()..data.addAll(p.data);
+      await t.pumpWidget(MaterialApp(home: EncryptionKeysScreen(service: svcOn(server, uA, v))));
+      await t.pumpAndSettle();
+      expect(find.textContaining('could not save the id'), findsOneWidget);
+      expect(find.textContaining('Check the connection'), findsNothing);
+      expect(find.byKey(const Key('keys-repair-device')), findsOneWidget);
     });
   });
 }

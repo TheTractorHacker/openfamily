@@ -210,6 +210,10 @@ enum DeviceRepair {
 
   /// The stored seed is missing or has the wrong size, so there is nothing to check the server's key against.
   noKey,
+
+  /// The server vouched for the key, but this phone's secure storage did not keep the id (the write failed, or reading
+  /// it back gave something else). The seed was not touched; the connection is not the problem.
+  notSaved,
 }
 
 /// The [LocalKeyException] that [e] amounts to, or null when [e] is not about
@@ -550,6 +554,10 @@ class E2eeService {
         if (_epoch != epoch) return identity(create: create);
         final String? fixed = fix.id;
         if (fixed == null) throw _unusable(cause, detail: 'repair=${fix.result.name}', repair: fix.result.name);
+        // Another isolate may have erased and created a new identity while the server was asked (the epoch only sees
+        // this isolate): the id belongs to the seed read at the top only if that seed is still the stored one.
+        final Uint8List? seedAfter = await _readKey(_seedName);
+        if (seedAfter == null || !E2ee.constEq(seedAfter, seed)) return identity(create: create);
         deviceId = fixed;
       }
     }
@@ -717,6 +725,7 @@ class E2eeService {
   }
 
   Future<OwnerRepair> _confirmAndWriteOwner(String uid, String deviceId, Uint8List ed, Uint8List x) async {
+    final int epoch = _epoch;
     final List<DeviceKey> mine;
     try {
       mine = await api.myKeys();
@@ -744,6 +753,7 @@ class E2eeService {
     }
     final (Uint8List es, Uint8List _) = await E2ee.deriveIdentity(seedNow);
     if (!E2ee.constEq(await E2ee.edPublicFromSeed(es), ed)) return OwnerRepair.noKey;
+    if (_epoch != epoch) return OwnerRepair.noKey;
     await vault.write(_userName, Uint8List.fromList(utf8.encode(uid)));
     _ownerUnconfirmed = false;
     StorageEventLog.instance.record('owner_repaired', store: 'vault', detail: 'was=${before.state.name}');
@@ -774,7 +784,8 @@ class E2eeService {
     final DateTime now = ownerClock();
     final hold = _deviceHold;
     if (!force && hold != null && hold.epoch == epoch) {
-      final Duration wait = hold.result == DeviceRepair.offline ? const Duration(minutes: 1) : const Duration(minutes: 15);
+      final bool soon = hold.result == DeviceRepair.offline || hold.result == DeviceRepair.notSaved;
+      final Duration wait = soon ? const Duration(minutes: 1) : const Duration(minutes: 15);
       if (now.difference(hold.at) < wait) return Future<_DeviceFix>.value((result: hold.result, id: null));
     }
     Future<_DeviceFix> run() async {
@@ -790,7 +801,7 @@ class E2eeService {
 
     final Future<_DeviceFix> f = run().then((_DeviceFix r) {
       final bool hold15 = r.result == DeviceRepair.notOurs || r.result == DeviceRepair.ambiguous || r.result == DeviceRepair.otherAccount;
-      _deviceHold = hold15 || r.result == DeviceRepair.offline ? (result: r.result, at: now, epoch: epoch) : null;
+      _deviceHold = hold15 || r.result == DeviceRepair.offline || r.result == DeviceRepair.notSaved ? (result: r.result, at: now, epoch: epoch) : null;
       return r;
     });
     _deviceRepairing = f;
@@ -846,10 +857,15 @@ class E2eeService {
       if (!E2ee.constEq(k.edPub, ed) || !E2ee.constEq(k.xPub, x)) continue;
       if (!k.isActive) {
         why = 'revoked';
-      } else if (k.kind != 'device' || k.userId != uid || k.deviceId.isEmpty) {
+      } else if (k.kind != 'device' || k.userId != uid || !_isUuid(k.deviceId)) {
         why = 'kind';
       } else if (k.fingerprint != E2ee.hex(fp) || !E2ee.constEq(await E2ee.fingerprint(k.edPub, k.xPub), fp)) {
         why = 'mismatch';
+      } else if (!await _registrationHolds(k, mine)) {
+        // The id the server names is only believed when the registration signature over it verifies: a root key
+        // must be signed by this phone's own key (which the server does not have); a key added by another device
+        // must be signed by a key this account lists. A server cannot make up an id for a key it merely knows.
+        why = 'unsigned';
       } else {
         vouching.add(k);
       }
@@ -872,11 +888,46 @@ class E2eeService {
     if (noteNow.id != null) return (result: DeviceRepair.notNeeded, id: noteNow.id);
     final _Owner ownerNow = await _readOwner();
     if (ownerNow.id != null && ownerNow.id != uid) return (result: DeviceRepair.otherAccount, id: null);
-    await vault.write(_deviceName, Uint8List.fromList(utf8.encode(serverId)));
+    if (_epoch != epoch) return (result: DeviceRepair.noKey, id: null);
+    final Uint8List wanted = Uint8List.fromList(utf8.encode(serverId));
+    try {
+      await vault.write(_deviceName, wanted);
+    } catch (e) {
+      if (localKeyProblemOf(e) != null) rethrow;
+      _noteKeyEvent('device_repair_error', 'write ${e.runtimeType}');
+      return (result: DeviceRepair.notSaved, id: null);
+    }
+    // The vault keeps two copies and reads the primary first: a write that only reached one would be undone at the
+    // next read. The repair counts only when what is read back is the id.
+    final Uint8List? back = await _readKey(_deviceName);
+    if (back == null || !E2ee.constEq(back, wanted)) {
+      _noteKeyEvent('device_repair_error', 'readback differs');
+      return (result: DeviceRepair.notSaved, id: null);
+    }
     final Uint8List vNow = dNow ?? Uint8List(0);
     StorageEventLog.instance.record('device_id_repaired',
         store: 'vault', detail: 'was=${noteNow.state.name} len=${vNow.length} equals_seed=${vNow.isNotEmpty && E2ee.constEq(vNow, seedNow)}');
     return (result: DeviceRepair.repaired, id: serverId);
+  }
+
+  static bool _isUuid(String id) {
+    try {
+      E2ee.checkId(id);
+      return true;
+    } on E2eeFormatException {
+      return false;
+    }
+  }
+
+  /// Whether the registration signature of [k] verifies. A root key (registered by itself) is signed by its own
+  /// key. Any other key must name a registrar that this account lists with exactly the public key that signed.
+  Future<bool> _registrationHolds(DeviceKey k, List<DeviceKey> mine) async {
+    if (!await verifyRegistration(k)) return false;
+    if (k.isRoot) return true;
+    for (final DeviceKey r in mine) {
+      if (r.deviceId == k.registeredByDeviceId && r.userId == k.userId && E2ee.constEq(r.edPub, k.registeredByPub)) return true;
+    }
+    return false;
   }
 
   /// Why the server's key list does not vouch for [deviceId] under [uid] with exactly these public keys, or null when
