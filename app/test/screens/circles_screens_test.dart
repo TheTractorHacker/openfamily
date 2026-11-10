@@ -323,7 +323,13 @@ void main() {
       final FakeProcessingController c = await pump(tester, svc, FakeProcessingController.snapshot());
       expect(find.byKey(const Key('circle-require-server')), findsOneWidget);
       expect(find.text('Require server processing'), findsOneWidget);
+      // The row says it in one line; the full sentence is behind its (i) (UI polish 2).
+      expect(find.text('Location goes to your server. Members cannot turn it off.'), findsOneWidget);
+      await tester.tap(find.descendant(of: find.byKey(const Key('circle-require-server')), matching: find.byKey(const Key('info-hint'))));
+      await tester.pumpAndSettle();
       expect(find.text("Everyone's phone sends its location to your Orbitly server for processing. Members cannot turn it off."), findsOneWidget);
+      await tester.tapAt(const Offset(5, 5));
+      await tester.pumpAndSettle();
       await tester.tap(find.descendant(of: find.byKey(const Key('circle-require-server')), matching: find.byType(Switch)));
       await tester.pumpAndSettle();
       expect(c.calls, contains('require:true'));

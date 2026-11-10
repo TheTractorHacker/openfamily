@@ -30,6 +30,14 @@ Future<void> pumpScreen(WidgetTester t, Widget w, {Size size = const Size(390, 2
 
 Finder txt(String s) => find.textContaining(s);
 
+/// Opens the (i) sheet of the row [k] (UI polish 2: long explanations moved behind the row's (i)).
+Future<void> openInfo(WidgetTester t, Key k) async {
+  final Finder hint = find.descendant(of: find.byKey(k), matching: find.byKey(const Key('info-hint')));
+  await t.ensureVisible(hint);
+  await t.tap(hint);
+  await t.pumpAndSettle();
+}
+
 Future<void> tapKey(WidgetTester t, String k) async {
   await t.ensureVisible(find.byKey(Key(k)));
   await t.tap(find.byKey(Key(k)));
@@ -144,7 +152,12 @@ void main() {
       expect(find.byKey(const Key('proc-required-notice')), findsOneWidget);
       expect(find.text('Your family admin requires server processing.'), findsOneWidget);
       expect(find.byKey(const Key('proc-required-catching-up')), findsOneWidget);
+      // The row says it short; the full sentence (check-ins and alerts still go through) is behind its (i).
+      expect(txt('Positions are not delivered until then.'), findsOneWidget);
+      await openInfo(t, const Key('proc-required-catching-up'));
       expect(txt('not delivered (check-ins and emergency alerts still are)'), findsOneWidget);
+      await t.tapAt(const Offset(5, 5));
+      await t.pumpAndSettle();
       expect(find.byKey(const Key('my-lane-switch')), findsNothing);
       expect(find.byKey(const Key('proc-choose')), findsNothing);
       expect(find.byKey(const Key('proc-consent-required')), findsNothing);
@@ -317,8 +330,14 @@ void main() {
       await t.tap(find.byKey(const Key('default-server')));
       await t.pumpAndSettle();
       expect(c.calls.where((String x) => x.startsWith('policy')), <String>['policy:true:phone:required_server', 'policy:true:server:allowed']);
-      expect(txt('every member\'s phone signs it by itself'), findsOneWidget);
+      // The long explanations are behind the (i) of the option and the "How this works" row (UI polish 2).
+      await openInfo(t, const Key('opt-required'));
       expect(txt('Applies to child accounts too'), findsOneWidget);
+      await t.tapAt(const Offset(5, 5));
+      await t.pumpAndSettle();
+      await t.tap(find.byKey(const Key('policy-how')));
+      await t.pumpAndSettle();
+      expect(txt('every member\'s phone signs it by itself'), findsOneWidget);
     });
 
     testWidgets('turning it off warns that copies stay and is not destructive-styled as consent', (t) async {
@@ -475,7 +494,12 @@ void main() {
       await pumpScreen(t, ProcessingScreen(circle: memberCircle, controller: c));
       await t.ensureVisible(find.byKey(const Key('viewer-Alice-web')));
       expect(txt('Alice has a web viewer'), findsOneWidget);
+      // The long sentences are behind each row's (i) (UI polish 2).
+      await openInfo(t, const Key('viewer-Alice-web'));
       expect(txt('including members who keep data on their phone'), findsOneWidget);
+      await t.tapAt(const Offset(5, 5));
+      await t.pumpAndSettle();
+      await openInfo(t, const Key('viewer-Alice-service'));
       expect(txt('reads members who allowed server processing, not phone-only members'), findsOneWidget);
     });
   });
@@ -486,13 +510,15 @@ void main() {
           optOut: E2ee.optOutRequiredServer, lanes: const <String, int>{pA: E2ee.lineServer, pB: E2ee.linePhone, pC: E2ee.linePhone}, unverified: const <String>{pC}));
       await pumpScreen(t, ProcessingScreen(circle: adminCircle, controller: c), size: const Size(390, 6000));
       expect(find.text('Required by the admin (1 of 3 on the server)'), findsOneWidget);
-      expect(find.descendant(of: find.byKey(Key('member-$pA')), matching: find.text('On the server')), findsOneWidget);
+      // The chip says it (the row has no second line that repeats it).
+      expect(find.descendant(of: find.byKey(Key('member-$pA')), matching: find.text('Processed by server')), findsOneWidget);
       expect(find.descendant(of: find.byKey(Key('member-$pB')), matching: find.text('Catching up')), findsWidgets);
       expect(find.descendant(of: find.byKey(Key('member-$pC')), matching: find.text('Catching up')), findsWidgets);
       expect(find.byKey(Key('catching-up-$pB')), findsOneWidget);
       expect(find.byKey(Key('catching-up-$pC')), findsOneWidget);
       expect(find.byKey(const Key('remind-copy')), findsNothing);
       expect(find.byKey(Key('remind-$pC')), findsNothing);
+      await openInfo(t, Key('catching-up-$pB'));
       expect(txt('positions may not arrive'), findsWidgets);
       expect(txt('not choosing yet'), findsNothing);
       expect(txt('Not chosen yet'), findsNothing);

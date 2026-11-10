@@ -164,41 +164,71 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
     final List<ProcessingMember> rest = <ProcessingMember>[for (final ProcessingMember m in s.members) if (!m.serverAssisted) m];
     if (s.required) {
       return <Widget>[
-        const DsSectionHeader('Still catching up', padding: EdgeInsets.fromLTRB(0, AppSpace.xl, 0, AppSpace.xs)),
+        const DsSectionHeader('Still catching up'),
         DsRowGroup(children: <Widget>[
           for (final ProcessingMember m in rest)
             DsListRow(
               key: Key('catching-up-${m.userId}'),
-              leading: DsListRow.iconTile(context, Icons.sync),
+              leading: DsListRow.iconTile(context, Icons.sync, decorative: true),
               title: m.isMe ? '${m.name} (you)' : m.name,
-              subtitle: s.notReady.contains(m.name) ? 'Needs to update the app first' : ProcessingCopy.catchingUpInfo,
+              subtitle: s.notReady.contains(m.name) ? 'Needs to update the app first' : 'Phone is switching over',
+              info: s.notReady.contains(m.name) ? null : ProcessingCopy.catchingUpInfo,
+              infoTitle: 'Catching up',
             ),
         ]),
       ];
     }
+    final double inset = DsRowScope.insetFor(context);
     return <Widget>[
-      const DsSectionHeader('Members not yet on the server', padding: EdgeInsets.fromLTRB(0, AppSpace.xl, 0, AppSpace.xs)),
+      const DsSectionHeader('Members not yet on the server'),
       DsRowGroup(children: <Widget>[
         for (final ProcessingMember m in rest)
           DsListRow(
             key: Key('not-on-server-${m.userId}'),
-            leading: DsListRow.iconTile(context, Icons.person_outline),
+            leading: DsListRow.iconTile(context, Icons.person_outline, decorative: true),
             title: m.isMe ? '${m.name} (you)' : m.name,
             subtitle: s.notReady.contains(m.name)
                 ? 'Needs to update the app first'
-                : (m.verified ? 'Chose to keep data on their phone. Nobody can change that for them.' : 'Uses the phone (has not chosen)'),
+                : (m.verified ? 'Chose to keep data on their phone' : 'Uses the phone (has not chosen)'),
+            info: !s.notReady.contains(m.name) && m.verified ? 'Nobody can change that for them.' : null,
+            infoTitle: m.name,
+            trailing: s.iAmAdmin && !m.isMe && !m.verified
+                ? IconButton(
+                    key: Key('remind-${m.userId}'),
+                    tooltip: 'Copy a reminder for ${m.name}',
+                    constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+                    icon: const Icon(Icons.notifications_active_outlined),
+                    onPressed: () async {
+                      await Clipboard.setData(ClipboardData(
+                          text: 'Hi ${m.name}, please open Orbitly > Settings > Server processing and choose how our circle "${widget.circle.name}" should handle your data.'));
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Reminder copied. Paste it in a message.')));
+                      }
+                    },
+                  )
+                : null,
           ),
       ]),
-      const SizedBox(height: AppSpace.sm),
-      const Text('Message to send them:', style: AppType.secondary),
-      const SelectableText(remindMessageText, key: Key('remind-message')),
-      const SizedBox(height: AppSpace.xs),
-      DsPillButton(
-        key: const Key('remind-copy'),
-        label: 'Copy message',
-        style: DsPillStyle.outlined,
-        icon: Icons.copy,
-        onPressed: () => Clipboard.setData(const ClipboardData(text: remindMessageText)),
+      Padding(
+        padding: EdgeInsets.fromLTRB(inset, AppSpace.md, inset, AppSpace.xs),
+        child: const Text('Message to send them:', style: AppType.secondary),
+      ),
+      Padding(
+        padding: EdgeInsets.symmetric(horizontal: inset),
+        child: const SelectableText(remindMessageText, key: Key('remind-message')),
+      ),
+      Padding(
+        padding: const EdgeInsets.only(top: AppSpace.sm),
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: DsPillButton(
+            key: const Key('remind-copy'),
+            label: 'Copy message',
+            style: DsPillStyle.outlined,
+            icon: Icons.copy,
+            onPressed: () => Clipboard.setData(const ClipboardData(text: remindMessageText)),
+          ),
+        ),
       ),
     ];
   }
@@ -222,17 +252,21 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
     );
   }
 
+  /// A gap above a note or card that is not a [DsSectionHeader] (which brings its own).
+  static const SizedBox _gap = SizedBox(height: AppSpace.md);
+
   Widget _body(ProcessingSnapshot s) {
-    final ColorScheme cs = Theme.of(context).colorScheme;
     final ProcessingMember? me = s.me;
+    final double inset = DsRowScope.insetFor(context);
     return RefreshIndicator(
       onRefresh: () => _load(force: true),
-      child: ListView(
+      child: DsSettingsList(
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.all(AppSpace.xl),
         children: <Widget>[
-          Text(widget.circle.name, style: AppType.headline),
-          const SizedBox(height: AppSpace.xs),
+          Padding(
+            padding: EdgeInsets.fromLTRB(inset, AppSpace.xs, inset, AppSpace.sm),
+            child: Text(widget.circle.name, style: AppType.headline),
+          ),
           if (!s.isPrivate)
             const ProcessingNote(
                 noteKey: Key('proc-not-private'),
@@ -241,58 +275,53 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
                     'Turn on "Private circle" in the circle settings (admins only) to use end-to-end encryption.')
           else ...<Widget>[
             _statusCard(s),
-            if (s.problem != null)
-              Padding(
-                padding: const EdgeInsets.only(top: AppSpace.lg),
-                child: ProcessingNote(noteKey: const Key('proc-problem'), icon: Icons.sync_problem, color: AppColors.statusOrange, text: s.problem!),
-              ),
-            if (s.legacy) ...<Widget>[const SizedBox(height: AppSpace.lg), _legacyCard(s)],
-            if (s.optOutPendingSince != null)
-              const Padding(
-                padding: EdgeInsets.only(top: AppSpace.lg),
-                child: ProcessingNote(
-                    noteKey: Key('proc-optout-pending'),
-                    icon: Icons.sync_problem,
-                    color: AppColors.statusOrange,
-                    text: 'Not yet confirmed: the server still has your previous choice. Your phone already seals for phones only and keeps '
-                        'trying to tell the server. Until it is confirmed, the server may still treat you as allowing it.'),
-              ),
-            if (s.undeliveredCount > 0)
-              Padding(
-                padding: const EdgeInsets.only(top: AppSpace.lg),
-                child: ProcessingNote(
-                    noteKey: const Key('proc-undelivered'),
-                    icon: Icons.report_problem_outlined,
-                    color: AppColors.statusRed,
-                    text: '${s.undeliveredCount} ${s.undeliveredCount == 1 ? 'item was' : 'items were'} not delivered to this circle'
-                        '${s.undeliveredCode == 'required_server' ? ' because your family admin requires server processing and the server did not accept this phone\'s choice (not signed yet, out of date after a server key change, or an admin phone has to sign the circle policy again)' : ''}. '
-                        '${s.undeliveredCode == 'required_server' ? 'This phone signs its choice by itself and sends what is waiting; if that does not happen, update the app or ask an admin.' : 'They are not kept. New positions are sent normally.'}'),
-              ),
-            if (s.required && s.members.any((ProcessingMember m) => m.isChild))
-              const Padding(
-                padding: EdgeInsets.only(top: AppSpace.lg),
-                child: ProcessingNote(
-                    noteKey: Key('proc-child-note'),
-                    icon: Icons.child_care,
-                    text: 'This circle requires server processing and the rule applies to child accounts too. A child\'s phone switches '
-                        'over by itself, like everyone else\'s.'),
-              ),
-            if (s.status == LaneStatus.verificationFailed)
-              const Padding(
-                padding: EdgeInsets.only(top: AppSpace.lg),
-                child: ProcessingNote(
-                    noteKey: Key('proc-verification-failed'),
-                    icon: Icons.warning_amber,
-                    color: AppColors.statusRed,
-                    text: 'The key log or the processing records did not verify. Your phone treats this circle as phone only until they do.'),
-              ),
-            const DsSectionHeader('Circle setting', padding: EdgeInsets.fromLTRB(0, AppSpace.xl, 0, AppSpace.xs)),
+            if (s.problem != null) ...<Widget>[
+              _gap,
+              ProcessingNote(noteKey: const Key('proc-problem'), icon: Icons.sync_problem, color: AppColors.statusOrange, text: s.problem!),
+            ],
+            if (s.legacy) ...<Widget>[_gap, _legacyCard(s)],
+            if (s.optOutPendingSince != null) ...<Widget>[
+              _gap,
+              const ProcessingNote(
+                  noteKey: Key('proc-optout-pending'),
+                  icon: Icons.sync_problem,
+                  color: AppColors.statusOrange,
+                  text: 'Not yet confirmed: the server still has your previous choice. Your phone already seals for phones only and keeps '
+                      'trying to tell the server. Until it is confirmed, the server may still treat you as allowing it.'),
+            ],
+            if (s.undeliveredCount > 0) ...<Widget>[
+              _gap,
+              ProcessingNote(
+                  noteKey: const Key('proc-undelivered'),
+                  icon: Icons.report_problem_outlined,
+                  color: AppColors.statusRed,
+                  text: '${s.undeliveredCount} ${s.undeliveredCount == 1 ? 'item was' : 'items were'} not delivered to this circle'
+                      '${s.undeliveredCode == 'required_server' ? ' because your family admin requires server processing and the server did not accept this phone\'s choice (not signed yet, out of date after a server key change, or an admin phone has to sign the circle policy again)' : ''}. '
+                      '${s.undeliveredCode == 'required_server' ? 'This phone signs its choice by itself and sends what is waiting; if that does not happen, update the app or ask an admin.' : 'They are not kept. New positions are sent normally.'}'),
+            ],
+            if (s.required && s.members.any((ProcessingMember m) => m.isChild)) ...<Widget>[
+              _gap,
+              const ProcessingNote(
+                  noteKey: Key('proc-child-note'),
+                  icon: Icons.child_care,
+                  text: 'This circle requires server processing and the rule applies to child accounts too. A child\'s phone switches '
+                      'over by itself, like everyone else\'s.'),
+            ],
+            if (s.status == LaneStatus.verificationFailed) ...<Widget>[
+              _gap,
+              const ProcessingNote(
+                  noteKey: Key('proc-verification-failed'),
+                  icon: Icons.warning_amber,
+                  color: AppColors.statusRed,
+                  text: 'The key log or the processing records did not verify. Your phone treats this circle as phone only until they do.'),
+            ],
+            const DsSectionHeader('Circle setting'),
             DsRowGroup(children: <Widget>[
               DsListRow(
                 key: const Key('proc-open-policy'),
-                leading: DsListRow.iconTile(context, Icons.admin_panel_settings_outlined),
-                title: s.iAmAdmin ? 'Server processing for this circle' : 'How this circle is set up',
-                subtitle: _policyLine(s),
+                leading: DsListRow.iconTile(context, Icons.admin_panel_settings_outlined, decorative: true),
+                title: _policyTitle(s),
+                subtitle: s.iAmAdmin ? 'Change the circle setting' : 'View only',
                 chevron: true,
                 onTap: () async {
                   await Navigator.of(context).push<void>(MaterialPageRoute<void>(
@@ -301,109 +330,57 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
                 },
               ),
             ]),
-            if (!s.iAmAdmin)
-              const Padding(
-                padding: EdgeInsets.only(top: AppSpace.sm),
-                child: Text(ProcessingCopy.adminOnly, key: Key('proc-admin-only'), style: AppType.secondary),
-              ),
-            const DsSectionHeader('My data', padding: EdgeInsets.fromLTRB(0, AppSpace.xl, 0, AppSpace.xs)),
+            if (!s.iAmAdmin) const DsFootnote(ProcessingCopy.adminOnly, key: Key('proc-admin-only')),
+            const DsSectionHeader('My data'),
             ..._myChoice(s, me),
-            const DsSectionHeader('Members', padding: EdgeInsets.fromLTRB(0, AppSpace.xl, 0, AppSpace.xs)),
+            const DsSectionHeader('Members'),
             DsRowGroup(children: <Widget>[
-              for (final ProcessingMember m in s.members)
-                DsListRow(
-                  key: Key('member-${m.userId}'),
-                  leading: DsListRow.iconTile(context, Icons.person_outline),
-                  title: m.isMe ? '${m.name} (you)' : m.name,
-                  subtitle: s.unconfirmed
-                      ? 'Not confirmed right now'
-                      : s.legacy
-                      ? 'Old mode: the server may read it'
-                      : m.serverAssisted
-                          ? (s.required ? 'On the server' : 'Allowed server processing')
-                          : (s.required
-                              ? ProcessingCopy.catchingUp
-                              : (s.assistOn && !m.verified ? 'Uses the phone (has not chosen)' : 'Keeps data on their phone')),
-                  info: s.unconfirmed
-                      ? null
-                      : s.legacy
-                      ? (m.isChild ? 'Child account. Old mode: the server may read it if everyone allowed it.' : 'Old mode: the server may read this circle if everyone allowed it.')
-                      : (s.required && !m.serverAssisted
-                          ? ProcessingCopy.catchingUpInfo
-                          : (s.assistOn && !m.verified && !m.serverAssisted
-                              ? '${m.name} has not chosen. Until they do, their data stays on their phone and is not sent to the server for processing.'
-                              : null)),
-                  trailing: s.unconfirmed || s.legacy
-                      ? null
-                      : (s.required && !m.serverAssisted
-                          ? const CatchingUpChip()
-                          : (s.assistOn && !m.verified && !m.serverAssisted && s.iAmAdmin && !m.isMe
-                              ? Wrap(spacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: <Widget>[
-                                  const LaneChip(server: false),
-                                  IconButton(
-                                    key: Key('remind-${m.userId}'),
-                                    tooltip: 'Copy a reminder for ${m.name}',
-                                    constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
-                                    icon: const Icon(Icons.notifications_active_outlined),
-                                    onPressed: () async {
-                                      await Clipboard.setData(ClipboardData(
-                                          text: 'Hi ${m.name}, please open Orbitly > Settings > Server processing and choose how our circle "${widget.circle.name}" should handle your data.'));
-                                      if (context.mounted) {
-                                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Reminder copied. Paste it in a message.')));
-                                      }
-                                    },
-                                  ),
-                                ])
-                              : LaneChip(server: m.serverAssisted))),
-                ),
+              for (final ProcessingMember m in s.members) _memberRow(s, m),
             ]),
             if (s.iAmAdmin && s.assistOn && !s.legacy && s.members.any((ProcessingMember m) => !m.serverAssisted)) ..._notYetOnServer(s),
             if (s.viewers.isNotEmpty && !s.legacy) ...<Widget>[
-              const DsSectionHeader('Viewers and bridges', padding: EdgeInsets.fromLTRB(0, AppSpace.xl, 0, AppSpace.xs)),
+              const DsSectionHeader('Viewers and bridges'),
               DsRowGroup(children: <Widget>[
                 for (final ProcessingViewer v in s.viewers)
                   DsListRow(
                     key: Key('viewer-${v.ownerName}-${v.kind}'),
-                    leading: DsListRow.iconTile(context, v.kind == 'web' ? Icons.web : Icons.hub_outlined),
-                    title: v.kind == 'web' ? '${v.ownerName} has a web viewer' : '${v.ownerName} has a bridge (for example Dawarich)',
-                    subtitle: v.kind == 'web'
+                    leading: DsListRow.iconTile(context, v.kind == 'web' ? Icons.web : Icons.hub_outlined, decorative: true),
+                    title: v.kind == 'web' ? '${v.ownerName} has a web viewer' : '${v.ownerName} has a bridge',
+                    subtitle: v.kind == 'web' ? 'May also read phone-only members' : 'Reads only members who allowed the server',
+                    info: v.kind == 'web'
                         ? 'If ${v.ownerName} gave it this circle\'s key, it can read everyone ${v.ownerName} can read, including members who keep data on their phone.'
-                        : 'A bridge gets only the server key here: it reads members who allowed server processing, not phone-only members.',
+                        : 'A bridge (for example Dawarich) gets only the server key here: it reads members who allowed server processing, not phone-only members.',
+                    infoTitle: v.kind == 'web' ? 'Web viewer' : 'Bridge',
                   ),
               ]),
             ],
             if (s.assistOn || s.serverCount > 0) ...<Widget>[
-              const DsSectionHeader('Delete server copies', padding: EdgeInsets.fromLTRB(0, AppSpace.xl, 0, AppSpace.xs)),
-              Text(
-                'Copies the server made while you allowed it stay until deleted. Backups and anything already exported cannot be deleted.',
-                style: AppType.secondary.copyWith(color: cs.onSurfaceVariant),
-              ),
-              const SizedBox(height: AppSpace.sm),
-              DsPillButton(
-                key: const Key('delete-mine'),
-                label: 'Delete my copies',
-                style: DsPillStyle.outlined,
-                icon: Icons.delete_outline,
-                onPressed: _busy ? null : () => _delete(whole: false),
-              ),
-              if (s.iAmAdmin) ...<Widget>[
-                const SizedBox(height: AppSpace.sm),
-                DsPillButton(
-                  key: const Key('delete-all'),
-                  label: 'Delete all copies of this circle',
-                  style: DsPillStyle.danger,
-                  icon: Icons.delete_forever_outlined,
-                  onPressed: _busy ? null : () => _delete(whole: true),
+              const DsSectionHeader('Delete server copies', caption: 'Copies made while you allowed it stay until deleted.'),
+              DsRowGroup(children: <Widget>[
+                DsListRow(
+                  key: const Key('delete-mine'),
+                  leading: DsListRow.iconTile(context, Icons.delete_outline, decorative: true),
+                  title: 'Delete my copies',
+                  info: 'Copies the server made while you allowed it stay until deleted. Backups and anything already exported cannot be deleted.',
+                  infoTitle: 'Delete my copies',
+                  onTap: _busy ? null : () => _delete(whole: false),
                 ),
-              ],
+                if (s.iAmAdmin)
+                  DsListRow(
+                    key: const Key('delete-all'),
+                    leading: DsListRow.iconTile(context, Icons.delete_forever_outlined, color: AppColors.sosRed, decorative: true),
+                    title: 'Delete all copies of this circle',
+                    destructive: true,
+                    onTap: _busy ? null : () => _delete(whole: true),
+                  ),
+              ]),
             ],
             const SizedBox(height: AppSpace.xl),
             DsRowGroup(children: <Widget>[
               DsListRow(
                 key: const Key('proc-footnote'),
-                leading: DsListRow.iconTile(context, Icons.info_outline),
+                leading: DsListRow.iconTile(context, Icons.info_outline, decorative: true),
                 title: 'What the server can still see',
-                subtitle: 'Tap (i) to read more',
                 info: '${ProcessingCopy.operatorCanRead} ${ProcessingCopy.metadata} ${ProcessingCopy.multiCircle}',
               ),
             ]),
@@ -413,26 +390,73 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
     );
   }
 
-  String _policyLine(ProcessingSnapshot s) {
-    if (s.legacy) return 'Old mode. An admin can upgrade it.';
-    if (!s.assistOn) return 'Off: phones do the work';
-    return s.required
-        ? 'Required by the admin: ${s.serverCount} of ${s.members.length} on the server'
-        : 'On: ${s.serverCount} of ${s.members.length} use the server';
+  Widget _memberRow(ProcessingSnapshot s, ProcessingMember m) {
+    final bool undecided = s.assistOn && !m.verified && !m.serverAssisted;
+    final bool catchingUp = s.required && !m.serverAssisted;
+    // The lane is a chip on the right; on a narrow screen or at large text a chip would be cut off, so it becomes the
+    // first part of the second line instead.
+    final bool asText = DsListRow.compactFor(context);
+    final String? lane = s.unconfirmed || s.legacy
+        ? null
+        : (catchingUp ? ProcessingCopy.catchingUp : laneLabel(m.serverAssisted));
+    final String? extra = s.unconfirmed
+        ? 'Not confirmed right now'
+        : s.legacy
+            ? 'Old mode: the server may read it'
+            : (!s.required && undecided ? 'Has not chosen' : null);
+    final String subtitle = dsMeta(<String?>[asText ? lane : null, extra]);
+    final String? info = s.unconfirmed
+        ? null
+        : s.legacy
+            ? (m.isChild ? 'Child account. Old mode: the server may read it if everyone allowed it.' : 'Old mode: the server may read this circle if everyone allowed it.')
+            : (catchingUp
+                ? ProcessingCopy.catchingUpInfo
+                : (undecided
+                    ? '${m.name} has not chosen. Until they do, their data stays on their phone and is not sent to the server for processing.'
+                    : null));
+    return DsListRow(
+      key: Key('member-${m.userId}'),
+      leading: DsListRow.iconTile(context, Icons.person_outline, decorative: true),
+      title: m.isMe ? '${m.name} (you)' : m.name,
+      subtitle: subtitle.isEmpty ? null : subtitle,
+      info: info,
+      infoTitle: m.name,
+      trailing: asText || lane == null ? null : (catchingUp ? const CatchingUpChip() : LaneChip(server: m.serverAssisted)),
+    );
+  }
+
+  /// What the circle setting is, as the row's title (the state itself, not a label for a page).
+  String _policyTitle(ProcessingSnapshot s) {
+    if (s.legacy) return 'Old trusted-server mode';
+    if (!s.assistOn) return 'Server assistance is off';
+    return s.required ? 'Required by the admin' : 'Members may opt out';
   }
 
   Widget _statusCard(ProcessingSnapshot s) {
-    final (IconData icon, Color color, String title, String sub) = s.unconfirmed
-        ? (Icons.sync_problem, AppColors.statusOrange, 'Not confirmed right now', 'Your position is never sent unencrypted. Where the admin requires server processing it waits until this phone has signed.')
+    final (IconData icon, Color color, String title, String sub, String? more) = s.unconfirmed
+        ? (
+            Icons.sync_problem,
+            AppColors.statusOrange,
+            'Not confirmed right now',
+            'Your position is never sent unencrypted.',
+            'Your position is never sent unencrypted. Where the admin requires server processing it waits until this phone has signed.'
+          )
         : s.legacy
-        ? (Icons.dns_outlined, AppColors.sosRed, ProcessingCopy.legacyStatusTitle, ProcessingCopy.legacyStatusBody)
+        ? (
+            Icons.dns_outlined,
+            AppColors.sosRed,
+            ProcessingCopy.legacyStatusTitle,
+            'The server holds the circle key and can read it.',
+            ProcessingCopy.legacyStatusBody
+          )
         : !s.assistOn
-        ? (Icons.smartphone, AppColors.sky, 'Phones only', 'The server cannot read this circle.')
+        ? (Icons.smartphone, AppColors.sky, 'Phones only', 'The server cannot read this circle.', null)
         : s.required
         ? (
             Icons.dns_outlined,
             AppColors.accentInk,
             'Required by the admin (${s.serverCount} of ${s.members.length} on the server)',
+            s.serverCount == s.members.length ? 'Members cannot turn it off.' : 'Phones are switching over by themselves.',
             s.serverCount == s.members.length
                 ? ProcessingCopy.requireSwitchBody
                 : 'Everyone\'s phone switches over by itself. A phone that has not switched over cannot send positions until it has.'
@@ -441,45 +465,52 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
             Icons.dns_outlined,
             AppColors.accentInk,
             'Server-assisted (${s.serverCount} of ${s.members.length} members)',
-            'Others keep their data on their phone.'
+            s.serverCount == s.members.length ? 'Everyone allowed server processing.' : 'Others keep their data on their phone.',
+            null
           );
     final bool dark = Theme.of(context).brightness == Brightness.dark;
+    final bool compact = DsListRow.compactFor(context);
     final Color fg = dark ? Color.lerp(color, Colors.white, 0.45)! : Color.lerp(color, Colors.black, 0.35)!;
+    final double inset = DsRowScope.insetFor(context);
     return Semantics(
       container: true,
       label: 'Status: $title. $sub',
       child: Container(
         key: const Key('proc-status-card'),
-        padding: const EdgeInsets.all(AppSpace.lg),
+        padding: EdgeInsets.fromLTRB(inset, AppSpace.md, more == null ? inset : AppSpace.xs, AppSpace.md),
         decoration: BoxDecoration(
-          color: color.withValues(alpha: dark ? 0.18 : 0.10),
+          color: color.withValues(alpha: dark ? 0.16 : 0.09),
           borderRadius: BorderRadius.circular(AppRadius.lg),
-          border: Border.all(color: color.withValues(alpha: 0.55)),
         ),
         child: Row(children: <Widget>[
-          CircleAvatar(radius: 22, backgroundColor: color.withValues(alpha: 0.25), child: Icon(icon, color: fg)),
-          const SizedBox(width: AppSpace.md),
+          if (!compact) ...<Widget>[
+            ExcludeSemantics(child: DsIconTile(icon, color: fg)),
+            const SizedBox(width: AppSpace.md),
+          ],
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[
-              Text(title, key: const Key('proc-status-title'), style: AppType.headline.copyWith(color: fg)),
+              Text(title, key: const Key('proc-status-title'), style: AppType.body.copyWith(fontWeight: FontWeight.w700)),
+              const SizedBox(height: AppSpace.xxs),
               Text(sub, style: AppType.secondary.copyWith(color: Theme.of(context).colorScheme.onSurface)),
             ]),
           ),
+          if (more != null) InfoHint(title: title, body: more),
         ]),
       ),
     );
   }
 
   Widget _legacyCard(ProcessingSnapshot s) {
+    final double inset = DsRowScope.insetFor(context);
     return Container(
       key: const Key('proc-legacy-card'),
-      padding: const EdgeInsets.all(AppSpace.lg),
+      padding: EdgeInsets.all(inset),
       decoration: BoxDecoration(
         border: Border.all(color: AppColors.statusOrange.withValues(alpha: 0.6)),
         borderRadius: BorderRadius.circular(AppRadius.lg),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[
-        const Text('Old trusted-server mode', style: AppType.headline),
+        const Text('Old trusted-server mode', style: AppType.body),
         const SizedBox(height: AppSpace.xs),
         const Text(
             'This circle still uses the old setup: the server can read it only while every member has allowed it, and it holds '
@@ -514,96 +545,102 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
   }
 
   List<Widget> _myChoice(ProcessingSnapshot s, ProcessingMember? me) {
-    final ColorScheme cs = Theme.of(context).colorScheme;
     final bool mine = me?.serverAssisted ?? false;
     // Unknown state: no claim about the lane, no control (the note above says what is going on).
     if (s.unconfirmed) return const <Widget>[];
     // Required by the admin: no choice, no dead end. A calm notice; the phone signs by itself.
     if (s.required && !s.legacy) {
       return <Widget>[
-        Container(
-          key: const Key('proc-required-notice'),
-          padding: const EdgeInsets.all(AppSpace.lg),
-          decoration: BoxDecoration(
-            border: Border.all(color: cs.outlineVariant),
-            borderRadius: BorderRadius.circular(AppRadius.lg),
+        DsRowGroup(key: const Key('proc-required-notice'), children: <Widget>[
+          DsListRow(
+            leading: DsListRow.iconTile(context, Icons.dns_outlined, decorative: true),
+            title: ProcessingCopy.requiredNoticeTitle,
+            subtitle: 'Members cannot turn it off.',
+            info: ProcessingCopy.requiredNoticeBody,
+            infoTitle: 'Server processing is required',
           ),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[
-            const Text(ProcessingCopy.requiredNoticeTitle, style: AppType.headline),
-            const SizedBox(height: AppSpace.xs),
-            const Text(ProcessingCopy.requiredNoticeBody, style: AppType.secondary),
-            if (!mine) ...<Widget>[
-              const SizedBox(height: AppSpace.sm),
-              const Text(ProcessingCopy.requiredCatchingUp, key: Key('proc-required-catching-up'), style: AppType.secondary),
-            ],
-          ]),
-        ),
+          if (!mine)
+            DsListRow(
+              key: const Key('proc-required-catching-up'),
+              leading: DsListRow.iconTile(context, Icons.sync, decorative: true),
+              title: 'Your phone is switching over',
+              subtitle: 'Positions are not delivered until then.',
+              info: ProcessingCopy.requiredCatchingUp,
+              infoTitle: 'Your phone is switching over',
+            ),
+        ]),
       ];
     }
     final bool undecided = s.assistOn && me != null && !me.verified;
     String? why;
+    String? whyFull;
     if (!s.assistOn) {
-      why = 'Server processing is off for this circle, so your phone does the processing.';
+      why = 'Server processing is off for this circle.';
+      whyFull = 'Server processing is off for this circle, so your phone does the processing.';
     } else if (s.legacy) {
-      why = 'This circle is in the old trusted-server mode. Use the old settings above until an admin upgrades it.';
+      why = 'Old trusted-server mode. Use the old settings above.';
+      whyFull = 'This circle is in the old trusted-server mode. Use the old settings above until an admin upgrades it.';
     } else if (!s.hasServerKey && !mine) {
-      why = 'This server has no approved server key for this circle yet, so server processing cannot be chosen.';
+      why = 'No approved server key for this circle yet.';
+      whyFull = 'This server has no approved server key for this circle yet, so server processing cannot be chosen.';
     }
     final bool canToggle = why == null && !_busy;
+    final double inset = DsRowScope.insetFor(context);
     return <Widget>[
       if (undecided)
-        Container(
-          key: const Key('proc-choose'),
-          margin: const EdgeInsets.only(bottom: AppSpace.md),
-          padding: const EdgeInsets.all(AppSpace.lg),
-          decoration: BoxDecoration(
-            border: Border.all(color: cs.outlineVariant),
+        Padding(
+          padding: const EdgeInsets.only(bottom: AppSpace.md),
+          child: Material(
+            key: const Key('proc-choose'),
+            color: BrandTheme.of(context).sheet,
             borderRadius: BorderRadius.circular(AppRadius.lg),
+            child: Padding(
+              padding: EdgeInsets.all(inset),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[
+                const Text('Choose where your data is processed', style: AppType.body),
+                const SizedBox(height: AppSpace.xs),
+                Text(
+                    'Your phone does the processing until you choose. The admin suggests '
+                    '"${s.policy.defaultForNew == E2ee.lineServer ? 'Server processing' : 'Phone only'}"; that is only a suggestion. '
+                    'Nothing is shared with the server unless you confirm it yourself.',
+                    key: const Key('proc-default-hint'),
+                    style: AppType.secondary.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                const SizedBox(height: AppSpace.md),
+                Wrap(spacing: AppSpace.sm, runSpacing: AppSpace.sm, children: <Widget>[
+                  DsPillButton(
+                    key: const Key('choose-server'),
+                    label: 'Server processing',
+                    style: DsPillStyle.outlined,
+                    onPressed: _busy || !s.hasServerKey ? null : () => _chooseUndecided(E2ee.lineServer),
+                  ),
+                  DsPillButton(
+                    key: const Key('choose-phone'),
+                    label: 'Phone only',
+                    style: DsPillStyle.outlined,
+                    onPressed: _busy ? null : () => _chooseUndecided(E2ee.linePhone),
+                  ),
+                ]),
+              ]),
+            ),
           ),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[
-            const Text('Choose where your data is processed', style: AppType.headline),
-            const SizedBox(height: AppSpace.xs),
-            Text(
-                'Until you choose, your phone does the processing. The admin suggests '
-                '"${s.policy.defaultForNew == E2ee.lineServer ? 'Server processing' : 'Phone only'}" for new members. '
-                'That is only a suggestion: nothing is shared with the server unless you confirm it yourself.',
-                key: const Key('proc-default-hint'),
-                style: AppType.secondary),
-            const SizedBox(height: AppSpace.md),
-            Wrap(spacing: AppSpace.sm, runSpacing: AppSpace.sm, children: <Widget>[
-              DsPillButton(
-                key: const Key('choose-server'),
-                label: 'Server processing',
-                style: DsPillStyle.outlined,
-                onPressed: _busy || !s.hasServerKey ? null : () => _chooseUndecided(E2ee.lineServer),
-              ),
-              DsPillButton(
-                key: const Key('choose-phone'),
-                label: 'Phone only',
-                style: DsPillStyle.outlined,
-                onPressed: _busy ? null : () => _chooseUndecided(E2ee.linePhone),
-              ),
-            ]),
-          ]),
         ),
-      DsToggleRow(
-        key: const Key('my-lane-switch'),
-        icon: Icons.dns_outlined,
-        title: 'Let the server process my data',
-        subtitle: why ??
-            (mine
-                ? 'On. The server can read your location, trips and driving data. Switch off to keep them on your phone ("Don\'t send my data to the server").'
-                : 'Off. Your phone does the processing; end-to-end encryption between phones continues.'),
-        value: mine,
-        onChanged: canToggle && me != null
-            ? (bool v) => v ? _optIn() : _optOut()
-            : null,
-      ),
-      if (!mine && s.assistOn)
-        const Padding(
-          padding: EdgeInsets.only(top: AppSpace.sm),
-          child: Text(ProcessingCopy.phoneWorkNote, key: Key('proc-phone-note'), style: AppType.secondary),
+      DsRowGroup(children: <Widget>[
+        DsToggleRow(
+          key: const Key('my-lane-switch'),
+          icon: Icons.dns_outlined,
+          title: 'Let the server process my data',
+          subtitle: why ?? (mine ? 'On' : 'Off'),
+          info: whyFull ??
+              (mine
+                  ? 'On. The server can read your location, trips and driving data. Switch off to keep them on your phone ("Don\'t send my data to the server").'
+                  : 'Off. Your phone does the processing; end-to-end encryption between phones continues.'),
+          value: mine,
+          onChanged: canToggle && me != null
+              ? (bool v) => v ? _optIn() : _optOut()
+              : null,
         ),
+      ]),
+      if (!mine && s.assistOn) const DsFootnote(ProcessingCopy.phoneWorkNote, key: Key('proc-phone-note')),
     ];
   }
 }

@@ -72,44 +72,43 @@ class _MyProcessingScreenState extends State<MyProcessingScreen> {
       body: SafeArea(
         child: _loading
             ? const Center(child: CircularProgressIndicator())
-            : ListView(
-                padding: const EdgeInsets.all(AppSpace.xl),
+            : DsSettingsList(
                 children: <Widget>[
-                  Row(children: <Widget>[
-                    const Expanded(
-                        child: Text('Where your data is processed, for each Private circle. Tap a circle to switch the server off or on for you.',
-                            style: AppType.secondary)),
-                    InfoHint(
+                  DsSectionHeader(
+                    'Private circles',
+                    padding: EdgeInsets.fromLTRB(DsRowScope.insetFor(context), AppSpace.sm, AppSpace.sm, AppSpace.sm),
+                    caption: 'Tap one to change where your data is processed.',
+                    trailing: const InfoHint(
                       title: 'Where my data is processed',
                       body: 'In each Private circle you decide whether the Orbitly server may process your data. '
                           'Choose "Phone only" ("Don\'t send my data to the server") and your phone does the work; end-to-end '
                           'encryption between phones continues. The server operator can still see that you are a member and when '
                           'your phone connects.',
                     ),
-                  ]),
-                  const SizedBox(height: AppSpace.md),
-                  if (_error != null) Text(_error!, key: const Key('my-proc-error'), style: AppType.secondary),
+                  ),
+                  if (_error != null) DsFootnote(_error!, key: const Key('my-proc-error')),
                   if (_rows.isEmpty && _error == null)
                     const ProcessingNote(
                         noteKey: Key('my-proc-empty'),
                         icon: Icons.lock_open,
                         text: 'You are not in a Private circle. In a normal circle your position is sent to the server in readable form.'),
-                  DsRowGroup(children: <Widget>[
-                    for (final ({Circle circle, ProcessingSnapshot? snap}) r in _rows)
-                      DsListRow(
-                        key: Key('my-proc-${r.circle.id}'),
-                        leading: DsListRow.iconTile(context, Icons.lock_outline),
-                        title: r.circle.name,
-                        subtitle: _subtitle(r.snap),
-                        trailing: r.snap?.me == null || r.snap!.legacy ? null : LaneChip(server: r.snap!.me!.serverAssisted),
-                        chevron: true,
-                        onTap: () async {
-                          await Navigator.of(context).push<void>(MaterialPageRoute<void>(
-                              builder: (_) => ProcessingScreen(circle: r.circle, controller: widget.controller)));
-                          if (mounted) _load();
-                        },
-                      ),
-                  ]),
+                  if (_rows.isNotEmpty)
+                    DsRowGroup(children: <Widget>[
+                      for (final ({Circle circle, ProcessingSnapshot? snap}) r in _rows)
+                        DsListRow(
+                          key: Key('my-proc-${r.circle.id}'),
+                          leading: DsListRow.iconTile(context, Icons.lock_outline, decorative: true),
+                          title: r.circle.name,
+                          subtitle: _subtitleFor(r.snap),
+                          trailing: _chipFor(r.snap),
+                          chevron: true,
+                          onTap: () async {
+                            await Navigator.of(context).push<void>(MaterialPageRoute<void>(
+                                builder: (_) => ProcessingScreen(circle: r.circle, controller: widget.controller)));
+                            if (mounted) _load();
+                          },
+                        ),
+                    ]),
                   if (_rows.isNotEmpty) const OnDeviceReportsTile(),
                 ],
               ),
@@ -117,12 +116,25 @@ class _MyProcessingScreenState extends State<MyProcessingScreen> {
     );
   }
 
-  String _subtitle(ProcessingSnapshot? s) {
-    if (s == null) return 'Could not check this circle right now; your position is still sent to it';
+  /// The lane chip on the right; none on a narrow screen or at large text (it would be cut off; the second line says it).
+  Widget? _chipFor(ProcessingSnapshot? s) {
+    if (DsListRow.compactFor(context) || s?.me == null || s!.legacy) return null;
+    return LaneChip(server: s.me!.serverAssisted);
+  }
+
+  String? _subtitleFor(ProcessingSnapshot? s) {
+    final String? lane = DsListRow.compactFor(context) && s?.me != null && !s!.legacy ? laneLabel(s.me!.serverAssisted) : null;
+    final String joined = dsMeta(<String?>[lane, _subtitle(s)]);
+    return joined.isEmpty ? null : joined;
+  }
+
+  /// A second line only when the chip on the right does not already say it.
+  String? _subtitle(ProcessingSnapshot? s) {
+    if (s == null) return 'Could not check; your position is still sent';
     if (s.legacy) return 'Old mode: the server can read it';
-    if (!s.assistOn) return 'Phone only';
+    if (!s.assistOn) return 'Off for this circle';
     final ProcessingMember? me = s.me;
-    if (me?.serverAssisted ?? false) return s.required ? 'Required by your family admin: the server processes your data' : 'The server processes your data';
-    return s.required ? 'Required by your family admin: switching over' : 'Phone only';
+    if (me?.serverAssisted ?? false) return s.required ? 'Required by your family admin' : null;
+    return s.required ? 'Required by your admin; switching over' : null;
   }
 }

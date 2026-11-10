@@ -55,6 +55,9 @@ class ProcessingCopy {
   static const String requireSwitchBody =
       'Everyone\'s phone sends its location to your Orbitly server for processing. Members cannot turn it off.';
 
+  /// The one line under the owner switch; [requireSwitchBody] is behind its (i).
+  static const String requireSwitchShort = 'Location goes to your server. Members cannot turn it off.';
+
   /// What a member sees when the admin requires it.
   static const String requiredNoticeTitle = 'Your family admin requires server processing.';
   static const String requiredNoticeBody =
@@ -141,6 +144,9 @@ class CatchingUpChip extends StatelessWidget {
   Widget build(BuildContext context) =>
       const DsStatusChip(label: ProcessingCopy.catchingUp, icon: Icons.sync, color: AppColors.statusGrey);
 }
+
+/// The words of a lane chip (true = server), for a second line where a chip would not fit.
+String laneLabel(bool server) => server ? 'Processed by server' : 'Phone only';
 
 /// Chip for a member lane (true = server).
 class LaneChip extends StatelessWidget {

@@ -280,11 +280,14 @@ class DsRadioRow extends StatelessWidget {
 /// gutter (16 dp, 12 dp when narrow) holding [DsSectionHeader]s, [DsRowGroup]s, [DsFootnote]s
 /// and the odd note. One left edge for all of them. Replaces `ListView(padding: all(20))`.
 class DsSettingsList extends StatelessWidget {
-  const DsSettingsList({super.key, required this.children, this.listKey, this.controller});
+  const DsSettingsList({super.key, required this.children, this.listKey, this.controller, this.physics});
 
   final List<Widget> children;
   final Key? listKey;
   final ScrollController? controller;
+
+  /// For a pull-to-refresh page that must scroll even when short (`AlwaysScrollableScrollPhysics`).
+  final ScrollPhysics? physics;
 
   @override
   Widget build(BuildContext context) {
@@ -295,6 +298,7 @@ class DsSettingsList extends StatelessWidget {
         child: ListView(
           key: listKey,
           controller: controller,
+          physics: physics,
           padding: EdgeInsets.fromLTRB(gutter, AppSpace.sm, gutter, AppSpace.xxl),
           children: children,
         ),

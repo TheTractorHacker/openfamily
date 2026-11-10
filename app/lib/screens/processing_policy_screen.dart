@@ -136,14 +136,14 @@ class _ProcessingPolicyScreenState extends State<ProcessingPolicyScreen> {
     );
   }
 
-  Widget _option(Key key, String title, String subtitle, bool selected, VoidCallback? onTap) => DsListRow(
-        key: key,
-        leading: DsListRow.iconTile(context, selected ? Icons.radio_button_checked : Icons.radio_button_unchecked),
-        title: title,
-        subtitle: subtitle,
-        selected: selected,
-        onTap: onTap,
-      );
+  /// The long, plain explanation behind the "How this works" row. Same facts as before, in one place.
+  static const String _howItWorks = 'Only a member\'s own phone signs where their data is processed. With "Server processing" as the default their phone '
+      'does it for them, shows it, and they can switch it off at any time (unless the server\'s administrator has turned '
+      'automatic switching off; then members are asked). When server processing is required, every member\'s phone '
+      'signs it by itself and members cannot switch it off.';
+
+  static const String _assistInfoOn = 'On. The server can read data of members who allow it.';
+  static const String _assistInfoOff = 'Off. Every member\'s phone does the processing and nothing is readable by the server.';
 
   Widget _body(ProcessingSnapshot s) {
     final bool admin = s.iAmAdmin;
@@ -161,25 +161,25 @@ class _ProcessingPolicyScreenState extends State<ProcessingPolicyScreen> {
       blocked = 'This Orbitly server has no approved server key for this circle yet. Tap "Set up the server key" below: if you run this server you can finish it from here.';
     }
     final bool canTurnOn = canEdit && (s.assistOn || blocked == null);
-    return ListView(
-      padding: const EdgeInsets.all(AppSpace.xl),
+    final double inset = DsRowScope.insetFor(context);
+    return DsSettingsList(
       children: <Widget>[
-        if (!admin)
-          const ProcessingNote(noteKey: Key('policy-readonly'), icon: Icons.lock_outline, text: ProcessingCopy.adminOnly),
-        if (!admin) const SizedBox(height: AppSpace.lg),
-        DsToggleRow(
-          key: const Key('policy-assist-switch'),
-          icon: Icons.dns_outlined,
-          title: 'Server assistance',
-          subtitle: s.assistOn
-              ? 'On. The server can read data of members who allow it.'
-              : 'Off. Every member\'s phone does the processing and nothing is readable by the server.',
-          value: s.assistOn,
-          onChanged: canTurnOn ? _toggleAssist : null,
-        ),
+        if (!admin) const ProcessingNote(noteKey: Key('policy-readonly'), icon: Icons.lock_outline, text: ProcessingCopy.adminOnly),
+        if (!admin) const SizedBox(height: AppSpace.md),
+        DsRowGroup(children: <Widget>[
+          DsToggleRow(
+            key: const Key('policy-assist-switch'),
+            icon: Icons.dns_outlined,
+            title: 'Server assistance',
+            subtitle: s.assistOn ? 'On' : 'Off: phones do the work',
+            info: '${s.assistOn ? _assistInfoOn : _assistInfoOff} ${ProcessingCopy.operatorCanRead}',
+            value: s.assistOn,
+            onChanged: canTurnOn ? _toggleAssist : null,
+          ),
+        ]),
         if (admin && blocked != null)
           Padding(
-            padding: const EdgeInsets.only(top: AppSpace.sm),
+            padding: EdgeInsets.fromLTRB(inset, AppSpace.sm, inset, AppSpace.xs),
             child: Text(blocked, key: const Key('policy-blocked'), style: AppType.secondary.copyWith(color: AppColors.statusRed)),
           ),
         if (admin && !s.assistOn && s.isPrivate && !s.legacy && s.notReady.isEmpty && !s.hasServerKey)
@@ -187,7 +187,7 @@ class _ProcessingPolicyScreenState extends State<ProcessingPolicyScreen> {
             padding: const EdgeInsets.only(top: AppSpace.md),
             child: Align(
               alignment: Alignment.centerLeft,
-              child: OutlinedButton.icon(
+              child: FilledButton.tonalIcon(
                 key: const Key('policy-setup-server'),
                 onPressed: _busy ? null : _setUpServerKey,
                 icon: const Icon(Icons.vpn_key_outlined),
@@ -196,36 +196,58 @@ class _ProcessingPolicyScreenState extends State<ProcessingPolicyScreen> {
             ),
           ),
         if (s.assistOn) ...<Widget>[
-          const DsSectionHeader('Can members keep data on their phone?', padding: EdgeInsets.fromLTRB(0, AppSpace.xl, 0, AppSpace.xs)),
+          const DsSectionHeader('Members\' choice', caption: 'Can members keep data on their phone?'),
           DsRowGroup(children: <Widget>[
-            _option(const Key('opt-allowed'), 'Yes, members may opt out (default)',
-                'Keeping your location on your own phone is the member\'s choice. They switch it off in Settings > Server processing.',
-                s.policy.memberOptOut == E2ee.optOutAllowed, canEdit ? () => _setOptOut(E2ee.optOutAllowed) : null),
-            _option(const Key('opt-required'), 'No, server processing is required',
-                'Everyone\'s phone sends its location to your Orbitly server for processing. Members cannot turn it off. Each '
-                    'member\'s phone switches over by itself, without a question; a phone that has not switched over yet cannot send positions until it has. Applies to child accounts too.',
-                s.policy.memberOptOut == E2ee.optOutRequiredServer, canEdit ? () => _setOptOut(E2ee.optOutRequiredServer) : null),
+            DsRadioRow(
+              key: const Key('opt-allowed'),
+              title: 'Members may opt out',
+              subtitle: 'Default. Their choice in Settings.',
+              info: 'Keeping your location on your own phone is the member\'s choice. They switch it off in Settings > Server processing.',
+              selected: s.policy.memberOptOut == E2ee.optOutAllowed,
+              onTap: canEdit ? () => _setOptOut(E2ee.optOutAllowed) : null,
+            ),
+            DsRadioRow(
+              key: const Key('opt-required'),
+              title: 'Server processing required',
+              subtitle: 'Members cannot turn it off.',
+              info: 'Everyone\'s phone sends its location to your Orbitly server for processing. Members cannot turn it off. Each '
+                  'member\'s phone switches over by itself, without a question; a phone that has not switched over yet cannot send positions until it has. Applies to child accounts too.',
+              selected: s.policy.memberOptOut == E2ee.optOutRequiredServer,
+              onTap: canEdit ? () => _setOptOut(E2ee.optOutRequiredServer) : null,
+            ),
           ]),
-          const DsSectionHeader('Default for members', padding: EdgeInsets.fromLTRB(0, AppSpace.xl, 0, AppSpace.xs)),
+          const DsSectionHeader('Default for members', caption: 'What a member starts with.'),
           DsRowGroup(children: <Widget>[
-            _option(const Key('default-server'), 'Server processing (recommended)',
-                'Each member\'s own phone switches it on the next time they open the app and shows a notice. Anyone can switch it off.',
-                s.policy.defaultForNew == E2ee.lineServer, canEdit ? () => _setDefault(E2ee.lineServer) : null),
-            _option(const Key('default-phone'), 'Phone only', 'Members are asked. Nothing reaches the server until they confirm it themselves.',
-                s.policy.defaultForNew == E2ee.linePhone, canEdit ? () => _setDefault(E2ee.linePhone) : null),
+            DsRadioRow(
+              key: const Key('default-server'),
+              title: 'Server processing',
+              subtitle: 'Recommended. Phones show a notice.',
+              info: 'Each member\'s own phone switches it on the next time they open the app and shows a notice. Anyone can switch it off.',
+              selected: s.policy.defaultForNew == E2ee.lineServer,
+              onTap: canEdit ? () => _setDefault(E2ee.lineServer) : null,
+            ),
+            DsRadioRow(
+              key: const Key('default-phone'),
+              title: 'Phone only',
+              subtitle: 'Members are asked first.',
+              info: 'Members are asked. Nothing reaches the server until they confirm it themselves.',
+              selected: s.policy.defaultForNew == E2ee.linePhone,
+              onTap: canEdit ? () => _setDefault(E2ee.linePhone) : null,
+            ),
           ]),
-          const SizedBox(height: AppSpace.sm),
-          const Text(
-              'Only a member\'s own phone signs where their data is processed. With "Server processing" as the default their phone '
-              'does it for them, shows it, and they can switch it off at any time (unless the server\'s administrator has turned '
-              'automatic switching off; then members are asked). When server processing is required, every member\'s phone '
-              'signs it by itself and members cannot switch it off.',
-              style: AppType.secondary),
+          const SizedBox(height: AppSpace.lg),
+          DsRowGroup(children: <Widget>[
+            DsListRow(
+              key: const Key('policy-how'),
+              leading: DsListRow.iconTile(context, Icons.info_outline, decorative: true),
+              title: 'How this works',
+              chevron: true,
+              onTap: () => showInfoSheet(context, title: 'How this works', body: _howItWorks),
+            ),
+          ]),
         ],
-        const SizedBox(height: AppSpace.xl),
-        const ProcessingNote(
-            icon: Icons.info_outline,
-            text: 'Every change here is a signed entry in the key log that all members can see. ${ProcessingCopy.operatorCanRead}'),
+        const SizedBox(height: AppSpace.md),
+        const DsFootnote('Every change is a signed entry in the key log that all members can see.', icon: Icons.info_outline),
       ],
     );
   }
