@@ -9,6 +9,8 @@ import 'package:openfamily/screens/security_screen.dart';
 import 'package:openfamily/screens/sessions_screen.dart';
 import 'package:openfamily/screens/two_factor_screen.dart';
 import 'package:openfamily/services/api_client.dart';
+import 'package:openfamily/services/e2ee/e2ee_crypto.dart';
+import 'package:openfamily/services/e2ee/key_backup.dart';
 import 'package:openfamily/widgets/ds/ds.dart';
 
 import '../support/fake_security_api.dart';
@@ -315,6 +317,38 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.textContaining('Off. Add'), findsOneWidget);
       expect(find.text('Issue a reset code'), findsNothing);
+    });
+
+    testWidgets('the reinstall switch: off removes the copy, on saves it again', (tester) async {
+      _tall(tester);
+      final MemoryPlatformKeyStore store = MemoryPlatformKeyStore();
+      final MemoryKeyBackupPrefs prefs = MemoryKeyBackupPrefs();
+      final KeyBackup kb = KeyBackup(store: store, prefs: prefs);
+      await tester.runAsync(() => kb.save(BackedUpIdentity('u', 'd', E2ee.randomBytes(32))));
+      int saves = 0;
+      await tester.pumpWidget(_wrap(SecurityScreen(
+        api: FakeSecurityApi(account: _on),
+        keyBackup: kb,
+        backUpNow: () async => saves++,
+      )));
+      await tester.pumpAndSettle();
+      expect(find.text("Keep this phone's key safe through reinstalls"), findsOneWidget);
+      expect(find.textContaining('Turn off to keep the key only'), findsOneWidget);
+      await tester.runAsync(() async {
+        await tester.tap(find.byKey(const Key('key-backup-switch')));
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      });
+      await tester.pumpAndSettle();
+      expect(prefs.on, isFalse);
+      expect(store.data, isEmpty);
+      expect(tester.widget<Switch>(find.byType(Switch).last).value, isFalse);
+      await tester.runAsync(() async {
+        await tester.tap(find.byKey(const Key('key-backup-switch')));
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      });
+      await tester.pumpAndSettle();
+      expect(prefs.on, isTrue);
+      expect(saves, 1);
     });
 
     testWidgets('large text scale does not overflow', (tester) async {

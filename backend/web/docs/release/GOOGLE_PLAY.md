@@ -204,6 +204,14 @@ receive data from the phone. Google allows an exemption for service providers ac
 behalf of the developer and for user-initiated transfers; tile hosts are neither, so
 declare "Approximate location: shared" to be safe.
 
+Not declared, and why: "Keep this phone's key safe through reinstalls" (0.26.28) stores a sealed copy of the
+phone's own encryption key in Google Play services Block Store. With a screen lock Block Store also backs it up to the
+user's Google account, end-to-end encrypted by Google (`setShouldBackupToCloud` is true only when
+`isEndToEndEncryptionAvailable()` is true). The copy goes to the user's own Google account through Google's backup, not
+to the developer or any server Orbitly runs, so it is not "collected" under Play's definition (a user-initiated backup
+to the user's own account). If Play review disagrees, declare "Other user-generated content / App info: not shared,
+encrypted in transit and at rest, user can request deletion (the setting deletes it)".
+
 Security practices:
 
 - Data is encrypted in transit: **Yes** (HTTPS only; the app rejects HTTP).

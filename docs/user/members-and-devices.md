@@ -28,6 +28,9 @@ of the server record) are under **Advanced**.
 
 ![Encryption keys: key status, recovery phrase, link another phone, the circle list and Advanced](../images/app/encryption-keys.png)
 
+Deleting and reinstalling the app keeps your key: see
+[Reinstalling Orbitly](reinstalling.md).
+
 ## Owner approval (when you are the only admin)
 
 If you created a Private circle, are its only admin and set your own phone up

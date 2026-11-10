@@ -435,13 +435,27 @@ class ChannelSealer {
 
   String _seqKey(String circle, String device) => 'seq/$circle/$device';
 
+  /// Where the first item number of a restored device id is kept (see [_nextSeq]).
+  static String seqFloorKey(String device) => 'seqfloor/$device';
+
+  /// The floor written when an identity is restored: the current time in milliseconds, far above the count of
+  /// items any earlier install of that device could have sealed since its own start, and far below 2^53.
+  static int seqFloorNow(DateTime now) => now.millisecondsSinceEpoch;
+
   Future<int> _nextSeq(String circle, String device) {
     final Completer<int> c = Completer<int>();
     _lock = _lock.then((_) async {
       try {
         // Fresh read: the background isolate seals with the same device and counter. A value cached in this
         // isolate would hand out a seq the other one already used, and the server drops the second as a duplicate.
-        final int cur = int.tryParse(await kv.getFresh(_seqKey(circle, device)) ?? '') ?? 0;
+        int cur = int.tryParse(await kv.getFresh(_seqKey(circle, device)) ?? '') ?? 0;
+        if (cur == 0) {
+          // No counter on this install yet. An identity brought back after a reinstall (key_backup.dart) left a
+          // floor above every number its previous install used: the server keeps (circle, device, seq) unique and
+          // would drop a reused number as a duplicate.
+          final int floor = int.tryParse(await kv.getFresh(seqFloorKey(device)) ?? '') ?? 0;
+          if (floor > 0) cur = floor;
+        }
         await kv.set(_seqKey(circle, device), '${cur + 1}');
         c.complete(cur + 1);
       } catch (e) {

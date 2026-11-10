@@ -10,6 +10,12 @@ for the **last 5 minor versions** of the app (see
 [API compatibility](api-compat.md)), so you can update the server first and
 the phones afterwards.
 
+## v0.26.28 (2026-11-10)
+
+App-only release (the server needs no change). Install over the current app.
+
+- **Your encryption key survives reinstalling the app.** Deleting Orbitly used to delete this phone's key for Private circles, so after a reinstall you had to reset your keys and everyone had to approve you again. Now a sealed copy of the phone's own key is kept outside the app (Android: Google Play services Block Store, which also stores it end-to-end encrypted in your Google account when the phone has a screen lock; iPhone: the keychain, carried by an encrypted iPhone backup, never synced to iCloud Keychain). When you install again and sign in to the same account, the key comes back by itself, with the same safety number and no approval. It only comes back when the server still lists that key as active; after **Reset my keys**, a revoked key or **Set this phone up again**, a new key is made as before. Trade-off: Google (or your iPhone backup) holds an encrypted copy of that one key; a restored new phone shares the key with the old one until you revoke the old one. Turn it off in **Settings, Security, Keep this phone's key safe through reinstalls** (this deletes the copy). Not yet tested on a real phone. See [Reinstalling Orbitly](user/reinstalling.md).
+
 ## v0.26.26 (2026-11-10)
 
 App-only release (the server needs no change; v0.26.25 fixed the database connections and needs a server update). Install over the current app.

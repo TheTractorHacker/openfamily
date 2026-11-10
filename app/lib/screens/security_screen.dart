@@ -1,10 +1,13 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../models/security_models.dart';
 import '../services/api_client.dart';
+import '../services/e2ee/e2ee_app.dart';
+import '../services/e2ee/key_backup.dart';
 import '../services/security_api.dart';
 import '../services/security_format.dart';
 import '../theme/app_theme.dart';
@@ -24,9 +27,18 @@ class SecurityScreen extends StatefulWidget {
     super.key,
     this.api = const ApiSecurityApi(),
     this.shareExport,
+    this.keyBackup,
+    this.backUpNow,
   });
 
   final SecurityApi api;
+
+  /// "Keep this phone's key safe through reinstalls". Defaults to the app's (null where the platform has none,
+  /// then the row is not shown).
+  final KeyBackup? keyBackup;
+
+  /// Saves the live key's copy after the switch is turned on. Defaults to the app's E2EE service.
+  final Future<void> Function()? backUpNow;
 
   /// Hands the exported JSON text to the OS. Overridable for tests.
   final Future<void> Function(String json)? shareExport;
@@ -40,12 +52,48 @@ class _SecurityScreenState extends State<SecurityScreen> {
   String? _loadError;
   bool _offline = false;
   bool _exporting = false;
+  KeyBackup? _keyBackup;
+  bool? _keyBackupOn;
 
   @override
   void initState() {
     super.initState();
+    _keyBackup = widget.keyBackup ?? E2eeApp.keyBackup;
     _load();
+    _loadKeyBackup();
   }
+
+  Future<void> _loadKeyBackup() async {
+    final KeyBackup? kb = _keyBackup;
+    if (kb == null) return;
+    final bool on = await kb.enabled();
+    if (mounted) setState(() => _keyBackupOn = on);
+  }
+
+  Future<void> _setKeyBackup(bool on) async {
+    final KeyBackup? kb = _keyBackup;
+    if (kb == null) return;
+    setState(() => _keyBackupOn = on);
+    bool ok = true;
+    try {
+      ok = await kb.setEnabled(on);
+      if (on) await (widget.backUpNow ?? E2eeApp.service.backUpIdentityNow)();
+    } catch (_) {
+      ok = false;
+    }
+    if (!ok && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('The copy could not be removed right now. The app tries again at the next start.')));
+    }
+  }
+
+  static String get _keyBackupText => defaultTargetPlatform == TargetPlatform.iOS
+      ? 'Kept in this iPhone\'s keychain, which stays when the app is deleted, so you do not have to set up '
+          'encryption again after reinstalling. It can also come back when you restore an encrypted iPhone backup. '
+          'It never goes to iCloud Keychain. Turn off to keep the key only on this phone.'
+      : 'Stored encrypted in your Google account so you do not have to set up encryption again after reinstalling. '
+          'Needs Google backup on and a screen lock; without a screen lock it stays on this phone only. '
+          'Turn off to keep the key only on this phone.';
 
   Future<void> _load() async {
     setState(() {
@@ -168,6 +216,15 @@ class _SecurityScreenState extends State<SecurityScreen> {
                         'safety numbers and the recovery phrase.',
                     onTap: () => _push(const EncryptionKeysScreen()),
                   ),
+                  if (_keyBackup != null && _keyBackupOn != null)
+                    DsToggleRow(
+                      key: const Key('key-backup-switch'),
+                      icon: Icons.restore,
+                      title: 'Keep this phone\'s key safe through reinstalls',
+                      subtitle: _keyBackupText,
+                      value: _keyBackupOn!,
+                      onChanged: _setKeyBackup,
+                    ),
                   const Divider(height: AppSpace.xxl),
                   _tile(
                     icon: Icons.download_outlined,

@@ -228,7 +228,44 @@ So a transient fault could make the identity read as missing or unreadable, and 
 6. **Storage errors never sign out.** Token stores that throw are re-read a few times; if they still fail, no refresh is attempted and nothing is cleared. Only the server's `401` on `/auth/refresh` (plus no working saved login) ends a session; a `400` or `403` (a proxy, a captive portal) does not.
 7. **Every event is logged.** A persisted ring buffer of the last 50 storage events (reason codes only: read or decrypt failures, retries, mirror use, heals, archives, migrations, sign-out causes, and a one-time startup self-check of tokens and identity) is shown under Diagnostics, "Sign-in and key storage", and included in the copied diagnostic report.
 
-Still true: uninstalling the app (or clearing its storage) deletes the Keystore key and every copy. Write down the recovery phrase, and keep a second admin in each Private circle so a new phone can be approved.
+Uninstalling the app (or clearing its storage) deletes the Keystore key and every copy above. Since 0.26.28 one more copy survives that; see the next section. Write down the recovery phrase anyway, and keep a second admin in each Private circle so a new phone can be approved.
+
+### Keys survive a reinstall
+
+Owner goal: "make it to where that encryption key is just tied to that phone. No matter if you delete the app, you sign back in, boom, it is going to be automatically there." Before 0.26.28 a reinstall lost the identity, so the owner had to reset keys and every member had to approve the new key again. Code: `lib/services/e2ee/key_backup.dart`, `E2eeService.identity()` (`_restoreFromPlatform`), Android `KeyBackupChannel.kt`. User page: [Reinstalling Orbitly](../user/reinstalling.md).
+
+**What is stored.** Only what recreates the identity: the 32-byte identity seed, the device id and the owning account id, plus a version byte. Circle and server-line keys are not stored: after a restore the phone fetches the wraps the server still holds for that (still active) device id. One entry per account; the entry name is a hash of the account id.
+
+**Where.**
+
+- **Android: Google Play services Block Store.** `KeyBackupChannel.kt` asks `isEndToEndEncryptionAvailable()` first (Android 9+ with a screen lock) and passes the answer to `StoreBytesData.setShouldBackupToCloud`: the entry goes to the user's Google account **only when Google can end-to-end encrypt it**, otherwise (or on any doubt or error) it stays local. Google documents that Block Store data survives an uninstall and reinstall when the user has Google backup on (Settings, Google, Backup), that cloud entries come back on a device restore, and that only the same package and signing certificate can read an entry. Entries are far under the 4 KB limit (about 130 bytes). Android Auto Backup of the vault files stays **off** (`allowBackup="false"`, `backup_rules.xml` and `data_extraction_rules.xml` exclude every domain): the Keystore-wrapped files would not decrypt on a restore anyway, so it would add exposure and nothing else.
+- **iOS: one Keychain item** in its own service `openfamily_key_backup`, `kSecAttrAccessibleAfterFirstUnlock` (not ThisDeviceOnly), `synchronizable: false`. Keychain items outlive the app, and a non-ThisDeviceOnly item travels in an encrypted device backup to a restored iPhone. The first-launch wipe in `SecureKeyChannel.swift` deliberately does not include this service. Before 0.26.28 nothing survived on iOS: that wipe deletes the vault and the Secure Enclave wrapping key on the first launch after a reinstall. **iCloud Keychain sync was rejected:** it would put the same device key on every Apple device of the user at once (live devices sharing one device id; "revoke the lost phone" would revoke all of them). A cleaner alternative was considered and not taken: stopping the first-launch wipe so the existing Secure-Enclave-wrapped vault survives. It cannot be tested without an iPhone, and the wipe exists because of stale-token behaviour; the separate item is the fallback that works with the existing code.
+
+**The seal.** `version(1) || nonce(24) || XChaCha20-Poly1305(seed || deviceId || accountId)`, key `HKDF-SHA256("" , "orbitly-keybackup-v1", "seal" || accountId)`, AAD `"orbitly-keybackup-v1" || accountId`. The key is derived from public constants and the account id, so **the seal is not a secret.** What it adds, honestly: integrity (a damaged or swapped blob is rejected), a binding to the account id, and a version byte. What it does not add: secrecy. The secrecy comes from the platform (Google's end-to-end encryption, the iOS keychain). A phone binding such as `ANDROID_ID` was built first and removed: Google knows `ANDROID_ID` too, so it gave no secrecy, and it stopped a restored new phone from opening the copy, which is the goal. A key held only by the app cannot help, because a reinstall deletes it; a key held by the server (split knowledge) or typed by the user (a passphrase) would add real secrecy and is left for later.
+
+**Restore rule (safety-critical).** In `E2eeService.identity()`, only when the vault holds **no** identity (a stored key that cannot be read is never treated as missing), in the foreground engine (the background isolate has no key backup):
+
+1. The entry for the signed-in account opens and names that account. Another account's entry is not even looked up; another account signing in neither restores nor deletes it.
+2. The server's key list of this account has that device id as an **active** `device` key whose Ed25519 and X25519 public keys, and fingerprint, are exactly what the seed derives. A reset or revoked key, an unknown device id, or other public keys: refused (`keybackup_refused reason=...` in the storage event log), and a new identity is created as before, whose copy replaces the stale entry.
+3. If the entry exists but the server cannot be asked, a caller that would create a new identity fails with the network error instead, so a new key never replaces one that can still come back.
+4. The vault is checked again right before writing; nothing live is ever overwritten. The event `identity_restored_platform` is logged (code only).
+
+A malicious server cannot make the phone adopt another key (the seed comes from the phone's own store), it can only refuse, which leads to a new key as without this feature.
+
+**Item numbers after a restore.** The server keeps `(circle, device, seq)` unique, and the seq counter lived in app storage, which a reinstall deletes; a restored device id would restart at 1 and every new item would be dropped as a duplicate. On restore the app writes a floor (`seqfloor/<device>` = current time in milliseconds) and `ChannelSealer` starts a device's first counter above it, far above any count an earlier install could have used and far below the server's 2^53 limit.
+
+**When the copy is replaced or removed.** A new identity (first setup, after a refused restore, or any new key) replaces its account's entry at once; once per app start the entry is rewritten from the live identity. "Reset my keys" rewrites it from the key that stays. "Set this phone up again" (`eraseLocalKeys`) removes it, so an explicit erase cannot come back by itself. Turning off **Settings, Security, Keep this phone's key safe through reinstalls** (default on) deletes every entry; if that delete fails it is repeated at the next start. The switch is in ordinary preferences, so a reinstall turns it on again, which is harmless because turning it off left nothing to restore.
+
+**Trust and threat analysis.**
+
+- *Google (Android):* with a screen lock the entry is in Google's cloud, end-to-end encrypted by Google with a key derived from the lock screen; Google cannot read it, but Google's scheme is not verified here. Without a screen lock it stays local. Anyone who gets into the user's Google account **and** passes the lock-screen secret of a device they restore onto, **and** signs in to the Orbitly account, can use the key; the second and third are separate secrets.
+- *Apple (iOS):* the item is protected by the iPhone's data protection and is not in iCloud Keychain. An encrypted device backup carries it (the backup password protects it).
+- *Someone with the unlocked phone, or root on it:* can read the entry and so the seed. This is a real weakening against the vault, whose seed is wrapped by a non-extractable Keystore / Secure Enclave key: the copy is a second, software-protected copy. That attacker could already use the key through the app. Users who want the key only inside the Keystore turn the setting off.
+- *A stolen copy:* worthless without the signed-in Orbitly account, and the server refuses a key that was reset or revoked.
+- *Two phones with one key:* possible by design when a copy restores onto a new phone while the old phone is still set up. The server cannot tell the two apart (same device id and key). "Revoke" on the old phone's key also stops the new phone, which then makes a new key. The user documentation says so. A factory reset without a restore, or a restore that did not carry the copy, gets a new key as before (recovery phrase or approval).
+- *Revoked or reset key:* never resurrected; the server check is the gate and is not optional.
+
+**Not verified.** Nothing of this has run on a real phone: not a real uninstall and reinstall, not a device restore, not the Block Store API (the Kotlin side was written without compiling it here), not the iOS Keychain item outliving the app or arriving in an encrypted backup, not Google's statements about Block Store. The Dart rules are covered by tests with a fake store (`test/services/e2ee/key_backup_test.dart`).
 
 ## iOS: what is different (written, not yet run on an iPhone)
 
@@ -260,7 +297,7 @@ compiled or run: no Mac or Apple account was available (see `IOS_RELEASE.md`, "V
   The stricter mode, `recreateKey(requireUserAuth: true)`, uses `WhenUnlockedThisDeviceOnly` plus
   `.userPresence` (Face ID/Touch ID or passcode on every use). It cannot work for background
   sealing, which is why it is opt-in and off by default.
-* **No iCloud, no backup, no new-phone migration.** Everything is `ThisDeviceOnly` and
+* **No iCloud, no backup, no new-phone migration** for the vault itself (the separate reinstall copy, see "Keys survive a reinstall", is the one exception). Everything here is `ThisDeviceOnly` and
   `kSecAttrSynchronizable = false`. A restored backup or a new phone does **not** carry the
   wrapping key; the wrapped blobs then cannot be decrypted, `decrypt` reports `invalidated`, and
   the app fails closed and asks for the recovery phrase (same as Android). The vault uses its own
