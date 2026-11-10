@@ -7,9 +7,14 @@ background.
 
 1. Allow location **"All the time"** (not "While using").
 2. Allow notifications and, on Android, "Physical activity" for driving.
-3. Android: set battery for Orbitly to **Unrestricted** or **Don't optimize**.
+3. Android: set battery for Orbitly to **Unrestricted** or **Don't optimize**. The
+   **Open battery settings** buttons in Orbitly go straight there (a one-tap
+   question about Orbitly itself, or Orbitly's own app page). By hand:
+   **Settings > Apps > Orbitly > Battery > Unrestricted**.
    Samsung, Xiaomi and Huawei phones have an extra "sleeping apps" list; remove
-   Orbitly from it.
+   Orbitly from it. On Samsung, **Never sleeping apps** may not offer Orbitly
+   when you search or scroll its list; the **Unrestricted** choice above does the
+   same job, so you do not need that list.
 4. Install ntfy (or accept the app's built-in channel) so alerts arrive when the
    app is closed: [Notifications](../admin/notifications.md).
 
