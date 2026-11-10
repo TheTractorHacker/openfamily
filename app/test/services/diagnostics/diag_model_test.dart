@@ -366,6 +366,23 @@ void main() {
       expect(plainDeliveryProblem('offline'), contains('no connection'));
       expect(plainDeliveryProblem('http_503'), contains('server had a problem'));
       expect(plainDeliveryProblem(''), '');
+      // A lost or unusable key never reads like a blip that fixes itself.
+      expect(plainDeliveryProblem('flush_invalidated'), contains('lost for good'));
+      expect(plainDeliveryProblem('flush_invalidated'), isNot(contains('tries again')));
+      expect(plainDeliveryProblem('flush_missing'), contains('no encryption key'));
+      expect(plainDeliveryProblem('flush_missing'), isNot(contains('tries again')));
+      expect(plainDeliveryProblem('flush_unreadable:seed-length'), contains('not usable'));
+      expect(plainDeliveryProblem('flush_unreadable:seed-length'), isNot(contains('tries again')));
+      expect(plainDeliveryProblem('flush_unreadable:device-id-format'), contains('not usable'));
+      expect(plainDeliveryProblem('flush_unreadable:device-id-missing'), contains('not usable'));
+      expect(plainDeliveryProblem('flush_unreadable:owner-format'), contains('not usable'));
+      // Only a read failure of the secure storage is a moment's trouble.
+      for (final String r in <String>['seed-read-PlatformException', 'owner-read-PlatformException', 'device-id-read-StateError', 'vault-decrypt']) {
+        expect(plainDeliveryProblem('flush_unreadable:$r'), contains('tries again'), reason: r);
+      }
+      // The lost account note is repaired once the server confirms the key; it is not promised unconditionally.
+      expect(plainDeliveryProblem('flush_unreadable:empty-user-id'), contains('once the server confirms'));
+      expect(plainDeliveryProblem('flush_unreadable:empty-user-id'), contains('send this report'));
     });
 
     test('no Private circle or not collected: no section', () {

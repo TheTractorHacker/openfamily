@@ -722,11 +722,28 @@ String plainDeliveryProblem(String code) {
     return 'the family\'s encryption key changed; the phone fetches the new one and sends again';
   }
   if (c.startsWith('flush_unreadable') || c.startsWith('flush_missing') || c.startsWith('flush_invalidated')) {
-    if (c.contains('empty-user-id')) {
-      return 'the part of the app that sends positions in the background has lost the note of which account this '
-          'phone\'s key belongs to; opening the app repairs it by itself, and the key is not changed';
+    final String reason = c.contains(':') ? c.substring(c.indexOf(':') + 1) : '';
+    if (c.startsWith('flush_invalidated')) {
+      return 'this phone\'s key storage was reset, so its encryption key is lost for good; open Encryption keys and '
+          'restore it with your recovery phrase or link it from your other phone';
     }
-    return 'this phone could not use its own encryption key for a moment (reason code: ${c.substring(c.indexOf('_') + 1)}); '
+    if (c.startsWith('flush_missing')) {
+      return 'this phone has no encryption key; open Encryption keys to set it up or restore it';
+    }
+    if (reason == 'empty-user-id') {
+      return 'the part of the app that sends positions in the background has lost the note of which account this '
+          'phone\'s key belongs to; opening the app repairs it once the server confirms this phone\'s key, and the key '
+          'is not changed; if it stays, send this report';
+    }
+    if (reason == 'seed-length' || reason == 'device-id-format' || reason == 'device-id-missing' || reason == 'owner-format') {
+      return 'the encryption key stored on this phone is not usable as it is (reason code: $reason); the key was not '
+          'changed or deleted; if this stays after opening the app, open Encryption keys and send this report';
+    }
+    if (reason.isEmpty) {
+      return 'this phone could not use its own encryption key (the cause was not recorded); open Encryption keys';
+    }
+    // The read failures (seed-read-*, owner-read-*, device-id-read-*, vault-*): the secure storage did not answer.
+    return 'this phone\'s secure storage did not hand over the encryption key for a moment (reason code: $reason); '
         'the key is not changed and the phone tries again';
   }
   if (c.startsWith('seal_')) {

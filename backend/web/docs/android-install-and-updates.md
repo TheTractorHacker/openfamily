@@ -51,7 +51,8 @@ If it happens anyway:
 4. Only if the key stays unreadable, use **Set this phone up again**. The old
    key is put aside on the phone, not deleted, and **Encryption keys** offers
    to bring it back if it becomes readable later. The copy kept for reinstalls
-   is removed by this step.
+   is not removed by this step, so a key the server still lists comes back by
+   itself.
 
 Prepare once, so a lost key is never a problem: write down your **recovery
 phrase** (Encryption keys, Recovery phrase), and make sure each Private

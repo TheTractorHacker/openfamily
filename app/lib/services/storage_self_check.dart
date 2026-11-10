@@ -62,7 +62,7 @@ class StorageSelfCheck {
       if (seed != null && device != null) {
         if (seed.length != 32) {
           identity = 'bad(seed_len)';
-        } else if (!_isText(device) || device.isEmpty) {
+        } else if (!_isText(device)) {
           identity = 'bad(device_format)';
         }
       }

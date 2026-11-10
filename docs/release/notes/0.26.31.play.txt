@@ -1,1 +1,1 @@
-Fixes a phone whose Private circle positions stayed stuck on 'encryption key can't be read': the app now repairs the lost account note by itself, without a reset or losing the key. Clearer Encryption keys screen and Diagnostics. Not tried on a real phone yet.
+Fixes Private circle positions stuck waiting because the phone lost its account note: repaired by itself, the key is never changed. The 'key can't be read' message on Encryption keys may remain; Diagnostics now names the cause. Not tried on a real phone yet.

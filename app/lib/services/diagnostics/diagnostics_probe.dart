@@ -9,7 +9,7 @@ import 'package:permission_handler/permission_handler.dart';
 import '../api_client.dart';
 import '../background_location_service.dart';
 import '../e2ee/e2ee_app.dart';
-import '../e2ee/e2ee_service.dart' show LocalKeyException;
+import '../e2ee/e2ee_service.dart' show E2eeService, LocalKeyException;
 import '../e2ee/e2ee_vault.dart';
 import '../e2ee/private_runtime.dart';
 import '../e2ee/private_store.dart';
@@ -168,6 +168,23 @@ class DiagnosticsProbe {
     return Uri.tryParse(base)?.host ?? '';
   }
 
+  /// Whether the stored key can be used the way the app uses it: a real decrypt of a stored secret (proves the Keystore
+  /// key still works), then the same checks the app makes (the account note, the device id, the key size), so this
+  /// cannot pass while the Encryption keys screen says the key cannot be read. A network or session failure while
+  /// asking who is signed in says nothing about the key and is ignored. A reset key store is rethrown.
+  @visibleForTesting
+  static Future<({bool ok, String detail})> checkKeyUsable(E2eeService service) async {
+    await service.hasIdentity();
+    try {
+      await service.identity();
+    } on LocalKeyException catch (e) {
+      return (ok: false, detail: e.reasonCode.isEmpty ? 'unreadable' : 'unreadable: ${e.reasonCode}');
+    } on VaultInvalidatedException {
+      rethrow;
+    } catch (_) {}
+    return (ok: true, detail: '');
+  }
+
   /// [light] skips the server round trip and the Private-store/key-store checks:
   /// enough for the health report, and nothing in it can hang.
   static Future<DiagFacts> collect({PackageVersion? version, bool light = false}) async {
@@ -207,20 +224,9 @@ class DiagnosticsProbe {
         final KeystoreStatus st = await vault.status();
         needsUnlock = st.unlockedDeviceRequired;
         userAuth = st.userAuthRequired;
-        // A real decrypt of a stored secret proves the Keystore key still works.
-        await E2eeApp.service.hasIdentity();
-        vaultOk = true;
-        // The same checks the app makes when it uses the key (the account note, the device id, the key size), so this
-        // check cannot pass while the Encryption keys screen says the key cannot be read. A network or session
-        // failure while asking who is signed in says nothing about the key and is ignored here.
-        try {
-          await E2eeApp.service.identity();
-        } on LocalKeyException catch (e) {
-          vaultOk = false;
-          vaultDetail = e.reasonCode.isEmpty ? 'unreadable' : 'unreadable: ${e.reasonCode}';
-        } on VaultInvalidatedException {
-          rethrow;
-        } catch (_) {}
+        final ({bool ok, String detail}) r = await checkKeyUsable(E2eeApp.service);
+        vaultOk = r.ok;
+        vaultDetail = r.detail;
       } on VaultInvalidatedException {
         vaultOk = false;
         vaultDetail = 'the key store was reset';

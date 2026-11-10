@@ -317,6 +317,10 @@ class E2eeService {
 
   LocalIdentity? _cached;
 
+  /// Counts the times the stored identity was wiped, replaced or forgotten (sign-out, erase, restore). A call that
+  /// read the vault before such a change and finishes after it must not put what it read into the cache.
+  int _epoch = 0;
+
   /// Accounts whose platform copy was already looked at in this process (none, refused or unusable).
   final Set<String> _platformChecked = <String>{};
   Future<_PlatformRestore>? _platformInFlight;
@@ -436,6 +440,7 @@ class E2eeService {
       if (_ownerUnconfirmed) _retryOwnerRepairSoon();
       return c;
     }
+    int epoch = _epoch;
     final Future<void>? writing = _creating;
     if (writing != null) {
       try {
@@ -455,6 +460,7 @@ class E2eeService {
         // wrapped by the Keystore key), never destroyed, so signing back in to that account can restore it.
         StorageEventLog.instance.record('identity_archived', store: 'vault', detail: 'reason=other account');
         await _wipeIdentity();
+        epoch = _epoch;
         seed = null;
         ownerNeedsCheck = false;
       }
@@ -505,15 +511,24 @@ class E2eeService {
     final Uint8List x = await E2ee.xPublicFromSecret(xs);
     if (ownerNeedsCheck) {
       // The key is intact; only the note of which account it belongs to is missing, empty or damaged.
-      final OwnerRepair r = await _guardedOwnerRepair(uid, deviceId, ed, x);
-      if (r != OwnerRepair.repaired && r != OwnerRepair.notNeeded) {
-        if (owner.state == _OwnerState.garbled) throw _unusable(KeyCause.ownerFormat, detail: 'repair=${r.name}');
-        // A missing or empty note was always tolerated in the foreground; the repair is tried again later.
+      if (owner.state == _OwnerState.garbled) {
+        // A damaged note cannot be told from "another account": the server has to confirm before the key is used.
+        final OwnerRepair r = await _guardedOwnerRepair(uid, deviceId, ed, x);
+        if (_epoch != epoch) return identity(create: create);
+        if (r != OwnerRepair.repaired && r != OwnerRepair.notNeeded) {
+          throw _unusable(KeyCause.ownerFormat, detail: 'repair=${r.name}');
+        }
+      } else {
+        // A missing or empty note was always tolerated in the foreground, with no network round trip: the key is
+        // used at once and the note is written back as soon as the server has confirmed it.
         _ownerUnconfirmed = true;
-        _noteKeyEvent('owner_unconfirmed', 'owner=${owner.state.name} repair=${r.name}');
+        _repairOwnerInBackground('owner=${owner.state.name}');
       }
     }
-    final LocalIdentity id = _cached = LocalIdentity._(uid, deviceId, es, xs, ed, x, await E2ee.fingerprint(ed, x));
+    final Uint8List fingerprint = await E2ee.fingerprint(ed, x);
+    // The vault was wiped, replaced or restored while this call was reading it: what it read is out of date.
+    if (_epoch != epoch) return identity(create: create);
+    final LocalIdentity id = _cached = LocalIdentity._(uid, deviceId, es, xs, ed, x, fingerprint);
     if (fresh) {
       // A new identity replaces this account's copy at once (also the stale copy of a revoked key).
       await _saveBackup(uid, deviceId, seed);
@@ -564,17 +579,32 @@ class E2eeService {
 
   /// Retries a pending owner-note repair in the background, at most once a minute.
   void _retryOwnerRepairSoon() {
-    final DateTime now = DateTime.now();
     final DateTime? t = _ownerTriedAt;
-    if (_ownerRepairing != null || (t != null && now.difference(t) < const Duration(minutes: 1))) return;
-    _ownerTriedAt = now;
-    unawaited(repairOwnerRecord().catchError((Object _) => OwnerRepair.offline));
+    if (_ownerRepairing != null || (t != null && ownerClock().difference(t) < _ownerRetryEvery)) return;
+    _repairOwnerInBackground(null);
+  }
+
+  /// Time source of the retry timing (a test moves it).
+  @visibleForTesting
+  DateTime Function() ownerClock = DateTime.now;
+
+  /// How long to wait before asking the server again about the note: a minute while the server could not be asked,
+  /// longer once it answered that this key is not ours to claim (that does not change by itself).
+  Duration _ownerRetryEvery = const Duration(minutes: 1);
+
+  void _repairOwnerInBackground(String? why) {
+    _ownerTriedAt = ownerClock();
+    unawaited(repairOwnerRecord().then((OwnerRepair r) {
+      if (why != null && r != OwnerRepair.repaired && r != OwnerRepair.notNeeded) {
+        _noteKeyEvent('owner_unconfirmed', '$why repair=${r.name}');
+      }
+    }).catchError((Object _) {}));
   }
 
   Future<OwnerRepair> _guardedOwnerRepair(String uid, String deviceId, Uint8List ed, Uint8List x) {
     final Future<OwnerRepair>? running = _ownerRepairing;
     if (running != null) return running;
-    _ownerTriedAt = DateTime.now();
+    _ownerTriedAt = ownerClock();
     final Future<OwnerRepair> f = _confirmAndWriteOwner(uid, deviceId, ed, x).catchError((Object e) {
       _noteKeyEvent('owner_repair_error', e.runtimeType.toString());
       return OwnerRepair.offline;
@@ -601,7 +631,14 @@ class E2eeService {
     }
     if (deviceId.isEmpty) return OwnerRepair.noKey;
     final _Owner o = await _readOwner();
-    if (o.id != null) return o.id == uid ? OwnerRepair.notNeeded : OwnerRepair.otherAccount;
+    if (o.id != null) {
+      if (o.id == uid) {
+        _ownerUnconfirmed = false;
+        return OwnerRepair.notNeeded;
+      }
+      _ownerRetryEvery = const Duration(minutes: 15);
+      return OwnerRepair.otherAccount;
+    }
     final (Uint8List es, Uint8List xs) = await E2ee.deriveIdentity(seed);
     final Uint8List ed = await E2ee.edPublicFromSeed(es);
     final Uint8List x = await E2ee.xPublicFromSecret(xs);
@@ -609,6 +646,7 @@ class E2eeService {
     if (r == OwnerRepair.repaired || r == OwnerRepair.notNeeded) {
       _ownerUnconfirmed = false;
     }
+    _ownerRetryEvery = r == OwnerRepair.notOurs || r == OwnerRepair.otherAccount ? const Duration(minutes: 15) : const Duration(minutes: 1);
     return r;
   }
 
@@ -626,12 +664,23 @@ class E2eeService {
       _noteKeyEvent('owner_repair_refused', 'reason=$refused');
       return OwnerRepair.notOurs;
     }
-    // Look again right before writing: another isolate may have written the note meanwhile.
-    final _Owner now = await _readOwner();
-    if (now.id != null) return now.id == uid ? OwnerRepair.notNeeded : OwnerRepair.otherAccount;
+    // Look again right before writing: another isolate may have written the note meanwhile, and the key itself may
+    // have been erased or replaced while the server was asked (a note must never be written next to no key).
+    final _Owner before = await _readOwner();
+    if (before.id != null) return before.id == uid ? OwnerRepair.notNeeded : OwnerRepair.otherAccount;
+    final Uint8List? seedNow = await _readKey(_seedName);
+    final Uint8List? deviceNow = await _readKey(_deviceName);
+    if (seedNow == null || deviceNow == null || seedNow.length != 32) return OwnerRepair.noKey;
+    try {
+      if (utf8.decode(deviceNow) != deviceId) return OwnerRepair.noKey;
+    } on FormatException {
+      return OwnerRepair.noKey;
+    }
+    final (Uint8List es, Uint8List _) = await E2ee.deriveIdentity(seedNow);
+    if (!E2ee.constEq(await E2ee.edPublicFromSeed(es), ed)) return OwnerRepair.noKey;
     await vault.write(_userName, Uint8List.fromList(utf8.encode(uid)));
     _ownerUnconfirmed = false;
-    StorageEventLog.instance.record('owner_repaired', store: 'vault', detail: 'was=${now.state.name}');
+    StorageEventLog.instance.record('owner_repaired', store: 'vault', detail: 'was=${before.state.name}');
     return OwnerRepair.repaired;
   }
 
@@ -767,7 +816,10 @@ class E2eeService {
   /// mistaken "Set this phone up again" can be undone with [restoreArchivedIdentity].
   Future<void> _wipeIdentity() async {
     _cached = null;
-    final List<String> names = await vault.names();
+    _epoch++;
+    // The seed goes first: a reader in another isolate then never sees a seed whose device id is already gone.
+    final List<String> names = (await vault.names()).toList()
+      ..sort((String a, String b) => (a == _seedName ? 0 : 1).compareTo(b == _seedName ? 0 : 1));
     final E2eeVault inner = vault.inner;
     if (inner is VaultArchive) {
       TickVault.tick++;
@@ -850,13 +902,19 @@ class E2eeService {
       throw StateError('This phone already has a key; it is not replaced.');
     }
     int n = 0;
-    for (final String name in set.names) {
+    // The seed is absent (checked above), so a live device id or account note can only be what a create that failed
+    // before writing its seed left behind: the archived ones belong to the archived seed and replace them. Every
+    // other name keeps "never overwrite a live value". The seed is written last, like a new identity.
+    final List<String> names = set.names.toList()
+      ..sort((String a, String b) => (a == _seedName ? 1 : 0).compareTo(b == _seedName ? 1 : 0));
+    for (final String name in names) {
       final Uint8List? v = await (inner as VaultArchive).readArchived(set.id, name);
       if (v == null) continue;
-      if ((await vault.read(name)) != null) continue; // never overwrite a live value
+      if (name != _deviceName && name != _userName && (await vault.read(name)) != null) continue;
       await vault.write(name, v);
       n++;
     }
+    _epoch++;
     _cached = null;
     StorageEventLog.instance.record('identity_restored', store: 'vault', detail: 'names=$n');
     // The platform copy follows the identity that is live now (never throws).
@@ -989,7 +1047,10 @@ class E2eeService {
   /// Drops the identity this isolate cached, so the next [identity] call reads the vault again. A background isolate
   /// that kept using a key an owner reset has since revoked calls this when the server refuses its uploads
   /// (`device_revoked`): it then stops sealing under the old key and picks up the new one.
-  void forgetCachedIdentity() => _cached = null;
+  void forgetCachedIdentity() {
+    _cached = null;
+    _epoch++;
+  }
 
   /// Drops the cached identity only when the vault now holds a different phone key than this isolate cached (an owner
   /// reset or a restore replaced it elsewhere). True when it did. Cheap enough to call whenever the app opens.
@@ -1000,6 +1061,7 @@ class E2eeService {
       final Uint8List? d = await _readKey(_deviceName);
       if (d != null && utf8.decode(d) != c.deviceId) {
         _cached = null;
+        _epoch++;
         return true;
       }
     } catch (_) {}

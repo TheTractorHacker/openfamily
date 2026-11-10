@@ -6,6 +6,7 @@
 // These tests pin: the diagnosis (the cause is recorded and shown), the repair (the note is written back only after the
 // server confirms this phone's key belongs to the signed-in account), and the guard rails (a seed is never changed,
 // deleted, or adopted for another account; a vault read failure is never "repaired").
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -14,6 +15,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:openfamily/models/circle.dart';
 import 'package:openfamily/screens/encryption_keys_screen.dart';
 import 'package:openfamily/services/diagnostics/diag_model.dart';
+import 'package:openfamily/services/diagnostics/diagnostics_probe.dart';
 import 'package:openfamily/services/e2ee/e2ee_api.dart' show E2eeApi;
 import 'package:openfamily/services/e2ee/e2ee_service.dart';
 import 'package:openfamily/services/e2ee/private_channel.dart' show MemoryKv;
@@ -70,6 +72,44 @@ E2eeService backgroundOn(FakeE2eeServer s, E2eeVault v) {
   return svc;
 }
 
+/// Waits (real time) until [ok], for work the service starts without making the caller wait.
+Future<void> until(bool Function() ok) async {
+  for (int i = 0; i < 200 && !ok(); i++) {
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+  }
+}
+
+/// A server whose `myKeys` answers only after [open] is called.
+class GatedApi extends FakeE2eeClient {
+  GatedApi(super.server, super.uid);
+  final Completer<void> gate = Completer<void>();
+  int asked = 0;
+
+  @override
+  Future<List<DeviceKey>> myKeys() async {
+    asked++;
+    await gate.future;
+    return super.myKeys();
+  }
+}
+
+/// Records the order names are put aside and written in.
+class OrderVault extends MemoryVault {
+  final List<List<String>> archivedOrder = <List<String>>[];
+  final List<String> writes = <String>[];
+  @override
+  Future<void> archiveNames(List<String> names) {
+    archivedOrder.add(List<String>.of(names));
+    return super.archiveNames(names);
+  }
+
+  @override
+  Future<void> write(String name, Uint8List value) {
+    writes.add(name);
+    return super.write(name, value);
+  }
+}
+
 Map<String, List<int>> snapshot(MemoryVault v) => <String, List<int>>{for (final MapEntry<String, Uint8List> e in v.data.entries) e.key: List<int>.of(e.value)};
 
 void main() {
@@ -111,6 +151,7 @@ void main() {
       // The foreground (uid from the profile) always worked; now it also writes the note back, after asking the server.
       final E2eeService fg = svcOn(server, uA, v);
       final LocalIdentity id = (await fg.identity())!;
+      await until(() => v.data.containsKey('identity_user'));
       expect(utf8.decode(v.data['identity_user']!), uA);
       expectKeyUntouched(v, before);
       expect((await events()).any((String l) => l.contains('owner_repaired')), isTrue);
@@ -140,6 +181,7 @@ void main() {
       v.data['identity_user'] = Uint8List(0);
       final E2eeService fg = svcOn(server, uA, v);
       expect((await fg.identity())!.userId, uA);
+      await until(() => v.data['identity_user']!.isNotEmpty);
       expect(utf8.decode(v.data['identity_user']!), uA);
       expectKeyUntouched(v, before);
     });
@@ -274,6 +316,122 @@ void main() {
     });
   });
 
+  group('the repair does not hold up the key, and never writes next to no key', () {
+    test('a missing note: identity() returns at once while the server is slow; the note is written when it answers', () async {
+      final (MemoryVault v, Map<String, List<int>> before) = await phoneWithoutOwnerNote();
+      final GatedApi api = GatedApi(server, uA);
+      final E2eeService fg = svcOn(server, uA, v, api: api);
+      final LocalIdentity id = (await fg.identity())!;
+      expect(id.deviceId, isNotEmpty);
+      expect(v.data.containsKey('identity_user'), isFalse, reason: 'not written before the server answered');
+      api.gate.complete();
+      await until(() => v.data.containsKey('identity_user'));
+      expect(utf8.decode(v.data['identity_user']!), uA);
+      expectKeyUntouched(v, before);
+    });
+
+    test('keys erased while the server is asked: no note is written, nothing stale is cached', () async {
+      final (MemoryVault v, _) = await phoneWithoutOwnerNote();
+      final GatedApi api = GatedApi(server, uA);
+      final E2eeService fg = svcOn(server, uA, v, api: api);
+      await fg.identity();
+      await until(() => api.asked > 0);
+      await fg.eraseLocalKeys();
+      api.gate.complete();
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      expect(v.data.containsKey('identity_user'), isFalse, reason: 'no orphan note next to no key');
+      expect(v.data.containsKey('identity_seed'), isFalse);
+      expect(await fg.identity(), isNull, reason: 'the erased key is not served from a cache');
+    });
+
+    test('a damaged note while the server is asked and the keys are erased: the answer is "no key", not the erased key', () async {
+      final (MemoryVault v, _) = await phoneWithoutOwnerNote();
+      v.data['identity_user'] = Uint8List.fromList(<int>[0xff, 0xfe]);
+      final GatedApi api = GatedApi(server, uA);
+      final E2eeService fg = svcOn(server, uA, v, api: api);
+      final Future<LocalIdentity?> pending = fg.identity();
+      await until(() => api.asked > 0);
+      await fg.eraseLocalKeys();
+      api.gate.complete();
+      expect(await pending, isNull);
+      expect(await fg.identity(), isNull);
+      expect(v.data.containsKey('identity_user'), isFalse);
+    });
+
+    test('offline at first use: retried after a minute, and the note is written once the server answers', () async {
+      final (MemoryVault v, Map<String, List<int>> before) = await phoneWithoutOwnerNote();
+      final FlakyApi api = FlakyApi(server, uA)..online = false;
+      final E2eeService fg = svcOn(server, uA, v, api: api);
+      DateTime t = DateTime.utc(2026, 11, 10, 16);
+      fg.ownerClock = () => t;
+      await fg.identity();
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(v.data.containsKey('identity_user'), isFalse);
+      api.online = true;
+      await fg.identity(); // under a minute later: not asked again
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(v.data.containsKey('identity_user'), isFalse, reason: 'at most once a minute');
+      t = t.add(const Duration(minutes: 1, seconds: 1));
+      await fg.identity();
+      await until(() => v.data.containsKey('identity_user'));
+      expect(utf8.decode(v.data['identity_user']!), uA);
+      expectKeyUntouched(v, before);
+    });
+
+    test('a key the server says is not ours is asked about again only after 15 minutes', () async {
+      final MemoryVault v = MemoryVault();
+      await svcOn(server, uA, v).registerThisDevice();
+      v.data.remove('identity_user');
+      final GatedApi api = GatedApi(FakeE2eeServer()..names.addAll(<String, String>{uA: 'Alice'}), uA)..gate.complete();
+      final E2eeService fg = svcOn(server, uA, v, api: api);
+      DateTime t = DateTime.utc(2026, 11, 10, 16);
+      fg.ownerClock = () => t;
+      await fg.identity();
+      await until(() => api.asked == 1);
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      t = t.add(const Duration(minutes: 2));
+      await fg.identity();
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(api.asked, 1, reason: 'backed off');
+      t = t.add(const Duration(minutes: 20));
+      await fg.identity();
+      await until(() => api.asked == 2);
+      expect(api.asked, 2);
+      expect(v.data.containsKey('identity_user'), isFalse);
+    });
+  });
+
+  group('put aside and restore keep the order and never pair a seed with the wrong device id', () {
+    test('wipe puts the seed aside first; restore writes it last', () async {
+      final OrderVault v = OrderVault();
+      await svcOn(server, uA, v).registerThisDevice();
+      final E2eeService s = svcOn(server, uA, v);
+      await s.eraseLocalKeys();
+      expect(v.archivedOrder.last.first, 'identity_seed');
+      final VaultArchiveSet set = (await s.restorableIdentity())!;
+      v.writes.clear();
+      await s.restoreArchivedIdentity(set);
+      expect(v.writes.last, 'identity_seed');
+    });
+
+    test('a create that failed before its seed left a new device id: the restore brings back the archived device id', () async {
+      final _FailOnSeed v = _FailOnSeed()..failSeed = false;
+      final E2eeService first = svcOn(server, uA, v);
+      final String original = (await first.identity(create: true))!.deviceId;
+      await first.eraseLocalKeys();
+      v.failSeed = true;
+      await expectLater(svcOn(server, uA, v).identity(create: true), throwsA(isA<StateError>()));
+      expect(v.data.containsKey('identity_seed'), isFalse);
+      expect(v.data.containsKey('device_id'), isTrue, reason: 'the leftover of the failed create');
+      v.failSeed = false;
+      final E2eeService s = svcOn(server, uA, v);
+      final VaultArchiveSet set = (await s.restorableIdentity())!;
+      await s.restoreArchivedIdentity(set);
+      expect((await s.identity())!.deviceId, original);
+      expect(utf8.decode(v.data['identity_user']!), uA);
+    });
+  });
+
   group('creating an identity while another reader looks', () {
     test('a concurrent reader never sees a seed without its device id; the identity completes', () async {
       final SlowVault v = SlowVault();
@@ -351,6 +509,40 @@ void main() {
       await svcOn(server, uA, v).registerThisDevice();
       v.failNames.add('identity_user');
       expect(await check(v), contains('identity=ok owner=unreadable(PlatformException)'));
+    });
+  });
+
+  group('the Diagnostics key check', () {
+    test('passes for a good key, and fails (with the reason) for a missing-owner-from-background, garbled note and wrong seed size', () async {
+      final MemoryVault v = MemoryVault();
+      await svcOn(server, uA, v).registerThisDevice();
+      expect((await DiagnosticsProbe.checkKeyUsable(svcOn(server, uA, v))).ok, isTrue);
+
+      // The background view of a missing note: the account cannot be named, so the key is refused.
+      v.data.remove('identity_user');
+      final ({bool ok, String detail}) bg = await DiagnosticsProbe.checkKeyUsable(backgroundOn(server, v));
+      expect(bg.ok, isFalse);
+      expect(bg.detail, contains('empty-user-id'));
+
+      // A damaged note with the server out of reach.
+      v.data['identity_user'] = Uint8List.fromList(<int>[0xff, 0xfe]);
+      final FlakyApi api = FlakyApi(server, uA)..online = false;
+      final ({bool ok, String detail}) g = await DiagnosticsProbe.checkKeyUsable(svcOn(server, uA, v, api: api));
+      expect(g.ok, isFalse);
+      expect(g.detail, contains('owner-format'));
+
+      v.data['identity_user'] = Uint8List.fromList(utf8.encode(uA));
+      v.data['identity_seed'] = Uint8List(31);
+      final ({bool ok, String detail}) w = await DiagnosticsProbe.checkKeyUsable(svcOn(server, uA, v));
+      expect(w.ok, isFalse);
+      expect(w.detail, contains('seed-length'));
+    });
+
+    test('a sign-in or network failure while asking who is signed in is not a key problem', () async {
+      final MemoryVault v = MemoryVault();
+      await svcOn(server, uA, v).registerThisDevice();
+      final E2eeService s = svcOn(server, uA, v, uid: () async => throw StateError('no session'));
+      expect((await DiagnosticsProbe.checkKeyUsable(s)).ok, isTrue);
     });
   });
 
