@@ -13,9 +13,10 @@ const (
 	DefaultLocationRetentionDays = 90
 
 	// DefaultDBMaxConns is the pgx pool size when DB_MAX_CONNS is unset or
-	// invalid. Postgres' default max_connections is 100, so 25 leaves ample
-	// headroom for a single API instance plus the migration connection.
-	DefaultDBMaxConns = 25
+	// invalid. The compose file sets Postgres max_connections to 60 (the timescaledb-ha image would tune it to
+	// only 25 for a 1 GB container, below a pool of 25 and starving backups and admin tools), so 15 leaves
+	// headroom for one API instance, the migration connection, backups and psql.
+	DefaultDBMaxConns = 15
 )
 
 // LocationRetentionDays returns the configured location history retention in
@@ -31,7 +32,7 @@ func LocationRetention() time.Duration {
 	return time.Duration(LocationRetentionDays()) * 24 * time.Hour
 }
 
-// DBMaxConns returns the pool size (env DB_MAX_CONNS, default 25).
+// DBMaxConns returns the pool size (env DB_MAX_CONNS, default 15).
 func DBMaxConns() int {
 	return getenvPositiveInt("DB_MAX_CONNS", DefaultDBMaxConns)
 }

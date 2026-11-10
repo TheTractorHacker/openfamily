@@ -49,6 +49,9 @@ services:
       # See docs/self-hosting.md ("Database TLS").
       DATABASE_URL: "${DATABASE_URL:-postgres://${POSTGRES_USER:-openfamily}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is not set - run ./scripts/setup.sh to generate .env}@postgres:5432/${POSTGRES_DB:-openfamily}?sslmode=${DB_SSLMODE:-disable}}"
       DB_SSL_DISABLE_OK: ${DB_SSL_DISABLE_OK:-false}
+      # Pool size. Keep it well below PG_MAX_CONNECTIONS (default 60): backups, migrations and admin tools need
+      # connections too.
+      DB_MAX_CONNS: ${DB_MAX_CONNS:-15}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is not set - run ./scripts/setup.sh to generate .env}
       ACCESS_TOKEN_TTL: "15m"
       REFRESH_TOKEN_TTL: "720h"
@@ -181,6 +184,10 @@ services:
     # Pinned for reproducible installs. Bump deliberately (and take a backup
     # first: ./scripts/backup.sh) rather than tracking a moving tag.
     image: timescale/timescaledb-ha:pg16.15-ts2.31.0@sha256:98f88217cb7be56655f842d9920f90d0b4893b67b3463f93084548b433ed5c93
+    # This image tunes max_connections down to 25 for a 1 GB container, which is LESS than the API's pool and
+    # left nothing for backups and admin tools: under load the API was refused with "too many clients" and its
+    # requests failed or hung. An explicit limit well above the API pool (DB_MAX_CONNS, default 15).
+    command: ["postgres", "-c", "max_connections=${PG_MAX_CONNECTIONS:-60}"]
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-openfamily}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is not set - run ./scripts/setup.sh to generate .env}

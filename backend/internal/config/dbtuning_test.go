@@ -17,7 +17,7 @@ func TestLocationRetentionDays(t *testing.T) {
 }
 
 func TestDBMaxConns(t *testing.T) {
-	cases := map[string]int{"": 25, "50": 50, "0": 25, "x": 25, "-1": 25}
+	cases := map[string]int{"": 15, "50": 50, "0": 15, "x": 15, "-1": 15}
 	for in, want := range cases {
 		t.Setenv("DB_MAX_CONNS", in)
 		if got := DBMaxConns(); got != want {

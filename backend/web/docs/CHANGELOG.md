@@ -10,6 +10,12 @@ for the **last 5 minor versions** of the app (see
 [API compatibility](api-compat.md)), so you can update the server first and
 the phones afterwards.
 
+## v0.26.25 (2026-11-10)
+
+Server only: update the server, no app update needed.
+
+- **Fixed: the server ran out of database connections under load.** The database image limited itself to 25 connections, which was fewer than the server's own pool (also 25) and left nothing for backups and admin tools. When many phones sent at once, requests were refused with "too many clients" or hung, which shows up in the app as a lost reply, a "Something went wrong" screen, a refresh that times out and, in the end, a sign-out. The compose file now sets the database limit to 60 (`PG_MAX_CONNECTIONS`) and the server's pool to 15 (`DB_MAX_CONNS`). Update the server and restart the stack (the database restarts for a few seconds).
+
 ## v0.26.24 (2026-11-10)
 
 Server only: update the server, no app update needed.
