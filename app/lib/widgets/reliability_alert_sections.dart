@@ -40,21 +40,25 @@ class _SilenceAlertsSectionState extends State<SilenceAlertsSection> {
   Future<void> _load() async {
     try {
       final List<Circle> circles = await CircleService.instance.listCircles();
-      final List<_SilenceRow> rows = <_SilenceRow>[];
-      for (final Circle c in circles) {
-        final dynamic j = await ApiClient.get('/circles/${c.id}/silence-alerts');
-        final Map<String, dynamic> m = j as Map<String, dynamic>;
-        rows.add(_SilenceRow(
-          c,
-          (m['hours'] as num?)?.toInt() ?? 0,
-          m['disabled'] == true,
-          DateTime.tryParse('${m['snoozed_until']}')?.toLocal(),
-        ));
-      }
+      // One request per circle, all at once: the list used to wait for each in turn.
+      final List<_SilenceRow> rows = await Future.wait(<Future<_SilenceRow>>[
+        for (final Circle c in circles) _loadRow(c),
+      ]);
       if (mounted) setState(() => _rows = rows);
     } catch (e) {
       if (mounted) setState(() => _error = errorText(e));
     }
+  }
+
+  static Future<_SilenceRow> _loadRow(Circle c) async {
+    final dynamic j = await ApiClient.get('/circles/${c.id}/silence-alerts');
+    final Map<String, dynamic> m = j as Map<String, dynamic>;
+    return _SilenceRow(
+      c,
+      (m['hours'] as num?)?.toInt() ?? 0,
+      m['disabled'] == true,
+      DateTime.tryParse('${m['snoozed_until']}')?.toLocal(),
+    );
   }
 
   Future<void> _put(String path, Map<String, Object?> body) async {
@@ -77,16 +81,13 @@ class _SilenceAlertsSectionState extends State<SilenceAlertsSection> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
-        const DsSectionHeader('Silent phone alerts'),
-        const Padding(
-          padding: EdgeInsets.symmetric(horizontal: AppSpace.lg, vertical: AppSpace.xs),
-          child: Text(
-            'Tells circle admins, and the person themselves, when a phone has not '
-            'reported for a long time during hours it normally does. Uses only '
-            'when the phone last reported, never where it is, so it also works for Private circles. '
-            'Turned off until an admin picks a time.',
-          ),
-        ),
+        const DsSectionHeader('Silent phone alerts', trailing: InfoHint(
+          title: 'Silent phone alerts',
+          body: 'Tells circle admins, and the person themselves, when a phone has not '
+              'reported for a long time during hours it normally does. Uses only '
+              'when the phone last reported, never where it is, so it also works for Private circles. '
+              'Off until an admin picks a time.',
+        )),
         for (final _SilenceRow r in rows) ...<Widget>[
           if (r.circle.role == 'admin')
             ListTile(
@@ -111,7 +112,7 @@ class _SilenceAlertsSectionState extends State<SilenceAlertsSection> {
               title: 'Don\'t alert about my phone in ${r.circle.name}',
               subtitle: r.snoozedUntil != null && r.snoozedUntil!.isAfter(DateTime.now())
                   ? 'Snoozed until ${MaterialLocalizations.of(context).formatShortDate(r.snoozedUntil!)}'
-                  : 'Turn on if you often switch your phone off',
+                  : 'For a phone you often switch off',
               value: r.disabled,
               onChanged: (bool v) {
                 setState(() => r.disabled = v);
@@ -188,20 +189,17 @@ class _ArrivalWatchSectionState extends State<ArrivalWatchSection> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
-        const DsSectionHeader('Late-arrival alerts'),
-        const Padding(
-          padding: EdgeInsets.symmetric(horizontal: AppSpace.lg, vertical: AppSpace.xs),
-          child: Text(
-            'Opt in per place to let your circle know when you are later than you usually are. '
-            'It needs a few weeks of regular arrivals first, sends at most two alerts a day, '
-            'and only works in circles where the server can see positions (not Private circles).',
-          ),
-        ),
+        const DsSectionHeader('Late-arrival alerts', trailing: InfoHint(
+          title: 'Late-arrival alerts',
+          body: 'Opt in per place to let your circle know when you are later than you usually are. '
+              'It needs a few weeks of regular arrivals first, sends at most two alerts a day, '
+              'and only works in circles where the server can see positions (not Private circles).',
+        )),
         for (final Map<String, String> p in places)
           DsToggleRow(
             icon: Icons.schedule_outlined,
             title: p['name']!,
-            subtitle: 'Alert if I am late getting here',
+            subtitle: 'Alert if I am late here',
             value: _watched.contains(p['id']),
             onChanged: (bool v) => _set(p['id']!, v),
           ),

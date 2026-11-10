@@ -43,7 +43,17 @@ no longer valid does.
 
 ## How many updates are waiting
 
-**Settings, Help, Diagnostics** shows **Updates waiting** (positions, messages, check-ins) and a
+**Settings, Advanced, Diagnostics** shows **Updates waiting** (positions, messages, check-ins) and a
 **Send now** button.
 
 More for administrators: [design notes](../design/OFFLINE_RESILIENCE.md).
+
+## What the error messages mean
+
+- **This phone is offline**: the phone has no Wi-Fi or mobile data. Connect and try again.
+- **Can't reach your server**: the phone is online but your server did not answer. It may be restarting or down; try again in a minute, and open **Settings, Advanced, Diagnostics** if it keeps happening.
+- **No answer in time**: the request went out but the answer took too long, usually a weak connection.
+- **Server busy**: your server is restarting or overloaded. Try again in a minute.
+- **Sign in again**: your sign-in on this phone ended. Signing in again keeps everything on the phone.
+- **Encryption key problem**: this phone's key is missing, locked or unreadable. Open **Encryption keys**.
+- **Problem on this phone**: something failed in the app itself. Try again; if it repeats, send a report from **Settings, Advanced, Diagnostics**.

@@ -9,12 +9,13 @@ import 'e2ee/e2ee_service.dart' show LocalKeyException, LocalKeyProblem, localKe
 import 'offline/offline_cache.dart';
 import 'offline/offline_errors.dart';
 import 'session_diary.dart';
+import 'error_copy.dart';
 
 export 'api_client.dart' show SessionExpiredException;
 
 /// A failure from the circles API, already worded for the user.
 class CircleException implements Exception {
-  const CircleException(this.message, {this.status = 0, this.offline = false, this.keyProblem});
+  const CircleException(this.message, {this.status = 0, this.offline = false, this.keyProblem, this.title});
 
   final String message;
 
@@ -27,6 +28,9 @@ class CircleException implements Exception {
 
   /// True when the device could not reach the server at all.
   final bool offline;
+
+  /// Short heading for a full-screen error (set for connection problems).
+  final String? title;
 
   @override
   String toString() => 'CircleException($status): $message';
@@ -43,7 +47,7 @@ class CircleException implements Exception {
 CircleException describeCircleError(Object error) {
   if (error is CircleException) return error;
   if (error is ApiException) {
-    if (error.status == 0) return CircleException(error.message);
+    if (error.status == 0) return _connectionProblem(error);
     return CircleException(error.message, status: error.status);
   }
   if (error is SessionExpiredException) {
@@ -54,16 +58,18 @@ CircleException describeCircleError(Object error) {
     _logCircleError(error, key.problem.name);
     return CircleException(key.message, keyProblem: key.problem);
   }
-  if (isOfflineError(error)) {
-    return const CircleException(
-      'Can\'t reach the server. Check your connection and try again.',
-      offline: true,
-    );
-  }
+  if (isOfflineError(error)) return _connectionProblem(error);
   _logCircleError(error, 'unexpected');
   return CircleException(
     'Something went wrong on this phone (${error.runtimeType}). Try again, and if it keeps happening send a diagnostics report.',
   );
+}
+
+/// A transport failure, worded by [describeError]: "offline" only when the
+/// phone really has no network; otherwise the server did not answer in time.
+CircleException _connectionProblem(Object error) {
+  final ErrorCopy c = describeError(error);
+  return CircleException(c.message, offline: true, title: c.title);
 }
 
 /// Type only: an exception's text can carry server data or file paths.

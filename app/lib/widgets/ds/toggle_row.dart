@@ -33,6 +33,7 @@ class DsToggleRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final bool compact = DsListRow.compactFor(context);
     final ColorScheme cs = Theme.of(context).colorScheme;
     final ValueChanged<bool>? cb = onChanged;
     return Semantics(
@@ -50,13 +51,13 @@ class DsToggleRow extends StatelessWidget {
               child: ConstrainedBox(
                 constraints: const BoxConstraints(minHeight: 56),
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: AppSpace.xl,
+                  padding: EdgeInsets.symmetric(
+                    horizontal: compact ? AppSpace.lg : AppSpace.xl,
                     vertical: AppSpace.sm,
                   ),
                   child: Row(
                     children: <Widget>[
-                      if (icon != null) ...<Widget>[
+                      if (icon != null && !compact) ...<Widget>[
                         DsListRow.iconTile(context, icon!),
                         const SizedBox(width: AppSpace.md),
                       ],

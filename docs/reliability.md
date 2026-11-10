@@ -6,7 +6,7 @@ Status: implemented and unit/DB-tested; **never run on a real phone** (see
 All of it is coordinate-free metadata (timestamps, counts, OS states), so it works
 for Private (end-to-end encrypted) circles without the server learning anything new.
 
-## In-app Diagnostics (Settings, Help, Diagnostics)
+## In-app Diagnostics (Settings, Advanced, Diagnostics)
 
 Runs on the phone and explains, in plain language, why it may not be reporting. Each
 check is pass, warn, fail or info and most have a one-tap fix: location permission

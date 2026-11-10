@@ -1,4 +1,5 @@
 import '../services/api_client.dart';
+import 'error_copy.dart';
 
 /// Pure helpers shared by the security screens.
 
@@ -27,23 +28,12 @@ class SecurityException implements Exception {
   String toString() => message;
 }
 
-/// Converts any failure into short, user-facing copy.
+/// Converts any failure into short, user-facing copy: what went wrong and
+/// what to do next (see [describeError]; "offline" only for a real network
+/// failure).
 String securityErrorMessage(Object error) {
-  if (error is ApiException) {
-    if (error.status == 0) {
-      return 'You appear to be offline or the server is unreachable. '
-          'Check your connection and try again.';
-    }
-    if (error.status == 429) {
-      return 'Too many attempts. Wait a few minutes and try again.';
-    }
-    if (error.status >= 500) {
-      return 'The server had a problem. Try again shortly.';
-    }
-    return error.message;
-  }
   if (error is SecurityException) return error.message;
-  return 'Something went wrong. Please try again.';
+  return describeError(error).message;
 }
 
 /// Whether the failure means the device could not reach the server.

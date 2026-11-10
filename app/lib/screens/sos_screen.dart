@@ -22,6 +22,7 @@ import '../theme/app_theme.dart';
 import '../widgets/ds/ds.dart';
 import 'alert_status_screen.dart';
 import 'safety_screen.dart';
+import '../services/error_copy.dart';
 
 /// The SOS flow: a first-run explainer, tap-to-send (with confirm),
 /// press-and-hold (discreet countdown), and slide-to-cancel.
@@ -397,12 +398,12 @@ class _SosScreenState extends State<SosScreen> {
         _phase = _SosPhase.idle;
         _error = _sendErrorMessage(e);
       });
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       setState(() {
         _phase = _SosPhase.idle;
-        _error = 'SOS was not sent. Could not reach the server. Check your '
-            'connection and try again, or call emergency services.';
+        _error = 'SOS was not sent. ${describeError(e).message} '
+            'Try again, or call emergency services.';
       });
     }
   }

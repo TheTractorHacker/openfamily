@@ -29,7 +29,7 @@ Full steps: [Nobody shows on the map](../admin/troubleshooting.md#nobody-shows-o
 The screen being off is normal; Android or iOS stopping the app is the problem.
 
 - Allow location **all the time**, allow notifications, and switch off battery saving for Orbitly ([Battery and permissions](../user/battery-and-permissions.md)).
-- Run **Settings, Phone health** in the app: it checks permissions, battery exemptions and connectivity.
+- Run **Settings, Advanced, Diagnostics** in the app: it checks permissions, battery exemptions and connectivity.
 - Some phone makers close apps aggressively; see what happens when Android freezes the app in [Push](../push.md) and [Reliability](../reliability.md).
 - The admin **Fleet** page shows the last time each phone reported and why it may have gone silent.
 

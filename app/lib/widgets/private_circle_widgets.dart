@@ -164,7 +164,7 @@ class LanesUnavailable extends StatelessWidget {
             Text(title, key: const ValueKey<String>('lanes-unavailable-title'), textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
             const SizedBox(height: 8),
-            Text('Check your connection and try again. Your data is not affected.',
+            Text('Try again in a moment. Your data is not affected.',
                 textAlign: TextAlign.center, style: Theme.of(context).textTheme.bodyMedium),
             if (onRetry != null) ...<Widget>[
               const SizedBox(height: 16),

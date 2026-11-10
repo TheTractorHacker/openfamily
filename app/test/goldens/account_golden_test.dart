@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:openfamily/models/member.dart';
 import 'package:openfamily/models/security_models.dart';
@@ -124,6 +125,7 @@ const Member _june = Member(
 void main() {
   setUpAll(_loadFonts);
   setUp(() {
+    FlutterSecureStorage.setMockInitialValues(<String, String>{});
     SharedPreferences.setMockInitialValues(<String, Object>{});
     ServerConfig.instance.debugReset();
   });

@@ -13,27 +13,36 @@ once into `~/.cache/orbitly-dev-stack` (`DEV_STACK_CACHE`).
 
 | Command | What it does |
 | --- | --- |
-| `up [--build]` | builds the API image from the working tree (first time, or with `--build`) and starts API + Postgres |
+| `up [--no-build]` | builds the API image from the working tree (every time; layer-cached, seconds when nothing changed; `--no-build` reuses the last build) and starts API + Postgres |
 | `seed` | owner, two family members and a Private circle with server processing on, through the real API |
 | `reset [--no-seed]` | removes the volumes and secrets, starts fresh, seeds |
-| `down [-v]` | removes the containers; `-v` also removes volumes and the secrets directory |
-| `status` | ports, health, image, seeded accounts |
+| `down [-v]` | removes the containers; `-v` also removes volumes and the secrets. Works from Docker's own project labels, so it cleans up even when the state file in `/tmp` is gone |
+| `status` | ports, health, image (build time, commit label), seeded accounts |
 
 It layers [`scripts/dev/dev-stack.compose.yml`](../../scripts/dev/dev-stack.compose.yml) on the repo's own
 `docker-compose.yml`, so the API is built from the same `backend/Dockerfile`, the database is the same pinned
-TimescaleDB image with the same `max_connections` (`PG_MAX_CONNECTIONS`, 60) and the API pool size
-(`DB_MAX_CONNS`, 15) as production. Differences: `fsync` is off, the built-in server device is forced on, geocoders
+TimescaleDB image running docker-compose.yml's own `command` (so the same `max_connections`, `PG_MAX_CONNECTIONS`,
+60), and the API pool size (`DB_MAX_CONNS`, 15) is production's. Differences: `fsync` is off (set with `ALTER SYSTEM`
+after start, so the compose command itself is not replaced), the built-in server device is forced on, geocoders
 and push are off, and the backup service is not started.
 
-It cannot touch production, even on the same host:
+It cannot touch production, even on the same host, and two checkouts cannot touch each other:
 
-- its own compose project name (`orbitly-dev`; the script refuses `openfamily`, `orbitly` and `openfamily-src`), so
-  containers and volumes (`pgdata`, `server_device`, `apk_data`) are separate;
-- the image is tagged `openfamily-api:devstack`, never the `:local` tag production uses;
+- **per worktree**: the compose project (`orbitly-<kind>-<tag>`, kind `dev` or `e2e`), the state directory and the
+  image tag (`openfamily-api:devstack-<tag>`) carry `<tag>`, a hash of the checkout's path. Ten worktrees on one
+  host get ten separate stacks; `down -v` in one never removes another's containers, volumes or secrets. The script
+  refuses any project name that does not start with `orbitly-` (so never `openfamily`), and a `DEV_STACK_DIR` whose
+  last component does not match `orbitly-*-stack-*` (`down -v` deletes only the files the script wrote there);
+- the image is never the `:local` tag production uses, and `up` rebuilds it from this tree on every run (Docker's
+  layer cache makes that cheap), so a green run is a run against this tree and not an older branch's image;
 - loopback ports picked free at first start (`DEV_API_PORT` / `DEV_DB_PORT` to choose them);
 - a freshly generated `stack.env` (database password, JWT secret, owner password) in
-  `$TMPDIR/orbitly-dev-stack-<uid>` (`DEV_STACK_DIR`), mode 600; the repo `.env` is never read and `docker compose`
-  runs in a clean environment, so an exported production variable cannot leak in.
+  `$TMPDIR/orbitly-<kind>-<tag>-stack-<uid>` (`DEV_STACK_DIR`), mode 600; the repo `.env` is never read and
+  `docker compose` runs in a clean environment, so an exported production variable cannot leak in;
+- the tests refuse a target that is not on this machine: `DevEnv` (Dart) and the SQL probe both reject a
+  non-loopback `E2E_BASE_URL` / database host, and `DevEnv` requires the state directory to hold a `stack.env` written by
+  `dev-stack.sh`. The probe runs any statement (the scenarios backdate timestamps), so a mis-set `E2E_DATABASE_URL`
+  must not reach a real database.
 
 The owner is the platform admin created at start-up from `PLATFORM_ADMIN_EMAIL` / `PLATFORM_ADMIN_PASSWORD` (in
 `stack.env`), because only a platform admin may approve the built-in server key. Members are made through
@@ -53,7 +62,7 @@ scripts/dev/e2e.sh auth       # (a)        scripts/dev/e2e.sh lanes     # (b)(c)
 scripts/dev/e2e.sh conn       # (e)        scripts/dev/e2e.sh --keep ...  # keep / reuse the stack
 ```
 
-It runs its own stack (`orbitly-e2e`), separate from the development stack, streams the API and Postgres container
+It runs its own stack (`orbitly-e2e-<tag>`), separate from the development stack and from other worktrees', and takes a lock so a second run from the same checkout fails fast (exit 3) instead of tearing the first one down. It rebuilds the API image first (`E2E_NO_BUILD=1` reuses it), streams the API and Postgres container
 logs to files the tests read, runs each file with `flutter test` in the Flutter image, then audits the API log (no
 phone-lane coordinate, no panic). A plain `flutter test` skips these files (`E2E_DEV_STACK` unset).
 
@@ -61,12 +70,13 @@ phone-lane coordinate, no panic). A plain `flutter test` skips these files (`E2E
 | --- | --- |
 | `auth_refresh_test.dart` | **(a)** sign-in (wrong password, unknown account), refresh rotation (spent token, same family), a lost answer retried within the 3 minute window (same successor, audited `auth.refresh_retry`), after the window (`used_at` backdated on the database clock: 401, family revoked, `auth.refresh_reuse`), a retry after the successor was used, the cap of 8 answers per spent token, access tokens versus logout |
 | `lanes_stack_test.dart` | **(b)** device key registration, joining, sealed fixes on the phone lane and the server lane, another member pulls and decrypts, the built-in server device stores the server-lane member's fix and never the phone-lane member's. **(d)** `bad_epoch` (both lines), `lane_not_server`, a mixed batch, an unknown device, each with the `e2ee items rejected` log line. **(c)** the owner resets keys on a new phone (an empty key store; on a phone whose key is still active a reset does nothing): devices revoked, the server key replaced (new device id, approved by the owner's phone, re-pinned), wraps of revoked keys deleted, rekey flags set while the epoch is unchanged, the owner's server-lane pref deleted, policy statements kept, policy no longer in effect; uploads refused with `device_revoked` (403, `e2ee upload refused` log line), `device_not_approved`, and per item `lane_not_server` |
-| `connections_test.dart` | **(e)** `max_connections` is the explicit 60 (not the image's 25) with room above the pool; 400 concurrent authenticated requests and two more waves: no non-200, no "too many clients" in the answers, the API log or the Postgres log, the peak number of server processes below the limit |
+| `connections_test.dart` | **(e)** `max_connections` equals the value in docker-compose.yml's own postgres `command` (read from `docker compose config`, not from `stack.env`; the test fails if that command loses its `max_connections`, and it is not the image's 25) with room above the pool; 25 other connections held open (more than the old limit allowed on top of the pool) while 200 authenticated requests run: no non-200, no "too many clients"; then 400 concurrent requests and two more waves: no non-200, no "too many clients" in the answers, the API log or the Postgres log, the API within its pool |
 
 ### Expected-failing checks
 
 Checks for features other tracks are still building are written as `expectedFailing(...)` (in
-`support.dart`): they run, must fail today, and the run FAILS with "now PASSES" the day the feature lands, which is
+`support.dart`): they run, must fail today **on their own expectation** (a `TestFailure`; a timeout, an API error or a failed
+`precondition(...)` is a broken set-up and fails the run instead of counting as "still failing"), and the run FAILS with "now PASSES" the day the feature lands, which is
 the signal to delete the marker and keep the check. `E2E_XFAIL=skip` skips them instead. Today:
 
 | Check | Waiting for |

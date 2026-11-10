@@ -5,7 +5,9 @@ import 'package:openfamily/screens/legacy_upgrade_screen.dart';
 import 'package:openfamily/screens/my_processing_screen.dart';
 import 'package:openfamily/screens/processing_policy_screen.dart';
 import 'package:openfamily/screens/processing_screen.dart';
+import 'package:openfamily/services/api_client.dart';
 import 'package:openfamily/services/circle_service.dart';
+import 'package:openfamily/services/e2ee/e2ee_service.dart' show LocalKeyException, LocalKeyProblem;
 import 'package:openfamily/services/e2ee/e2ee_crypto.dart';
 import 'package:openfamily/services/e2ee/lanes_store.dart';
 import 'package:openfamily/services/e2ee/processing_controller.dart' show ProcessingViewer;
@@ -53,6 +55,25 @@ void main() {
       await pumpScreen(t, ProcessingScreen(circle: memberCircle, controller: c));
       expect(txt('MEMBERS NOT YET ON THE SERVER'), findsNothing);
     });
+  });
+
+  group('ProcessingScreen: load errors name the cause', () {
+    final Map<Object, (String, String)> cases = <Object, (String, String)>{
+      const ApiException(503, 'Request failed (503).'): ('Server busy', 'restarting'),
+      const ApiException(401, 'unauthorized'): ('Sign in again', 'Sign in again'),
+      const LocalKeyException(LocalKeyProblem.missing): ('Encryption key problem', 'Encryption keys'),
+    };
+    for (final MapEntry<Object, (String, String)> e in cases.entries) {
+      testWidgets('${e.value.$1}: not "Something went wrong", not "offline"', (t) async {
+        final FakeProcessingController c = FakeProcessingController(FakeProcessingController.snapshot())..loadFails = e.key;
+        await pumpScreen(t, ProcessingScreen(circle: adminCircle, controller: c));
+        expect(find.text(e.value.$1), findsWidgets);
+        expect(find.textContaining(e.value.$2), findsWidgets);
+        expect(find.text('Something went wrong'), findsNothing);
+        expect(find.textContaining('offline'), findsNothing);
+        expect(find.text('Try again'), findsOneWidget);
+      });
+    }
   });
 
   group('ProcessingScreen: a member', () {

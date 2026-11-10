@@ -3,6 +3,7 @@ import 'package:openfamily/models/security_models.dart';
 import 'package:openfamily/services/api_client.dart';
 import 'package:openfamily/services/auth_service.dart';
 import 'package:openfamily/services/otpauth_launcher.dart';
+import 'package:openfamily/services/error_copy.dart';
 import 'package:openfamily/services/security_format.dart';
 
 void main() {
@@ -17,15 +18,21 @@ void main() {
   });
 
   test('error messages: offline, throttled, server, generic', () {
-    expect(securityErrorMessage(const ApiException(0, 'x')),
+    DeviceNetwork.online = false;
+    addTearDown(() => DeviceNetwork.online = null);
+    expect(securityErrorMessage(const ApiException(0, 'Could not reach the server.')),
         contains('offline'));
+    DeviceNetwork.online = true;
+    expect(securityErrorMessage(const ApiException(0, 'Could not reach the server.')),
+        isNot(contains('offline')));
+    DeviceNetwork.online = null;
     expect(securityErrorMessage(const ApiException(429, 'x')),
         contains('Too many'));
     expect(securityErrorMessage(const ApiException(503, 'x')),
         contains('server'));
     expect(securityErrorMessage(const ApiException(400, 'password is incorrect')),
         'password is incorrect');
-    expect(securityErrorMessage(StateError('boom')), contains('Something'));
+    expect(securityErrorMessage(StateError('boom')), contains('Boom'));
   });
 
   test('password validation', () {

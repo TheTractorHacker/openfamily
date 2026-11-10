@@ -30,6 +30,9 @@ class _LegacyUpgradeScreenState extends State<LegacyUpgradeScreen> {
   bool _done = false;
   String? _error;
 
+  /// What failed, so the error state can name the cause (see describeError).
+  Object? _errorCause;
+
   @override
   void initState() {
     super.initState();
@@ -40,6 +43,7 @@ class _LegacyUpgradeScreenState extends State<LegacyUpgradeScreen> {
     setState(() {
       _loading = _s == null;
       _error = null;
+      _errorCause = null;
     });
     try {
       final ProcessingSnapshot s = await _c.load(widget.circle.id, force: true);
@@ -55,6 +59,7 @@ class _LegacyUpgradeScreenState extends State<LegacyUpgradeScreen> {
       setState(() {
         _loading = false;
         _error = errorText(e);
+        _errorCause = e;
       });
     }
   }
@@ -102,7 +107,9 @@ class _LegacyUpgradeScreenState extends State<LegacyUpgradeScreen> {
         child: _loading
             ? const Center(child: CircularProgressIndicator())
             : _error != null && _s == null
-                ? LoadStateView(error: _error, offline: false, onRetry: _load)
+                ? (_errorCause != null
+                    ? LoadStateView.forError(_errorCause!, onRetry: _load)
+                    : LoadStateView(error: _error, offline: false, onRetry: _load))
                 : _body(_s!),
       ),
     );

@@ -6,7 +6,6 @@ import 'package:share_plus/share_plus.dart';
 import '../models/security_models.dart';
 import '../services/api_client.dart';
 import '../services/security_api.dart';
-import '../services/security_format.dart';
 import '../theme/app_theme.dart';
 import '../widgets/ds/ds.dart';
 import 'change_password_screen.dart';
@@ -16,6 +15,7 @@ import 'issue_reset_code_screen.dart';
 import 'security_widgets.dart';
 import 'sessions_screen.dart';
 import 'two_factor_screen.dart';
+import '../services/error_copy.dart';
 
 /// Hub for account security: two-factor, sessions, password, data export and
 /// account deletion. Reached from Settings.
@@ -38,7 +38,7 @@ class SecurityScreen extends StatefulWidget {
 class _SecurityScreenState extends State<SecurityScreen> {
   AccountInfo? _account;
   String? _loadError;
-  bool _offline = false;
+  ErrorCopy? _loadCopy;
   bool _exporting = false;
 
   @override
@@ -50,7 +50,7 @@ class _SecurityScreenState extends State<SecurityScreen> {
   Future<void> _load() async {
     setState(() {
       _loadError = null;
-      _offline = false;
+      _loadCopy = null;
     });
     try {
       final AccountInfo a = await widget.api.getAccount();
@@ -62,7 +62,7 @@ class _SecurityScreenState extends State<SecurityScreen> {
       if (!mounted) return;
       setState(() {
         _loadError = errorText(e);
-        _offline = isOfflineError(e);
+        _loadCopy = describeError(e);
       });
     }
   }
@@ -120,7 +120,7 @@ class _SecurityScreenState extends State<SecurityScreen> {
       appBar: AppBar(title: const Text('Security')),
       body: SafeArea(
         child: a == null
-            ? LoadStateView(error: _loadError, offline: _offline, onRetry: _load)
+            ? LoadStateView(error: _loadError, offline: _loadCopy?.connection ?? false, title: _loadCopy?.title, onRetry: _load)
             : ListView(
                 children: <Widget>[
                   _tile(

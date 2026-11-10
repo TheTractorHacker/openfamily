@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../services/error_copy.dart';
 import '../services/security_format.dart';
 import '../theme/app_theme.dart';
 import '../widgets/ds/ds.dart';
@@ -131,12 +132,21 @@ class BusyButton extends StatelessWidget {
 
 /// Full-area loading / error (with Retry) state.
 class LoadStateView extends StatelessWidget {
-  const LoadStateView({super.key, this.error, this.offline = false, this.onRetry});
+  const LoadStateView({super.key, this.error, this.offline = false, this.onRetry, this.title});
+
+  /// The error state for [cause]: its own title and message (see [describeError]).
+  factory LoadStateView.forError(Object cause, {Key? key, VoidCallback? onRetry}) {
+    final ErrorCopy c = describeError(cause);
+    return LoadStateView(key: key, error: c.message, title: c.title, offline: c.connection, onRetry: onRetry);
+  }
 
   /// Null means "loading".
   final String? error;
   final bool offline;
   final VoidCallback? onRetry;
+
+  /// Headline of the error state; defaults to a generic one.
+  final String? title;
 
   @override
   Widget build(BuildContext context) {
@@ -148,7 +158,7 @@ class LoadStateView extends StatelessWidget {
     }
     return DsErrorState(
       icon: offline ? Icons.cloud_off : Icons.error_outline,
-      title: offline ? 'No connection' : 'Something went wrong',
+      title: title ?? (offline ? 'No connection' : 'Something went wrong'),
       message: error!,
       onRetry: onRetry,
     );

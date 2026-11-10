@@ -579,7 +579,7 @@ class _CircleDetailScreenState extends State<CircleDetailScreen> {
     if (err != null && _members.isEmpty) {
       return CircleStateMessage(
         icon: err.offline ? Icons.cloud_off_outlined : Icons.error_outline,
-        title: err.offline ? 'You\'re offline' : 'Couldn\'t load this circle',
+        title: err.offline ? (err.title ?? 'No connection') : 'Couldn\'t load this circle',
         body: err.message,
         onAction: _load,
       );

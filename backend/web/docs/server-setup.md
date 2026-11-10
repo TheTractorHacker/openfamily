@@ -7,7 +7,7 @@ and can opt out.**
 * Circles are **Private** (end-to-end encrypted between the phones) and your server takes part as its own
   device, so it keeps **history, driving reports, trips and the map** for everyone.
 * Each person's own phone switches server processing on for them, with a notice. Anyone who prefers taps
-  **Keep on my phone** (or later Settings > Server processing). Nobody can switch another person on.
+  **Keep on my phone** (or later Settings > Privacy and security > Server processing). Nobody can switch another person on.
 * The steps: pick where the server runs, approve the server on your phone, install the apps and create your
   circle. What members see and how they opt out: [Server processing](user/server-processing.md).
 

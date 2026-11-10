@@ -206,8 +206,12 @@ void main() {
     testWidgets('the reset dialog of the server owner names the server key', (WidgetTester tester) async {
       final E2eeService fresh = phone(uA);
       await tester.pumpWidget(MaterialApp(home: LinkDeviceScreen(service: fresh)));
+      // The reset sits behind "No other phone?" so it never competes with linking.
+      await tester.tap(find.text('No other phone?'));
+      await tester.pumpAndSettle();
       final Finder reset = find.text('Reset my keys');
-      await tester.scrollUntilVisible(reset, 300, scrollable: find.byType(Scrollable).first);
+      await tester.ensureVisible(reset);
+      await tester.pumpAndSettle();
       await tester.tap(reset);
       await tester.pumpAndSettle();
       expect(find.text('Reset your encryption keys?'), findsOneWidget);

@@ -28,6 +28,21 @@ class StoredSession {
       refresh == null ? null : jwtIssuedAtOf(refresh!);
 }
 
+/// Whether the saved-login fallback can work on this phone.
+enum KeepSignedInStatus {
+  /// The switch is off; nothing is saved.
+  off,
+
+  /// A password is saved and will be used if the server ends the session.
+  active,
+
+  /// On, but the last sign-in needed a two-factor code, so nothing can be saved.
+  twoFactor,
+
+  /// On, but nothing is saved yet: it is saved at the next password sign-in.
+  waitingForSignIn,
+}
+
 /// Stores auth tokens in the platform secure store, redundantly.
 ///
 /// Production incident: after a fresh login the app later sent an OLD (already
@@ -76,6 +91,9 @@ class TokenStorage {
   static const String _credEmailKey = 'saved_login_email';
   static const String _credPasswordKey = 'saved_login_password';
   static const String _keepSignedInPref = 'keep_signed_in_on_device';
+  // Set when the last password login needed a two-factor code: such a login
+  // cannot be repeated without the person, so nothing is saved for it.
+  static const String _twoFactorLoginPref = 'last_login_used_two_factor';
   static const String _deviceIdKey = 'device_id';
 
   // Store D: ordinary app-private SharedPreferences. Production incident: the
@@ -658,6 +676,31 @@ class TokenStorage {
       return null;
     }
     return (email: email, password: password);
+  }
+
+  /// Records whether the last password login needed a two-factor code. The
+  /// saved login cannot complete such a login, so Settings says so honestly.
+  static Future<void> setLastLoginUsedTwoFactor(bool used) async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_twoFactorLoginPref, used);
+  }
+
+  static Future<bool> lastLoginUsedTwoFactor() async {
+    try {
+      final SharedPreferences prefs = await SharedPreferences.getInstance();
+      return prefs.getBool(_twoFactorLoginPref) ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// What "Keep me signed in" really does right now (Settings shows it).
+  static Future<KeepSignedInStatus> keepSignedInStatus() async {
+    if (!await keepSignedInEnabled()) return KeepSignedInStatus.off;
+    if (await readCredentials() != null) return KeepSignedInStatus.active;
+    return await lastLoginUsedTwoFactor()
+        ? KeepSignedInStatus.twoFactor
+        : KeepSignedInStatus.waitingForSignIn;
   }
 
   static Future<void> clearSavedCredentials() async {

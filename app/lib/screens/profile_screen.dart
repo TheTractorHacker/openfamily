@@ -8,6 +8,7 @@ import '../services/api_client.dart';
 import '../theme/app_theme.dart';
 import '../widgets/ds/ds.dart';
 import 'security_widgets.dart' show SecurePasswordField;
+import '../services/error_copy.dart';
 
 /// The authenticated user's account profile and private profile photo.
 ///
@@ -177,7 +178,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       if (!mounted || generation != _profileLoadGeneration) return;
       setState(() {
         _loading = false;
-        _error = error.message;
+        _error = error.status == 0 ? describeError(error).message : error.message;
       });
     } catch (_) {
       if (!mounted || generation != _profileLoadGeneration) return;
@@ -748,7 +749,7 @@ class _ProfileLoadError extends StatelessWidget {
   Widget build(BuildContext context) {
     return DsErrorState(
       title: 'Couldn\'t load your profile',
-      message: message ?? 'Please check your connection and try again.',
+      message: message ?? 'Please try again.',
       onRetry: onRetry,
     );
   }

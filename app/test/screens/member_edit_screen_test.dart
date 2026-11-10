@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:openfamily/services/error_copy.dart';
 import 'package:openfamily/widgets/ds/ds.dart';
 import 'package:openfamily/screens/member_edit_screen.dart';
 import 'package:openfamily/services/api_client.dart';
@@ -105,14 +106,22 @@ void main() {
       expect(find.text('Save'), findsOneWidget);
     });
 
-    testWidgets('offline error uses friendly copy', (tester) async {
-      final FakeMemberEditService svc =
-          FakeMemberEditService(failWith: const ApiException(0, 'socket'));
-      await tester.pumpWidget(_wrap(MemberEditScreen(
-          memberId: 'm1', initialName: 'Bob', service: svc)));
-      await tester.tap(find.text('Save'));
-      await tester.pumpAndSettle();
-      expect(find.textContaining('offline'), findsOneWidget);
+    testWidgets('offline error uses friendly copy, and only says offline when the phone is offline', (tester) async {
+      addTearDown(() => DeviceNetwork.online = null);
+      for (final (bool? online, String expected) in <(bool?, String)>[
+        (false, 'offline'),
+        (true, 'did not answer'),
+      ]) {
+        DeviceNetwork.online = online;
+        final FakeMemberEditService svc =
+            FakeMemberEditService(failWith: const ApiException(0, 'Could not reach the server.'));
+        await tester.pumpWidget(_wrap(MemberEditScreen(
+            key: UniqueKey(), memberId: 'm1', initialName: 'Bob', service: svc)));
+        await tester.tap(find.text('Save'));
+        await tester.pumpAndSettle();
+        expect(find.textContaining(expected), findsOneWidget, reason: 'online=$online');
+        if (online == true) expect(find.textContaining('offline'), findsNothing);
+      }
     });
 
     testWidgets('survives large text scale', (tester) async {

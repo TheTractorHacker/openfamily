@@ -11,7 +11,7 @@ enforces it anyway). Every screen must therefore pad itself from
   (`systemOverlayFor` in `theme/app_theme.dart`), applied in
   `MaterialApp.builder` and in `AppBarTheme`.
 - App bars handle the status bar. Bodies use `Scaffold` + `DsBody` (safe left,
-  right, bottom; centered at `kContentMaxWidth` = 640 dp) or `DsPage` (560 dp).
+  right, bottom; centered at `kContentMaxWidth` = 600 dp) or `DsPage` (600 dp).
 - The bottom `NavigationBar` already insets for the gesture bar. Full-screen
   map overlays add `MediaQuery.paddingOf(context).bottom` themselves.
 - Pinned actions go outside the scroll view so the keyboard (`viewInsets`)

@@ -35,4 +35,4 @@ every phone.
    memory close background apps sooner; this setting asks the phone to keep
    Orbitly.
 3. Restart the phone once if it has been on for weeks.
-4. Open **Settings, Diagnostics** and send the report if it still struggles.
+4. Open **Settings, Advanced, Diagnostics** and send the report if it still struggles.

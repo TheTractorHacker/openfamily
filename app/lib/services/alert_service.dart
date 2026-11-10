@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/alert.dart';
 import 'api_client.dart';
+import 'error_copy.dart';
 import 'native_uri_opener.dart';
 
 /// Thin wrapper over the alerts endpoints. Screens take one so tests can
@@ -88,10 +89,9 @@ String alertErrorMessage(Object e, {String action = 'send the alert'}) {
     if (e.status >= 500) {
       return 'The server had a problem. Try again in a moment.';
     }
-    return e.message;
+    if (e.status != 0) return e.message;
   }
-  return 'Could not reach the server, so we could not $action. Check your '
-      'connection and try again.';
+  return actionFailedMessage(e, action);
 }
 
 /// True when [e] is a 429 cooldown/rate-limit.

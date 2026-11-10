@@ -41,7 +41,7 @@ because the phone could not read its storage.
 If it happens anyway:
 
 1. Tap **Try again**, or restart the phone and open the app again.
-2. Open **Settings, Diagnostics** and copy the report: the
+2. Open **Settings, Advanced, Diagnostics** and copy the report: the
    "Sign-in and key storage" section says what failed (no secrets in it).
    Send it to your server operator.
 3. Only if the key stays unreadable, use **Set this phone up again**. The old

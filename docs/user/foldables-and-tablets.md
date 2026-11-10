@@ -16,6 +16,13 @@ place in each tab is kept, and nothing reloads or reconnects. The layout simply 
 
 The same applies when you turn the phone sideways or drag the divider in split-screen or a pop-up window.
 
+## Settings on a narrow screen
+
+Settings, Notifications and Link another phone are laid out for the Fold's cover display (about 344 dp wide) and
+for large text: the icons in front of the rows are left out so the words and the switch get the room, and long text
+wraps. On wide screens they sit in a centred column no wider than about 600 dp. Other screens have not been
+checked at 344 dp yet.
+
 ## Tips
 
 - Orbitly works in any direction. There is no portrait lock.

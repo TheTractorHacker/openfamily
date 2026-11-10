@@ -12,6 +12,7 @@ import 'offline/offline_errors.dart';
 import 'offline/offline_queue.dart';
 import 'offline/offline_sync.dart';
 import 'offline/server_reachability.dart';
+import 'error_copy.dart';
 
 /// A chat failure already worded for the user.
 class ChatException implements Exception {
@@ -33,11 +34,10 @@ ChatException describeChatError(Object error) {
         status: 429,
       );
     }
+    if (error.status == 0) return ChatException(describeError(error).message);
     return ChatException(error.message, status: error.status);
   }
-  return const ChatException(
-    'Can\'t reach the server. Check your connection and try again.',
-  );
+  return ChatException(describeError(error).message);
 }
 
 /// Chat operations used by the chat screen. Abstract so widget tests can

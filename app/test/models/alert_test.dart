@@ -87,7 +87,7 @@ void main() {
             'your family was already notified of an SOS a moment ago; wait a couple of minutes before sending another')),
         startsWith('Your family was already notified'));
     expect(alertErrorMessage(const ApiException(503, 'x')), contains('server'));
-    expect(alertErrorMessage(Exception('socket')), contains('Could not reach'));
+    expect(alertErrorMessage(Exception('socket')), contains('Could not send the alert'));
     expect(isCooldownError(const ApiException(429, '')), isTrue);
   });
 }

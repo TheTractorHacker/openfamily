@@ -3,6 +3,7 @@ import '../widgets/on_device_reports_tile.dart';
 
 import '../models/circle.dart';
 import '../services/circle_service.dart';
+import '../services/error_copy.dart';
 import '../services/e2ee/processing_controller.dart';
 import '../theme/app_theme.dart';
 import '../widgets/ds/ds.dart';
@@ -55,11 +56,11 @@ class _MyProcessingScreenState extends State<MyProcessingScreen> {
         _rows = rows;
         _loading = false;
       });
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _error = 'Could not load your circles.';
+        _error = actionFailedMessage(e, 'load your circles');
       });
     }
   }

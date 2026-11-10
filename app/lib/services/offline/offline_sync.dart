@@ -6,6 +6,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 
 import '../api_client.dart';
 import '../chat_service.dart';
+import '../error_copy.dart' show DeviceNetwork;
 import '../e2ee/private_runtime.dart';
 import '../location_outbox.dart';
 import 'offline_cache.dart';
@@ -41,9 +42,13 @@ class OfflineSync {
     try {
       _net = Connectivity().onConnectivityChanged.listen((List<ConnectivityResult> results) {
         final bool up = results.any((ConnectivityResult c) => c != ConnectivityResult.none);
+        DeviceNetwork.online = up; // error messages say "offline" only when this is false
         r.connectivityChanged(connected: up);
         if (up) unawaited(flushAll());
       });
+      unawaited(Connectivity().checkConnectivity().then((List<ConnectivityResult> results) {
+        DeviceNetwork.online = results.any((ConnectivityResult c) => c != ConnectivityResult.none);
+      }, onError: (Object _) {}));
     } catch (_) {
       // No connectivity plugin (tests, desktop): probing by failures still works.
     }

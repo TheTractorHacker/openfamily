@@ -24,6 +24,7 @@ import 'live_speed.dart';
 import 'invite_hero_card.dart';
 import 'member_avatar_bubble.dart';
 import 'visible_value_builder.dart';
+import '../services/error_copy.dart';
 
 /// Loads saved places for the Places tab. Injected in tests.
 typedef PlacesLoader = Future<List<Place>> Function();
@@ -1010,7 +1011,7 @@ class _LocationTabViewState extends State<LocationTabView> {
             if (snap.hasError) {
               return DsErrorState(
                 title: 'Could not load places',
-                message: 'Check your connection and try again.',
+                message: describeError(snap.error!).message,
                 onRetry: _reloadPlaces,
               );
             }

@@ -23,14 +23,14 @@ class FakeAlertService extends AlertService {
   @override
   Future<AlertDetail> detail(String id) async {
     detailCalls++;
-    if (failDetail) throw Exception('offline');
+    if (failDetail) throw const ApiException(0, 'Could not reach the server.');
     return details[(detailCalls - 1).clamp(0, details.length - 1)];
   }
 
   @override
   Future<AlertPage> list({int limit = 20, String? before}) async {
     befores.add(before);
-    if (failList) throw Exception('offline');
+    if (failList) throw const ApiException(0, 'Could not reach the server.');
     listCalls++;
     return pages[(listCalls - 1).clamp(0, pages.length - 1)];
   }
@@ -126,7 +126,7 @@ void main() {
         alertId: 'a1', service: svc, dialer: FakeDialer(),
         pollInterval: const Duration(seconds: 100))));
     await tester.pump();
-    expect(find.textContaining('Could not reach the server'), findsOneWidget);
+    expect(find.textContaining('did not answer'), findsOneWidget);
     expect(find.text(kFamilyNotifiedLine), findsOneWidget);
     svc.failDetail = false;
     await tester.tap(find.text('Retry'));
@@ -209,7 +209,7 @@ void main() {
     final bad = FakeAlertService(pages: [page(['a'], next: 'a'), page(['b'])], failList: true);
     await tester.pumpWidget(host(AlertsHistoryScreen(key: const ValueKey('bad'), service: bad, selfUserId: 'me')));
     await tester.pumpAndSettle();
-    expect(find.textContaining('Could not reach'), findsOneWidget);
+    expect(find.textContaining('did not answer'), findsOneWidget);
     bad.failList = false;
     await tester.tap(find.text('Try again'));
     await tester.pumpAndSettle();

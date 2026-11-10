@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/place.dart';
 import '../services/place_alert_rules_service.dart';
+import '../theme/app_theme.dart';
 import '../widgets/ds/ds.dart';
 import 'security_widgets.dart';
 
@@ -133,6 +134,13 @@ class _QuietHoursSectionState extends State<QuietHoursSection> {
   @override
   void initState() {
     super.initState();
+    _load();
+  }
+
+  /// Loads the saved quiet hours. The row is on screen from the first frame
+  /// (see [build]), so its height never changes when the answer arrives.
+  void _load() {
+    if (_error != null) setState(() => _error = null);
     widget.service.quietHours().then((QuietHours q) {
       if (mounted) setState(() => _q = q);
     }).catchError((Object e) {
@@ -182,38 +190,56 @@ class _QuietHoursSectionState extends State<QuietHoursSection> {
   @override
   Widget build(BuildContext context) {
     final QuietHours? q = _q;
-    if (q == null) {
-      return _error == null ? const SizedBox.shrink() : ErrorText(_error!);
-    }
+    // One layout for "loading", "failed" and "loaded": the row is on screen
+    // from the first frame and keeps its height when the answer arrives.
     return Column(children: <Widget>[
       DsToggleRow(
+        key: q == null ? const Key('quiet-hours-placeholder') : null,
         icon: Icons.bedtime_outlined,
         title: 'Quiet hours',
-        subtitle: q.enabled
-            ? 'No arrival or departure alerts ${q.start} to ${q.end}'
-            : 'Pause arrival and departure alerts at set hours',
-        value: q.enabled,
-        onChanged: (bool v) => _save(v
-            ? const QuietHours(start: '22:00', end: '07:00')
-            : const QuietHours()),
+        subtitle: q == null
+            // While loading it reads like the loaded "off" row (same words, so
+            // the same height in any font), with the switch disabled.
+            ? (_error == null ? 'Pause place alerts at night' : 'Could not load')
+            : q.enabled
+                ? 'Silent ${q.start} to ${q.end}'
+                : 'Pause place alerts at night',
+        value: q?.enabled ?? false,
+        onChanged: q == null
+            ? null
+            : (bool v) => _save(v ? const QuietHours(start: '22:00', end: '07:00') : const QuietHours()),
       ),
-      if (q.enabled) ...<Widget>[
-        DsListRow(
-          leading: DsListRow.iconTile(context, Icons.nights_stay_outlined),
-          title: 'From',
-          subtitle: q.start,
-          chevron: true,
-          onTap: () => _pick(true),
-        ),
-        DsListRow(
-          leading: DsListRow.iconTile(context, Icons.wb_sunny_outlined),
-          title: 'Until',
-          subtitle: q.end,
-          chevron: true,
-          onTap: () => _pick(false),
-        ),
-      ],
+      AnimatedSize(
+        duration: const Duration(milliseconds: 150),
+        alignment: Alignment.topCenter,
+        child: Column(children: <Widget>[
+          if (q != null && q.enabled) ...<Widget>[
+            DsListRow(
+              leading: DsListRow.iconTile(context, Icons.nights_stay_outlined),
+              title: 'From',
+              subtitle: q.start,
+              chevron: true,
+              onTap: () => _pick(true),
+            ),
+            DsListRow(
+              leading: DsListRow.iconTile(context, Icons.wb_sunny_outlined),
+              title: 'Until',
+              subtitle: q.end,
+              chevron: true,
+              onTap: () => _pick(false),
+            ),
+          ],
+        ]),
+      ),
       if (_error != null) ErrorText(_error!),
+      if (q == null && _error != null)
+        Align(
+          alignment: AlignmentDirectional.centerStart,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: AppSpace.sm),
+            child: TextButton(onPressed: _load, child: const Text('Try again')),
+          ),
+        ),
     ]);
   }
 }

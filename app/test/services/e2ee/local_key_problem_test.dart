@@ -99,8 +99,11 @@ void main() {
 
     test('transport failures still read as offline', () {
       final CircleException c = describeCircleError(TimeoutException('slow'));
+      // A timeout is a transport failure (offline: true keeps the retry paths),
+      // but the words say the server was slow, not that the phone is offline.
       expect(c.offline, isTrue);
-      expect(c.message, contains('reach the server'));
+      expect(c.message, contains('took too long to answer'));
+      expect(c.message, isNot(contains('offline')));
     });
 
     test('server answers are unchanged', () {
