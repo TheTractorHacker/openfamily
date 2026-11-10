@@ -48,6 +48,8 @@ class DsSheetScaffold extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       child: Column(
         mainAxisSize: MainAxisSize.min,
+        // Everything under the handle starts on the left edge (a header never centres itself).
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
           Semantics(label: 'Drag handle', child: const DsDragHandle()),
           if (title != null)

@@ -2,6 +2,7 @@
 library;
 
 export 'body.dart';
+export 'chip_row.dart';
 export 'choice_setting.dart';
 export 'confirm.dart';
 export 'info_hint.dart';
@@ -12,6 +13,7 @@ export 'pill_button.dart';
 export 'section_header.dart';
 export 'segmented_tabs.dart';
 export 'sheet_scaffold.dart';
+export 'stat_strip.dart';
 export 'states.dart';
 export 'status_chip.dart';
 export 'toggle_row.dart';

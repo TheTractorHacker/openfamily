@@ -1,7 +1,33 @@
 import 'package:flutter/material.dart';
 
 import '../../theme/app_theme.dart';
+import 'body.dart';
 import 'info_hint.dart';
+
+/// The side inset of rows and section text, shared by a [DsRowGroup] (its rows)
+/// and a [DsSettingsList] (the headers and footnotes between the groups), so
+/// a header, a row's icon tile and a footnote all start on one left edge.
+/// Outside both, rows keep their old full-bleed gutter.
+class DsRowScope extends InheritedWidget {
+  const DsRowScope({super.key, required this.inset, required super.child});
+
+  /// Distance from the group (card) edge to the row content.
+  final double inset;
+
+  static DsRowScope? maybeOf(BuildContext context) => context.dependOnInheritedWidgetOfExactType<DsRowScope>();
+
+  /// 16 dp, 12 dp on a narrow screen or at large text.
+  static double insetFor(BuildContext context) => DsListRow.compactFor(context) ? AppSpace.md : AppSpace.lg;
+
+  @override
+  bool updateShouldNotify(DsRowScope old) => inset != old.inset;
+}
+
+/// Joins the short facts of a row's second line with a middle dot, skipping empty ones:
+/// `dsMeta(['2 people', 'Admin'])` is "2 people · Admin". Keep it to two or three parts
+/// that fit one line at normal text size.
+String dsMeta(Iterable<String?> parts) =>
+    parts.whereType<String>().where((String p) => p.trim().isNotEmpty).join(' \u00B7 ');
 
 /// Standard list row: leading (avatar or icon), title, optional status line,
 /// optional trailing widget. At least 56dp tall, wraps instead of clipping
@@ -19,6 +45,7 @@ class DsListRow extends StatelessWidget {
     this.chevron = false,
     this.semanticLabel,
     this.wash = true,
+    this.checked,
     this.info,
     this.infoTitle,
   });
@@ -28,6 +55,9 @@ class DsListRow extends StatelessWidget {
 
   /// Sheet title; defaults to [title].
   final String? infoTitle;
+
+  /// Non-null makes the row one option of a mutually exclusive group (a radio): the value is whether it is chosen.
+  final bool? checked;
 
   /// Paint the selected tint; false when the parent paints a bigger one.
   final bool wash;
@@ -64,10 +94,13 @@ class DsListRow extends StatelessWidget {
     final ColorScheme cs = Theme.of(context).colorScheme;
     final BrandTheme brand = BrandTheme.of(context);
     final Color titleColor = destructive ? AppColors.sosRed : cs.onSurface;
+    final double inset = DsRowScope.maybeOf(context)?.inset ?? (compact ? AppSpace.lg : AppSpace.xl);
     final Widget? lead = compact && leading is DsIconTile && (leading as DsIconTile).decorative ? null : leading;
     return Semantics(
       button: onTap != null,
       selected: selected,
+      checked: checked,
+      inMutuallyExclusiveGroup: checked == null ? null : true,
       label: semanticLabel,
       container: true,
       child: Material(
@@ -80,7 +113,7 @@ class DsListRow extends StatelessWidget {
             constraints: const BoxConstraints(minHeight: 56),
             child: Padding(
               padding: EdgeInsets.symmetric(
-                horizontal: compact ? AppSpace.lg : AppSpace.xl,
+                horizontal: inset,
                 vertical: AppSpace.md,
               ),
               child: Row(
@@ -164,8 +197,9 @@ class DsIconTile extends StatelessWidget {
 /// A settings row: title, at most one short line, optional (i) with the long text. Same widget as [DsListRow].
 typedef SettingRow = DsListRow;
 
-/// Rounded card that groups [DsListRow]s with hairline dividers. Use inside a
-/// [DsPage] (the page already supplies the gutter).
+/// Rounded card that groups [DsListRow]s with hairline dividers. Sits on the page
+/// gutter (see [DsSettingsList]); its rows use [DsRowScope.insetFor] so every
+/// row inside starts on the same left edge.
 class DsRowGroup extends StatelessWidget {
   const DsRowGroup({super.key, required this.children});
 
@@ -174,19 +208,96 @@ class DsRowGroup extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ColorScheme cs = Theme.of(context).colorScheme;
-    return Material(
-      color: BrandTheme.of(context).sheet,
-      borderRadius: BorderRadius.circular(AppRadius.lg),
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          for (int i = 0; i < children.length; i++) ...<Widget>[
-            if (i > 0)
-              Divider(height: 1, indent: AppSpace.xl, color: cs.outlineVariant),
-            children[i],
+    final double inset = DsRowScope.insetFor(context);
+    return DsRowScope(
+      inset: inset,
+      child: Material(
+        color: BrandTheme.of(context).sheet,
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            for (int i = 0; i < children.length; i++) ...<Widget>[
+              if (i > 0) Divider(height: 1, indent: inset, color: cs.outlineVariant),
+              children[i],
+            ],
           ],
-        ],
+        ),
+      ),
+    );
+  }
+}
+
+/// One option of a "pick one" group of rows: a radio mark, the option's name, at most one
+/// short line under it and, for the long explanation, the (i) [info] sheet. Put several in a
+/// [DsRowGroup]. The chosen row shows the filled mark AND is announced as checked; there is no
+/// heavy coloured card around it. A null [onTap] disables the row (read-only).
+class DsRadioRow extends StatelessWidget {
+  const DsRadioRow({
+    super.key,
+    required this.title,
+    required this.selected,
+    required this.onTap,
+    this.subtitle,
+    this.info,
+    this.infoTitle,
+  });
+
+  final String title;
+  final String? subtitle;
+  final bool selected;
+  final VoidCallback? onTap;
+  final String? info;
+  final String? infoTitle;
+
+  @override
+  Widget build(BuildContext context) {
+    final BrandTheme brand = BrandTheme.of(context);
+    final ColorScheme cs = Theme.of(context).colorScheme;
+    return DsListRow(
+      title: title,
+      subtitle: subtitle,
+      checked: selected,
+      selected: selected,
+      wash: false,
+      onTap: onTap,
+      info: info,
+      infoTitle: infoTitle,
+      leading: ExcludeSemantics(
+        child: Icon(
+          selected ? Icons.radio_button_checked : Icons.radio_button_unchecked,
+          size: 24,
+          // Read-only (null onTap): a quieter mark, no offscreen layer.
+          color: selected && onTap != null ? brand.accentInk : cs.onSurfaceVariant,
+        ),
+      ),
+    );
+  }
+}
+
+/// Page body for a settings-style screen: a readable-width scrolling list on the page
+/// gutter (16 dp, 12 dp when narrow) holding [DsSectionHeader]s, [DsRowGroup]s, [DsFootnote]s
+/// and the odd note. One left edge for all of them. Replaces `ListView(padding: all(20))`.
+class DsSettingsList extends StatelessWidget {
+  const DsSettingsList({super.key, required this.children, this.listKey, this.controller});
+
+  final List<Widget> children;
+  final Key? listKey;
+  final ScrollController? controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final double gutter = DsListRow.compactFor(context) ? AppSpace.md : AppSpace.lg;
+    return DsBody(
+      child: DsRowScope(
+        inset: DsRowScope.insetFor(context),
+        child: ListView(
+          key: listKey,
+          controller: controller,
+          padding: EdgeInsets.fromLTRB(gutter, AppSpace.sm, gutter, AppSpace.xxl),
+          children: children,
+        ),
       ),
     );
   }

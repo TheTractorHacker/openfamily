@@ -52,7 +52,7 @@ class DsToggleRow extends StatelessWidget {
                 constraints: const BoxConstraints(minHeight: 56),
                 child: Padding(
                   padding: EdgeInsets.symmetric(
-                    horizontal: compact ? AppSpace.lg : AppSpace.xl,
+                    horizontal: DsRowScope.maybeOf(context)?.inset ?? (compact ? AppSpace.lg : AppSpace.xl),
                     vertical: AppSpace.sm,
                   ),
                   child: Row(

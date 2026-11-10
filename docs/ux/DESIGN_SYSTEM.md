@@ -51,6 +51,11 @@ control has a tooltip/semantic label.
 | `showDsConfirm` | Confirm dialog. `destructive: true` adds a warning icon and the danger pill; buttons stack and the body scrolls at large text. Use for delete account, log out everywhere, remove member. |
 | `DsRowGroup` | Rounded card of `DsListRow`s with dividers, for use inside `DsPage`. |
 | `DsChoiceSetting` | Pick one of a few values (theme, map style, units): segmented control, or check-marked rows at text over 130%. |
+| `DsSettingsList` | Settings page body: readable width, gutter 16 dp (12 narrow), provides the shared row inset (`DsRowScope`). |
+| `DsStatStrip` / `DsStat` | Equal-column figures (value over label); regroups 2 + 2 or a label / value list, never 3 + 1. |
+| `DsChipRow` | Start-aligned, 8 dp spaced status chips. |
+| `DsRadioRow` | One option of a pick-one group inside a `DsRowGroup`. |
+| `DsFootnote`, `DsSectionHeader.caption`, `dsMeta` | Quiet notes, one-line header captions, "a · b" second lines. |
 | `OnboardingStepIndicator` | "Step X of Y" with segments, used as `DsPage(step:, totalSteps:)`. |
 
 ## App shell
@@ -146,3 +151,8 @@ default black shadow showed as a black ring around the lime button on Night.
 
 Goldens: `test/goldens/acct_*.png` (light, dark and 200% text), from
 `test/goldens/account_golden_test.dart`.
+
+## UI polish 2
+
+Gutter, inset, type scale, icon tile, row rhythm, stat and chip rules, and the per-screen changes are in
+`docs/ux/UI_POLISH_2.md`. Goldens: `test/goldens/p2/` (`polish2_golden_test.dart`).
