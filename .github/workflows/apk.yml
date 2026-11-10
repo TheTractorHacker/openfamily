@@ -422,8 +422,14 @@ jobs:
           set -euo pipefail
           FLAGS=()
           if [ "$PRE" = "true" ]; then FLAGS+=(--prerelease); else FLAGS+=(--latest); fi
+          # What's new in plain words (docs/release/notes/<version>.md, else the changelog section), then the install line.
+          scripts/release-notes.sh --check "$V" || echo "::warning::no phone release notes for $V (docs/release/notes); the changelog section is used"
+          {
+            scripts/release-notes.sh "$V"
+            printf '\n---\nAndroid build %s (versionCode %s). Verify the APK against SHA256SUMS.txt. Install/update with Obtainium; see docs/android-install-and-updates.md.\n' "$V" "$CODE"
+          } > release-notes.md
           gh release create "$GITHUB_REF_NAME" "${FLAGS[@]}" \
             --repo "$GITHUB_REPOSITORY" \
             --title "Orbitly $V" \
-            --notes "Android build $V (versionCode $CODE). Verify the APK against SHA256SUMS.txt. Install/update with Obtainium; see docs/android-install-and-updates.md." \
+            --notes-file release-notes.md \
             dist/*

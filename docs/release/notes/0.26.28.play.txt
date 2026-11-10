@@ -1,0 +1,4 @@
+Resetting your encryption keys no longer breaks the circle: the server keeps its key, so no one has to approve it again.
+New circle switch: Require server processing.
+Your encryption key now survives deleting and reinstalling the app.
+Clearer messages on the Server processing screen and in Diagnostics.
