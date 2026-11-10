@@ -10,6 +10,17 @@ for the **last 5 minor versions** of the app (see
 [API compatibility](api-compat.md)), so you can update the server first and
 the phones afterwards.
 
+## v0.26.27 (unreleased)
+
+Update the server first, then the phones. The server part works with every app version of the last five minors; phones on older versions keep today's behaviour (a reset replaces the server key and an admin phone approves the new one).
+
+- **An owner key reset no longer replaces the server's key.** After a reset the owner's new phone can keep the same server key by signing for it (a new key-log entry, "server key attached"). Only that exact key, only for the owner's own account, only with the new phone's signature; any other case revokes the key as before. The server's own files, keys and history are untouched, so the other family members' choices stay valid and nobody has to do anything. (Server part; the phone part is in the app.)
+- **A member who is still catching up can always send.** In a circle that requires server processing the server used to refuse everything from a member who had not yet chosen the server (the screen then said "has not encrypted one for the Private circle"). It now relays their private, encrypted phone-line items. The server still reads only members whose own phone signed the server choice.
+- **The server key directory is protected and documented.** It lives on the `server_device` volume, is created once and never regenerated; a unreadable key file is an error, not a new key. `scripts/backup.sh` saves it next to an encrypted backup (never unencrypted) and `scripts/restore-server-key.sh` puts it back; the nightly backup service does not include it (see Backups).
+- **New: "Replace the server key"** (`POST /e2ee/server-device/replace`), the only deliberate way to change the key: a server admin whose account holds it signs with their phone; the new key waits for the usual approval.
+- The Server processing status now says whether the circle's policy is still backed by a live admin phone, and which members are catching up or hold an out-of-date choice.
+- Database migration 000410 (adds `e2ee_server_attach`, follows the attach in `e2ee_device_approved`, relaxes `e2ee_item_guard`); it has a down file.
+
 ## v0.26.26 (2026-11-10)
 
 App-only release (the server needs no change; v0.26.25 fixed the database connections and needs a server update). Install over the current app.

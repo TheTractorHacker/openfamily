@@ -14,6 +14,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -238,6 +239,16 @@ type registerReq struct {
 	// e2ee_processing.go). Unknown values are dropped. A key without "lanes2"
 	// stays phone-only: it is never counted ready for server assistance.
 	Caps []string `json:"caps"`
+	// KeepServer (reset only, optional) asks to KEEP the account's built-in server key
+	// instead of revoking it with everything else. The new root phone signs a log action
+	// (ActServerAttach) naming that exact key; see keepServerOK. An old server ignores the
+	// field and revokes the key as before (the response then has no server_kept).
+	KeepServer *keepServerReq `json:"keep_server,omitempty"`
+}
+
+type keepServerReq struct {
+	DeviceID     string `json:"device_id"`
+	LogSignature string `json:"log_signature"`
 }
 
 const devInsert = `INSERT INTO device_keys (device_id, user_id, kind, ed25519_pub, x25519_pub, fingerprint, signature,
@@ -386,12 +397,23 @@ func (s *Server) E2EERegisterDevice(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "log signature does not verify")
 		return
 	}
+	// The built-in server key may survive the reset, but only when the new root phone signed
+	// for exactly that key (keepServerOK). Anything else is revoked as always.
+	var keep *keptServer
+	if root && action == e2ee.ActReset && active > 0 && req.Kind == "device" && req.KeepServer != nil {
+		keep = s.keepServerOK(ctx, tx, uid, req.DeviceID, p.ed, req.KeepServer)
+	}
+	var keepID any // nil: revoke every key
+	if keep != nil {
+		keepID = keep.deviceID
+	}
 	// The server keys of this account that the reset revokes (the built-in server device
 	// replaces its key at once and waits for this new phone to approve it; nothing else).
 	var revokedServerKeys []string
 	if root && action == e2ee.ActReset && active > 0 {
 		rows, err := tx.Query(ctx, `UPDATE device_keys SET revoked_at = now(), revoked_reason = 'revoked'
-			WHERE user_id = $1 AND revoked_at IS NULL RETURNING device_id::text, kind`, uid)
+			WHERE user_id = $1 AND revoked_at IS NULL AND ($2::uuid IS NULL OR device_id <> $2::uuid)
+			RETURNING device_id::text, kind`, uid, keepID)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to register key")
 			return
@@ -431,14 +453,42 @@ func (s *Server) E2EERegisterDevice(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to register key")
 		return
 	}
+	if keep != nil {
+		// The attach entry follows the reset entry directly in the log (same transaction, log lock held).
+		if err := appendLog(ctx, tx, e2ee.ActServerAttach, uid, req.DeviceID, p.ed, "", keep.deviceID, 0, keep.fp, keep.sig); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to register key")
+			return
+		}
+		seq, err := lastLogSeq(ctx, tx)
+		if err == nil {
+			_, err = tx.Exec(ctx, `INSERT INTO e2ee_server_attach (server_device_id, attached_by_device_id, log_seq, signature)
+				VALUES ($1,$2,$3,$4)
+				ON CONFLICT (server_device_id) DO UPDATE SET attached_by_device_id = EXCLUDED.attached_by_device_id,
+				       log_seq = EXCLUDED.log_seq, signature = EXCLUDED.signature, created_at = now()`,
+				keep.deviceID, req.DeviceID, seq, keep.sig)
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to register key")
+			return
+		}
+	}
 	if err := tx.Commit(ctx); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to register key")
 		return
 	}
+	serverKept := false
 	// Only after the commit: the device then reads the revocation back from the API before it acts.
 	if s.ServerDevice != nil {
 		for _, id := range revokedServerKeys {
 			s.ServerDevice.NoteRevoked(id)
+		}
+		if keep != nil {
+			if err := s.ServerDevice.Reattach(req.DeviceID, p.ed, keep.sig); err != nil {
+				// The database keeps the key active and attached; the device re-reads its own
+				// anchor from the next successful attach or restart. No key material is logged.
+				slog.Error("the built-in server device could not move its anchor to the owner's new phone", "err", err.Error())
+			}
+			serverKept = true
 		}
 	}
 	name := "e2ee.device_registered"
@@ -447,8 +497,62 @@ func (s *Server) E2EERegisterDevice(w http.ResponseWriter, r *http.Request) {
 	} else if req.Kind == "recovery" {
 		name = "e2ee.recovery_registered"
 	}
-	s.logAudit(ctx, uid, "", name, "device "+out.DeviceID+" fingerprint "+out.Short, clientIP(r))
+	detail := "device " + out.DeviceID + " fingerprint " + out.Short
+	if serverKept {
+		detail += " (server key kept)"
+	}
+	s.logAudit(ctx, uid, "", name, detail, clientIP(r))
+	if serverKept {
+		writeJSON(w, http.StatusCreated, struct {
+			e2eeDeviceOut
+			ServerKept bool `json:"server_kept"`
+		}{out, true})
+		return
+	}
 	writeJSON(w, http.StatusCreated, out)
+}
+
+// keptServer is a server key that survives an owner key reset.
+type keptServer struct {
+	deviceID string
+	fp       []byte
+	sig      []byte
+}
+
+// keepServerOK decides, inside the reset transaction, whether the built-in server key
+// may survive the reset. ALL of these must hold, otherwise nil (the key is revoked with
+// everything else, exactly as before):
+//   - this process runs the built-in server device and the id is ITS current key
+//     (a sidecar or any other server key is never kept);
+//   - that key is the pinned server key, kind "server", active, and belongs to the caller;
+//   - the NEW ROOT phone's own signature verifies over ActServerAttach naming that exact
+//     key id and fingerprint (so only a phone that checked the key can keep it).
+//
+// An unknown, unpinned, foreign or unsigned key can therefore never be kept or attached.
+func (s *Server) keepServerOK(ctx context.Context, tx pgx.Tx, uid, newPhoneID string, newPhonePub []byte, k *keepServerReq) *keptServer {
+	if s.ServerDevice == nil || k == nil || e2ee.CheckID(k.DeviceID) != nil {
+		return nil
+	}
+	sig, ok := b64d(k.LogSignature, e2ee.SigLen)
+	if !ok {
+		return nil
+	}
+	if in := s.ServerDevice.Info(); in.DeviceID != k.DeviceID || !in.Registered {
+		return nil
+	}
+	var fpHex string
+	if tx.QueryRow(ctx, `SELECT d.fingerprint FROM e2ee_server_device sd JOIN device_keys d ON d.device_id = sd.device_id
+		WHERE d.device_id = $1 AND d.user_id = $2 AND d.kind = 'server' AND d.revoked_at IS NULL`, k.DeviceID, uid).Scan(&fpHex) != nil {
+		return nil
+	}
+	fp, err := hex.DecodeString(fpHex)
+	if err != nil || len(fp) != 32 || s.ServerDevice.Info().Fingerprint != fpHex {
+		return nil
+	}
+	if e2ee.VerifyLogAction(newPhonePub, e2ee.ActServerAttach, uid, newPhoneID, "", k.DeviceID, 0, fp, sig) != nil {
+		return nil
+	}
+	return &keptServer{deviceID: k.DeviceID, fp: fp, sig: sig}
 }
 
 // E2EERotateDevice replaces one of the caller's keys with a new pair. The OLD
@@ -1425,6 +1529,8 @@ func (s *Server) E2EELog(w http.ResponseWriter, r *http.Request) {
 	// understand them; older apps (and bridges) reject unknown action codes, so
 	// they get the entry redacted: the hash chain stays checkable.
 	ownerOK := r.URL.Query().Get("owner_approval") == "1"
+	// Same for the server-attach entry (action 13, a server key kept across an owner reset).
+	attachOK := r.URL.Query().Get("server_attach") == "1"
 	if after < 0 {
 		after = 0
 	}
@@ -1486,6 +1592,9 @@ func (s *Server) E2EELog(w http.ResponseWriter, r *http.Request) {
 			show = false
 		}
 		if show && action == int(e2ee.ActOwnerApproval) && !ownerOK {
+			show = false
+		}
+		if show && action == int(e2ee.ActServerAttach) && !attachOK {
 			show = false
 		}
 		if show && action == int(e2ee.ActApprove) && subject != nil {

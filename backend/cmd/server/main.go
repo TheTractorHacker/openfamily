@@ -455,6 +455,7 @@ func main() {
 		r.Get("/e2ee/server-device", srv.E2EEServerDevice)
 		r.Get("/e2ee/server-join", srv.E2EEServerJoin)
 		r.Post("/e2ee/server-join/approve", srv.E2EEServerJoinApprove)
+		r.Post("/e2ee/server-device/replace", srv.E2EEServerReplace)
 		r.Get("/circles/{id}/e2ee/server-member", srv.E2EEServerMemberState)
 		r.Put("/circles/{id}/e2ee/server-consent", srv.E2EEPutServerConsent)
 		r.Delete("/circles/{id}/e2ee/server-consent", srv.E2EEDeleteServerConsent)

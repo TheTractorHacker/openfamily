@@ -264,7 +264,7 @@ func (b *bridge) verifyLog(ctx context.Context) error {
 				Hash string `json:"hash"`
 			} `json:"head"`
 		}
-		if err := b.api.do(ctx, "GET", "/e2ee/log?after="+strconv.FormatInt(after, 10), nil, &resp); err != nil {
+		if err := b.api.do(ctx, "GET", "/e2ee/log?server_attach=1&after="+strconv.FormatInt(after, 10), nil, &resp); err != nil {
 			return nil, e2ee.LogHead{}, err
 		}
 		h, err := hex.DecodeString(resp.Head.Hash)

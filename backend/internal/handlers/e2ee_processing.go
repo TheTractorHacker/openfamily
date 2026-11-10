@@ -392,6 +392,12 @@ type processingMemberOut struct {
 	SKGenOK   bool       `json:"sk_gen_ok"`
 	Lanes2    bool       `json:"lanes2"`
 	Processed string     `json:"processing"` // "server" | "phone" (what the UI shows)
+	// PrefStale: the member signed a server lane that no longer counts (it names an older or
+	// revoked server key, or an SK generation that is gone). Their phone re-signs it by itself.
+	PrefStale bool `json:"pref_stale"`
+	// CatchingUp: the circle requires server processing and this member is not on the server
+	// lane yet (their data travels on the phone line meanwhile). The owner screen says so in words.
+	CatchingUp bool `json:"catching_up"`
 	// The member's signed statement, so phones verify it against the key log.
 	Pref *prefStatementOut `json:"pref,omitempty"`
 }
@@ -531,6 +537,7 @@ func (s *Server) E2EEProcessingState(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to load preferences")
 		return
 	}
+	policyOK := assist && !legacy && s.policyVerified(ctx, s.Pool, m.CircleID)
 	for _, mo := range members {
 		if !mo.Lanes2 {
 			notReady = append(notReady, mo.UserID)
@@ -554,8 +561,19 @@ func (s *Server) E2EEProcessingState(w http.ResponseWriter, r *http.Request) {
 			mo.SKGenOK = true
 		}
 		mo.Processed = mo.Lane
-		if mo.Lane == "server" {
+		if mo.Lane == "server" && assist && !legacy && !policyOK {
+			// The member's pref is fine, but the stored policy is not backed by a live admin phone key
+			// (the admin phone that signed it was reset): nothing is read on the server until an admin
+			// phone signs it again.
+			mo.Processed = "phone"
+		}
+		if mo.Processed == "server" {
 			serverCount++
+		} else {
+			if p, found := prefs[mo.UserID]; found && p.Lane == "server" && mo.Lane != "server" {
+				mo.PrefStale = true
+			}
+			mo.CatchingUp = assist && optOut == "required_server"
 		}
 	}
 	myLane := "phone"
@@ -569,6 +587,9 @@ func (s *Server) E2EEProcessingState(w http.ResponseWriter, r *http.Request) {
 		"policy": policy, "legacy": map[string]any{"active": legacy, "epoch_max": legacyMax},
 		"members": members, "my_lane": myLane, "members_server": serverCount, "members_phone_only": len(members) - serverCount,
 		"all_members_lanes2": len(notReady) == 0, "not_ready": notReady,
+		// False when the stored policy is not backed by a live admin phone key (for example the
+		// admin phone that signed it was reset): an admin phone must sign it again.
+		"policy_verified": policyOK,
 	}
 	if serverMemberEnabled() && dev != nil {
 		out["device"] = dev

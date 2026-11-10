@@ -216,6 +216,16 @@ func TestLanesMigrationIdempotentAndDown(t *testing.T) {
 			t.Fatalf("250 up is not idempotent (run %d): %v", i+2, err)
 		}
 	}
+	// Migration 410 redefines e2ee_item_guard and e2ee_device_approved after 250: re-apply it too.
+	up410, err := os.ReadFile("../db/migrations/000410_server_key_across_reset.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if _, err := e.pool.Exec(context.Background(), string(up410)); err != nil {
+			t.Fatalf("410 up is not idempotent (run %d): %v", i+2, err)
+		}
+	}
 	if after := e.count(`SELECT count(*) FROM e2ee_processing_pref`); after != before {
 		t.Fatalf("prefs changed by re-running the migration: %d -> %d", before, after)
 	}
@@ -714,7 +724,11 @@ func TestItemRoutingByKeyLine(t *testing.T) {
 	e.mustCode("A", "GET", "/circles/"+e.circle+"/e2ee/items?key_line=zzz", nil, 400)
 }
 
-func TestRequiredServerRefusesPhoneLaneItems(t *testing.T) {
+// required_server no longer refuses phone-line items (migration 000410): a member who is still
+// catching up (no verified server lane yet, a stale pref, a new server key) keeps delivering on
+// the phone line, so the family is never left with nothing. The owner's requirement is enforced
+// where it matters: only a member's own VERIFIED server lane ever reaches the server.
+func TestRequiredServerRelaysPhoneLaneItemsWhileACatchingUp(t *testing.T) {
 	e := newLaneEnv(t)
 	// required_server needs assist on (the statement itself refuses otherwise).
 	dl, _ := e2ee.ParseLine("phone")
@@ -724,60 +738,53 @@ func TestRequiredServerRefusesPhoneLaneItems(t *testing.T) {
 	e.enableAssist("required_server")
 	e.setLane("A", e.a, "server", 1, 200)
 	e.wrapSKToServer(1, 200)
-	// A is in lane server; B and C are not (no consent yet): their phone-lane items are not relayed.
+	// A is in lane server; B and C are not (no pref yet): their phone-line items are relayed, never dropped.
+	seq := int64(1)
 	for _, u := range []struct {
 		name string
 		d    *tdev
 	}{{"B", e.b}, {"C", e.c}} {
 		rs := results(e.mustCode(u.name, "POST", "/circles/"+e.circle+"/e2ee/batch", map[string]any{"sender_device_id": u.d.id,
-			"items": []any{e.seal(t, u.d, e.circle, "fix", 1, 1, []byte("x")), e.sealV2(u.d, e.phoneLine(), 1, 2, "history")}}, 200))
+			"items": []any{e.seal(t, u.d, e.circle, "fix", 1, seq, []byte("x")), e.sealV2(u.d, e.phoneLine(), 1, seq+1, "history")}}, 201))
+		seq += 2
 		for _, r := range rs {
-			if r["status"] != "rejected" || r["error"] != "required_server" {
-				t.Fatalf("%s: phone-lane item relayed in a required_server circle: %v", u.name, r)
+			if r["status"] != "stored" {
+				t.Fatalf("%s: a phone-line item of a member who is catching up was refused: %v", u.name, r)
 			}
 		}
 	}
-	if e.count(`SELECT count(*) FROM e2ee_items WHERE circle_id = $1 AND device_id IN ($2,$3)`, e.circle, e.b.id, e.c.id) != 0 {
-		t.Fatal("items stored")
+	if e.count(`SELECT count(*) FROM e2ee_items WHERE circle_id = $1 AND device_id IN ($2,$3)`, e.circle, e.b.id, e.c.id) != 4 {
+		t.Fatal("items not stored")
 	}
-	// L2: check-ins (SOS) and events are never blocked by the rule.
-	for i, purpose := range []string{"checkin", "event"} {
-		if r := results(e.mustCode("C", "POST", "/circles/"+e.circle+"/e2ee/batch", map[string]any{"sender_device_id": e.c.id,
-			"items": []any{e.sealV2(e.c, e.phoneLine(), 1, int64(50+i), purpose)}}, 201)); r[0]["status"] != "stored" {
-			t.Fatalf("%s blocked in a required_server circle: %v", purpose, r)
-		}
+	// The server line stays closed to a member whose own verified lane is not server.
+	rs := results(e.mustCode("C", "POST", "/circles/"+e.circle+"/e2ee/batch", map[string]any{"sender_device_id": e.c.id,
+		"items": []any{e.sealV2(e.c, e.serverLine(), 1, 90, "fix")}}, 200))
+	if rs[0]["status"] != "rejected" || rs[0]["error"] != "lane_not_server" {
+		t.Fatalf("a server-line item from a member outside the server lane: %v", rs)
 	}
-	e.sql(`DELETE FROM e2ee_items WHERE circle_id = $1 AND device_id = $2`, e.circle, e.c.id)
-	err := e.sqlErr(`INSERT INTO e2ee_items (circle_id, device_id, seq, purpose, epoch, size_bucket, ciphertext, received_at)
-		VALUES ($1,$2,99,'fix',1,256,'\x00',now())`, e.circle, e.b.id)
-	if err == nil || !strings.Contains(err.Error(), "e2ee_required_server") {
-		t.Fatalf("DB backstop: %v", err)
-	}
-	// After B signs their own consent, B is relayed; the admin still cannot do it for C.
+	// After B signs their own pref, B's server line is relayed; the admin still cannot do it for C.
 	e.setLane("B", e.b, "server", 1, 200)
 	r := results(e.post("B", e.b, e.circle, 201, e.sealV2(e.b, e.serverLine(), 1, 3, "fix")))
 	if r[0]["status"] != "stored" {
 		t.Fatalf("%v", r)
 	}
 	e.mustCode("A", "PUT", "/circles/"+e.circle+"/e2ee/processing-pref", e.prefBody(e.c, "server", 1), 400)
-	// Withdrawing consent is always possible (and stops C's relay again).
+	// Withdrawing the pref is always possible; B's phone line is still relayed.
 	e.setLane("B", e.b, "phone", 0, 200)
-	rs := results(e.mustCode("B", "POST", "/circles/"+e.circle+"/e2ee/batch", map[string]any{"sender_device_id": e.b.id,
-		"items": []any{e.sealV2(e.b, e.phoneLine(), 1, 4, "fix")}}, 200))
-	if rs[0]["status"] != "rejected" {
-		t.Fatalf("%v", rs)
+	if r := results(e.post("B", e.b, e.circle, 201, e.sealV2(e.b, e.phoneLine(), 1, 4, "fix"))); r[0]["status"] != "stored" {
+		t.Fatalf("%v", r)
 	}
-	// Switching the rule back to allowed relays phone-lane items again.
+	// The server never ingests a member outside the verified server lane.
+	var n int
+	if err := e.pool.QueryRow(context.Background(), `SELECT e2ee_pref_lane_server($1::uuid, $2::uuid)::int`, e.circle, e.ids["B"]).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("B is still a server lane member after withdrawing: %d %v", n, err)
+	}
+	// Switching the rule back to allowed changes nothing for relaying.
 	e.mustCode("A", "PUT", "/circles/"+e.circle+"/e2ee/processing-policy", policyBody(t, e.circle, true, "phone", "allowed", 1, e.a), 200)
 	if r := results(e.post("B", e.b, e.circle, 201, e.sealV2(e.b, e.phoneLine(), 1, 5, "fix"))); r[0]["status"] != "stored" {
 		t.Fatalf("%v", r)
 	}
-	// Turning required_server on with a member whose app lacks lanes2 is refused.
-	e.sql(`UPDATE device_keys SET caps = '{}' WHERE device_id = $1`, e.c.id)
-	c, m, _ := e.do("A", "PUT", "/circles/"+e.circle+"/e2ee/processing-policy", policyBody(t, e.circle, true, "phone", "required_server", 1, e.a))
-	if c != 409 || m["code"] != "members_not_ready" {
-		t.Fatalf("%d %v", c, m)
-	}
+
 }
 
 // ---------------------------------------------------- rekey and membership
@@ -955,6 +962,17 @@ func TestLegacyCircleStaysLegacyAndNewCirclesCannotBe(t *testing.T) {
 	}
 	if e.count(`SELECT count(*) FROM circles WHERE id = $1 AND server_legacy_ck`, e.circle) != 1 {
 		t.Fatal("migration did not flag a circle that already had a server consent")
+	}
+	// 220 redefines e2ee_item_guard; later migrations redefine it again. Re-apply them so the
+	// shared test database keeps the current functions for the tests that follow.
+	for _, f := range []string{"000250_chat_e2ee", "000410_server_key_across_reset"} {
+		later, err := os.ReadFile("../db/migrations/" + f + ".up.sql")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := e.pool.Exec(context.Background(), string(later)); err != nil {
+			t.Fatalf("%s: %v", f, err)
+		}
 	}
 }
 

@@ -323,7 +323,16 @@ const (
 	// ref is OwnerApprovalRef(circle, user, on). Served only to apps that ask
 	// for it (GET /e2ee/log?owner_approval=1); older apps see it redacted.
 	ActOwnerApproval byte = 12
-	zeroUUID              = "00000000-0000-0000-0000-000000000000"
+	// ActServerAttach is written right after an ActReset, in the same transaction, when
+	// the owner's NEW root phone keeps the account's built-in server key instead of
+	// revoking it: user = the key owner, actor = the new root phone, subject = the
+	// server key, ref = the server key's 32-byte fingerprint. A reset retires every
+	// earlier key of the user by inference; this entry is the new phone's signed
+	// statement "I checked this exact server key and re-approve it". It is served
+	// only to clients that ask (GET /e2ee/log?server_attach=1); others see it
+	// redacted. See docs/design/E2EE.md "Server key across an owner reset".
+	ActServerAttach byte = 13
+	zeroUUID             = "00000000-0000-0000-0000-000000000000"
 )
 
 // LogActionMessage is signed by the ACTING device's Ed25519 key for every
@@ -351,7 +360,7 @@ func LogActionMessage(action byte, userID, actorDeviceID, circleID, subjectID st
 	if ref == nil {
 		ref = make([]byte, 32)
 	}
-	if len(ref) != 32 || action < ActRegister || action > ActOwnerApproval {
+	if len(ref) != 32 || action < ActRegister || action > ActServerAttach {
 		return nil, ErrBadBlob
 	}
 	m := append([]byte(domLogAct), action)

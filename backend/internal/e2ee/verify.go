@@ -238,7 +238,7 @@ func (e LogEntry) verifyFull(prev []byte) LogCheck {
 	pub, err1 := b64(*e.ActorPub)
 	sig, err2 := b64(*e.Signature)
 	ref, err3 := hex.DecodeString(*e.Ref)
-	if errors.Join(err1, err2, err3) != nil || *e.Action < int(ActRegister) || *e.Action > int(ActOwnerApproval) {
+	if errors.Join(err1, err2, err3) != nil || *e.Action < int(ActRegister) || *e.Action > int(ActServerAttach) {
 		return LogCheck{Problem: LogMalformed, Detail: fmt.Sprintf("entry %d is malformed", e.Seq)}
 	}
 	circle, subject, epoch := "", "", 0
@@ -424,6 +424,8 @@ type LogIndex struct {
 	epochs  map[string]LogEntry // circle|epoch -> enable/epoch entry
 	revoked map[string]int64    // device -> first logged revoke OR rotate-away (its key was replaced)
 	resets  map[string][]int64  // user -> sequence numbers of reset entries (each retires all earlier keys of that user)
+	// attaches indexes the ActServerAttach entries by their subject (the server key kept across a reset).
+	attaches map[string][]LogEntry
 	// actorKey is the one Ed25519 key each acting device id has used in the log.
 	// A log entry only proves "some key signed this"; binding it to the device id is
 	// what stops a forged voucher.
@@ -441,7 +443,7 @@ type LogIndex struct {
 var ErrNotInLog = errors.New("e2ee: not in the verified log")
 
 func newLogIndex() *LogIndex {
-	return &LogIndex{hashes: map[int64][]byte{}, regs: map[string]LogEntry{}, epochs: map[string]LogEntry{}, revoked: map[string]int64{}, resets: map[string][]int64{}, actorKey: map[string]string{}, proc: map[int64]LogEntry{}, procLatest: map[string]LogEntry{}}
+	return &LogIndex{hashes: map[int64][]byte{}, regs: map[string]LogEntry{}, epochs: map[string]LogEntry{}, revoked: map[string]int64{}, resets: map[string][]int64{}, attaches: map[string][]LogEntry{}, actorKey: map[string]string{}, proc: map[int64]LogEntry{}, procLatest: map[string]LogEntry{}}
 }
 
 func (x *LogIndex) add(e LogEntry) {
@@ -481,6 +483,10 @@ func (x *LogIndex) add(e LogEntry) {
 			} else if !dup {
 				x.regs[*e.SubjectID] = e
 			}
+		}
+	case ActServerAttach:
+		if e.SubjectID != nil && e.UserID != nil && e.ActorDeviceID != nil {
+			x.attaches[*e.SubjectID] = append(x.attaches[*e.SubjectID], e)
 		}
 	case ActProcessingPref, ActProcessingPolicy:
 		if e.CircleID != nil && e.UserID != nil {
@@ -542,7 +548,10 @@ func SyncLogFull(pinned *LogHead, fetch LogFetcher) (LogCheck, *LogIndex, error)
 }
 
 // RevokeSeq returns the sequence number at which the log retires a device:
-// an explicit revoke, being rotated away, or a later reset of its user.
+// an explicit revoke, being rotated away, or a later reset of its user. A reset
+// does NOT retire a built-in server key that the reset's own root phone re-attached
+// with a valid ActServerAttach entry (see attachFor); the NEXT reset retires it
+// again unless that one attaches it too.
 func (x *LogIndex) RevokeSeq(deviceID string) (int64, bool) {
 	if x == nil {
 		return 0, false
@@ -550,15 +559,86 @@ func (x *LogIndex) RevokeSeq(deviceID string) (int64, bool) {
 	best, ok := x.revoked[deviceID]
 	if e, has := x.regs[deviceID]; has && e.UserID != nil {
 		for _, rs := range x.resets[*e.UserID] { // ascending
-			if rs > e.Seq {
-				if !ok || rs < best {
-					best, ok = rs, true
-				}
-				break
+			if rs <= e.Seq {
+				continue
 			}
+			if _, kept := x.attachFor(deviceID, rs, e); kept {
+				continue
+			}
+			if !ok || rs < best {
+				best, ok = rs, true
+			}
+			break
 		}
 	}
 	return best, ok
+}
+
+// attachFor returns the valid attach entry that answers the reset at resetSeq, if any.
+// Valid means: same user and same key fingerprint as the registration recorded; the
+// actor is the root key that made THAT reset (so only the new phone of the owner,
+// never an old or foreign key); the entry comes after the reset, before any other
+// reset, and the actor was not revoked before it. The entry's signature was verified
+// together with the rest of the log.
+func (x *LogIndex) attachFor(deviceID string, resetSeq int64, reg LogEntry) (LogEntry, bool) {
+	if reg.UserID == nil || reg.Ref == nil {
+		return LogEntry{}, false
+	}
+	for _, a := range x.attaches[deviceID] {
+		if a.Seq <= resetSeq || a.UserID == nil || a.ActorDeviceID == nil || a.Ref == nil || *a.UserID != *reg.UserID || *a.Ref != *reg.Ref {
+			continue
+		}
+		actor := *a.ActorDeviceID
+		if actor == deviceID {
+			continue
+		}
+		root, has := x.regs[actor]
+		if !has || root.Action == nil || byte(*root.Action) != ActReset || root.Seq != resetSeq || root.UserID == nil || *root.UserID != *reg.UserID {
+			continue
+		}
+		if r, rev := x.revoked[actor]; rev && r < a.Seq {
+			continue
+		}
+		retired := false
+		for _, r2 := range x.resets[*reg.UserID] {
+			if r2 > resetSeq && r2 < a.Seq {
+				retired = true
+				break
+			}
+		}
+		if !retired {
+			return a, true
+		}
+	}
+	return LogEntry{}, false
+}
+
+// AttachVoucher returns the device that re-attached the server key deviceID after the
+// latest reset of its user (the phone the chain of that server key now hangs on), or
+// false when no reset happened after its registration or none was answered by a valid
+// attach.
+func (x *LogIndex) AttachVoucher(deviceID string) (actorID, actorPub string, seq int64, ok bool) {
+	if x == nil {
+		return "", "", 0, false
+	}
+	reg, has := x.regs[deviceID]
+	if !has || reg.UserID == nil || reg.Ref == nil {
+		return "", "", 0, false
+	}
+	var last int64
+	for _, rs := range x.resets[*reg.UserID] {
+		if rs > reg.Seq {
+			last = rs
+		}
+	}
+	if last == 0 {
+		return "", "", 0, false
+	}
+	a, ok := x.attachFor(deviceID, last, reg)
+	if !ok || a.ActorPub == nil {
+		return "", "", 0, false
+	}
+	return *a.ActorDeviceID, *a.ActorPub, a.Seq, true
 }
 
 // Revoked reports whether the log retires the device at any point.
@@ -612,6 +692,19 @@ func (x *LogIndex) WalkChain(d DeviceRecord, members []CircleMember) ([]ChainNod
 		regSeq := x.regs[cur.DeviceID].Seq
 		v := cur.RegisteredByDeviceID
 		k, ok := x.actorKey[v]
+		if cur.Kind == "server" {
+			// A server key kept across an owner reset hangs on the new root phone that
+			// re-attached it, not on the (now retired) phone that first approved it.
+			if av, apub, _, kept := x.AttachVoucher(cur.DeviceID); kept {
+				vd, _ := FindDevice(members, av)
+				if vd == nil || vd.Ed25519Pub != apub || vd.UserID != d.UserID || vd.Kind != "device" || !VerifyRegistration(*vd) ||
+					!x.RegistrationLogged(*vd) || x.actorKey[av] != apub || vd.RegisteredByDeviceID != vd.DeviceID {
+					return nil, false
+				}
+				nodes = append(nodes, ChainNode{ID: av, Pub: apub})
+				return nodes, true // the new root phone is self-registered
+			}
+		}
 		if !ok || k != cur.RegisteredByPub {
 			return nil, false
 		}
