@@ -7,7 +7,13 @@ import app.openfamily.wear.logic.Commands
 import app.openfamily.wear.logic.CompassMath
 import app.openfamily.wear.logic.CompassMath.Axis
 import app.openfamily.wear.logic.DeclinationCache
+import app.openfamily.wear.logic.OrderedSender
 import app.openfamily.wear.logic.TiltTracker
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -155,6 +161,35 @@ class AngleFollowerTest {
         assertEquals(raw, f.degrees, 0.06)
     }
 
+    @Test fun aReversedTargetOvershootsOnlyAFewDegrees() {
+        // Momentum carries on when the target turns back; documented, bounded, and it comes back to the target.
+        val f = AngleFollower(ArrowEngine.HEADING_OMEGA)
+        f.snapTo(0.0)
+        var raw = 0.0
+        repeat(60) { raw += 5.0; f.setTarget(raw); f.step(1.0 / 60) } // turning at 300 deg/s
+        raw -= 30.0
+        f.setTarget(raw)
+        var worst = 0.0
+        repeat(120) { f.step(1.0 / 60); worst = maxOf(worst, raw - f.position) }
+        assertTrue("past the new target by ${-worst}", worst > -8.0)
+        assertEquals(raw, f.position, 0.06)
+    }
+
+    @Test fun aNonFiniteAngleNeverGetsInAndTheFollowerStillSettles() {
+        val f = AngleFollower(18.0)
+        f.snapTo(Double.NaN)
+        assertFalse("a NaN first reading is not a start", f.started)
+        f.snapTo(10.0)
+        f.setTarget(Double.NaN)
+        f.setTarget(Double.POSITIVE_INFINITY)
+        assertEquals(10.0, f.target, 0.0)
+        assertTrue(f.settled)
+        f.setTarget(40.0)
+        repeat(120) { f.step(1.0 / 60) }
+        assertTrue(f.settled)
+        assertEquals(40.0, f.position, 0.0)
+    }
+
     @Test fun firstTargetIsTakenAsIs() {
         val f = AngleFollower(18.0)
         f.setTarget(200.0)
@@ -212,6 +247,41 @@ class ArrowEngineTest {
         assertTrue("biggest frame step $worst", worst < 3.0)
     }
 
+    @Test fun nanHeadingOrBearingIsIgnoredAndTheLoopCanStillRest() {
+        val e = ArrowEngine()
+        assertFalse(e.onHeading(Double.NaN))
+        assertFalse("still no heading", e.hasHeading)
+        e.onHeading(10.0)
+        e.onBearing(20.0)
+        assertFalse(e.onHeading(Double.NaN))
+        assertFalse(e.onBearing(Double.NaN))
+        repeat(10) { e.step(1.0 / 60) }
+        assertTrue(e.settled)
+        assertEquals(10.0, e.arrowDeg, 1e-9)
+        e.onHeading(30.0)
+        repeat(60) { e.step(1.0 / 60) }
+        assertTrue(e.settled)
+        assertEquals(350.0, e.arrowDeg, 0.06)
+    }
+
+    @Test fun headingFollowerLagsLessThanTenthOfASecondOnASteadyTurn() {
+        // 90 deg/s, sensor at 50 Hz (staircase), frames at 60 Hz. The arrow with bearing 0 is minus the heading.
+        val e = ArrowEngine()
+        e.onBearing(0.0)
+        e.onHeading(0.0)
+        var t = 0.0
+        var nextSensor = 0.0
+        var lagDeg = 0.0
+        while (t < 2.0) {
+            if (t >= nextSensor) { e.onHeading((90.0 * nextSensor) % 360.0); nextSensor += 0.02 }
+            e.step(1.0 / 60)
+            t += 1.0 / 60
+            val heading = (360.0 - e.arrowDeg) % 360.0
+            lagDeg = ((90.0 * t - heading) % 360.0 + 360.0) % 360.0
+        }
+        assertTrue("lag $lagDeg degrees = ${lagDeg / 90.0 * 1000} ms", lagDeg in 0.0..9.0)
+    }
+
     @Test fun restsWhenNothingMoves() {
         val e = ArrowEngine()
         e.onBearing(30.0)
@@ -264,6 +334,10 @@ class CompassMathTest {
         assertEquals(0.0, angDiff(CompassMath.azimuthDeg(r, Axis.Back)!!, 75.0), 1e-3)
     }
 
+    @Test fun aNonFiniteDeclinationIsTreatedAsUnknown() {
+        assertEquals(10.0, CompassMath.trueHeading(10.0, Double.NaN), 0.0)
+    }
+
     @Test fun trueHeadingAddsDeclinationEastPositive() {
         assertEquals(15.0, CompassMath.trueHeading(10.0, 5.0), 1e-9)
         assertEquals(355.0, CompassMath.trueHeading(5.0, -10.0), 1e-9)
@@ -281,21 +355,7 @@ class CompassMathTest {
 }
 
 class TiltTrackerTest {
-    @Test fun usesTopAxisUntilSteeplyTiltedThenBackAxisWithHysteresis() {
-        val t = TiltTracker()
-        assertNotNull(t.azimuth(pose(10.0, 30.0)))
-        assertEquals(Axis.Top, t.axis)
-        t.azimuth(pose(10.0, 65.0)) // sin 65 = 0.906 > 0.87
-        assertEquals(Axis.Back, t.axis)
-        t.azimuth(pose(10.0, 52.0)) // sin 52 = 0.788, between 0.74 and 0.87: stays
-        assertEquals(Axis.Back, t.axis)
-        t.azimuth(pose(10.0, 40.0)) // sin 40 = 0.643 < 0.74
-        assertEquals(Axis.Top, t.axis)
-        t.azimuth(pose(10.0, 52.0))
-        assertEquals("does not flip back inside the band", Axis.Top, t.axis)
-    }
-
-    @Test fun headingIsContinuousWhileRaisingTheWristThroughTheSwitch() {
+    @Test fun headingIsContinuousWhileRaisingTheWristThroughTheBlend() {
         val t = TiltTracker()
         var prev: Double? = null
         var pitch = 0.0
@@ -308,18 +368,67 @@ class TiltTrackerTest {
         assertEquals(0.0, angDiff(prev!!, 200.0), 1e-3)
     }
 
-    @Test fun headingIsRightAtTheSwitchEvenWithSomeRoll() {
-        // Roll about the arm axis moves the two axes' directions apart; at the switch angle the error stays modest.
-        val t = TiltTracker()
-        val az = t.azimuth(pose(100.0, 60.0, 20.0))!!
-        assertTrue("error ${angDiff(az, 100.0)}", angDiff(az, 100.0) < 25.0)
+    @Test fun headingHasNoJumpWhenTheWristIsRolledWhileItIsRaised() {
+        // The two axes disagree by about the roll; a hard switch would jump by that much. The blend must not.
+        for (roll in listOf(10.0, 20.0, 30.0, 45.0, 60.0)) {
+            val t = TiltTracker()
+            var prev: Double? = null
+            var worst = 0.0
+            var pitch = 0.0
+            while (pitch <= 85.0) {
+                val az = t.azimuth(pose(100.0, pitch, roll)) ?: run { pitch += 0.5; null }
+                if (az != null) {
+                    prev?.let { worst = maxOf(worst, angDiff(az, it)) }
+                    prev = az
+                    pitch += 0.5
+                }
+            }
+            assertTrue("roll $roll: biggest step per half degree of pitch $worst", worst < 3.5) // a hard switch jumped by about the roll, up to 66 degrees
+        }
+    }
+
+    @Test fun backWeightIsZeroAtTheLowEndOneAtTheHighEndAndSmooth() {
+        assertEquals(0.0, CompassMath.backWeight(0.0), 0.0)
+        assertEquals(0.0, CompassMath.backWeight(CompassMath.BLEND_FROM), 0.0)
+        assertEquals(1.0, CompassMath.backWeight(CompassMath.BLEND_TO), 0.0)
+        assertEquals(1.0, CompassMath.backWeight(1.0), 0.0)
+        assertEquals(0.5, CompassMath.backWeight((CompassMath.BLEND_FROM + CompassMath.BLEND_TO) / 2), 1e-9)
     }
 
     @Test fun holdsWhenNoAxisHasADirection() {
         val t = TiltTracker()
         assertNull(CompassMath.azimuthDeg(matrix(pose(0.0, 90.0)), Axis.Top))
-        // Watch lying face up: the back axis is straight down, but the top axis is the one in use there.
         assertNotNull(t.azimuth(pose(0.0, 0.0)))
+    }
+
+    @Test fun uprightScreenReadsWhereTheWatchFaces() {
+        val t = TiltTracker()
+        assertEquals(0.0, angDiff(t.azimuth(pose(75.0, 90.0))!!, 75.0), 1e-3)
+    }
+
+    @Test fun aTurnedDisplayStillPointsTheScreenTopAtNorthUp() {
+        // Wear OS turns the display 180 degrees for the other-wrist setting: the top of the screen is device -y.
+        // Sensor frame is unchanged, so the same physical watch is read through the display rotation.
+        for (h in listOf(0.0, 40.0, 130.0, 270.0)) {
+            val flat180 = TiltTracker().also { it.rotation = 2 }.azimuth(pose(h + 180.0))!! // device -y at heading h
+            assertEquals("rot 180 heading $h", 0.0, angDiff(flat180, h), 1e-3)
+            val flat90 = TiltTracker().also { it.rotation = 1 }.azimuth(pose(h + 90.0))!! // device -x at heading h
+            assertEquals("rot 90 heading $h", 0.0, angDiff(flat90, h), 1e-3)
+            val flat270 = TiltTracker().also { it.rotation = 3 }.azimuth(pose(h - 90.0))!! // device +x at heading h
+            assertEquals("rot 270 heading $h", 0.0, angDiff(flat270, h), 1e-3)
+        }
+    }
+
+    @Test fun aTurnedDisplayWithTheWristRaisedAlsoReadsRight() {
+        // Screen turned 180, wrist raised 30 degrees (the screen top points 30 degrees up toward the horizon).
+        val t = TiltTracker().also { it.rotation = 2 }
+        // device -y at heading 80, tilted up 30: pitch about east lifts +y, so lift -y by pitching -30 from heading 260.
+        val az = t.azimuth(pose(260.0, -30.0))!!
+        assertEquals(0.0, angDiff(az, 80.0), 1e-3)
+    }
+
+    @Test fun nanReadingsHaveNoDirection() {
+        assertNull(TiltTracker().azimuth(floatArrayOf(Float.NaN, 0f, 0f, 1f)))
     }
 }
 
@@ -381,6 +490,46 @@ class DeclinationCacheTest {
         assertEquals(3f, c.get(10.0, 10.0, 1)!!, 0f)
         fail = true
         assertEquals("old answer beats none", 3f, c.get(60.0, 10.0, 2)!!, 0f)
+    }
+}
+
+class DeclinationCacheNanTest {
+    @Test fun aBadPositionOrAnswerNeverPoisonsTheCache() {
+        var calls = 0
+        val c = DeclinationCache { _, _, _ -> calls++; if (calls == 2) Float.NaN else 4f }
+        assertEquals(4f, c.get(10.0, 10.0, 0)!!, 0f)
+        assertEquals(4f, c.get(Double.NaN, 10.0, 1)!!, 0f)
+        assertEquals("not even asked for a NaN position", 1, calls)
+        assertEquals("a NaN answer is dropped, the old one kept", 4f, c.get(50.0, 10.0, 2)!!, 0f)
+        assertEquals(4f, c.get(50.0, 10.0, 3)!!, 0f)
+    }
+}
+
+class OrderedSenderTest {
+    @Test fun sendsInPostedOrderEvenWhenEarlierOnesAreSlower() = runBlocking {
+        val seen = java.util.Collections.synchronizedList(mutableListOf<Int>())
+        val job = SupervisorJob()
+        val s = OrderedSender<Int>(CoroutineScope(job + Dispatchers.Default)) { n ->
+            delay(if (n % 2 == 0) 8L else 1L) // later, quicker sends would overtake without the queue
+            seen += n
+        }
+        repeat(40) { s.post(it) }
+        s.close()
+        job.children.forEach { it.join() }
+        assertEquals((0 until 40).toList(), seen.toList())
+    }
+
+    @Test fun aFailingSendDoesNotStopTheOnesAfterIt() = runBlocking {
+        val seen = java.util.Collections.synchronizedList(mutableListOf<Int>())
+        val job = SupervisorJob()
+        val s = OrderedSender<Int>(CoroutineScope(job + Dispatchers.Default)) { n ->
+            if (n == 1) throw IllegalStateException("no node")
+            seen += n
+        }
+        s.post(0); s.post(1); s.post(2)
+        s.close()
+        job.children.forEach { it.join() }
+        assertEquals(listOf(0, 2), seen.toList())
     }
 }
 

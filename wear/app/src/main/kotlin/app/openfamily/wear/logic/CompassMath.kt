@@ -41,7 +41,7 @@ object CompassMath {
 
     /** Which device axis is read as "where the watch points". */
     enum class Axis {
-        /** The 12 o'clock axis: right while the wrist is level or tilted up to about 60 degrees. */
+        /** The 12 o'clock axis of the screen: right while the wrist is level or tilted up to about 40 degrees. */
         Top,
 
         /** Out of the back of the watch (like a phone camera): right when the screen is held upright. */
@@ -49,36 +49,82 @@ object CompassMath {
     }
 
     /**
-     * Compass azimuth (0..360 clockwise from magnetic north) of [axis], or null when that axis points almost
-     * straight up or down and has no direction to speak of.
+     * Where the top of the screen points, in world (east, north, up) as 3 numbers in [out]. The sensor frame is the
+     * watch's natural frame and does not follow the display, so when Wear OS turns the display (the crown-on-the-
+     * other-side setting turns it 180 degrees) the screen's top is another device axis. [rotation] is the
+     * display rotation as Surface.ROTATION_0..3 (0..3); the cases are the ones SensorManager.remapCoordinateSystem
+     * documents for them.
      */
-    fun azimuthDeg(r: DoubleArray, axis: Axis): Double? {
+    fun screenUp(r: DoubleArray, rotation: Int, out: DoubleArray) {
+        when (((rotation % 4) + 4) % 4) {
+            1 -> { out[0] = -r[0]; out[1] = -r[3]; out[2] = -r[6] } // ROTATION_90: top is device -x
+            2 -> { out[0] = -r[1]; out[1] = -r[4]; out[2] = -r[7] } // ROTATION_180: top is device -y
+            3 -> { out[0] = r[0]; out[1] = r[3]; out[2] = r[6] } // ROTATION_270: top is device +x
+            else -> { out[0] = r[1]; out[1] = r[4]; out[2] = r[7] } // ROTATION_0: top is device +y
+        }
+    }
+
+    /**
+     * Compass azimuth (0..360 clockwise from magnetic north) of [axis] with the display at [rotation], or null when
+     * that axis points almost straight up or down and has no direction to speak of.
+     */
+    fun azimuthDeg(r: DoubleArray, axis: Axis, rotation: Int = 0): Double? {
+        val up = DoubleArray(3)
+        screenUp(r, rotation, up)
         val east: Double
         val north: Double
         if (axis == Axis.Top) {
-            east = r[1]; north = r[4]
+            east = up[0]; north = up[1]
         } else {
             east = -r[2]; north = -r[5]
         }
-        if (east * east + north * north < MIN_HORIZONTAL * MIN_HORIZONTAL) return null
+        return bearingOf(east, north)
+    }
+
+    /** Compass azimuth of a horizontal vector (east, north), or null when it is too short (or not a number). */
+    private fun bearingOf(east: Double, north: Double): Double? {
+        // Written so that NaN fails it too.
+        if (!(east * east + north * north >= MIN_HORIZONTAL * MIN_HORIZONTAL)) return null
         return (Math.toDegrees(atan2(east, north)) + 360.0) % 360.0
     }
 
-    /** Vertical part of the 12 o'clock axis: 0 level, 1 straight up, -1 straight down. */
-    fun topUp(r: DoubleArray): Double = r[7]
+    /**
+     * One heading from the two axes with no switch: the top of the screen counts fully while it is less than
+     * about 37 degrees above (or below) the horizon, the back axis counts fully beyond about 60 degrees, and in
+     * between the two horizontal directions are blended (smoothstep) as vectors, so the heading changes smoothly
+     * while the wrist is raised, also when the wrist is rolled and the two axes do not agree. Null when the result
+     * has no direction.
+     */
+    fun blendedAzimuthDeg(r: DoubleArray, rotation: Int = 0): Double? {
+        val up = DoubleArray(3)
+        screenUp(r, rotation, up)
+        val w = backWeight(abs(up[2]))
+        val east = (1 - w) * up[0] + w * -r[2]
+        val north = (1 - w) * up[1] + w * -r[5]
+        return bearingOf(east, north)
+    }
+
+    /** 0 for a screen top at or below [BLEND_FROM], 1 at or above [BLEND_TO], smooth in between. */
+    fun backWeight(absUp: Double): Double {
+        val t = ((absUp - BLEND_FROM) / (BLEND_TO - BLEND_FROM)).coerceIn(0.0, 1.0)
+        return t * t * (3 - 2 * t)
+    }
 
     /** Below this horizontal length an axis has no usable direction. */
     const val MIN_HORIZONTAL = 0.2
 
-    /** Switch to [Axis.Back] when the 12 o'clock axis is more than about 60 degrees up or down. */
-    const val SWITCH_TO_BACK = 0.87
+    /** The back axis starts to count when the top of the screen is more than about 37 degrees up or down. */
+    const val BLEND_FROM = 0.6
 
-    /** Switch back to [Axis.Top] below about 48 degrees; the gap between the two is the hysteresis. */
-    const val SWITCH_TO_TOP = 0.74
+    /** The back axis counts fully when it is more than about 60 degrees up or down. */
+    const val BLEND_TO = 0.87
 
     /** True north from a magnetic azimuth and the local declination (east is positive). */
-    fun trueHeading(magneticDeg: Double, declinationDeg: Double): Double =
-        (((magneticDeg + declinationDeg) % 360.0) + 360.0) % 360.0
+    fun trueHeading(magneticDeg: Double, declinationDeg: Double): Double {
+        // A declination that is not a number is treated as unknown (magnetic north), never as a NaN heading.
+        val d = if (declinationDeg.isFinite()) declinationDeg else 0.0
+        return (((magneticDeg + d) % 360.0) + 360.0) % 360.0
+    }
 
     /** Estimated heading error (radians) above which the compass is treated as needing calibration. */
     const val POOR_ESTIMATE_RAD = 0.35
@@ -92,26 +138,22 @@ object CompassMath {
         accuracy <= 1 || (estimateRad != null && estimateRad >= 0f && estimateRad > POOR_ESTIMATE_RAD)
 }
 
-/** Picks the axis for each reading with hysteresis, so holding the wrist near the switch angle does not flicker. */
+/**
+ * Turns a rotation-vector reading into a magnetic compass azimuth for a watch whose display is turned by
+ * [rotation] (Surface.ROTATION_*). There is no axis switch, so no jump and no hysteresis band: the heading source
+ * glides from the top of the screen to the back of the watch as the wrist is raised
+ * ([CompassMath.blendedAzimuthDeg]).
+ */
 class TiltTracker {
-    var axis = CompassMath.Axis.Top
-        private set
-
     private val r = DoubleArray(9)
 
-    /** True-or-magnetic azimuth for the reading in [values], or null (hold the last one) if it has no direction. */
+    /** Display rotation, 0..3 as Surface.ROTATION_*. Set it when it changes. */
+    var rotation = 0
+
+    /** Magnetic azimuth for the reading in [values], or null (hold the last one) if it has no direction. */
     fun azimuth(values: FloatArray): Double? {
         CompassMath.rotationMatrix(values, r)
-        return azimuthOf(r)
-    }
-
-    fun azimuthOf(r: DoubleArray): Double? {
-        val up = abs(CompassMath.topUp(r))
-        axis = when (axis) {
-            CompassMath.Axis.Top -> if (up > CompassMath.SWITCH_TO_BACK) CompassMath.Axis.Back else CompassMath.Axis.Top
-            CompassMath.Axis.Back -> if (up < CompassMath.SWITCH_TO_TOP) CompassMath.Axis.Top else CompassMath.Axis.Back
-        }
-        return CompassMath.azimuthDeg(r, axis)
+        return CompassMath.blendedAzimuthDeg(r, rotation)
     }
 }
 
@@ -152,11 +194,12 @@ class DeclinationCache(private val compute: (lat: Double, lon: Double, nowMs: Lo
 
     /** Declination in degrees, east positive, or null if it cannot be worked out. */
     fun get(lat: Double, lon: Double, nowMs: Long): Float? {
+        if (!lat.isFinite() || !lon.isFinite()) return value // a bad position never replaces a good answer
         val v = value
         if (v != null && nowMs >= at && nowMs - at < MAX_AGE_MS &&
             abs(lat - this.lat) < MOVED_DEG && abs(HeadingFilter.delta(this.lon, lon)) < MOVED_DEG
         ) return v
-        val fresh = runCatching { compute(lat, lon, nowMs) }.getOrNull()
+        val fresh = runCatching { compute(lat, lon, nowMs) }.getOrNull()?.takeIf { it.isFinite() }
         if (fresh != null) {
             this.lat = lat; this.lon = lon; at = nowMs; value = fresh
             return fresh

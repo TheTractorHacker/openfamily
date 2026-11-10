@@ -280,15 +280,19 @@ screen uses the location permission the app already asks for).
 - **Sensor.** `TYPE_ROTATION_VECTOR` (gyro, accelerometer and magnetometer
   fused) at `SENSOR_DELAY_GAME` (about 50 Hz) with no batching. It is
   registered only while the Direction screen is RESUMED, not in ambient mode and
-  there is a position to point at, and unregistered the moment any of that stops
-  (`ui/Heading.kt`). The previous 5 Hz feed with a low-pass and a 1.5 degree
+  there is a position to point at, and unregistered as soon as any of that stops
+  (`ui/Heading.kt`): a pause at once, ambient mode within a frame (the ambient
+  state change is recomposed to draw the ambient screen anyway; not measured on
+  a watch). Accuracy is read from each event. The previous 5 Hz feed with a low-pass and a 1.5 degree
   dead band moved the arrow in visible steps and is gone.
 - **Smoothing per display frame.** The listener only does a little arithmetic
   and wakes a frame loop (`withFrameNanos`). Each frame a critically damped
   follower (`logic/AngleFollower.kt`, exact closed form, so any frame time is
-  stable, no overshoot) moves the heading (omega 18 /s: 90% of a step in about
-  0.2 s, a steady turn lags about 0.11 s) and the bearing to the person (omega
-  6 /s: a new position glides in over about 0.65 s instead of jumping). Both are
+  stable; no overshoot from rest, a few degrees if the turn reverses at speed)
+  moves the heading (omega 30 /s: 90% of a step in about 0.13 s, a steady turn
+  lags about 0.07 s on top of the sensor's own latency) and the bearing to the person (omega
+  6 /s: a new position gets 90% of the way in about 0.65 s instead of jumping,
+  and is within 0.05 degrees after about 1.8 s for a half turn). Both are
   kept as **unwrapped** angles, so 359 to 1 degrees is a 2 degree turn. The
   arrow and the north tick are two `mutableFloatStateOf` read only in the draw
   step, so a frame recomposes nothing. A reading within 0.3 degrees of the
@@ -298,13 +302,16 @@ screen uses the location permission the app already asks for).
   arrow keeps its last angle and glides to the new one.
 - **Tilt.** `getOrientation` assumes the watch lies flat and becomes unstable
   when the 12 o'clock edge points steeply up. `logic/CompassMath.kt` reads the
-  rotation matrix instead: the 12 o'clock axis while the wrist is level or tilted
-  up to about 60 degrees, the axis out of the back of the watch above that,
-  with a gap (back at 60, top again below 48 degrees) so it does not flicker.
-  For a plain pitch of the wrist both give the same heading, so the switch does
-  not jump; with a rolled wrist at the switch the two differ and the follower
-  smooths the step. When the chosen axis has no horizontal direction the last
-  heading is held.
+  rotation matrix instead and blends two horizontal directions as vectors: the
+  top of the screen while the wrist is level or tilted up to about 37 degrees,
+  the axis out of the back of the watch beyond about 60 degrees, a smoothstep
+  between. There is no switch, so no jump and no hysteresis band, also when the
+  wrist is rolled (a hard switch jumped by about the roll, up to 66 degrees).
+  When the blend has no horizontal direction the last heading is held.
+- **Display rotation.** The sensor frame is the watch's own, but Wear OS turns
+  the display 180 degrees for the other-wrist setting. The screen's top is
+  taken as device -y (or -x, +x for 90/270) from the display rotation, read from
+  the view's display about twice a second. Not tried on a watch.
 - **True north.** The heading adds the magnetic declination from Android's
   `GeomagneticField` at the watch's last known position (`data/Declination.kt`,
   cached for about 11 km / a day). It needs no permission. If it cannot be

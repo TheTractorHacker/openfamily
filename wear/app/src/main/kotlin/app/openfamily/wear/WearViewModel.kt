@@ -8,6 +8,7 @@ import app.openfamily.wear.data.PhoneLink
 import app.openfamily.wear.data.Snapshot
 import app.openfamily.wear.data.SnapshotRepository
 import app.openfamily.wear.logic.Commands
+import app.openfamily.wear.logic.OrderedSender
 import app.openfamily.wear.logic.Presenter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -79,7 +80,15 @@ class WearViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun presence(visible: Boolean) {
         val cmd = if (visible) Commands.build(Commands.Cmd.Visible, Commands.presenceArg(ambientNow, findingNow)) else Commands.build(Commands.Cmd.Hidden)
-        background.launch { link.send(cmd) }
+        presenceSender.post(cmd)
+    }
+
+    // Presence messages leave one at a time in the order they were made (see OrderedSender). Outside viewModelScope,
+    // so a "hidden" sent as the activity closes still goes out.
+    private val presenceSender = OrderedSender<Commands.Built>(background) { link.send(it) }
+
+    override fun onCleared() {
+        presenceSender.close()
     }
 
     /** Always-on mode started or ended; tells the phone. */

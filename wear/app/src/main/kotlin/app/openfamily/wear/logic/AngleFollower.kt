@@ -6,7 +6,9 @@ import kotlin.math.floor
 
 /**
  * A critically damped follower for an angle in degrees. It runs once per display frame, so the arrow glides
- * between sensor readings instead of stepping at the sensor rate, and it never overshoots.
+ * between sensor readings instead of stepping at the sensor rate. From rest it never overshoots a step; if the
+ * target reverses while it is moving it keeps its momentum for a moment and runs a little past the new target
+ * (a few degrees at turning speeds) before coming back, which looks natural.
  *
  * The angle is kept **unwrapped** (it can be 725 or -40): a new reading moves the target by the shortest turn from
  * the previous one, so 359 to 1 degrees is +2, never -358, and the follower never spins the long way round.
@@ -40,6 +42,7 @@ class AngleFollower(private val omega: Double) {
 
     /** Jump to [raw] with no glide (the first reading). */
     fun snapTo(raw: Double) {
+        if (!raw.isFinite()) return // a non-finite angle must never get in: it would never settle
         position = norm(raw)
         target = position
         lastRaw = target
@@ -49,6 +52,7 @@ class AngleFollower(private val omega: Double) {
 
     /** Aim at [raw] (0..360 or any angle); the move is the shortest turn from the last aim. */
     fun setTarget(raw: Double) {
+        if (!raw.isFinite()) return
         if (!started) {
             snapTo(raw)
             return
@@ -90,7 +94,7 @@ class AngleFollower(private val omega: Double) {
 
 /**
  * The compass arrow: where the person is relative to where the watch points, both followed on unwrapped angles.
- * The heading follower is quick (about 0.2 s to get 90% of the way); the bearing follower is slower, so a new
+ * The heading follower is quick (about 0.13 s to get 90% of the way); the bearing follower is slower, so a new
  * position of the other person glides in instead of jumping. Main thread only.
  */
 class ArrowEngine {
@@ -102,6 +106,7 @@ class ArrowEngine {
 
     /** Feed a true-north heading. Returns true if the frame loop should wake (the change is not just noise). */
     fun onHeading(rawDeg: Double): Boolean {
+        if (!rawDeg.isFinite()) return false
         if (heading.started && abs(HeadingFilter.delta(heading.target, rawDeg)) < NOISE_DEG) return false
         heading.setTarget(rawDeg)
         return true
@@ -109,6 +114,7 @@ class ArrowEngine {
 
     /** Feed the bearing to the person. The first one is taken as is; later ones glide. Returns true to wake the loop. */
     fun onBearing(rawDeg: Double): Boolean {
+        if (!rawDeg.isFinite()) return false
         if (bearing.started && abs(HeadingFilter.delta(bearing.target, rawDeg)) < 0.01) return false
         bearing.setTarget(rawDeg)
         return true
@@ -128,10 +134,14 @@ class ArrowEngine {
     val northDeg: Double get() = ((-heading.position % 360.0) + 360.0) % 360.0
 
     companion object {
-        /** Heading: a steady turn lags by about 2 / omega = 0.11 s; no overshoot. */
-        const val HEADING_OMEGA = 18.0
+        /**
+         * Heading: a steady turn lags by about 2 / omega = 0.07 s on top of the sensor's own latency. The sensor
+         * comes at 50 Hz and the display at 60 Hz or more, so this only has to bridge gaps of about 20 ms; a slower
+         * follower (it was 18) made the arrow feel late rather than smoother.
+         */
+        const val HEADING_OMEGA = 30.0
 
-        /** Bearing: settles in about 0.65 s. */
+        /** Bearing: gets 90% of the way in about 0.65 s (under 0.05 degrees off after about 1.8 s for a half turn). */
         const val BEARING_OMEGA = 6.0
 
         /** A reading closer than this to the current aim is sensor noise: ignored, and it does not wake the loop. */

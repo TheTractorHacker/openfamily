@@ -14,6 +14,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import app.openfamily.wear.data.Declination
 import app.openfamily.wear.logic.AccuracyGate
@@ -90,7 +91,8 @@ class CompassState {
  *
  * The rotation-vector sensor (gyro, accelerometer and magnetometer fused) is registered at game rate (about
  * 50 Hz, no batching) only while the screen is RESUMED, [enabled] (not ambient) and there is something to point
- * at, and is unregistered the moment any of that stops. The listener does a little arithmetic and wakes the frame
+ * at, and is unregistered as soon as any of that stops (a pause at once; ambient mode within a frame, because the
+ * ambient state change has to be recomposed to draw the ambient screen anyway). The listener does a little arithmetic and wakes the frame
  * loop; the loop eases the arrow every display frame and goes to sleep when it has settled, so a still wrist
  * costs no frames. North is true north: the declination at [here] is added to the magnetic reading, and if it
  * cannot be had the arrow uses magnetic north and [CompassState.approxNorth] says so.
@@ -98,6 +100,7 @@ class CompassState {
 @Composable
 fun rememberCompass(enabled: Boolean, bearingDeg: Double?, here: Presenter.Here?): CompassState {
     val ctx = LocalContext.current
+    val view = LocalView.current
     val state = remember { CompassState() }
     val active = enabled && bearingDeg != null
 
@@ -131,13 +134,21 @@ fun rememberCompass(enabled: Boolean, bearingDeg: Double?, here: Presenter.Here?
         val l = object : SensorEventListener {
             private val tilt = TiltTracker()
             private val gate = AccuracyGate()
-            private var accuracy = SensorManager.SENSOR_STATUS_ACCURACY_HIGH
+            private var rotationReadAtMs = -1L
 
             override fun onSensorChanged(e: SensorEvent) {
                 val v = e.values
                 if (v.size < 3) return
-                val poor = CompassMath.isPoor(accuracy, if (v.size >= 5) v[4] else null)
-                val show = gate.update(e.timestamp / 1_000_000L, poor)
+                val nowMs = e.timestamp / 1_000_000L
+                // The sensor frame is the watch's own; Wear OS turns the display 180 degrees for the other-wrist
+                // setting. Looked up twice a second, not 50 times.
+                if (rotationReadAtMs < 0 || nowMs - rotationReadAtMs >= ROTATION_REFRESH_MS || nowMs < rotationReadAtMs) {
+                    rotationReadAtMs = nowMs
+                    tilt.rotation = view.display?.rotation ?: 0
+                }
+                // The event's own accuracy is always current; onAccuracyChanged may not fire for a fresh registration.
+                val poor = CompassMath.isPoor(e.accuracy, if (v.size >= 5) v[4] else null)
+                val show = gate.update(nowMs, poor)
                 if (show != state.needsCalibration) state.needsCalibration = show
                 val magnetic = tilt.azimuth(v) ?: return // pointing straight up or down: keep the last heading
                 val heading = CompassMath.trueHeading(magnetic, state.declination)
@@ -145,9 +156,7 @@ fun rememberCompass(enabled: Boolean, bearingDeg: Double?, here: Presenter.Here?
                 if (state.engine.onHeading(heading)) state.wake.trySend(Unit)
             }
 
-            override fun onAccuracyChanged(s: Sensor?, a: Int) {
-                accuracy = a
-            }
+            override fun onAccuracyChanged(s: Sensor?, a: Int) = Unit // each event carries its accuracy
         }
         // Game rate, and no batching (maxReportLatency 0) so no reading waits in the sensor FIFO.
         if (active && sm != null && sensor != null) {
@@ -160,3 +169,5 @@ fun rememberCompass(enabled: Boolean, bearingDeg: Double?, here: Presenter.Here?
     }
     return state
 }
+
+private const val ROTATION_REFRESH_MS = 500L
