@@ -130,9 +130,23 @@ class _SecurityScreenState extends State<SecurityScreen> {
     if (message != null) _say(message);
   }
 
-  /// A line that tells the person when the promise of the row does not hold on this phone.
-  String? get _keyBackupNote {
+  /// A short line that tells the person when the promise of the row does not hold on this phone (null = nothing
+  /// known to be wrong). The full wording is in [_keyBackupInfo].
+  String? get _keyBackupProblem {
     if (_keyBackupOn != true) return null;
+    final bool ios = defaultTargetPlatform == TargetPlatform.iOS;
+    if (_keyBackupReach == KeyBackupMiss.unavailable) {
+      return ios ? 'Not available on this iPhone, so no copy is kept.' : 'No copy kept: Google Play services is missing.';
+    }
+    if (_keyBackupReach == KeyBackupMiss.storeError || _keyBackupSaveFailed) {
+      return 'The copy could not be saved right now.';
+    }
+    return null;
+  }
+
+  /// The longer wording of the problem line, shown behind the (i).
+  String? get _keyBackupProblemLong {
+    if (_keyBackupProblem == null) return null;
     final bool ios = defaultTargetPlatform == TargetPlatform.iOS;
     if (_keyBackupReach == KeyBackupMiss.unavailable) {
       return ios
@@ -140,10 +154,7 @@ class _SecurityScreenState extends State<SecurityScreen> {
           : 'Not available on this phone (Google Play services is missing), so no copy is kept. After a reinstall '
               'you would set up encryption again.';
     }
-    if (_keyBackupReach == KeyBackupMiss.storeError || _keyBackupSaveFailed) {
-      return 'The copy could not be saved right now. The app tries again at the next start.';
-    }
-    return null;
+    return 'The copy could not be saved right now. The app tries again at the next start.';
   }
 
   static String get _keyBackupText => defaultTargetPlatform == TargetPlatform.iOS
@@ -153,6 +164,12 @@ class _SecurityScreenState extends State<SecurityScreen> {
       : 'When Google backup is on, the key is stored encrypted in your Google account so you do not have to set up '
           'encryption again after reinstalling. This needs Google Play services and a screen lock; without a screen '
           'lock the copy stays on this phone only. Turn off to keep the key only on this phone.';
+
+  /// Everything the row used to say, now behind its (i).
+  String get _keyBackupInfo {
+    final String? problem = _keyBackupProblemLong;
+    return problem == null ? _keyBackupText : '$_keyBackupText\n\n$problem';
+  }
 
   Future<void> _load() async {
     setState(() {
@@ -228,83 +245,90 @@ class _SecurityScreenState extends State<SecurityScreen> {
       body: SafeArea(
         child: a == null
             ? LoadStateView(error: _loadError, offline: _loadCopy?.connection ?? false, title: _loadCopy?.title, onRetry: _load)
-            : ListView(
+            : DsSettingsList(
                 children: <Widget>[
-                  _tile(
-                    icon: Icons.shield_outlined,
-                    title: 'Two-factor authentication',
-                    subtitle: a.totpEnabled
-                        ? 'On. Codes are required to sign in.'
-                        : 'Off. Add a second step when signing in.',
-                    onTap: () => _push(TwoFactorScreen(
-                      enabled: a.totpEnabled,
-                      api: widget.api,
-                    )),
-                  ),
-                  _tile(
-                    icon: Icons.devices_outlined,
-                    title: 'Active sessions',
-                    subtitle: 'See where you are signed in, or log out '
-                        'everywhere.',
-                    onTap: () => _push(SessionsScreen(api: widget.api)),
-                  ),
-                  _tile(
-                    icon: Icons.password,
-                    title: 'Change password',
-                    subtitle: 'Signs out your other devices.',
-                    onTap: () => _push(ChangePasswordScreen(
-                      totpEnabled: a.totpEnabled,
-                      api: widget.api,
-                    )),
-                  ),
-                  if (a.isFamilyAdmin)
+                  const DsSectionHeader('Sign in'),
+                  DsRowGroup(children: <Widget>[
                     _tile(
-                      icon: Icons.key_outlined,
-                      title: 'Issue a reset code',
-                      subtitle: 'Help a family member who forgot their '
-                          'password.',
-                      onTap: () => _push(IssueResetCodeScreen(
-                        selfId: a.id,
+                      icon: Icons.shield_outlined,
+                      title: 'Two-factor authentication',
+                      subtitle: a.totpEnabled ? 'On' : 'Off',
+                      onTap: () => _push(TwoFactorScreen(
+                        enabled: a.totpEnabled,
                         api: widget.api,
                       )),
                     ),
-                  _tile(
-                    icon: Icons.key,
-                    title: 'Encryption keys',
-                    subtitle: 'Your device key, the server\'s record of it, '
-                        'safety numbers and the recovery phrase.',
-                    onTap: () => _push(const EncryptionKeysScreen()),
-                  ),
-                  if (_keyBackup != null && _keyBackupOn != null)
-                    DsToggleRow(
-                      key: const Key('key-backup-switch'),
-                      icon: Icons.restore,
-                      title: 'Keep this phone\'s key safe through reinstalls',
-                      subtitle: _keyBackupNote == null ? _keyBackupText : '$_keyBackupText\n$_keyBackupNote',
-                      subtitleColor: _keyBackupNote == null ? null : Theme.of(context).colorScheme.error,
-                      value: _keyBackupOn!,
-                      onChanged: _keyBackupBusy ? null : _setKeyBackup,
+                    _tile(
+                      icon: Icons.devices_outlined,
+                      title: 'Active sessions',
+                      subtitle: 'Where you are signed in',
+                      onTap: () => _push(SessionsScreen(api: widget.api)),
                     ),
-                  const Divider(height: AppSpace.xxl),
-                  _tile(
-                    icon: Icons.download_outlined,
-                    title: 'Download my data',
-                    subtitle: 'A JSON file with your profile, devices, '
-                        'places and location history.',
-                    busy: _exporting,
-                    onTap: _export,
-                  ),
-                  const Divider(height: AppSpace.xxl),
-                  _tile(
-                    icon: Icons.delete_forever,
-                    title: 'Delete account',
-                    subtitle: 'Permanently erase your account and data.',
-                    danger: true,
-                    onTap: () => _push(DeleteAccountScreen(
-                      totpEnabled: a.totpEnabled,
-                      api: widget.api,
-                    )),
-                  ),
+                    _tile(
+                      icon: Icons.lock_outline,
+                      title: 'Change password',
+                      subtitle: 'Signs out your other devices',
+                      onTap: () => _push(ChangePasswordScreen(
+                        totpEnabled: a.totpEnabled,
+                        api: widget.api,
+                      )),
+                    ),
+                    if (a.isFamilyAdmin)
+                      _tile(
+                        icon: Icons.lock_reset,
+                        title: 'Issue a reset code',
+                        subtitle: 'For a member who forgot theirs',
+                        onTap: () => _push(IssueResetCodeScreen(
+                          selfId: a.id,
+                          api: widget.api,
+                        )),
+                      ),
+                  ]),
+                  const DsSectionHeader('Encryption'),
+                  DsRowGroup(children: <Widget>[
+                    _tile(
+                      icon: Icons.vpn_key_outlined,
+                      title: 'Encryption keys',
+                      subtitle: 'Your key and recovery phrase',
+                      onTap: () => _push(const EncryptionKeysScreen()),
+                    ),
+                    if (_keyBackup != null && _keyBackupOn != null)
+                      DsToggleRow(
+                        key: const Key('key-backup-switch'),
+                        icon: Icons.restore,
+                        title: 'Key backup',
+                        subtitle: _keyBackupProblem ?? (_keyBackupOn! ? 'Kept through reinstalls' : 'Only on this phone'),
+                        subtitleColor: _keyBackupProblem == null ? null : Theme.of(context).colorScheme.error,
+                        info: _keyBackupInfo,
+                        infoTitle: 'Keep this phone\'s key through reinstalls',
+                        value: _keyBackupOn!,
+                        onChanged: _keyBackupBusy ? null : _setKeyBackup,
+                      ),
+                  ]),
+                  const DsSectionHeader('Your data'),
+                  DsRowGroup(children: <Widget>[
+                    _tile(
+                      icon: Icons.download_outlined,
+                      title: 'Download my data',
+                      subtitle: 'A JSON file of your data',
+                      info: 'A JSON file with your profile, devices, places and location history.',
+                      busy: _exporting,
+                      onTap: _export,
+                    ),
+                  ]),
+                  const SizedBox(height: AppSpace.xxl),
+                  DsRowGroup(children: <Widget>[
+                    _tile(
+                      icon: Icons.delete_forever,
+                      title: 'Delete account',
+                      subtitle: 'Permanently erase all your data',
+                      danger: true,
+                      onTap: () => _push(DeleteAccountScreen(
+                        totpEnabled: a.totpEnabled,
+                        api: widget.api,
+                      )),
+                    ),
+                  ]),
                 ],
               ),
       ),
@@ -316,6 +340,7 @@ class _SecurityScreenState extends State<SecurityScreen> {
     required String title,
     required String subtitle,
     required VoidCallback onTap,
+    String? info,
     bool danger = false,
     bool busy = false,
   }) {
@@ -336,11 +361,13 @@ class _SecurityScreenState extends State<SecurityScreen> {
               context,
               icon,
               color: danger ? AppColors.sosRed : null,
+              decorative: true,
             ),
       title: title,
       subtitle: busy ? 'Preparing your file...' : subtitle,
+      info: busy ? null : info,
       destructive: danger,
-      chevron: !busy,
+      chevron: !busy && info == null,
       onTap: busy ? null : onTap,
     );
   }

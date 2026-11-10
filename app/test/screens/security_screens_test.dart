@@ -301,7 +301,9 @@ void main() {
         shareExport: (j) async => shared = j,
       )));
       await tester.pumpAndSettle();
-      expect(find.textContaining('On. Codes'), findsOneWidget);
+      // The row says only "On" (the title already says what it is); the old sentence is gone on purpose.
+      expect(find.descendant(of: find.widgetWithText(DsListRow, 'Two-factor authentication'), matching: find.text('On')),
+          findsOneWidget);
       expect(find.text('Issue a reset code'), findsOneWidget);
       await tester.tap(find.text('Download my data'));
       await tester.pumpAndSettle();
@@ -318,7 +320,8 @@ void main() {
       expect(find.byIcon(Icons.cloud_off), findsOneWidget);
       await tester.tap(find.text('Try again'));
       await tester.pumpAndSettle();
-      expect(find.textContaining('Off. Add'), findsOneWidget);
+      expect(find.descendant(of: find.widgetWithText(DsListRow, 'Two-factor authentication'), matching: find.text('Off')),
+          findsOneWidget);
       expect(find.text('Issue a reset code'), findsNothing);
     });
 
@@ -338,8 +341,14 @@ void main() {
         },
       )));
       await tester.pumpAndSettle();
-      expect(find.text("Keep this phone's key safe through reinstalls"), findsOneWidget);
+      // Title and one short line; the long explanation sits behind the row's (i) (it used to fill nine lines).
+      expect(find.text('Key backup'), findsOneWidget);
+      expect(find.textContaining('Turn off to keep the key only'), findsNothing);
+      await tester.tap(find.descendant(of: find.byKey(const Key('key-backup-switch')), matching: find.byKey(const Key('info-hint'))));
+      await tester.pumpAndSettle();
       expect(find.textContaining('Turn off to keep the key only'), findsOneWidget);
+      await tester.tapAt(const Offset(20, 20));
+      await tester.pumpAndSettle();
       await tester.runAsync(() async {
         await tester.tap(find.byKey(const Key('key-backup-switch')));
         await Future<void>.delayed(const Duration(milliseconds: 50));

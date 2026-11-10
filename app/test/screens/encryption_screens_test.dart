@@ -109,7 +109,7 @@ void main() {
       await setup(t);
       await open(t);
       expect(find.text('Encryption keys'), findsOneWidget);
-      expect(find.text('Your keys are safe on this phone'), findsOneWidget);
+      expect(find.text('Keys are safe on this phone'), findsOneWidget);
       await expandAdvanced(t);
       expect(find.byKey(const Key('keystore-level')), findsOneWidget);
       expect(find.textContaining('StrongBox'), findsOneWidget);

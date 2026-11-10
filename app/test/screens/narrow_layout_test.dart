@@ -116,6 +116,8 @@ void main() {
       await reveal(t, find.byKey(const Key('link-make-code')));
       await t.tap(find.byKey(const Key('link-make-code')));
       await settle(t);
+      // Each step now opens at its top (it used to keep the last step's scroll offset), so scroll to the code.
+      await reveal(t, find.byKey(const Key('link-request')));
       final String request = (t.widget(find.byKey(const Key('link-request'))) as SelectableText).data!;
       await reveal(t, find.byKey(const Key('link-qr-toggle')));
       await t.tap(find.byKey(const Key('link-qr-toggle')));

@@ -275,6 +275,8 @@ class _LinkDeviceScreenState extends State<LinkDeviceScreen> {
         }
       },
       child: DsPage(
+        // A new step starts at the top, not where the last step's list was scrolled to.
+        key: ValueKey<LinkStep>(_step),
         title: 'Link another phone',
         actions: actions,
         children: <Widget>[
@@ -321,21 +323,24 @@ class _LinkDeviceScreenState extends State<LinkDeviceScreen> {
         <Widget>[
           const DsHeading('Which phone is this?',
               subtitle: 'Linking takes a minute. Keep both phones in front of you, signed in to the same account.'),
-          DsOptionCard(
-            key: const Key('link-choose-new'),
-            icon: Icons.phone_android,
-            title: 'This is the new phone',
-            subtitle: 'Make a code here and approve it on your other phone',
-            onTap: () => _go(LinkStep.newStart),
-          ),
-          const SizedBox(height: AppSpace.md),
-          DsOptionCard(
-            key: const Key('link-choose-existing'),
-            icon: Icons.verified_user_outlined,
-            title: 'This is the phone I already use',
-            subtitle: 'Approve a new phone with the code it shows',
-            onTap: () => _go(LinkStep.existingPaste),
-          ),
+          DsRowGroup(children: <Widget>[
+            DsListRow(
+              key: const Key('link-choose-new'),
+              leading: DsListRow.iconTile(context, Icons.phone_android, decorative: true),
+              title: 'This is the new phone',
+              subtitle: 'Make a code here, approve it there',
+              chevron: true,
+              onTap: () => _go(LinkStep.newStart),
+            ),
+            DsListRow(
+              key: const Key('link-choose-existing'),
+              leading: DsListRow.iconTile(context, Icons.verified_user_outlined, decorative: true),
+              title: 'This is the phone I already use',
+              subtitle: 'Approve a new phone with its code',
+              chevron: true,
+              onTap: () => _go(LinkStep.existingPaste),
+            ),
+          ]),
           const SizedBox(height: AppSpace.xxl),
           _NoOtherPhone(busy: _busy, onReset: _reset),
         ],
@@ -698,7 +703,8 @@ class _Details extends StatelessWidget {
 }
 
 /// The way out when no other phone is available, folded away so it never
-/// competes with the normal path.
+/// competes with the normal path. The reset itself is one quiet row inside
+/// the fold, not a red button.
 class _NoOtherPhone extends StatelessWidget {
   const _NoOtherPhone({required this.busy, required this.onReset});
   final bool busy;
@@ -706,32 +712,59 @@ class _NoOtherPhone extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Theme(
-      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-      child: ExpansionTile(
-        key: const Key('link-no-other-phone'),
-        tilePadding: EdgeInsets.zero,
-        childrenPadding: const EdgeInsets.only(bottom: AppSpace.md),
-        expandedCrossAxisAlignment: CrossAxisAlignment.stretch,
-        title: const Text('No other phone?', style: AppType.body),
-        children: <Widget>[
-          const Text(
-            'If you have your recovery phrase, go back to Encryption keys and restore with it instead. '
-            'Without your other phone or the phrase you can start over with new keys: everyone you share a private '
-            'circle with sees that your keys changed, and a circle admin must approve this phone before it can read anything.',
-            style: AppType.secondary,
-          ),
-          const SizedBox(height: AppSpace.md),
-          DsPillButton(
-            key: const Key('link-reset'),
-            label: 'Reset my keys',
-            style: DsPillStyle.danger,
-            icon: Icons.restart_alt,
-            onPressed: busy ? null : onReset,
-          ),
-        ],
+    final double inset = DsRowScope.insetFor(context);
+    final Color line = Theme.of(context).colorScheme.outlineVariant;
+    return DsRowGroup(children: <Widget>[
+      Theme(
+        data: Theme.of(context).copyWith(
+          dividerColor: Colors.transparent,
+          // Title on the same x as the rows above: tile (40) + 12.
+          listTileTheme: Theme.of(context).listTileTheme.copyWith(horizontalTitleGap: AppSpace.md, minLeadingWidth: 40),
+        ),
+        child: ExpansionTile(
+          key: const Key('link-no-other-phone'),
+          tilePadding: EdgeInsets.symmetric(horizontal: inset),
+          leading: DsListRow.compactFor(context)
+              ? null
+              : DsListRow.iconTile(context, Icons.help_outline, decorative: true),
+          childrenPadding: EdgeInsets.zero,
+          expandedCrossAxisAlignment: CrossAxisAlignment.stretch,
+          title: const Text('No other phone?', style: AppType.body),
+          children: <Widget>[
+            Divider(height: 1, indent: inset, color: line),
+            Padding(
+              padding: EdgeInsets.fromLTRB(inset, AppSpace.md, inset, AppSpace.md),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    'If you have your recovery phrase, go back to Encryption keys and restore with it instead.',
+                    style: AppType.secondary.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                  ),
+                  const SizedBox(height: AppSpace.sm),
+                  Text(
+                    'Without your other phone or the phrase you can start over with new keys: everyone you share a '
+                    'private circle with sees that your keys changed, and a circle admin must approve this phone '
+                    'before it can read anything.',
+                    style: AppType.secondary.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                  ),
+                ],
+              ),
+            ),
+            Divider(height: 1, indent: inset, color: line),
+            DsListRow(
+              key: const Key('link-reset'),
+              leading: DsListRow.iconTile(context, Icons.restart_alt, color: AppColors.sosRed, decorative: true),
+              title: 'Reset my keys',
+              subtitle: 'Start over with new keys',
+              destructive: true,
+              chevron: true,
+              onTap: busy ? null : onReset,
+            ),
+          ],
+        ),
       ),
-    );
+    ]);
   }
 }
 
