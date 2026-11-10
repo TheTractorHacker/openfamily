@@ -192,7 +192,8 @@ class _EncryptionKeysScreenState extends State<EncryptionKeysScreen> {
         _keyError = e;
         _error = e.problem == LocalKeyProblem.locked
             ? e.message
-            : (e.whatIsWrong.isNotEmpty ? e.whatIsWrong : e.screenMessage);
+            : '${e.whatIsWrong.isNotEmpty ? e.whatIsWrong : e.screenMessage}'
+                '${e.reasonCode.isEmpty ? '' : ' (Reason: ${e.reasonCode}.)'}';
       });
     } on VaultLockedException {
       if (!mounted) return;
