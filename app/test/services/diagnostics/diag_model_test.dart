@@ -373,8 +373,12 @@ void main() {
       expect(plainDeliveryProblem('flush_missing'), isNot(contains('tries again')));
       expect(plainDeliveryProblem('flush_unreadable:seed-length'), contains('not usable'));
       expect(plainDeliveryProblem('flush_unreadable:seed-length'), isNot(contains('tries again')));
-      expect(plainDeliveryProblem('flush_unreadable:device-id-format'), contains('not usable'));
-      expect(plainDeliveryProblem('flush_unreadable:device-id-missing'), contains('not usable'));
+      // The phone's id note is repaired once the server confirms the key (Encryption keys has a Repair button).
+      for (final String r in <String>['device-id-format', 'device-id-missing']) {
+        expect(plainDeliveryProblem('flush_unreadable:$r'), contains('opening the app repairs the note'), reason: r);
+        expect(plainDeliveryProblem('flush_unreadable:$r'), contains('Repair button'), reason: r);
+        expect(plainDeliveryProblem('flush_unreadable:$r'), isNot(contains('tries again')), reason: r);
+      }
       expect(plainDeliveryProblem('flush_unreadable:owner-format'), contains('not usable'));
       // Only a read failure of the secure storage is a moment's trouble.
       for (final String r in <String>['seed-read-PlatformException', 'owner-read-PlatformException', 'device-id-read-StateError', 'vault-decrypt']) {

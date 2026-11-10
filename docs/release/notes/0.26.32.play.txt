@@ -1,0 +1,1 @@
+Fixes the Encryption keys message "key can't be read (device-id-format)": the damaged note of this phone's id is written again by itself once your server confirms the key is yours. The key is never changed. Repair button added. Not tried on a real phone yet.

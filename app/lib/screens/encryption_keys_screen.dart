@@ -75,6 +75,8 @@ class _EncryptionKeysScreenState extends State<EncryptionKeysScreen> {
   String? _repairNote;
 
   Future<void> _load() async {
+    // Try again (and the first look) asks the server about a damaged id note at once, not on the automatic schedule.
+    _svc.forgetRepairThrottle();
     setState(() {
       _loading = true;
       _error = null;
@@ -190,6 +192,8 @@ class _EncryptionKeysScreenState extends State<EncryptionKeysScreen> {
         _loading = false;
         _keyProblem = e.problem;
         _keyError = e;
+        final DeviceRepair? tried = DeviceRepair.values.asNameMap()[e.repair];
+        if (tried != null) _repairNote = _deviceRepairWords(tried);
         _error = e.problem == LocalKeyProblem.locked
             ? e.message
             : '${e.whatIsWrong.isNotEmpty ? e.whatIsWrong : e.screenMessage}'
@@ -418,11 +422,17 @@ class _EncryptionKeysScreenState extends State<EncryptionKeysScreen> {
   /// phone, or new keys).
   Widget _repairView() {
     final bool ownerNote = _keyError?.ownerRepairable ?? false;
+    final bool deviceNote = _keyError?.deviceIdRepairable ?? false;
     final bool intact = _keyError?.keyIntact ?? false;
     return ListView(
       padding: EdgeInsets.all(DsListRow.compactFor(context) ? AppSpace.md : AppSpace.lg),
       children: <Widget>[
-        Text(ownerNote ? 'This phone lost the note of which account its key belongs to' : "This phone's encryption key can't be read",
+        Text(
+            ownerNote
+                ? 'This phone lost the note of which account its key belongs to'
+                : deviceNote
+                    ? "This phone's key is stored, but the note of its id is damaged"
+                    : "This phone's encryption key can't be read",
             key: const Key('keys-repair-title'), style: AppType.headline),
         const SizedBox(height: AppSpace.sm),
         Text(_error ?? ''),
@@ -431,6 +441,13 @@ class _EncryptionKeysScreenState extends State<EncryptionKeysScreen> {
           const Text(
               'Repair writes that note again, but only after the server confirms that this phone\'s key belongs to your '
               'account. The key itself is never touched.',
+              style: AppType.secondary),
+        ],
+        if (deviceNote) ...<Widget>[
+          const SizedBox(height: AppSpace.sm),
+          const Text(
+              'Repair writes that id again, but only after the server confirms which id belongs to this phone\'s key. '
+              'The key itself is never touched.',
               style: AppType.secondary),
         ],
         if (_repairNote != null) ...<Widget>[
@@ -449,6 +466,15 @@ class _EncryptionKeysScreenState extends State<EncryptionKeysScreen> {
             label: 'Repair',
             icon: Icons.build_outlined,
             onPressed: _busy ? null : _repairOwner,
+          ),
+          const SizedBox(height: AppSpace.sm),
+        ],
+        if (deviceNote) ...<Widget>[
+          DsPillButton(
+            key: const Key('keys-repair-device'),
+            label: 'Repair',
+            icon: Icons.build_outlined,
+            onPressed: _busy ? null : _repairDevice,
           ),
           const SizedBox(height: AppSpace.sm),
         ],
@@ -500,6 +526,41 @@ class _EncryptionKeysScreenState extends State<EncryptionKeysScreen> {
       };
     });
     if (r == OwnerRepair.repaired || r == OwnerRepair.notNeeded) await _load();
+  }
+
+  /// What a repair of the id note found, in words for the screen.
+  String? _deviceRepairWords(DeviceRepair r) => switch (r) {
+        DeviceRepair.repaired || DeviceRepair.notNeeded => null,
+        DeviceRepair.offline => 'The server could not be asked just now, so nothing was changed. Check the connection and tap Repair again.',
+        DeviceRepair.notOurs => 'The server has no record of this key under your account, so the id cannot be filled in and nothing was changed. '
+            'The way out is Set this phone up again, then restore or link this phone.',
+        DeviceRepair.ambiguous => 'The server lists this key more than once, so which id belongs to this phone cannot be told and nothing was changed. '
+            'Use Set this phone up again, then restore or link this phone.',
+        DeviceRepair.otherAccount => 'The key on this phone belongs to another account, so nothing was changed.',
+        DeviceRepair.noAccount => 'The app could not tell which account is signed in. Sign in again, then tap Repair.',
+        DeviceRepair.noKey => 'The stored key could not be checked, so nothing was changed.',
+      };
+
+  /// "Repair" for a damaged id note: writes the id the server lists for this key (see [E2eeService.repairDeviceId]).
+  /// Never changes the key.
+  Future<void> _repairDevice() async {
+    setState(() {
+      _busy = true;
+      _repairNote = null;
+    });
+    DeviceRepair r;
+    try {
+      r = await _svc.repairDeviceId();
+    } catch (e) {
+      debugPrint('encryption keys: id repair failed (${e.runtimeType})');
+      r = DeviceRepair.offline;
+    }
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      _repairNote = _deviceRepairWords(r);
+    });
+    if (r == DeviceRepair.repaired || r == DeviceRepair.notNeeded) await _load();
   }
 
   Future<void> _repair() async {

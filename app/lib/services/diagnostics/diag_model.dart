@@ -735,7 +735,12 @@ String plainDeliveryProblem(String code) {
           'phone\'s key belongs to; opening the app repairs it once the server confirms this phone\'s key, and the key '
           'is not changed; if it stays, send this report';
     }
-    if (reason == 'seed-length' || reason == 'device-id-format' || reason == 'device-id-missing' || reason == 'owner-format') {
+    if (reason == 'device-id-format' || reason == 'device-id-missing') {
+      return 'the note of this phone\'s id next to its encryption key is damaged or missing (reason code: $reason); the key '
+          'was not changed or deleted; opening the app repairs the note once the server confirms this phone\'s key '
+          '(Encryption keys has a Repair button); if it stays, send this report';
+    }
+    if (reason == 'seed-length' || reason == 'owner-format') {
       return 'the encryption key stored on this phone is not usable as it is (reason code: $reason); the key was not '
           'changed or deleted; if this stays after opening the app, open Encryption keys and send this report';
     }

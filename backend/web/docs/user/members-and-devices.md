@@ -28,6 +28,12 @@ of the server record) are under **Advanced**.
 
 ![Encryption keys: key status, recovery phrase, link another phone, the circle list and Advanced](../images/app/encryption-keys.png)
 
+**"This phone's encryption key can't be read".** When the screen says the key is stored but a note next to it is
+damaged or missing (the account it belongs to, or this phone's id), nothing was lost and nothing was changed. Update
+the app, open **Encryption keys** and tap **Try again**, or **Repair** where it is offered: the app writes the note
+again, but only after your server confirms that this phone's key is yours. If the server has no record of the key,
+the screen says so; then the way out is **Set this phone up again** (the old key is put aside, not deleted).
+
 ## Settings at a glance
 
 **Settings** has six groups. Every row has a title and at most one short line; tap the (i) for the long explanation.

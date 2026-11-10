@@ -303,14 +303,15 @@ void main() {
       expect(e.whatIsWrong, contains('Nothing was changed'));
     });
 
-    test('a seed without its device id is reported, never "created over", and stays as it is', () async {
+    test('a seed without its device id that the server does not list is reported, never "created over", and stays as it is', () async {
       final MemoryVault v = MemoryVault();
-      await svcOn(server, uA, v).registerThisDevice();
+      await svcOn(server, uA, v).identity(create: true); // created locally, never registered: the server cannot vouch for it
       v.data.remove('device_id');
       final Map<String, List<int>> before = snapshot(v);
       final E2eeService s = svcOn(server, uA, v);
       final LocalKeyException e = await s.identity(create: true).then<LocalKeyException>((_) => fail('x'), onError: (Object x) => x as LocalKeyException);
       expect(e.cause, KeyCause.deviceIdMissing);
+      expect(e.repair, 'notOurs');
       expect(snapshot(v), before);
       expect((await events()).any((String l) => l.contains('identity_partial')), isTrue);
     });
@@ -594,17 +595,17 @@ void main() {
       expect(v.data['device_id'], before['device_id']);
     });
 
-    testWidgets('an unreadable cause that cannot be repaired says what it is and still offers only Try again and set up again', (WidgetTester t) async {
+    testWidgets('an unreadable cause that cannot be repaired says what it is and still offers Try again and set up again', (WidgetTester t) async {
       t.view.physicalSize = const Size(800, 3000);
       t.view.devicePixelRatio = 1;
       addTearDown(t.view.resetPhysicalSize);
       addTearDown(t.view.resetDevicePixelRatio);
       final MemoryVault v = MemoryVault();
-      await svcOn(server, uA, v).registerThisDevice();
+      await svcOn(server, uA, v).identity(create: true); // never registered: the server cannot vouch for its id
       v.data.remove('device_id');
       await t.pumpWidget(MaterialApp(home: EncryptionKeysScreen(service: svcOn(server, uA, v))));
       await t.pumpAndSettle();
-      expect(find.textContaining("note of this phone's id"), findsOneWidget);
+      expect(find.textContaining("note of this phone's id"), findsWidgets);
       expect(find.textContaining('Open Encryption keys'), findsNothing);
       expect(find.byKey(const Key('keys-repair-owner')), findsNothing);
       expect(find.text('Try again'), findsOneWidget);
