@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"fmt"
 	"context"
 	"os"
 	"testing"
@@ -291,6 +292,24 @@ func TestPGRefreshConcurrentPresentations(t *testing.T) {
 	// A replay of idem-a once its successor was used is theft, even inside the window.
 	if out, _, err := st.Rotate(ctx, uid, "idem-a", "idem-g", exp); err != nil || out != rotateReused {
 		t.Fatalf("replay after the successor was used: %v %v", out, err)
+	}
+	// The number of answers per spent token is capped: past the cap only the one-off grace is left, then theft.
+	if err := st.Create(ctx, uid, "cap-a", exp); err != nil {
+		t.Fatal(err)
+	}
+	if out, got, _ := st.Rotate(ctx, uid, "cap-a", "cap-b", exp); out != rotateOK || got != "cap-b" {
+		t.Fatal("rotate cap-a")
+	}
+	for i := 0; i < refreshIdempotentMax; i++ {
+		if out, got, err := st.Rotate(ctx, uid, "cap-a", fmt.Sprintf("cap-x%d", i), exp); err != nil || out != rotateOK || got != "cap-b" {
+			t.Fatalf("answer %d of the cap: %v %q %v", i, out, got, err)
+		}
+	}
+	if out, got, err := st.Rotate(ctx, uid, "cap-a", "cap-grace", exp); err != nil || out != rotateOK || got != "cap-grace" {
+		t.Fatalf("after the cap only the one-off grace is left: %v %q %v", out, got, err)
+	}
+	if out, _, err := st.Rotate(ctx, uid, "cap-a", "cap-theft", exp); err != nil || out != rotateReused {
+		t.Fatalf("past the cap and the grace: %v %v", out, err)
 	}
 	// A replay after the window (and no strict grace left) is theft.
 	if err := st.Create(ctx, uid, "late-a", exp); err != nil {

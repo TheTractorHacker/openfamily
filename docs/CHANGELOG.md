@@ -12,8 +12,9 @@ the phones afterwards.
 
 ## v0.26.23 (2026-11-10)
 
-App-only release (the server needs no change). Install over the current app.
+Update the server first, then the phones.
 
+- **Fixed: being signed out again and again.** The server log showed the cause: when a phone is frozen or loses its connection while the app renews its sign-in, the server completes the renewal but the answer never arrives, so the app retries the same token about every 15 seconds. The server tolerated only one retry, and the third one looked like token theft and signed the whole session out (seen five times, on carrier data and on home Wi-Fi). The server now answers every retry of that token for 3 minutes with the same new token, with no extra copies and no sign-out. A retry after the new token was already used, or after the 3 minutes, is still treated as theft. To keep the wider window safe, one used token is answered again at most 8 times, and every repeat answer is written to the audit log as `auth.refresh_retry`, so a replay by someone else would be visible. Server change (migration 400 adds a small counter column): update the server for this one.
 - **A phone in a Private circle can no longer stop sending its position without a word.** Several ways it could go quiet while still looking alive (its regular check-ins kept arriving) are closed:
   - Encrypting a position and uploading the encrypted queue each run one at a time. If one step never finished (for example a call to the phone's key store that never answered in the background), every later position waited behind it until the phone restarted: nothing was encrypted, nothing was sent and no error was recorded. Each step now gives up after a time limit, notes why, and the next position goes through.
   - The background service kept the phone's upload key from the moment it started. After signing in again, which gives the phone a new upload key and voids the old one, its encrypted uploads were refused with "not signed in" and kept for later, forever. It now reads the current key before every upload.

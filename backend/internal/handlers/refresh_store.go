@@ -62,6 +62,11 @@ const refreshReuseGrace = 60 * time.Second
 // window, keeps the strict rules below.
 var refreshIdempotentWindow = 3 * time.Minute
 
+// refreshIdempotentMax caps how many times one spent token is answered with the same successor (concurrent
+// parts of one phone plus a few lost-answer retries). A replayed token cannot be used indefinitely: past the
+// cap the strict rules apply (the one-off grace, then theft).
+const refreshIdempotentMax = 8
+
 type pgRefreshStore struct{ pool *pgxpool.Pool }
 
 func (p pgRefreshStore) Create(ctx context.Context, userID, jti string, expires time.Time) error {
@@ -114,13 +119,17 @@ func (p pgRefreshStore) Rotate(ctx context.Context, userID, oldJTI, newJTI strin
 	// successor (it has not been used yet), so nobody is treated as a thief.
 	var sameChild string
 	err = tx.QueryRow(ctx, `
-		SELECT c.jti FROM refresh_sessions p
+		WITH p AS (
+		  UPDATE refresh_sessions SET retry_count = retry_count + 1
+		  WHERE jti = $1 AND user_id = $2
+		    AND used_at IS NOT NULL AND revoked_at IS NULL
+		    AND used_at > now() - make_interval(secs => $3)
+		    AND retry_count < $4
+		  RETURNING jti)
+		SELECT c.jti FROM p
 		JOIN refresh_sessions c ON c.parent_jti = p.jti
-		WHERE p.jti = $1 AND p.user_id = $2
-		  AND p.used_at IS NOT NULL AND p.revoked_at IS NULL
-		  AND p.used_at > now() - make_interval(secs => $3)
-		  AND c.used_at IS NULL AND c.revoked_at IS NULL AND c.expires_at > now()
-		ORDER BY c.created_at LIMIT 1`, oldJTI, userID, refreshIdempotentWindow.Seconds()).Scan(&sameChild)
+		WHERE c.used_at IS NULL AND c.revoked_at IS NULL AND c.expires_at > now()
+		ORDER BY c.created_at LIMIT 1`, oldJTI, userID, refreshIdempotentWindow.Seconds(), refreshIdempotentMax).Scan(&sameChild)
 	if err == nil {
 		return rotateOK, sameChild, tx.Commit(ctx)
 	}

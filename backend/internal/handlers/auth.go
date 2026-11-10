@@ -257,6 +257,9 @@ func (s *Server) Refresh(w http.ResponseWriter, r *http.Request) {
 	newJTI, status := s.rotateRefreshToken(r.Context(), user.ID, claims.ID)
 	switch status {
 	case refreshRotated:
+	case refreshRetried:
+		s.logAudit(r.Context(), user.ID, "", "auth.refresh_retry",
+			fmt.Sprintf("refresh token answered again with the same successor (jti %s, ua %q)", shortJTI(claims.ID), truncateUA(r.UserAgent())), clientIP(r))
 	case refreshReuse:
 		// Say which client replayed which token, so a repeated logout can be
 		// traced: the token's age, its jti prefix and the caller's user agent.
@@ -314,6 +317,9 @@ type refreshStatus int
 
 const (
 	refreshRotated refreshStatus = iota
+	// refreshRetried: the token had already been renewed and its successor is handed out again (the phone never
+	// got the first answer). Treated as success; audited so a replay by someone else would be visible.
+	refreshRetried
 	refreshRejected
 	refreshReuse
 	refreshError
@@ -342,6 +348,9 @@ func (s *Server) rotateRefreshToken(ctx context.Context, userID, oldJTI string) 
 	}
 	switch out {
 	case rotateOK:
+		if issued != newJTI {
+			return issued, refreshRetried // an earlier answer was lost: the same successor again
+		}
 		return issued, refreshRotated
 	case rotateReused:
 		return "", refreshReuse
@@ -409,4 +418,11 @@ func truncateUA(ua string) string {
 		return ua[:80]
 	}
 	return ua
+}
+
+func shortJTI(j string) string {
+	if len(j) > 8 {
+		return j[:8]
+	}
+	return j
 }
