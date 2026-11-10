@@ -133,6 +133,9 @@ class TokenStorage {
     } catch (_) {}
   }
 
+  static DateTime? _lastSignoutLoggedAt;
+  static String _lastSignoutReason = '';
+
   /// Remembers that [refresh] has been used (or replaced) and must never be presented again. Never throws.
   static Future<void> markSpent(String refresh) async {
     if (refresh.isEmpty) return;
@@ -190,14 +193,17 @@ class TokenStorage {
 
   /// Marks every stored refresh token that was issued strictly BEFORE [newRefresh] as spent: it was replaced by
   /// this save. Tokens with an unknown or equal issue time are left alone (never mark a live token).
-  static Future<void> _spendReplaced(String newRefresh) async {
+  static Future<void> _spendReplaced(String newRefresh, List<StoredSession> before) async {
     try {
       final DateTime? newIat = StoredSession(source: 'N', access: null, refresh: newRefresh).refreshIssuedAt;
       if (newIat == null) return;
-      final List<StoredSession> held = <StoredSession>[
-        ...await readAllStores(),
-        if (_mem != null) _mem!,
-      ];
+      // [before] is what the phone held in memory and in the plain file just before this save (the plain file is
+      // overwritten by it); the Keystore stores are read now, with a time limit: a stuck one must not block.
+      List<StoredSession> stores = const <StoredSession>[];
+      try {
+        stores = await readAllStores().timeout(storeTimeout * 3);
+      } catch (_) {}
+      final List<StoredSession> held = <StoredSession>[...before, ...stores];
       for (final StoredSession h in held) {
         final String? r = h.refresh;
         if (r == null || r.isEmpty || r == newRefresh) continue;
@@ -207,9 +213,15 @@ class TokenStorage {
     } catch (_) {}
   }
 
+  /// How long any single call into a Keystore-backed store may take before it is treated as failed. A stuck store
+  /// (seen on a Samsung phone) can hang forever instead of throwing; a hang while saving a refreshed token used
+  /// to stop the reliable plain-file copy from ever being written, so the server had rotated the token and the
+  /// phone kept the spent one. A test seam.
+  static Duration storeTimeout = const Duration(seconds: 5);
+
   static Future<String?> _safeRead(FlutterSecureStorage s, String key, [String store = '?']) async {
     try {
-      return await s.read(key: key);
+      return await s.read(key: key).timeout(storeTimeout);
     } catch (e) {
       _readErrors[store] = e.runtimeType.toString();
       return null;
@@ -278,39 +290,55 @@ class TokenStorage {
     return false;
   }
 
-  /// Persists an access + refresh token pair to both stores.
+  /// Time-bounded verified write of one Keystore-backed store: a hang counts as a failed write.
+  static Future<bool> _boundedWrite(Future<bool> write, String store) => write.timeout(storeTimeout, onTimeout: () {
+        _diary.record('write_timeout', 'store=$store');
+        StorageEventLog.instance.record('write_timeout', store: 'tokens.$store');
+        return false;
+      });
+
+  /// Persists an access + refresh token pair to every store.
   static Future<void> saveTokens({
     required String access,
     required String refresh,
   }) async {
-    // A refresh token is single-use: if the new one is not what we can read
-    // back, the next refresh replays a spent token. Write and verify both
-    // stores; one verified copy keeps the session, none is a loud failure.
-    await _spendReplaced(refresh);
-    await _reconcileKeptBackground(access);
-    final bool okA =
-        await _writeVerified(_storage, _accessKey, _refreshKey, access, refresh);
-    final bool okB = await _writeVerified(
-        _storageB, _accessKeyB, _refreshKeyB, access, refresh);
-    final bool okD = await _writePrefs(access, refresh);
+    // A refresh token is single-use: the server has ALREADY rotated it when this runs, so the new one must be
+    // saved before anything else can go wrong. Order matters: the plain app-private file first (instant and
+    // reliable), then the two Keystore-backed stores, each with a time limit so a store that hangs cannot stop
+    // the others. What this replaces is looked up afterwards, also with limits. One verified copy keeps the
+    // session; none is a loud failure.
+    final List<StoredSession> before = <StoredSession>[if (_mem != null) _mem!];
+    try {
+      before.add(await _readPrefs());
+    } catch (_) {}
     _mem = StoredSession(source: 'M', access: access, refresh: refresh);
+    final bool okD = await _writePrefs(access, refresh);
+    final List<bool> keystore = await Future.wait(<Future<bool>>[
+      _boundedWrite(_writeVerified(_storage, _accessKey, _refreshKey, access, refresh), 'A'),
+      _boundedWrite(_writeVerified(_storageB, _accessKeyB, _refreshKeyB, access, refresh), 'B'),
+    ]);
+    final bool okA = keystore[0], okB = keystore[1];
     _diary.record('save', 'refresh=${SessionDiary.shortHash(refresh)} '
         'A=${okA ? 'ok' : 'FAIL'} B=${okB ? 'ok' : 'FAIL'} '
         'D=${okD ? 'ok' : 'FAIL'}');
     if (!okA && !okB && !okD) {
       throw StateError('Could not save the session on this device.');
     }
+    await _spendReplaced(refresh, before);
+    await _reconcileKeptBackground(access);
     try {
-      await _storage.delete(key: _legacyAccessKey);
-      await _storage.delete(key: _legacyRefreshKey);
+      await _storage.delete(key: _legacyAccessKey).timeout(storeTimeout);
+      await _storage.delete(key: _legacyRefreshKey).timeout(storeTimeout);
     } catch (_) {}
     // The background isolate gets only the base URL and device id (plus its
     // ingest key, stored separately); it never sees these tokens (MOB-002).
-    final String? deviceId = await readDeviceId();
-    await BackgroundCredentialStore.sync(
-      apiBaseUrl: ServerConfig.instance.apiBaseUrl,
-      deviceId: deviceId ?? '',
-    );
+    try {
+      final String? deviceId = await readDeviceId().timeout(storeTimeout);
+      await BackgroundCredentialStore.sync(
+        apiBaseUrl: ServerConfig.instance.apiBaseUrl,
+        deviceId: deviceId ?? '',
+      ).timeout(storeTimeout);
+    } catch (_) {}
   }
 
   /// Reads every store. Entries with no tokens are omitted.
@@ -442,6 +470,8 @@ class TokenStorage {
 
   /// Test hook: forget in-memory state.
   static void resetForTest() {
+    _lastSignoutLoggedAt = null;
+    _lastSignoutReason = '';
     _rejected.clear();
     _mem = null;
   }
@@ -498,7 +528,15 @@ class TokenStorage {
   /// would reuse the previous user's device id.
   static Future<bool> clear({String reason = 'unspecified', bool keepOfflineData = false}) async {
     _diary.record('clear', 'reason=$reason');
-    StorageEventLog.instance.record('signout', store: 'tokens', detail: 'reason=$reason');
+    // The same sign-out from many concurrent callers (a dead session makes every request fail at once) is logged
+    // once per minute: the log keeps only the last 50 events and the storm pushed out everything else.
+    final DateTime nowT = DateTime.now();
+    final DateTime? lastAt = _lastSignoutLoggedAt;
+    if (reason != _lastSignoutReason || lastAt == null || nowT.difference(lastAt) > const Duration(minutes: 1)) {
+      StorageEventLog.instance.record('signout', store: 'tokens', detail: 'reason=$reason');
+      _lastSignoutLoggedAt = nowT;
+      _lastSignoutReason = reason;
+    }
     // A store that ignores deletes (seen on a Samsung phone) keeps its old token after this teardown. Remember
     // every token held now as dead, so it is never offered to the server or mistaken for a session again.
     try {

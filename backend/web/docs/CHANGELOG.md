@@ -10,6 +10,13 @@ for the **last 5 minor versions** of the app (see
 [API compatibility](api-compat.md)), so you can update the server first and
 the phones afterwards.
 
+## v0.26.26 (2026-11-10)
+
+App-only release (the server needs no change; v0.26.25 fixed the database connections and needs a server update). Install over the current app.
+
+- **Fixed: a stuck secure-storage place could cost the phone its sign-in.** The server logs showed a refresh that succeeded on the server at 01:05:42 while the phone never used the new token and presented the old one 14 minutes later, which signed the session out. On a phone whose Keystore storage hangs, saving the new token stopped at the stuck place and the reliable plain-file copy was never written. The app now writes the plain file first, bounds every Keystore call with a time limit, and finds the tokens it replaced afterwards. Reading is bounded the same way.
+- **The Diagnostics report names why encryption failed.** The "Private circle delivery" section now shows a short reason after the code (for example `seal_unreadable:empty user id`), with all ids masked, and repeated sign-outs are logged once a minute instead of 40 times, so the last 50 events keep the useful lines.
+
 ## v0.26.25 (2026-11-10)
 
 Server only: update the server, no app update needed.

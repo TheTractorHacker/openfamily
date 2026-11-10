@@ -207,4 +207,12 @@ void main() {
       expect(c.laneLabel, 'server gen 3 (pref names gen 2) (no server key here: phone line used)');
     });
   });
+
+  test('the seal error cause shown in the report names what failed but never an id', () {
+    expect(PrivateRuntime.shortSealCause('empty user id'), 'empty user id');
+    expect(PrivateRuntime.shortSealCause('FormatException'), 'FormatException');
+    expect(PrivateRuntime.shortSealCause('read sk/3c0fd4e8-2622-4c80-add8-3d46f28031b1/3 failed'), 'read sk/<id>/3 failed');
+    expect(PrivateRuntime.shortSealCause('key 0123456789abcdef0123456789abcdef bad'), 'key <hex> bad');
+    expect(PrivateRuntime.shortSealCause('x' * 100).length, 49);
+  });
 }

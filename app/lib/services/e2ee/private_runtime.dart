@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
 
-import 'package:flutter/foundation.dart' show ValueNotifier;
+import 'package:flutter/foundation.dart' show ValueNotifier, visibleForTesting;
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -1647,7 +1647,8 @@ class PrivateRuntime {
     String code = up.code;
     DateTime? codeAt = up.codeAt;
     if (se != null && (codeAt == null || (se.at != null && se.at!.isAfter(codeAt)))) {
-      code = 'seal_${se.problem}';
+      final String cause = shortSealCause(se.cause);
+      code = cause.isEmpty ? 'seal_${se.problem}' : 'seal_${se.problem}:$cause';
       codeAt = se.at;
     }
     return PrivateDeliveryFacts(
@@ -1856,6 +1857,19 @@ class PrivateRuntime {
   Future<String> _notificationWho(String userId) async {
     if (!await NotificationNames.load()) return 'A family member';
     return nameOf?.call(userId) ?? 'Someone';
+  }
+
+  /// A short, identifier-free form of a seal error's cause for the diagnostic report: ids (UUIDs, hex strings
+  /// longer than 12) are masked, whitespace is collapsed, and it is clipped. It says WHAT failed (for example
+  /// "empty user id" or a platform error name), never which circle, device or key.
+  @visibleForTesting
+  static String shortSealCause(String cause) {
+    final String masked = cause
+        .replaceAll(RegExp(r'[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'), '<id>')
+        .replaceAll(RegExp(r'[0-9a-fA-F]{13,}'), '<hex>')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    return masked.length <= 48 ? masked : '${masked.substring(0, 48)}…';
   }
 
   Future<void> _apply(ReceivedItem r) async {
