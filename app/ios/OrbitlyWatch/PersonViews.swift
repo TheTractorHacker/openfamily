@@ -76,11 +76,22 @@ struct PersonDetailView: View {
 /// awake, and stopped as soon as it is not (wrist down, screen left), because the
 /// magnetometer costs battery. The latest value is a plain property read once per
 /// frame by the arrow; nothing is published per sample, so a compass update never
-/// re-evaluates a SwiftUI body. Main thread only (the manager is created there, so
-/// CoreLocation calls the delegate there too).
+/// re-evaluates a SwiftUI body (only `live` is published, once, when the first usable
+/// reading arrives). Main thread only (the manager is created there, so CoreLocation
+/// calls the delegate there too).
+///
+/// Only a TRUE-north heading is used: the bearing from the phone is a true bearing,
+/// and mixing in the magnetic heading would be off by the local declination (10 to
+/// 20 degrees in many regions). Without a true heading (location denied, no fix yet)
+/// the screen keeps the north-up arrow. The last valid heading is kept across
+/// stop/start, so waking the screen never snaps the arrow to north-up.
 final class HeadingProvider: NSObject, ObservableObject, CLLocationManagerDelegate {
-    /// Degrees clockwise from north, or -1 while there is no usable reading.
+    /// Degrees clockwise from true north: the last valid reading, or -1 if there has
+    /// never been one. Deliberately not cleared by stop()/start().
     private(set) var degrees: Double = -1
+    /// True once a valid true-north heading has been received. Published, but it flips
+    /// at most once, so it never causes per-sample redraws.
+    @Published private(set) var live = false
 
     private let manager = CLLocationManager()
     private var running = false
@@ -96,7 +107,6 @@ final class HeadingProvider: NSObject, ObservableObject, CLLocationManagerDelega
         if running { return }
         guard CLLocationManager.headingAvailable() else { return }
         running = true
-        degrees = -1
         manager.startUpdatingHeading()
         switch manager.authorizationStatus {
         case .notDetermined:
@@ -114,13 +124,16 @@ final class HeadingProvider: NSObject, ObservableObject, CLLocationManagerDelega
         if !running { return }
         running = false
         manager.stopUpdatingHeading()
-        degrees = -1
     }
 
     func locationManager(_ manager: CLLocationManager, didUpdateHeading newHeading: CLHeading) {
-        // A negative accuracy means the reading is invalid.
+        // A negative accuracy means the reading is invalid; a negative true heading
+        // means there is no location fix yet (only the magnetic one would be valid,
+        // which is off by the declination, so it is ignored).
         if newHeading.headingAccuracy < 0 { return }
-        degrees = newHeading.trueHeading >= 0 ? newHeading.trueHeading : newHeading.magneticHeading
+        if newHeading.trueHeading < 0 { return }
+        degrees = newHeading.trueHeading
+        if !live { live = true }
     }
 
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
@@ -141,9 +154,10 @@ final class HeadingProvider: NSObject, ObservableObject, CLLocationManagerDelega
 
 /// Precision Finding style: an arrow towards the person that turns with your wrist.
 /// Arrow angle = bearing to the person minus the watch heading. The angle is
-/// unwrapped and eased on every frame (30 a second, paused when the screen is dimmed),
-/// so it glides instead of jumping when a new position or heading arrives. Without a
-/// compass reading it falls back to the old north-up arrow.
+/// unwrapped and eased on every frame (30 a second, paused when the screen is dimmed
+/// or, without a compass, once the arrow has settled), so it glides instead of jumping
+/// when a new position or heading arrives. Without a compass reading it falls back to
+/// the old north-up arrow.
 struct DirectionView: View {
     let memberId: String
     @EnvironmentObject var link: PhoneLink
@@ -207,17 +221,32 @@ struct DirectionView: View {
 struct DirectionDial: View {
     let bearing: Double
     let close: Bool
-    let heading: HeadingProvider
+    @ObservedObject var heading: HeadingProvider
     let state: FindingState
     let dimmed: Bool
+    /// Set once both smoothers have settled while there is no compass: nothing can
+    /// move then until a new bearing arrives, so the frame schedule is paused.
+    @State private var idle = false
+
+    /// Advances both smoothers to `date` and returns the angles to draw.
+    private func frame(at date: Date) -> (arrow: Double, north: Double) {
+        let h = heading.degrees
+        let hasHeading = h >= 0
+        // Where the person is relative to where the watch points; where north is.
+        let a = state.arrow.step(raw: hasHeading ? bearing - h : bearing, now: date)
+        let n = state.north.step(raw: hasHeading ? -h : 0, now: date)
+        if !heading.live && !idle && state.arrow.isSettled && state.north.isSettled {
+            // Not inside the view update: the state change must come after it.
+            DispatchQueue.main.async { self.idle = true }
+        }
+        return (a, n)
+    }
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: dimmed)) { context in
-            let h = heading.degrees
-            let hasHeading = h >= 0
-            // Where the person is relative to where the watch points; where north is.
-            let arrowAngle = state.arrow.step(raw: hasHeading ? bearing - h : bearing, now: context.date)
-            let northAngle = state.north.step(raw: hasHeading ? -h : 0, now: context.date)
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: dimmed || (idle && !heading.live))) { context in
+            let angles = frame(at: context.date)
+            let arrowAngle = angles.arrow
+            let northAngle = angles.north
             ZStack {
                 Circle()
                     .stroke(Brand.sky.opacity(0.5), lineWidth: 3)
@@ -240,6 +269,7 @@ struct DirectionDial: View {
             }
             .frame(width: 116, height: 116)
         }
+        .onChange(of: bearing) { _ in idle = false }
         .accessibilityHidden(true)
     }
 }

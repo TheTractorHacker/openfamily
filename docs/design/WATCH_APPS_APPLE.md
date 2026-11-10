@@ -69,11 +69,14 @@ Direction view (v0.26.30, Precision Finding style): the arrow turns with your wr
 its own compass (`CLLocationManager` heading, `headingFilter` 1 degree) only while the screen is
 open and awake: it starts in `onAppear`, and stops in `onDisappear` and whenever
 `isLuminanceReduced` is true (wrist down, always-on). Arrow angle = bearing to the person (from the
-snapshot) minus the watch heading, using `trueHeading` when valid and `magneticHeading` otherwise;
-one `requestLocation()` is asked so the system can give a true-north heading. This needs
+snapshot) minus the watch heading. Only `trueHeading` is used (the phone bearing is a true bearing;
+`magneticHeading` would be off by the declination); one `requestLocation()` is asked so the system can
+give it, and until then the arrow is north-up. The last valid heading is kept across stop/start, so
+waking the screen never snaps the arrow to north-up. This needs
 `NSLocationWhenInUseUsageDescription` in `OrbitlyWatch/Info.plist`; the watch position itself is
 neither used nor stored. The angle is drawn by a `TimelineView(.animation(minimumInterval: 1/30))`
-that is paused while dimmed. `AngleSmoother` (Format.swift) keeps an unwrapped angle (359 to 1
+that is paused while dimmed, and also once both smoothers have settled while there is no compass
+(`isSettled`; it resumes on a new bearing). `AngleSmoother` (Format.swift) keeps an unwrapped angle (359 to 1
 degrees turns 2 degrees, not 358), eases it with a frame-rate independent exponential (tau 0.14 s)
 and ignores changes under 1 degree. The ring and its N counter-rotate so north stays where it is.
 Without a compass reading (not available, not yet ready, refused) the arrow is north-up as before.

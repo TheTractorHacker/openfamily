@@ -167,6 +167,9 @@ final class AngleSmoother {
         return shown
     }
 
+    /// True once the drawn angle has reached its target (nothing is moving).
+    var isSettled: Bool { return primed && shown == target }
+
     /// The angle last returned (no time passes).
     var current: Double { return shown }
 }
