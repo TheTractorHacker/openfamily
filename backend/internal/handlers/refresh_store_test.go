@@ -299,7 +299,16 @@ func TestPGRefreshConcurrentPresentations(t *testing.T) {
 	if out, _, _ := st.Rotate(ctx, uid, "late-a", "late-b", exp); out != rotateOK {
 		t.Fatal("rotate late-a")
 	}
-	if _, err := pool.Exec(ctx, `UPDATE refresh_sessions SET used_at = now() - interval '5 minutes' WHERE jti = 'late-a'`); err != nil {
+	// A phone that was frozen mid-refresh retries every ~15 s: still the same successor, never a fork or a revoke.
+	if _, err := pool.Exec(ctx, `UPDATE refresh_sessions SET used_at = now() - interval '2 minutes' WHERE jti = 'late-a'`); err != nil {
+		t.Fatal(err)
+	}
+	for i, cand := range []string{"late-x", "late-y", "late-z"} {
+		if out, got, err := st.Rotate(ctx, uid, "late-a", cand, exp); err != nil || out != rotateOK || got != "late-b" {
+			t.Fatalf("retry %d two minutes after the rotation: %v %q %v", i, out, got, err)
+		}
+	}
+	if _, err := pool.Exec(ctx, `UPDATE refresh_sessions SET used_at = now() - interval '10 minutes' WHERE jti = 'late-a'`); err != nil {
 		t.Fatal(err)
 	}
 	if out, _, err := st.Rotate(ctx, uid, "late-a", "late-c", exp); err != nil || out != rotateReused {

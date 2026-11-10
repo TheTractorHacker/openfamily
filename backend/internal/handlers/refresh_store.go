@@ -52,11 +52,15 @@ func newTokenID() (string, error) {
 const refreshReuseGrace = 60 * time.Second
 
 // refreshIdempotentWindow: within this long after a refresh token is spent, presenting it again
-// (for any number of times) returns the SAME successor instead of counting as reuse. One phone has
-// several parts that refresh together on start-up (the screen, the background location service, a
-// retry after a lost answer); treating the third as token theft signed people out. A successor
-// that was already used, or a presentation after the window, keeps the strict rules below.
-var refreshIdempotentWindow = 10 * time.Second
+// (for any number of times) returns the SAME successor instead of counting as reuse, as long as that
+// successor has not been used yet. One phone has several parts that refresh together on start-up (the
+// screen, the background location service) and a phone that is frozen or loses its connection while a
+// refresh is in flight never receives the answer and retries the same token every ~15 s (its request
+// timeout). Production incident (2026-11-09/10, several times): the first retry used the one-off grace,
+// the third presentation read as theft and revoked the owner's whole session (token reuse 15 s apart, on
+// carrier data and on home Wi-Fi alike). A successor that was already used, or a presentation after the
+// window, keeps the strict rules below.
+var refreshIdempotentWindow = 3 * time.Minute
 
 type pgRefreshStore struct{ pool *pgxpool.Pool }
 
