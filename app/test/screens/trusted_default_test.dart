@@ -150,7 +150,7 @@ void main() {
         ((status: LaneStatus.serverAssisted, assist: true), 'On for you'),
         ((status: LaneStatus.phoneOnly, assist: true), 'Phone only for you (you can switch it on)'),
         ((status: LaneStatus.phoneOnly, assist: false), 'Phone only (off for this circle)'),
-        ((status: LaneStatus.consentRequired, assist: true), 'Required in this circle: needs your OK'),
+        ((status: LaneStatus.serverPending, assist: true), 'Switching on for you (positions keep arriving)'),
       ]) {
         await t.pumpWidget(const SizedBox());
         await t.pumpWidget(MaterialApp(

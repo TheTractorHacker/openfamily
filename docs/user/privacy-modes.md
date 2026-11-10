@@ -57,7 +57,7 @@ works like this:
 - If you ever chose yourself, in either direction, it is never changed. Opting out stays opted out.
 - From then on the server can read your location, trips and driving data (the server owner and anyone who backs up or
   steals the server can too). Anything it stored stays until you delete it; backups cannot be deleted.
-- Not done for you: circles that **require** server processing (you are asked to consent), child accounts, and
+- In a circle where the admin **requires** server processing, your phone signs it by itself and there is no switch to turn it off (see [Server processing](server-processing.md)). Not done for you: child accounts in an optional circle, and
   servers whose owner turned automatic switching off (the app asks you instead).
 
 ## Who decides what

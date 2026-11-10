@@ -68,10 +68,24 @@ class PrivateCircleDelivery {
     this.queued = 0,
     this.parked = 0,
     this.lastSealedAt,
+    this.circleKeyMissing = false,
+    this.awaitingApproval = false,
+    this.serverCopyRefused = false,
   });
 
-  /// 'phone' | 'server' | 'consent' (the circle requires server processing and this member has not agreed: nothing
-  /// is sealed for it) | 'failed' (the processing records did not verify: the phone lane is used).
+  /// This phone holds no key of the circle yet (it waits for another member's phone to share it).
+  final bool circleKeyMissing;
+
+  /// This phone's key is not approved in the circle yet (an admin approves it once).
+  final bool awaitingApproval;
+
+  /// The server refused this phone's server copy (its signed choice names an old server key); the phone switched to
+  /// the family copy and signs its choice again by itself.
+  final bool serverCopyRefused;
+
+  /// 'phone' | 'server' | 'pending' (the family admin requires server processing and this phone has not signed its
+  /// own choice for the current server key yet: it sends on the phone line meanwhile) | 'failed' (the processing
+  /// records did not verify: the phone lane is used).
   final String laneKind;
 
   /// The circle's current server-key generation (server lane only).
@@ -97,8 +111,8 @@ class PrivateCircleDelivery {
     switch (laneKind) {
       case 'server':
         return 'server gen $serverGen${stalePref ? ' (pref names gen $prefGen)' : ''}${serverKeyMissing ? ' (no server key here: phone line used)' : ''}';
-      case 'consent':
-        return 'consent required';
+      case 'pending':
+        return 'server processing required (phone signs by itself; phone line meanwhile)';
       case 'failed':
         return 'phone (verification failed)';
       default:
@@ -681,7 +695,41 @@ List<DiagCheck> evaluateDiagnostics(DiagFacts f) {
   return out;
 }
 
+/// Plain words for a short upload or encryption problem code (`http_401`, `rejected_lane_not_server`, `seal_...`),
+/// saying what happened and what the app does about it. No codes, no jargon: the code itself stays in the copied
+/// report's technical section.
+String plainDeliveryProblem(String code) {
+  final String c = code.trim();
+  if (c.isEmpty) return '';
+  if (c == 'offline') return 'the phone had no connection; it sends them as soon as it is back online';
+  if (c == 'no_credentials' || c == 'http_401') return 'the phone was renewing its sign-in; it retries by itself';
+  if (c == 'http_408' || c == 'http_429') return 'the server asked the phone to slow down; it retries by itself';
+  if (c == 'server_error' || RegExp(r'^http_5\d\d$').hasMatch(c)) return 'the server had a problem; the phone retries by itself';
+  if (c == 'http_403') {
+    return 'the server no longer accepts the encryption key these updates were made with (the key was replaced); '
+        'new positions use the current key';
+  }
+  if (c == 'rejected_lane_not_server' || c == 'rejected_server_line_off' || c == 'rejected_device_lacks_lanes2') {
+    return 'the server would not take the copy meant for server processing, so the phone sends the family copy instead '
+        'and renews its server processing choice by itself';
+  }
+  if (c == 'required_server' || c == 'rejected_required_server') {
+    return 'the family admin requires server processing and this phone is still setting that up; it keeps sending meanwhile';
+  }
+  if (c == 'rejected_bad_epoch' || c == 'rejected_legacy_epoch_closed') {
+    return 'the family\'s encryption key changed; the phone fetches the new one and sends again';
+  }
+  if (c.startsWith('seal_')) {
+    return 'this phone could not open its own encryption key for a moment; it tries again with the next position';
+  }
+  if (c.startsWith('rejected_')) return 'the server refused some updates';
+  if (c.startsWith('http_')) return 'the server refused the upload';
+  return 'there was a problem sending';
+}
+
 /// The "Private circle delivery" check: null when there is nothing to say (no Private circle, not collected).
+/// Warnings are in plain family words (what is wrong and what the app does about it); the technical summary (counts,
+/// codes) is only in the PASS detail and the copied report's own section.
 DiagCheck? privateDeliveryCheck(DiagFacts f) {
   final PrivateDeliveryFacts? p = f.privateDelivery;
   if (p == null || p.circles.isEmpty) return null;
@@ -692,37 +740,52 @@ DiagCheck? privateDeliveryCheck(DiagFacts f) {
   for (final PrivateCircleDelivery c in p.circles) {
     n++;
     final String name = p.circles.length == 1 ? 'your Private circle' : 'Private circle $n';
-    if (c.laneKind == 'consent') {
-      problems.add('$name requires server processing and you have not agreed, so nothing of yours is sent to it. '
-          'Open the circle\'s processing settings to agree or leave the circle.');
-      continue;
+    if (c.laneKind == 'pending') {
+      problems.add('The family admin requires server processing in $name. This phone signs that choice by itself and '
+          'keeps sending your position to the family meanwhile.');
     }
     final DateTime? s = c.lastSealedAt;
-    if (gettingFixes && (s == null || f.now.difference(s) > kNoSealWarn)) {
+    final bool stuck = gettingFixes && (s == null || f.now.difference(s) > kNoSealWarn);
+    if (c.awaitingApproval) {
+      problems.add('This phone is waiting to be approved in $name. An admin of the circle approves it once in Encryption keys; '
+          'until then your positions are kept on this phone and sent right after.');
+    } else if (c.circleKeyMissing || (stuck && c.parked > 0 && !p.lastErrorCode.startsWith('seal_'))) {
+      problems.add('This phone is waiting for the family\'s encryption key for $name. It is asked for automatically; another '
+          'family member\'s phone or the admin\'s phone has to be online once. Your positions are kept and sent after that.');
+    } else if (stuck) {
+      final String why = plainDeliveryProblem(p.lastErrorCode);
       problems.add('This phone has fresh positions but has not encrypted one for $name '
-          '${s == null ? 'yet' : 'recently (the last one ${humanAgo(f.now.difference(s))})'}, so the others see an old position.');
+          '${s == null ? 'yet' : 'recently (the last one ${humanAgo(f.now.difference(s))})'}, so the others see an old position'
+          '${why.isEmpty ? '.' : '. Most likely $why.'}');
+    }
+    if (c.laneKind == 'failed') {
+      problems.add('The server processing settings of $name could not be confirmed, so this phone sends your position '
+          'to the family only until they can. Nothing is lost.');
+    } else if (c.serverCopyRefused) {
+      problems.add('The server stopped taking the copy of your position meant for server processing in $name (its key changed). '
+          'This phone sends the family copy instead and renews your choice by itself.');
     }
   }
   final int waiting = p.circles.fold(0, (int a, PrivateCircleDelivery c) => a + c.queued + c.parked);
   final DateTime? ok = p.lastUploadOkAt;
   if (waiting > 0 && (ok == null || f.now.difference(ok) > kStaleUpload)) {
+    final String why = plainDeliveryProblem(p.lastErrorCode);
     problems.add('$waiting encrypted update${waiting == 1 ? ' is' : 's are'} waiting and the server has not accepted an '
         'upload ${ok == null ? 'yet' : 'recently (the last one ${humanAgo(f.now.difference(ok))})'}'
-        '${p.lastErrorCode.isEmpty ? '' : ' (last problem: ${p.lastErrorCode})'}.');
+        '${why.isEmpty ? '.' : ': $why.'}');
   }
-  final String summary = privateDeliverySummary(f);
   if (problems.isEmpty) {
     return DiagCheck(
         id: 'private_delivery',
         title: 'Private circle delivery',
         status: DiagStatus.pass,
-        detail: 'Positions are encrypted and sent. $summary');
+        detail: 'Positions are encrypted and sent. ${privateDeliverySummary(f)}');
   }
   return DiagCheck(
       id: 'private_delivery',
       title: 'Private circle delivery',
       status: DiagStatus.warn,
-      detail: '${problems.join(' ')} $summary',
+      detail: problems.join(' '),
       fix: const DiagFix(DiagFixKind.sendQueue, 'Send now'));
 }
 

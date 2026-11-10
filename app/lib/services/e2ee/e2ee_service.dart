@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
+
 import 'package:bip39/bip39.dart' as bip39;
 
 import '../storage_event_log.dart';
@@ -145,7 +147,11 @@ class LogSync {
 
 /// What [E2eeService.resetThisDevice] did.
 class KeyResetResult {
-  const KeyResetResult(this.key, {this.serverKeyRevoked = false, this.serverRejoined = false});
+  const KeyResetResult(this.key, {this.serverKeyRevoked = false, this.serverRejoined = false, this.serverKept = false});
+
+  /// The reset KEPT the built-in server key: this phone signed a re-attachment of exactly that key (same id, same
+  /// fingerprint) and the server confirmed it. Nobody is asked anything and members' choices naming that key stay valid.
+  final bool serverKept;
 
   /// This phone's new key.
   final DeviceKey key;
@@ -377,7 +383,11 @@ class E2eeService {
   /// Registers this phone's PUBLIC keys. The first key of an account is a root.
   /// Otherwise it needs [approval] (a cross-signature from another device or the
   /// recovery key) unless [reset] replaces all keys (peers must then re-approve).
-  Future<DeviceKey> registerThisDevice({LinkApproval? approval, bool reset = false, String label = ''}) async {
+  ///
+  /// [keepServer] (reset only): the account's built-in server key to KEEP. This phone, as the new root, signs a
+  /// re-attachment of exactly that key (log action 13) and sends it with the reset; a server that does not know the
+  /// field revokes the key as before and the answer has no `serverKept`.
+  Future<DeviceKey> registerThisDevice({LinkApproval? approval, bool reset = false, String label = '', DeviceKey? keepServer}) async {
     final LocalIdentity id = (await identity(create: true))!;
     final List<DeviceKey> mine = await api.myKeys();
     final bool anyActive = mine.any((DeviceKey k) => k.isActive);
@@ -394,13 +404,62 @@ class E2eeService {
     }
     if (anyActive && !reset) throw const NeedsCrossSignatureException();
     final bool first = mine.isEmpty;
-    return api.register(await _registrationBody(id,
+    final Map<String, dynamic> body = await _registrationBody(id,
         kind: 'device',
         action: first ? E2ee.actRegister : E2ee.actReset,
         actorDeviceId: id.deviceId,
         actorEdSeed: id.edSeed,
         reset: !first && anyActive,
-        label: label));
+        label: label);
+    if (keepServer != null && !first && anyActive) {
+      final Uint8List sig = await E2ee.sign(id.edSeed,
+          E2ee.logActionMessage(E2ee.actServerAttach, id.userId, id.deviceId, subjectId: keepServer.deviceId, ref: E2ee.unhex(keepServer.fingerprint)));
+      body['keep_server'] = <String, dynamic>{'device_id': keepServer.deviceId, 'log_signature': E2ee.b64(sig)};
+    }
+    return api.register(body);
+  }
+
+  /// The one server key a reset may KEEP, or null. Strict: it must be an active `server` key of THIS account from this
+  /// phone's own pre-reset key list, whose registration verifies and was signed by one of this account's own keys, and it
+  /// must be the key the server itself reports as its pinned built-in device (same id, same fingerprint). Anything else
+  /// (an unknown, foreign, unpinned or unsigned key) is never attached: it is revoked with the rest, as before.
+  @visibleForTesting
+  Future<DeviceKey?> serverKeyToKeep(List<DeviceKey> before) async {
+    try {
+      final ServerProfile p = await api.serverProfile();
+      final ServerDeviceInfo? pinned = p.device;
+      if (!p.builtin || pinned == null) return null;
+      final LocalIdentity? me = await identity();
+      final Set<String> mineIds = <String>{for (final DeviceKey k in before) k.deviceId};
+      for (final DeviceKey k in before) {
+        if (!k.isActive || k.kind != 'server' || k.deviceId != pinned.deviceId) continue;
+        if (me != null && k.userId != me.userId) continue;
+        if (k.fingerprint != pinned.fingerprint.toLowerCase()) continue;
+        if (!mineIds.contains(k.registeredByDeviceId) || !await verifyRegistration(k)) continue;
+        return k;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  /// Drops the identity this isolate cached, so the next [identity] call reads the vault again. A background isolate
+  /// that kept using a key an owner reset has since revoked calls this when the server refuses its uploads
+  /// (`device_revoked`): it then stops sealing under the old key and picks up the new one.
+  void forgetCachedIdentity() => _cached = null;
+
+  /// Drops the cached identity only when the vault now holds a different phone key than this isolate cached (an owner
+  /// reset or a restore replaced it elsewhere). True when it did. Cheap enough to call whenever the app opens.
+  Future<bool> dropStaleIdentity() async {
+    final LocalIdentity? c = _cached;
+    if (c == null) return false;
+    try {
+      final Uint8List? d = await _readKey(_deviceName);
+      if (d != null && utf8.decode(d) != c.deviceId) {
+        _cached = null;
+        return true;
+      }
+    } catch (_) {}
+    return false;
   }
 
   // ---- linking a second phone (manual ping-pong, no server round trip)
@@ -492,13 +551,18 @@ class E2eeService {
     Duration serverWait = const Duration(seconds: 20),
     Duration step = const Duration(seconds: 1),
   }) async {
+    final List<DeviceKey> before = await api.myKeys();
     final Set<String> oldServerKeys = <String>{
-      for (final DeviceKey k in await api.myKeys())
+      for (final DeviceKey k in before)
         if (k.isActive && k.kind == 'server') k.deviceId,
     };
-    final DeviceKey key = await registerThisDevice(reset: true, label: label);
+    await identity(create: true); // the new root's id and key are needed to sign the re-attachment before the request
+    final DeviceKey? keep = oldServerKeys.isEmpty ? null : await serverKeyToKeep(before);
+    final DeviceKey key = await registerThisDevice(reset: true, label: label, keepServer: keep);
     // Nothing was revoked (this phone's key was still active): the server key is untouched.
     if (key.registrationAction != E2ee.actReset || oldServerKeys.isEmpty) return KeyResetResult(key);
+    // The server kept its key (same id, same fingerprint): nothing to approve again.
+    if (key.serverKept && keep != null) return KeyResetResult(key, serverKept: true);
     bool rejoined;
     try {
       rejoined = await rejoinServerAfterReset(oldServerKeys, timeout: serverWait, step: step);

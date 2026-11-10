@@ -612,18 +612,22 @@ void main() {
   });
 
   group('member_opt_out: required_server', () {
-    test('a member without consent is told to consent or leave; nothing of theirs is sealed or sent meanwhile', () async {
+    test('a member whose phone has not signed yet keeps sending on the phone line; then the phone signs by itself', () async {
       await policyOn(optOut: E2ee.optOutRequiredServer);
       final CircleLanes v = await bob.lanes.refresh(priv);
-      expect((v.status, v.policy.memberOptOut), (LaneStatus.consentRequired, E2ee.optOutRequiredServer));
+      expect((v.status, v.policy.memberOptOut), (LaneStatus.serverPending, E2ee.optOutRequiredServer));
+      // Nothing is held back: the position is sealed on the phone line (never plaintext, never nothing).
       await sealFixes(bob, 3);
-      expect((await bob.runtime.queue.peek()).where((WireItem i) => i.purpose == 'fix'), isEmpty);
-      expect(channel.uploaded, isEmpty);
-      // Consent is Bob's own signed act; the admin cannot do it for him.
-      await bob.lanes.setLane(priv, E2ee.lineServer, confirmServerFingerprintHex: srvKey.fingerprint);
+      final List<WireItem> q = (await bob.runtime.queue.peek()).where((WireItem i) => i.purpose == 'fix').toList();
+      expect(q.length, 3);
+      expect(q.every((WireItem i) => i.line == E2ee.linePhone), isTrue);
+      // The member's OWN phone signs the lane; nobody asks and the admin does not do it for them.
+      expect(await bob.lanes.signRequiredLaneIfDue(priv), AutoApplyOutcome.applied);
       expect(await bob.lanes.status(priv), LaneStatus.serverAssisted);
+      final String bobDevice = (await bob.service.identity())!.deviceId;
+      expect(server.log.where((Map<String, dynamic> e) => e['action'] == E2ee.actProcessingPref && e['user'] == uB && e['actor'] == bobDevice).length, 1);
       await sealFixes(bob, 1);
-      expect((await bob.runtime.queue.peek()).where((WireItem i) => i.purpose == 'fix').single.line, E2ee.lineServer);
+      expect((await bob.runtime.queue.peek()).where((WireItem i) => i.purpose == 'fix' && i.line == E2ee.lineServer), isNotEmpty);
     });
 
     test('allowed (the default) leaves a member without a pref simply phone-only', () async {

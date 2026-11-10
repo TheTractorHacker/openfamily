@@ -21,10 +21,11 @@ enum LaneStatus {
   /// This member's signed pref is the server lane and the policy is on.
   serverAssisted,
 
-  /// The circle requires server processing (`required_server`) and this member
-  /// has not signed their own consent: they must consent or leave. Nothing of
-  /// theirs is sealed or sent to this circle meanwhile.
-  consentRequired,
+  /// The family admin requires server processing (`required_server`) and this member's phone has not signed its own
+  /// server choice for the CURRENT server key yet (first run, a new server key, a new key generation, or the phone
+  /// still waits for the key). The phone signs it by itself as soon as it can; until then it keeps sending on the
+  /// phone line, so nothing is ever held back. There is no prompt and nothing for the member to do.
+  serverPending,
 
   /// The key log or the processing records failed verification; the phone lane is used.
   verificationFailed,
@@ -133,6 +134,7 @@ class LaneStore {
   // ---- status
   Future<LaneStatus> status(String circleId) async {
     final String? raw = await _get(_status(circleId));
+    if (raw == 'consentRequired') return LaneStatus.serverPending; // written by an older build
     for (final LaneStatus s in LaneStatus.values) {
       if (s.name == raw) return s;
     }
@@ -140,6 +142,39 @@ class LaneStore {
   }
 
   Future<void> setStatus(String circleId, LaneStatus s) => kv.set(_status(circleId), s.name);
+
+  // ---- server lane suspended: the relay refused this phone's server-line items
+  String _susp(String c) => 'lanes/suspended/$c';
+  String _seen(String c) => 'lanes/seen/$c';
+
+  /// What the last verification pass saw as the newest policy entry and this member's own newest pref entry of the log.
+  /// A suspension ends by itself as soon as either one changes (the admin re-signed, or this phone signed again).
+  Future<void> setSeen(String circleId, int policySeq, int ownPrefSeq) async {
+    final String now = '$policySeq|$ownPrefSeq';
+    await kv.set(_seen(circleId), now);
+    final Map<String, dynamic>? j = await _json(_susp(circleId));
+    if (j != null && j['s'] != null && j['s'] != now) await clearSuspension(circleId);
+  }
+
+  /// Marks the server lane as refused by the relay for [lasting] from now. The sealer then uses the phone line (the
+  /// signed pref is untouched; the phone signs it again by itself if it is stale). Never throws away data: queued
+  /// server-line items are turned into their phone-line twins by the queue.
+  Future<void> suspendServerLane(String circleId, {Duration lasting = const Duration(minutes: 30)}) async {
+    await kv.set(_susp(circleId), jsonEncode(<String, dynamic>{'u': DateTime.now().add(lasting).millisecondsSinceEpoch, 's': await _get(_seen(circleId))}));
+    await _bumpVer(circleId);
+  }
+
+  Future<void> clearSuspension(String circleId) async {
+    if (await _get(_susp(circleId)) == null) return;
+    await kv.remove(_susp(circleId));
+    await _bumpVer(circleId);
+  }
+
+  /// Whether the server lane is currently suspended (an expired mark counts as not suspended).
+  Future<bool> serverLaneSuspended(String circleId) async {
+    final int? until = ((await _json(_susp(circleId)))?['u'] as num?)?.toInt();
+    return until != null && DateTime.now().millisecondsSinceEpoch < until;
+  }
 
   // ---- pending local opt-out (effective at once, before the server confirms)
   Future<String?> pendingPhoneRef(String circleId) async => (await _json(_pending(circleId)))?['ref'] as String?;
@@ -241,7 +276,7 @@ class LaneStore {
     for (final String u in users) {
       await kv.remove(_hist(circleId, u));
     }
-    for (final String k in <String>[_own(circleId), _policy(circleId), _status(circleId), _pending(circleId), _pendingBody(circleId), _members(circleId)]) {
+    for (final String k in <String>[_own(circleId), _policy(circleId), _status(circleId), _pending(circleId), _pendingBody(circleId), _members(circleId), _susp(circleId), _seen(circleId)]) {
       await kv.remove(k);
     }
     await _bumpVer(circleId);
@@ -286,6 +321,7 @@ class KvLaneSource implements LaneSource, VersionedLaneSource {
       final StoredPolicy p = await store.policy(circleId);
       if (!p.assist) return LaneChoice.phone;
       final LaneChoice c = await store.ownLane(circleId);
+      if (await store.serverLaneSuspended(circleId)) return LaneChoice.phone; // the relay refused the server line: phone line meanwhile
       return c.line == E2ee.lineServer ? LaneChoice(E2ee.lineServer, p.skGen) : LaneChoice.phone;
     } catch (_) {
       return LaneChoice.phone;

@@ -45,9 +45,6 @@ enum AutoApplyOutcome {
   /// Not a Private circle, or the circle's server assistance is off / has no approved server key.
   notAvailable,
 
-  /// `required_server`: consent stays an explicit, informed act; nothing is signed on its own.
-  consentRequired,
-
   /// A child account: the pairing-time choice stands.
   child,
 
@@ -228,7 +225,16 @@ class LanesService {
     DeviceKey? serverKey;
     if (proc.serverDeviceId != null) {
       final DeviceKey? k = deviceById[proc.serverDeviceId];
-      if (k != null && k.kind == 'server' && k.isActive && k.approved == true && k.fingerprint == proc.serverFingerprint) serverKey = k;
+      // Also: a server key registered before its owner's latest key reset only counts if the new root phone signed a
+      // re-attachment of exactly that key (log action 13). Without it the key is NOT the server key.
+      if (k != null &&
+          k.kind == 'server' &&
+          k.isActive &&
+          k.approved == true &&
+          k.fingerprint == proc.serverFingerprint &&
+          serverKeySurvivedResets(log, k, deviceById, admins)) {
+        serverKey = k;
+      }
     }
     final List<StoredMember> members = <StoredMember>[];
     final List<MemberLaneView> views = <MemberLaneView>[];
@@ -250,6 +256,16 @@ class LanesService {
       }
     }
     await store.setMembers(circleId, members);
+    {
+      int ownSeq = 0, polSeq = 0;
+      for (final StoredMember m in members) {
+        if (m.userId == me.userId) ownSeq = m.seq;
+      }
+      for (final LogEntry e in policyEntries) {
+        if (e.seq > polSeq) polSeq = e.seq;
+      }
+      await store.setSeen(circleId, polSeq, ownSeq);
+    }
 
     // ---- this member's own effective lane ----
     // Server lane only while the policy is on AND the verified pref says so. A pending local
@@ -275,7 +291,7 @@ class LanesService {
         prefGen: serverLane ? ownPrefGen : 0);
     final LaneStatus status = serverLane
         ? LaneStatus.serverAssisted
-        : (policy.assist && policy.memberOptOut == E2ee.optOutRequiredServer ? LaneStatus.consentRequired : LaneStatus.phoneOnly);
+        : (policy.assist && policy.memberOptOut == E2ee.optOutRequiredServer ? LaneStatus.serverPending : LaneStatus.phoneOnly);
     await store.setStatus(circleId, status);
     // Remember that the server line key must rotate (member removed / key revoked) even if the
     // circle key epoch is bumped first and clears the server's flag.
@@ -428,6 +444,7 @@ class LanesService {
       'log_signature': E2ee.b64(await E2ee.sign(me.edSeed, logMsg)),
     });
     await store.clearPending(circleId);
+    await store.clearSuspension(circleId);
     invalidateLog();
     final CircleLanes after = await refresh(circleId, force: true);
     if (after.status == LaneStatus.serverAssisted) await _wrapForServerIfDue(circleId, after);
@@ -618,6 +635,9 @@ class LanesService {
   /// [followCircleDefault] (section 24): no server administrator saved a member default, so the circle admin's
   /// VERIFIED signed policy `default_for_new = server` counts like [autoApply] for this circle.
   Future<AutoApplyOutcome> autoApplyIfDue(String circleId, {required bool autoApply, bool followCircleDefault = false}) async {
+    final StoredPolicy known = await store.policy(circleId);
+    // The family admin REQUIRES server processing: not a default to follow, a rule. The member's own phone signs it.
+    if (known.assist && known.memberOptOut == E2ee.optOutRequiredServer) return signRequiredLaneIfDue(circleId);
     if (!autoApply && !followCircleDefault) return AutoApplyOutcome.disabled;
     final LocalIdentity? me = await service.identity();
     if (me == null) return AutoApplyOutcome.notYet;
@@ -628,7 +648,7 @@ class LanesService {
     if (st == null || !st.isPrivate || !cl.policy.assist || cl.serverKey == null || cl.status == LaneStatus.verificationFailed) {
       return AutoApplyOutcome.notAvailable;
     }
-    if (cl.policy.memberOptOut == E2ee.optOutRequiredServer) return AutoApplyOutcome.consentRequired;
+    if (cl.policy.memberOptOut == E2ee.optOutRequiredServer) return signRequiredLaneIfDue(circleId, known: cl);
     if (!autoApply && cl.policy.defaultForNew != E2ee.lineServer) return AutoApplyOutcome.disabled;
     for (final CircleE2eeMember m in st.members) {
       if (m.userId == me.userId && m.role == 'child') return AutoApplyOutcome.child;
@@ -650,6 +670,184 @@ class LanesService {
     }
     await store.setAutoRecord(circleId, AutoApplyRecord(state: 'applied', atMs: clock.now().millisecondsSinceEpoch));
     return AutoApplyOutcome.applied;
+  }
+
+  // ---------------------------------------------- required server processing
+
+  /// "Require server processing" is on (the verified admin policy says `required_server`): this member's OWN approved
+  /// phone signs its lane pref for the CURRENT server key, with no prompt and no "not choosing yet" state. It runs the
+  /// first time the phone sees the circle and again whenever its pref is not effective for the current server key (a new
+  /// or replaced server key, a pref that names a revoked key, a pref voided by the policy being re-signed). The
+  /// signature is the member's own and shows in the key log; nothing signs it for them.
+  ///
+  /// It signs only what this phone verified itself: a pinned server key that is active, approved, matches the server's
+  /// fingerprint and survived every key reset of its owner; a verified policy that is on and requires it; and the SK of
+  /// the policy's generation held on this phone. If any of that is missing it signs nothing and the phone keeps sending
+  /// on the phone line (the sealer never seals nothing). A queued older opt-out is dropped: the admin's rule wins.
+  /// Safe to call often; a signature for the same (phone, server key, generation) is not repeated within [resignAfter].
+  Future<AutoApplyOutcome> signRequiredLaneIfDue(String circleId, {CircleLanes? known, Duration resignAfter = const Duration(minutes: 10)}) async {
+    final LocalIdentity? me = await service.identity();
+    if (me == null) return AutoApplyOutcome.notYet;
+    final CircleLanes cl = known ?? await refresh(circleId);
+    final CircleE2eeState? st = cl.state;
+    if (st == null || !st.isPrivate || !cl.policy.assist || cl.status == LaneStatus.verificationFailed) return AutoApplyOutcome.notAvailable;
+    if (cl.policy.memberOptOut != E2ee.optOutRequiredServer) return AutoApplyOutcome.disabled;
+    final bool suspended = await store.serverLaneSuspended(circleId);
+    for (final MemberLaneView v in cl.members) {
+      if (v.userId == me.userId && v.serverAssisted && v.verified && !suspended) return AutoApplyOutcome.alreadyHandled;
+    }
+    final DeviceKey? sk = cl.serverKey;
+    if (sk == null) return AutoApplyOutcome.notYet;
+    if (await service.serverKey(circleId, cl.policy.skGen) == null) return AutoApplyOutcome.notYet;
+    final String mark = '${me.deviceId}|${sk.deviceId}|${sk.fingerprint}|${cl.policy.skGen}';
+    if (!await _signDue(circleId, mark, resignAfter)) return AutoApplyOutcome.notYet;
+    try {
+      await store.clearPending(circleId); // a queued phone opt-out is void in a circle that requires the server
+      await setLane(circleId, E2ee.lineServer, confirmServerFingerprintHex: sk.fingerprint);
+    } catch (_) {
+      return AutoApplyOutcome.notYet;
+    }
+    return AutoApplyOutcome.applied;
+  }
+
+  /// Not a required circle, but this member's newest signed choice is the server lane and it is not effective any more
+  /// for the current server key: it names a key that was revoked or replaced, or (the admin only, [carryOver], right
+  /// after this phone signed the circle's settings again) it was signed by a key of this same account that a key reset
+  /// retired. The member's intent did not change, only the key did: their own phone signs the same choice for the
+  /// current key. A choice for the phone line is never touched, and a member's own choice lost to their own reset (not
+  /// the admin's) keeps its one-tap re-offer.
+  Future<AutoApplyOutcome> renewServerChoiceIfDue(String circleId,
+      {CircleLanes? known, bool carryOver = false, Duration resignAfter = const Duration(minutes: 10)}) async {
+    final LocalIdentity? me = await service.identity();
+    if (me == null) return AutoApplyOutcome.notYet;
+    final CircleLanes cl = known ?? await refresh(circleId);
+    final CircleE2eeState? st = cl.state;
+    if (st == null || !st.isPrivate || !cl.policy.assist || cl.status == LaneStatus.verificationFailed || cl.serverKey == null) {
+      return AutoApplyOutcome.notAvailable;
+    }
+    if (cl.policy.memberOptOut == E2ee.optOutRequiredServer) return AutoApplyOutcome.disabled;
+    for (final MemberLaneView v in cl.members) {
+      if (v.userId == me.userId && v.serverAssisted) return AutoApplyOutcome.alreadyHandled; // effective already
+    }
+    final List<LogEntry>? log = await _verifiedLog();
+    if (log == null) return AutoApplyOutcome.notAvailable;
+    LogEntry? newest;
+    for (final LogEntry e in log) {
+      if (!e.redacted && e.action == E2ee.actProcessingPref && e.userId == me.userId && e.circleId == circleId) {
+        if (newest == null || e.seq > newest.seq) newest = e;
+      }
+    }
+    if (newest == null || (newest.subjectId ?? E2ee.zeroUuid) == E2ee.zeroUuid) return AutoApplyOutcome.hasChoice; // never chose, or chose the phone
+    DeviceKey? signer = <String, DeviceKey>{for (final DeviceKey d in st.allDevices) d.deviceId: d}[newest.actorDeviceId];
+    if (signer != null) {
+      if (signer.userId != me.userId || !signer.isActive) return AutoApplyOutcome.hasChoice;
+    } else {
+      // Not a live key. Only the admin's carry-over may use a retired key of this very account (the account's own list
+      // shows revoked keys; the circle's does not).
+      if (!carryOver) return AutoApplyOutcome.hasChoice;
+      bool mine = false;
+      for (final DeviceKey d in await api.myKeys()) {
+        if (d.deviceId == newest.actorDeviceId && d.userId == me.userId && d.kind == 'device') mine = true;
+      }
+      if (!mine) return AutoApplyOutcome.hasChoice;
+    }
+    if (await service.serverKey(circleId, cl.policy.skGen) == null) return AutoApplyOutcome.notYet;
+    final String mark = '${me.deviceId}|${cl.serverKey!.deviceId}|${cl.serverKey!.fingerprint}|${cl.policy.skGen}';
+    if (!await _signDue(circleId, mark, resignAfter)) return AutoApplyOutcome.notYet;
+    try {
+      await setLane(circleId, E2ee.lineServer, confirmServerFingerprintHex: cl.serverKey!.fingerprint);
+    } catch (_) {
+      return AutoApplyOutcome.notYet;
+    }
+    return AutoApplyOutcome.applied;
+  }
+
+  /// True (and remembered) when a silent signature for [mark] was not made within [after]. Keeps a pref that cannot
+  /// become effective from being re-signed in a loop (the server also rate-limits signatures per hour).
+  Future<bool> _signDue(String circleId, String mark, Duration after) async {
+    final String key = 'lanes/silentsign/$circleId';
+    final String? raw = await kv.get(key);
+    final int now = clock.now().millisecondsSinceEpoch;
+    if (raw != null) {
+      final int i = raw.lastIndexOf('@');
+      final int? at = i < 0 ? null : int.tryParse(raw.substring(i + 1));
+      if (i > 0 && raw.substring(0, i) == mark && at != null && now >= at && now - at < after.inMilliseconds) return false;
+    }
+    await kv.set(key, '$mark@$now');
+    return true;
+  }
+
+  /// Circle admin, after an owner key reset: the signed policy was made by a phone key that is revoked now, so no phone
+  /// and not the server counts it. If the server still holds that statement and it verifies under a key of THIS account,
+  /// this approved admin phone signs the same settings again (a new SK generation, wrapped to every member's approved
+  /// phone). Returns true when it published. It never turns server processing on for a circle that had it off, never
+  /// copies settings from a statement it cannot tie to this account, and never changes who is required to use it.
+  Future<bool> repairPolicyIfLost(String circleId, CircleLanes cl) async {
+    final LocalIdentity? me = await service.identity();
+    final CircleE2eeState? st = cl.state;
+    final ProcessingServerState? proc = cl.proc;
+    if (me == null || st == null || proc == null || !st.isPrivate || cl.policy.assist || cl.serverKey == null) return false;
+    if (cl.status == LaneStatus.verificationFailed) return false;
+    if (!st.members.any((CircleE2eeMember m) => m.userId == me.userId && m.role == 'admin')) return false;
+    final PolicyStatement? old = proc.policy;
+    if (!proc.serverAssist || old == null || !old.serverAssist || old.adminUserId != me.userId) return false;
+    // The circle's key list only shows live keys; the account's own list ("my keys") also holds the revoked ones, which
+    // is where the old signer is. Only a key of THIS account may vouch for settings this phone signs again.
+    DeviceKey? signer;
+    for (final DeviceKey d in await api.myKeys()) {
+      if (d.deviceId == old.actorDeviceId) signer = d;
+    }
+    if (signer == null || signer.userId != me.userId || signer.kind != 'device') return false;
+    if (!await E2ee.verify(signer.edPub, old.message(circleId), old.signature)) return false;
+    await publishPolicy(circleId, serverAssist: true, defaultForNew: old.defaultForNew, memberOptOut: old.memberOptOut);
+    return true;
+  }
+
+  final Map<String, Future<List<String>>> _healing = <String, Future<List<String>>>{};
+
+  /// Everything this phone owes a Private circle after a key reset, a replaced server key or a first run, with no tap
+  /// (the app calls it when it opens, when it comes back to the foreground and when a server copy is refused). In order:
+  ///   1. the admin phone signs the circle's policy again if the old signature belonged to a revoked key of this account;
+  ///   2. this member's own phone signs its lane pref for the current server key (required circles: always; others: only
+  ///      when its signed server choice names an old key);
+  ///   3. [maintain]: wraps the keys the phone owes (the new SK generation to the members' phones, to the server key).
+  /// Idempotent, serialised per circle, best effort: a step that cannot run yet is retried on the next call. Returns the
+  /// short names of what it did (`policy`, `pref`) for tests and diagnostics; never keys or statements.
+  Future<List<String>> selfHeal(String circleId) {
+    final Future<List<String>>? running = _healing[circleId];
+    if (running != null) return running;
+    final Future<List<String>> f = _selfHeal(circleId).whenComplete(() {
+      _healing.remove(circleId); // a block body: returning the removed future itself would make it wait for itself
+    });
+    _healing[circleId] = f;
+    return f;
+  }
+
+  Future<List<String>> _selfHeal(String circleId) async {
+    final List<String> did = <String>[];
+    final LocalIdentity? me = await service.identity();
+    if (me == null) return did;
+    try {
+      await retryPendingOptOut(circleId);
+    } catch (_) {}
+    CircleLanes cl = await refresh(circleId);
+    if (cl.state == null || !cl.state!.isPrivate) return did;
+    try {
+      if (await repairPolicyIfLost(circleId, cl)) {
+        did.add('policy');
+        cl = await refresh(circleId, force: true);
+      }
+    } catch (_) {}
+    try {
+      final AutoApplyOutcome o = cl.policy.assist && cl.policy.memberOptOut == E2ee.optOutRequiredServer
+          ? await signRequiredLaneIfDue(circleId, known: cl)
+          : await renewServerChoiceIfDue(circleId, known: cl, carryOver: did.contains('policy'));
+      if (o == AutoApplyOutcome.applied) did.add('pref');
+    } catch (_) {}
+    try {
+      await maintain(circleId);
+    } catch (_) {}
+    return did;
   }
 
   /// "Set this phone up again" revokes every older key of the account, and a lane pref only counts while the

@@ -5,7 +5,6 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:openfamily/models/circle.dart';
 import 'package:openfamily/models/trip_report.dart';
 import 'package:openfamily/services/trip_report_service.dart';
 import 'package:openfamily/services/api_client.dart';
@@ -19,7 +18,6 @@ import 'package:openfamily/services/e2ee/lanes_store.dart';
 import 'package:openfamily/services/e2ee/lanes_wire.dart';
 import 'package:openfamily/services/e2ee/private_channel.dart';
 import 'package:openfamily/services/e2ee/processing_controller.dart';
-import 'package:openfamily/services/e2ee/private_runtime.dart';
 
 import 'harness.dart';
 
@@ -341,41 +339,27 @@ void main() {
   });
 
   group('scenario 4: required_server', () {
-    test('the server refuses Cleo\'s phone-line fix, her phone shows consentRequired and seals nothing', () async {
-      await a.run(() => a.lanes.publishPolicy(circle, serverAssist: true, memberOptOut: E2ee.optOutRequiredServer, defaultForNew: E2ee.linePhone));
+    test('the server relays a catching-up phone\'s phone-line fix; each phone signs its own server lane by itself', () async {
+      await a.run(() => a.lanes.publishPolicy(circle, serverAssist: true, memberOptOut: E2ee.optOutRequiredServer, defaultForNew: E2ee.lineServer));
       for (final Phone p in <Phone>[b, c]) {
         final CircleLanes v = await p.run(() => p.lanes.refresh(circle, force: true));
-        expect(v.status, LaneStatus.consentRequired, reason: p.name);
+        expect(v.status, LaneStatus.serverPending, reason: p.name);
         expect(v.policy.memberOptOut, E2ee.optOutRequiredServer);
       }
-      // 1) The server side: a phone that did not learn about the policy yet still tries a phone-line fix.
-      final Phone stale = Phone('Cleo-stale', c.email, c.password)
-        ..userId = c.userId
-        ..token = c.token;
-      // Same keys and key store, but its lane store is empty: it believes it is on the phone lane.
-      stale.vault.data.addAll(c.vault.data);
-      stale.startRuntime();
-      await stale.run(() => stale.runtime.setCircles(<Circle>[circleOf(circle)]));
+      // 1) A phone that has not signed yet still sends on the phone line, and the server relays it (ciphertext it cannot read).
       final int before = (await serverItems("purpose = 'fix'")).length;
-      final List<BatchResult> res = await stale.run(() async {
-        final Uint8List? ck = await stale.service.circleKey(circle, 1);
-        expect(ck, isNotNull);
-        await stale.runtime.routeFix(stale.fix(cLat + 0.5, cLon));
-        await Future<void>.delayed(const Duration(milliseconds: 300));
-        final List<WireItem> q = await stale.runtime.queue.peek();
-        expect(q, isNotEmpty);
-        return const HttpChannelApi().postBatch(circle, q.first.deviceId, q);
-      });
-      expect(res.single.status, 'rejected');
-      expect(res.single.error, 'required_server');
-      expect((await serverItems("purpose = 'fix'")).length, before);
-      // 2) The honest phone: consentRequired, nothing is sealed.
       final int q0 = await c.run(() => c.runtime.queue.length());
       await c.run(() => c.runtime.routeFix(c.fix(cLat, cLon)));
       await Future<void>.delayed(const Duration(milliseconds: 300));
-      expect(await c.run(() => c.runtime.queue.length()), q0);
-      expect(await db.anyRowNear(cLat, cLon), 0);
-      // Check-ins keep working under required_server (help requests are never blocked).
+      expect(await c.run(() => c.runtime.queue.length()), q0 + 1, reason: 'the phone never seals nothing');
+      await c.run(() => c.runtime.flush());
+      expect((await serverItems("purpose = 'fix'")).length, before + 1);
+      // 2) Its own approved phone signs the server lane, with no prompt.
+      for (final Phone p in <Phone>[b, c]) {
+        expect(await p.run(() => p.lanes.signRequiredLaneIfDue(circle)), AutoApplyOutcome.applied, reason: p.name);
+        expect((await p.run(() => p.lanes.refresh(circle, force: true))).status, LaneStatus.serverAssisted, reason: p.name);
+      }
+      // Check-ins keep working (help requests are never blocked).
       await c.run(() => c.runtime.sendItem(circle, ChannelPurpose.checkin, <String, dynamic>{'k': 'sos', 'lat': cLat, 'lon': cLon}));
       expect((await serverItems("purpose = 'checkin'")).length, 1);
     });

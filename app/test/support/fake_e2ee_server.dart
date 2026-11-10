@@ -32,6 +32,12 @@ class FakeE2eeServer {
   /// Server clock (tests that use a fake clock set this to it).
   DateTime Function() now = () => DateTime.now().toUtc();
 
+  /// The pinned server key is the server's own built-in device (GET /e2ee/server-device says `builtin`).
+  bool builtinServer = false;
+
+  /// False: an older server that ignores `keep_server` (the reset then revokes the server key as before).
+  bool supportsKeepServer = true;
+
   /// Users whose registrations lose their `caps` (an app that predates lanes).
   final Set<String> oldAppUsers = <String>{};
 
@@ -68,9 +74,33 @@ class FakeE2eeServer {
 
   List<DeviceKey> activeOf(String user) => (keys[user] ?? <DeviceKey>[]).where((DeviceKey k) => k.isActive).toList();
 
+  /// Server keys KEPT across an owner reset: server device id -> the new root phone that re-attached it (migration 000410).
+  final Map<String, String> attachActor = <String, String>{};
+
+  /// Every call of the fake that mirrors a server refusal, for assertions: "code/device".
+  final List<String> refusals = <String>[];
+
+  /// A key the DB trigger `e2ee_device_revoked` just revoked: its wraps (both lines) go, the circle asks for a new
+  /// key, and `e2ee_processing_key_revoked` deletes the prefs its key signed.
+  void revokeEffects(String deviceId) {
+    for (final FakeCircle c in circles.values) {
+      c.wraps.removeWhere((String _, WrapRecord w) => w.recipientDeviceId == deviceId);
+      c.skWraps.removeWhere((String _, WrapRecord w) => w.recipientDeviceId == deviceId);
+      c.prefs.removeWhere((String _, PrefStatement p) => p.approverDeviceId == deviceId);
+      if (c.mode == 'private') c.rekey = true;
+      if (c.assist) c.skRekey = true;
+    }
+  }
+
   /// Transitive approval, like migration 000151: the key or ANY ancestor in its
   /// registration chain is the user's first key or was approved for the circle.
+  /// A server key with an attach row (migration 000410) is approved ONLY through the phone that re-attached it.
   bool approved(DeviceKey d, String circleId) {
+    final String? att = attachActor[d.deviceId];
+    if (att != null) {
+      final DeviceKey? a = anyKey(att);
+      return a != null && a.isActive && approved(a, circleId);
+    }
     final Set<String> seen = <String>{};
     DeviceKey? cur = d;
     while (cur != null && seen.add(cur.deviceId)) {
@@ -149,7 +179,7 @@ class FakeE2eeClient implements E2eeApi {
   final FakeE2eeServer s;
   final String uid;
 
-  DeviceKey _mk(Map<String, dynamic> b, int action, Uint8List actorPub, bool initial, Uint8List fp) => DeviceKey(
+  DeviceKey _mk(Map<String, dynamic> b, int action, Uint8List actorPub, bool initial, Uint8List fp, {bool serverKept = false}) => DeviceKey(
         deviceId: b['device_id'] as String,
         userId: uid,
         kind: b['kind'] as String,
@@ -166,6 +196,7 @@ class FakeE2eeClient implements E2eeApi {
         label: (b['label'] as String?) ?? '',
         createdAt: DateTime.now().toUtc(),
         caps: s.oldAppUsers.contains(uid) || b['caps'] is! List ? const <String>[] : (b['caps'] as List<dynamic>).cast<String>(),
+        serverKept: serverKept,
       );
 
   @override
@@ -198,14 +229,38 @@ class FakeE2eeClient implements E2eeApi {
     if (!await E2ee.verify(signerPub, E2ee.logActionMessage(action, uid, actor, subjectId: did, ref: fp), E2ee.unb64(b['log_signature']))) {
       throw StateError('bad log signature');
     }
-    if (root && action == E2ee.actReset) {
-      for (int i = 0; i < mine.length; i++) {
-        if (mine[i].isActive) mine[i] = _revoked(mine[i]);
+    // keep_server: like keepServerOK in the Go handler. Only the pinned, active server key of THIS account whose
+    // re-attachment the new root phone signed over exactly that id and fingerprint survives; anything else is revoked.
+    String? kept;
+    Uint8List? keptSig;
+    final Object? ks = b['keep_server'];
+    if (root && action == E2ee.actReset && ks is Map<String, dynamic> && s.supportsKeepServer) {
+      final String kid = ks['device_id'] as String;
+      final DeviceKey? k = s.findActive(kid);
+      final Uint8List sg = E2ee.unb64(ks['log_signature']);
+      if (k != null && k.userId == uid && k.kind == 'server' && s.pinnedServerDevice == kid &&
+          await E2ee.verify(ed, E2ee.logActionMessage(E2ee.actServerAttach, uid, did, subjectId: kid, ref: E2ee.unhex(k.fingerprint)), sg)) {
+        kept = kid;
+        keptSig = sg;
+      } else {
+        s.refusals.add('keep_server_refused/$kid');
       }
     }
-    final DeviceKey d = _mk(b, action, signerPub, initial, fp);
+    if (root && action == E2ee.actReset) {
+      for (int i = 0; i < mine.length; i++) {
+        if (mine[i].isActive && mine[i].deviceId != kept) {
+          mine[i] = _revoked(mine[i]);
+          s.revokeEffects(mine[i].deviceId);
+        }
+      }
+    }
+    final DeviceKey d = _mk(b, action, signerPub, initial, fp, serverKept: kept != null);
     mine.add(d);
     await s.appendLog(action, uid, actor, signerPub, subjectId: did, ref: fp, sig: E2ee.unb64(b['log_signature']));
+    if (kept != null) {
+      await s.appendLog(E2ee.actServerAttach, uid, did, ed, subjectId: kept, ref: E2ee.unhex(s.findActive(kept)!.fingerprint), sig: keptSig!);
+      s.attachActor[kept] = did;
+    }
     return d;
   }
 
@@ -225,12 +280,7 @@ class FakeE2eeClient implements E2eeApi {
     final int i = l.indexWhere((DeviceKey k) => k.deviceId == deviceId && k.isActive);
     if (i < 0) throw StateError('not found');
     l[i] = _revoked(l[i]);
-    for (final FakeCircle c in s.circles.values) {
-      c.wraps.removeWhere((String _, WrapRecord w) => w.recipientDeviceId == deviceId);
-      c.skWraps.removeWhere((String _, WrapRecord w) => w.recipientDeviceId == deviceId);
-      if (c.mode == 'private') c.rekey = true;
-      if (c.assist) c.skRekey = true;
-    }
+    s.revokeEffects(deviceId);
   }
 
   @override
@@ -240,7 +290,16 @@ class FakeE2eeClient implements E2eeApi {
   Future<bool> trustedServerDefault() async => s.trustedServerDefault;
 
   @override
-  Future<ServerProfile> serverProfile() async => s.serverProfileValue;
+  Future<ServerProfile> serverProfile() async {
+    final DeviceKey? d = s.pinnedServerDevice == null ? null : s.findActive(s.pinnedServerDevice!);
+    if (!s.builtinServer || d == null) return s.serverProfileValue;
+    return ServerProfile(
+      known: true,
+      enabled: true,
+      builtin: true,
+      device: ServerDeviceInfo(deviceId: d.deviceId, fingerprint: d.fingerprint, short: d.short, digits: d.digits, label: d.label, ownerUserId: d.userId),
+    );
+  }
 
   @override
   Future<ServerJoinInfo> serverJoin() async => ServerJoinInfo.none;
@@ -670,16 +729,44 @@ class FakeLaneChannel implements ChannelApi {
 
   int posts = 0;
 
+  /// The server's real lane rules (backend checkE2EEItemLine): an upload from a revoked key is refused with 403
+  /// (`device_revoked`), and a server-line item is only taken from a member whose OWN signed pref is effective for the
+  /// current server key under a policy a live admin key signed (else `lane_not_server`). Off by default so older tests,
+  /// which only exercise the happy path, stay as they are.
+  bool strictLanes = false;
+
+  bool _laneServerFor(FakeCircle c, String deviceId) {
+    final DeviceKey? dev = server.anyKey(deviceId);
+    if (dev == null) return false;
+    final PolicyStatement? pol = c.policy;
+    final DeviceKey? polSigner = pol == null ? null : server.findActive(pol.actorDeviceId);
+    if (!c.assist || pol == null || polSigner == null) return false; // the policy is not verified: nobody is on the server lane
+    final PrefStatement? p = c.prefs[dev.userId];
+    if (p == null || p.lane != E2ee.lineServer || server.findActive(p.approverDeviceId) == null) return false;
+    final String? srv = server.pinnedServerDevice;
+    if (srv == null || server.findActive(srv) == null || p.serverDeviceId != srv) return false;
+    return p.skGen >= 1 && p.skGen <= c.skGen;
+  }
+
   @override
   Future<List<BatchResult>> postBatch(String circleId, String deviceId, List<WireItem> batch) async {
     posts++;
     if (offline) throw StateError('offline');
     final FakeCircle c = server.circles[circleId]!;
+    if (strictLanes && server.findActive(deviceId) == null) {
+      server.refusals.add('device_revoked/$deviceId');
+      throw const PermanentUploadError('403');
+    }
     final List<BatchResult> out = <BatchResult>[];
     for (final WireItem i in batch) {
       uploaded.add('$circleId/$deviceId/${i.seq}/${i.line}');
       if (i.line == E2ee.lineServer && (!c.assist || i.epoch < 1 || i.epoch > c.skGen)) {
         out.add(BatchResult(i.seq, 'rejected', error: 'server line not available'));
+        continue;
+      }
+      if (strictLanes && i.line == E2ee.lineServer && !_laneServerFor(c, deviceId)) {
+        server.refusals.add('lane_not_server/$deviceId');
+        out.add(BatchResult(i.seq, 'rejected', error: 'lane_not_server'));
         continue;
       }
       final bool dup = items.any((WireItem x) => x.circleId == circleId && x.deviceId == deviceId && x.seq == i.seq);

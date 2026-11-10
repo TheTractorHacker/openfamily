@@ -45,7 +45,7 @@ class _CircleCreateScreenState extends State<CircleCreateScreen> {
   NewCircleMode _mode = NewCircleMode.normal;
   bool _modeTouched = false;
   bool _serverAvailable = false;
-  bool _requireServer = false;
+  bool _requireServer = true; // default ON for a new Private circle with the server; the owner can switch it off here or later
 
   /// Lifetime of a temporary circle in hours (24h / 3 days / 1 week / custom).
   int _hours = 24;

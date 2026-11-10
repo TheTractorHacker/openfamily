@@ -723,8 +723,14 @@ class SealedQueue {
   /// twin or dropped (see [reconcileLanes]). Without a [lanes] source no
   /// server-line item is ever sent.
   Future<int> flush(ChannelApi api,
-      {required String Function(String circleId) deviceFor, int batchSize = 50, LaneSource? lanes, void Function(String circleId)? onNeedKeySync}) async {
+      {required String Function(String circleId) deviceFor,
+      int batchSize = 50,
+      LaneSource? lanes,
+      void Function(String circleId)? onNeedKeySync,
+      Future<void> Function(String circleId, String code)? onLaneRefused,
+      void Function()? onIdentityRefused}) async {
     int delivered = 0;
+    final Set<String> laneRetried = <String>{}; // one immediate re-send per circle and call: no hot loop
     while (true) {
       await reconcileLanes(lanes);
       final List<Map<String, dynamic>> all = await _locked(_load);
@@ -759,6 +765,9 @@ class SealedQueue {
         // Not silent: the diagnostics screen tells the user that the relay refused updates, and why.
         await noteUndelivered(circle, 'http_${e.message}');
         await noteUpload(code: 'http_${e.message}');
+        // 403: the key these items were sealed with is revoked (an owner reset replaced it). Whoever holds a stale
+        // copy of the old identity (a background isolate) must stop using it and read the new one.
+        if (e.message == '403') onIdentityRefused?.call();
         await _remove(batch, <int>{for (final WireItem i in items) i.seq});
         continue;
       } catch (e) {
@@ -771,6 +780,8 @@ class SealedQueue {
       }
       await noteUpload(ok: true);
       final Set<int> done = <int>{};
+      final Set<int> laneSeqs = <int>{};
+      String? laneCode;
       bool needSync = false;
       String? rejectedCode;
       for (final BatchResult r in results) {
@@ -787,12 +798,34 @@ class SealedQueue {
           needSync = true;
           continue;
         }
+        if (laneRefusals.contains(code)) {
+          // The relay would not take the SERVER copy (the signed choice names an old server key, the policy is off or
+          // not verified there). The position is never dropped and never sent in the clear: the phone-line twin
+          // takes its place below and goes out at once; the phone renews its signed choice by itself.
+          laneSeqs.add(r.seq);
+          laneCode ??= code;
+          continue;
+        }
         // Permanent. A required_server refusal is NOT silent: the user is told the data was not delivered.
         if (code == 'required_server') await noteUndelivered(circle, code);
         done.add(r.seq);
       }
       if (rejectedCode != null) await noteUpload(code: rejectedCode);
       if (needSync) onNeedKeySync?.call(circle);
+      if (laneSeqs.isNotEmpty) {
+        if (onLaneRefused != null) {
+          try {
+            await onLaneRefused(circle, laneCode!);
+          } catch (_) {}
+        }
+        final int swapped = await _swapToTwins(circle, device, null); // every server copy of this circle: the lane is refused as a whole
+        await _remove(batch, done);
+        // Re-send once per circle right away (the twins are phone-line items now). A second refusal in the same call
+        // (or nothing to swap) is left for the next round, counted against the item like any failure.
+        if (swapped > 0 && laneRetried.add(circle)) continue;
+        await _bump(batch);
+        return delivered;
+      }
       // Items the server did not mention stay queued.
       await _remove(batch, done);
       if (done.isEmpty) {
@@ -804,6 +837,27 @@ class SealedQueue {
 
   /// Rejection codes of the relay that a key sync can cure; the item stays queued.
   static const Set<String> transientRejections = <String>{'legacy_epoch_closed', 'bad_epoch'};
+
+  /// Rejections of a SERVER-line item that say "not on this lane": a signed choice that names an old server key
+  /// (`lane_not_server`), assistance off or unverified (`server_line_off`), or a phone key without the capability.
+  static const Set<String> laneRefusals = <String>{'lane_not_server', 'server_line_off', 'device_lacks_lanes2'};
+
+  /// Replaces the queued server-line items of [circle]/[device] ([seqs] null: all of them) by their phone-line twins,
+  /// in place (same seq, same time: order and idempotency hold). An item without a twin stays as it is (nothing can be re-sealed from
+  /// plaintext because none is stored). Returns how many were swapped.
+  Future<int> _swapToTwins(String circle, String device, Set<int>? seqs) => _mutate((List<Map<String, dynamic>> l) async {
+        int n = 0;
+        for (int i = 0; i < l.length; i++) {
+          final Map<String, dynamic> m = l[i];
+          if (m['c'] != circle || m['d'] != device || (seqs != null && !seqs.contains(m['s']))) continue;
+          if (((m['l'] as num?)?.toInt() ?? E2ee.linePhone) != E2ee.lineServer) continue;
+          final Object? tw = m['tw'];
+          if (tw is! Map<String, dynamic>) continue;
+          l[i] = <String, dynamic>{...tw, 'q': m['q'], 'n': m['n']};
+          n++;
+        }
+        return n;
+      });
 
   static Future<int> _laneVersion(LaneSource? lanes, String circle) async {
     try {

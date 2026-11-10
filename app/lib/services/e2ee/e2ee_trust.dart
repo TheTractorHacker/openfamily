@@ -256,6 +256,46 @@ Future<bool> verifyRegistration(DeviceKey d) async {
   }
 }
 
+/// Whether a `server` key that is still listed as active survived every key reset of its owner. A reset retires every
+/// earlier key of the account without a per-key entry, so a server key registered BEFORE the owner's latest reset is
+/// only still the server key if the new root phone signed a re-attachment (log action 13) of exactly that key after the
+/// reset: same device id, same fingerprint, signed by a currently listed, approved phone key of the same owner. A key
+/// registered after the latest reset (the server made a new one and a phone approved it) needs nothing. [log] is the
+/// verified log (an attachment the server withheld simply is not there, so the key is not accepted: fail closed).
+/// A key whose registration the log does not show cannot be judged and keeps today's behaviour (the circle list's own
+/// checks apply).
+///
+/// Also required: the key belongs to a circle ADMIN ([admins]). The Orbitly server's key is the owner's own key, vouched
+/// for by the owner's approved phone; a `server` key of an ordinary member (whose own first key approves it in a
+/// circle, by design) is never the server key, whatever the server reports as pinned.
+bool serverKeySurvivedResets(List<LogEntry> log, DeviceKey k, Map<String, DeviceKey> deviceById, Set<String> admins) {
+  if (!admins.contains(k.userId)) return false;
+  int registered = 0, lastReset = 0;
+  for (final LogEntry e in log) {
+    if (e.redacted) continue;
+    final int? a = e.action;
+    if (e.subjectId == k.deviceId && (a == E2ee.actRegister || a == E2ee.actRecovery || a == E2ee.actReset) && e.seq > registered) registered = e.seq;
+    if (a == E2ee.actReset && e.userId == k.userId && e.seq > lastReset) lastReset = e.seq;
+  }
+  if (registered == 0 || lastReset < registered) return true;
+  final Uint8List fp;
+  try {
+    fp = E2ee.unhex(k.fingerprint);
+  } catch (_) {
+    return false;
+  }
+  for (final LogEntry e in log) {
+    if (e.redacted || e.action != E2ee.actServerAttach || e.seq <= lastReset) continue;
+    if (e.subjectId != k.deviceId || e.userId != k.userId || e.ref == null || !E2ee.constEq(e.ref!, fp)) continue;
+    if (e.circleId != null && e.circleId != E2ee.zeroUuid) continue;
+    final DeviceKey? actor = deviceById[e.actorDeviceId];
+    if (actor == null || actor.userId != k.userId || actor.kind != 'device' || !actor.isActive || actor.approved != true) continue;
+    if (e.actorPub == null || !E2ee.constEq(e.actorPub!, actor.edPub)) continue;
+    return true;
+  }
+  return false;
+}
+
 // --------------------------------------------------------------------------
 // Wrap policy: when may my phone issue a circle key to someone's key?
 
