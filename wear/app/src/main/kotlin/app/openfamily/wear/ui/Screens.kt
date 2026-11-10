@@ -31,6 +31,10 @@ import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleResumeEffect
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -46,6 +50,7 @@ import app.openfamily.wear.CommandStatus
 import app.openfamily.wear.WearViewModel
 import app.openfamily.wear.data.Snapshot
 import app.openfamily.wear.logic.Commands
+import app.openfamily.wear.logic.CompassTuning
 import app.openfamily.wear.logic.Format
 import app.openfamily.wear.logic.Geo
 import app.openfamily.wear.logic.Presenter
@@ -186,25 +191,50 @@ fun CompassScreen(vm: WearViewModel, id: String) {
     val here by vm.here.collectAsState()
     val m = s?.members?.firstOrNull { it.id == id }
     val ambient = LocalAmbient.current
-    val headingState = rememberHeading(enabled = !ambient)
-    // Only the arrow's draw step reads the changing heading; the list is not recomposed 5 times a second.
-    val hasCompass by remember { derivedStateOf { headingState.value != null } }
+    val h = here
+    val bearing = if (m != null && m.hasPosition && h != null) Geo.bearingDeg(h.lat, h.lon, m.lat!!, m.lon!!) else null
+    val compass = rememberCompass(enabled = !ambient, bearingDeg = bearing, here = h)
+
+    // While this screen is open and awake the phone is asked for a position every 2 s (the same `finding` request
+    // the Apple Watch makes); ambient mode, the screen turning off and leaving this screen all end it.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    LifecycleResumeEffect(ambient, bearing != null) {
+        val on = !ambient && bearing != null
+        if (on) vm.setFinding(true)
+        onPauseOrDispose {
+            // Tell the phone right away only if the app stays on screen; on pause the activity sends `hidden`.
+            vm.setFinding(false, announce = lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
+        }
+    }
+    // The cached fix is re-read now and then so distance and bearing follow the wearer; no GPS is started.
+    LaunchedEffect(ambient) {
+        if (ambient) return@LaunchedEffect
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            while (true) {
+                delay(CompassTuning.HERE_REFRESH_MS)
+                vm.refreshHere()
+            }
+        }
+    }
+
     ScreenList(title = m?.name) {
-        val h = here
         if (m == null || !m.hasPosition) {
             item { Text("No position for this person yet.", textAlign = TextAlign.Center) }
-        } else if (h == null) {
+        } else if (h == null || bearing == null) {
             item { Text("Allow location for Orbitly on this watch to see distance and direction.", textAlign = TextAlign.Center, style = MaterialTheme.typography.body2) }
         } else {
             val dist = Geo.distanceM(h.lat, h.lon, m.lat!!, m.lon!!)
-            val bearing = Geo.bearingDeg(h.lat, h.lon, m.lat, m.lon)
             item {
-                Arrow({ Geo.relativeDeg(bearing, headingState.value).toFloat() }, if (ambient) Color.White else Brand.Lime)
+                Arrow(compass, if (ambient) Color.White else Brand.Lime)
             }
             item { Text(Geo.formatDistance(dist, isMetric()), style = MaterialTheme.typography.title2) }
+            if (compass.needsCalibration) {
+                item { Text("Move your wrist in a figure 8", style = MaterialTheme.typography.body2, textAlign = TextAlign.Center) }
+            }
             item {
                 Text(
-                    "${Geo.compassWord(bearing)} of you" + if (!hasCompass) " (no compass)" else "",
+                    "${Geo.compassWord(bearing)} of you" +
+                        if (!compass.hasSensor) " (no compass)" else if (compass.approxNorth) " (approx. north)" else "",
                     style = MaterialTheme.typography.body2, textAlign = TextAlign.Center,
                 )
             }
@@ -213,17 +243,26 @@ fun CompassScreen(vm: WearViewModel, id: String) {
 }
 
 @Composable
-private fun Arrow(degrees: () -> Float, color: Color) {
+private fun Arrow(compass: CompassState, color: Color) {
+    // Dimmed while the compass needs calibrating: better a faint arrow than a confident wrong one. Read while
+    // composing, but it changes only when the hint appears or goes.
+    val shown = if (compass.needsCalibration) color.copy(alpha = 0.4f) else color
+    val north = Color.White.copy(alpha = if (compass.hasReading) 0.8f else 0f)
     Canvas(Modifier.size(72.dp)) {
         val c = Offset(size.width / 2, size.height / 2)
-        // Read here, in the draw step: a new heading redraws this canvas only.
-        rotate(degrees(), c) {
-            val sw = 8.dp.toPx()
-            drawLine(color, Offset(c.x, size.height * 0.9f), Offset(c.x, size.height * 0.1f), strokeWidth = sw, cap = StrokeCap.Round)
-            drawLine(color, Offset(c.x, size.height * 0.1f), Offset(c.x - size.width * 0.22f, size.height * 0.36f), strokeWidth = sw, cap = StrokeCap.Round)
-            drawLine(color, Offset(c.x, size.height * 0.1f), Offset(c.x + size.width * 0.22f, size.height * 0.36f), strokeWidth = sw, cap = StrokeCap.Round)
+        val r = size.minDimension / 2
+        // The two angles are read here, in the draw step: a new frame redraws this canvas and recomposes nothing.
+        rotate(compass.northDeg.floatValue, c) {
+            // North tick on the ring, so the dial turns the other way and north stays put.
+            drawLine(north, Offset(c.x, c.y - r), Offset(c.x, c.y - r + 6.dp.toPx()), strokeWidth = 3.dp.toPx(), cap = StrokeCap.Round)
         }
-        drawCircle(color.copy(alpha = 0.25f), radius = size.minDimension / 2, center = c, style = Stroke(2.dp.toPx()))
+        rotate(compass.arrowDeg.floatValue, c) {
+            val sw = 8.dp.toPx()
+            drawLine(shown, Offset(c.x, size.height * 0.9f), Offset(c.x, size.height * 0.1f), strokeWidth = sw, cap = StrokeCap.Round)
+            drawLine(shown, Offset(c.x, size.height * 0.1f), Offset(c.x - size.width * 0.22f, size.height * 0.36f), strokeWidth = sw, cap = StrokeCap.Round)
+            drawLine(shown, Offset(c.x, size.height * 0.1f), Offset(c.x + size.width * 0.22f, size.height * 0.36f), strokeWidth = sw, cap = StrokeCap.Round)
+        }
+        drawCircle(shown.copy(alpha = 0.25f * shown.alpha), radius = r, center = c, style = Stroke(2.dp.toPx()))
     }
 }
 

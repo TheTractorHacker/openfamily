@@ -2,7 +2,11 @@ package app.openfamily.wear.logic
 
 import kotlin.math.abs
 
-/** Smoothing for the compass arrow so a 5 Hz sensor does not make it jitter or cost redraws. */
+/**
+ * Shortest-turn maths on a circle. [delta] is used by the compass arrow (AngleFollower, ArrowEngine).
+ * [next] is the old 5 Hz low-pass with a dead band; the arrow no longer uses it (it made visible 5 Hz steps),
+ * and it is kept only for its tests.
+ */
 object HeadingFilter {
     /** Signed shortest turn from [from] to [to], in -180..180. */
     fun delta(from: Double, to: Double): Double {

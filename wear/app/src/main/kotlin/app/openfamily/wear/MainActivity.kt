@@ -29,11 +29,11 @@ class MainActivity : ComponentActivity() {
     private val ambientCallback = object : AmbientLifecycleObserver.AmbientLifecycleCallback {
         override fun onEnterAmbient(ambientDetails: AmbientLifecycleObserver.AmbientDetails) {
             ambient = true
-            vm.presence(visible = true, ambient = true)
+            vm.setAmbient(true)
         }
         override fun onExitAmbient() {
             ambient = false
-            vm.presence(visible = true)
+            vm.setAmbient(false)
         }
     }
 
