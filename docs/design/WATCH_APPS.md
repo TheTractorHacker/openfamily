@@ -166,7 +166,7 @@ when it leaves. A `visible` not repeated within 150 s (an `ambient` within
 
 | Tier | Meaningful changes | Keep-alive | Data Layer |
 |---|---|---|---|
-| visible | every change, at most one snapshot per 5 s (2 s while the Apple Watch direction screen is open: `visible` with arg `finding`); a fresh one right away when the app comes on screen | 60 s (keeps "Updated" current) | urgent |
+| visible | every change, at most one snapshot per 5 s (2 s while the direction screen is open on the Apple Watch or the Wear OS watch: `visible` with arg `finding`); a fresh one right away when the app comes on screen | 60 s (keeps "Updated" current) | urgent |
 | ambient | at most once per 60 s | 10 min | urgent |
 | hidden (default) | at most once per 2 min | 10 min | not urgent: the system may batch it for a few minutes |
 
@@ -259,7 +259,10 @@ and the SOS screen says "If it did not send, call emergency services".
 - Updates arrive by `DataClient` changes only (a `WearableListenerService` is
   woken by the system; the UI collects from a `StateFlow`). No polling, no
   background service, no wake locks. The only repeating message is `visible`
-  once a minute while the app is on screen and not in ambient mode.
+  once a minute while the app is on screen and not in ambient mode. Every
+  `visible` carries the app's state (`ambient`, `finding` while the Direction
+  screen is open and awake, otherwise no arg), because a plain `visible` would
+  end the phone's 2 s `finding` cadence.
 - Screens: People, Person (place, age, "Open on phone", distance and direction),
   SOS (hold to arm, 5 s countdown, cancel, haptics), I'm OK, Sharing pause and
   resume, Quick replies with unread badge, Alerts. A Tile ("Circle", the people
@@ -267,6 +270,60 @@ and the SOS screen says "If it did not send, call emergency services".
 - Distance and direction use the watch's last known location (only if the user
   grants location permission on the watch) and the member's coordinates; there
   is no map.
+
+### Direction screen (compass)
+
+The arrow follows the wrist smoothly, like the Apple Watch one. Nothing about
+the heading or the position leaves the watch, and no permission was added (the
+screen uses the location permission the app already asks for).
+
+- **Sensor.** `TYPE_ROTATION_VECTOR` (gyro, accelerometer and magnetometer
+  fused) at `SENSOR_DELAY_GAME` (about 50 Hz) with no batching. It is
+  registered only while the Direction screen is RESUMED, not in ambient mode and
+  there is a position to point at, and unregistered the moment any of that stops
+  (`ui/Heading.kt`). The previous 5 Hz feed with a low-pass and a 1.5 degree
+  dead band moved the arrow in visible steps and is gone.
+- **Smoothing per display frame.** The listener only does a little arithmetic
+  and wakes a frame loop (`withFrameNanos`). Each frame a critically damped
+  follower (`logic/AngleFollower.kt`, exact closed form, so any frame time is
+  stable, no overshoot) moves the heading (omega 18 /s: 90% of a step in about
+  0.2 s, a steady turn lags about 0.11 s) and the bearing to the person (omega
+  6 /s: a new position glides in over about 0.65 s instead of jumping). Both are
+  kept as **unwrapped** angles, so 359 to 1 degrees is a 2 degree turn. The
+  arrow and the north tick are two `mutableFloatStateOf` read only in the draw
+  step, so a frame recomposes nothing. A reading within 0.3 degrees of the
+  current aim is ignored and does not wake the loop; the loop sleeps once both
+  followers settle (under 0.05 degrees and 0.5 degrees/s) and when the screen
+  is ambient or paused, so a still wrist costs no frames. After a pause the
+  arrow keeps its last angle and glides to the new one.
+- **Tilt.** `getOrientation` assumes the watch lies flat and becomes unstable
+  when the 12 o'clock edge points steeply up. `logic/CompassMath.kt` reads the
+  rotation matrix instead: the 12 o'clock axis while the wrist is level or tilted
+  up to about 60 degrees, the axis out of the back of the watch above that,
+  with a gap (back at 60, top again below 48 degrees) so it does not flicker.
+  For a plain pitch of the wrist both give the same heading, so the switch does
+  not jump; with a rolled wrist at the switch the two differ and the follower
+  smooths the step. When the chosen axis has no horizontal direction the last
+  heading is held.
+- **True north.** The heading adds the magnetic declination from Android's
+  `GeomagneticField` at the watch's last known position (`data/Declination.kt`,
+  cached for about 11 km / a day). It needs no permission. If it cannot be
+  worked out the screen uses magnetic north and says "(approx. north)". With
+  no location the screen shows "Allow location" instead of an arrow, so there
+  is no unlabelled magnetic arrow.
+- **Calibration.** When the sensor reports low or unreliable accuracy, or its
+  heading error estimate is above 0.35 rad, for 1.5 s, the arrow is dimmed and
+  the screen says "Move your wrist in a figure 8"; it goes after 1 s of good
+  readings.
+- **Position cadence.** Opening the screen sends `visible` with arg `finding`
+  (the same request the Apple Watch makes), so the phone sends a snapshot every
+  2 s while it has something new; leaving the screen, ambient mode or the screen
+  turning off end it. The watch also re-reads its cached location every 15 s
+  while the screen is open; it never starts GPS. The arrow is still only as
+  fresh as the other person's last reported position.
+- **Not verified on a real watch.** The maths is unit-tested (`CompassLogicTest`);
+  how smooth it feels, the sensor axis conventions on a real watch and the
+  battery cost have not been tried.
 - Offline: the last snapshot is stored on the watch (DataClient item or a copy
   in app storage) and shown with its age; the header shows "Phone not connected".
 

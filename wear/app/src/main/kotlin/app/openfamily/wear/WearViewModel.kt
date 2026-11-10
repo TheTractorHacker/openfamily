@@ -65,16 +65,37 @@ class WearViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { link.requestRefresh() }
     }
 
+    @Volatile private var ambientNow = false
+    @Volatile private var findingNow = false
+
     /**
      * Tells the phone whether this app is on screen, so it sends every few seconds
      * while it is and only meaningful changes while it is not (docs/design/WATCH_APPS.md,
-     * Cadence). Fire and forget, and outside the view model's scope so a "hidden" sent
-     * while the activity closes still goes out. A lost one is harmless: the phone
+     * Cadence). The argument follows the app's state: "ambient" in always-on mode, "finding" while the
+     * Direction screen is open (about every 2 s), none otherwise; every repeat carries it, because a plain
+     * `visible` would end the faster cadence. Fire and forget, and outside the view model's scope so a "hidden"
+     * sent while the activity closes still goes out. A lost one is harmless: the phone
      * forgets "visible" after 150 s by itself.
      */
-    fun presence(visible: Boolean, ambient: Boolean = false) {
-        val cmd = if (visible) Commands.build(Commands.Cmd.Visible, if (ambient) "ambient" else null) else Commands.build(Commands.Cmd.Hidden)
+    fun presence(visible: Boolean) {
+        val cmd = if (visible) Commands.build(Commands.Cmd.Visible, Commands.presenceArg(ambientNow, findingNow)) else Commands.build(Commands.Cmd.Hidden)
         background.launch { link.send(cmd) }
+    }
+
+    /** Always-on mode started or ended; tells the phone. */
+    fun setAmbient(on: Boolean) {
+        ambientNow = on
+        presence(visible = true)
+    }
+
+    /**
+     * The Direction screen is open and awake ([on]) or is not any more. Tells the phone when the state changes,
+     * unless [announce] is false (the app is leaving the screen, and `hidden` goes out instead).
+     */
+    fun setFinding(on: Boolean, announce: Boolean = true) {
+        if (findingNow == on) return
+        findingNow = on
+        if (announce) presence(visible = true)
     }
 
     fun send(cmd: Commands.Cmd, arg: String? = null) {

@@ -12,11 +12,24 @@ object Commands {
     enum class Cmd(val wire: String) {
         Sos("sos"), CheckIn("checkin"), Pause("pause"), Resume("resume"), Ack("ack"), Refresh("refresh"), Reply("reply"),
 
-        /** The app is on screen (arg "ambient" in always-on mode): the phone sends more often. Never answered. */
+        /**
+         * The app is on screen: the phone sends more often. Arg "ambient" in always-on mode, "finding" while the
+         * Direction screen is open (the phone then sends about every 2 s). Never answered.
+         */
         Visible("visible"),
 
         /** The app left the screen: the phone falls back to its slow cadence. Never answered. */
         Hidden("hidden"),
+    }
+
+    const val AMBIENT_ARG = "ambient"
+    const val FINDING_ARG = "finding"
+
+    /** Arg of [Cmd.Visible] for the app's state: always-on wins, then the Direction screen; null for plain visible. */
+    fun presenceArg(ambient: Boolean, finding: Boolean): String? = when {
+        ambient -> AMBIENT_ARG
+        finding -> FINDING_ARG
+        else -> null
     }
 
     /** How often the app repeats [Cmd.Visible] while on screen; the phone forgets it after 150 s without one. */

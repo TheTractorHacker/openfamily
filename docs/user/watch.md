@@ -16,8 +16,14 @@ is paired with.
 
 - **People**: who is where ("At Home", "Driving 42 mph", "2 min ago"), battery,
   and for each person the place, how old the position is, and **Open on phone**.
-- **Direction**: a simple arrow and distance to a person from where your watch is
-  (if you allow location for Orbitly on the watch). There is no map on the watch.
+- **Direction**: an arrow and distance to a person from where your watch is
+  (if you allow location for Orbitly on the watch). The arrow turns smoothly
+  with your wrist and points to true north (a small mark on the ring shows
+  north). If the watch compass needs calibrating the arrow fades and the screen
+  says "Move your wrist in a figure 8". While this screen is open the phone sends
+  the person's position every 2 seconds; the arrow can still only be as fresh
+  as their phone's last report. The compass runs only while the screen is open
+  and awake. **New and not yet tried on a real watch.** There is no map on the watch.
 - **I'm OK**: tells your circle you are fine, with where you are.
 - **SOS**: press and hold, then you have 5 seconds to cancel. Your family is
   told. **Emergency services are not called.** If the watch says it could not

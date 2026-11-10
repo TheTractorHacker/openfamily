@@ -10,6 +10,18 @@ for the **last 5 minor versions** of the app (see
 [API compatibility](api-compat.md)), so you can update the server first and
 the phones afterwards.
 
+## v0.26.31 (2026-11-10)
+
+App-only release (the server needs no change). Install the Wear OS watch app over the current one; the phone app is unchanged apart from the version. **Nothing in this release has been tried on a real watch**: there is no emulator or watch on the build machine, so only the arithmetic is tested.
+
+- **Wear OS: the direction arrow now follows your wrist smoothly.** Before, the watch read its compass 5 times a second and nudged the arrow after each reading, so it moved in steps and lagged. Now, while the Distance and direction screen is open and awake, it reads the rotation sensor at about 50 times a second and eases the arrow every display frame (a critically damped follower: no overshoot, about 0.2 s to cover most of a turn, always the short way round, so 359 to 1 degrees is a 2 degree turn). The compass stops when the screen closes, the watch goes to always-on mode or you leave the screen, and no frames are drawn while nothing moves. A small mark on the ring shows north.
+- **True north, and a steadier arrow when the wrist is raised.** The heading now includes the local magnetic declination (from Android's built-in model at the watch's last known position; no permission added, nothing sent anywhere), so the arrow no longer points a few degrees off in places where magnetic and true north differ. If it cannot be worked out the screen says "(approx. north)". When the watch is tilted up the compass switches to the axis out of the back of the watch, with a gap so it does not flicker, instead of getting unstable.
+- **Calibration hint.** If the watch compass reports low accuracy for a moment, the arrow fades and the screen says "Move your wrist in a figure 8" instead of showing a confident wrong arrow.
+- **Fresher position while you look for someone.** While the direction screen is open the Wear OS watch sends `visible` with the argument `finding` (the same request the Apple Watch makes), so the phone sends a snapshot every 2 seconds instead of every 5. The minute-by-minute `visible` repeat now carries the same argument, otherwise it would have switched the faster rate off again. The watch re-reads its last known location every 15 seconds while the screen is open (it never starts GPS), and a new position for the other person now glides in over about half a second instead of making the arrow jump. The phone code is unchanged: the Dart side already accepted `finding` from any watch.
+- Not changed: the arrow is still only as fresh as the other person's phone reports, and the watch's own position is the last one Android has cached.
+
+Not verified: how smooth it feels on a real watch, whether the sensor axes behave as expected on different models and wrists (left or right), the battery cost of 50 Hz sensing while the screen is open, and the figure-8 hint's thresholds. Tested on a computer: 34 new unit tests for the follower, wrap-around, tilt switch, declination cache, calibration gate and the `finding` argument, and the debug watch app builds.
+
 ## v0.26.29 (2026-11-10)
 
 App-only release (the server needs no change). Install over the current app; the Apple Watch app updates with the iPhone app (let the watch app update too). Nothing in this release has been tried on a real phone, foldable or watch yet.

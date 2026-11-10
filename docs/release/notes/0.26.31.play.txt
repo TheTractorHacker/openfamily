@@ -1,0 +1,1 @@
+Wear OS watch: the direction arrow now turns smoothly with your wrist and points to true north. A figure-8 hint appears when the compass needs calibrating. Position refreshes every 2 seconds while the direction screen is open.
