@@ -374,7 +374,12 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 1
-          sparse-checkout: scripts
+          # scripts (checksums, size budget) plus what the release body is built from
+          # (scripts/release-notes.sh reads docs/release/notes and docs/CHANGELOG.md).
+          sparse-checkout: |
+            scripts
+            docs/release/notes
+            docs/CHANGELOG.md
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: parts-*
