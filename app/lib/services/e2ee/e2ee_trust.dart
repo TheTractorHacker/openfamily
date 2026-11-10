@@ -256,6 +256,113 @@ Future<bool> verifyRegistration(DeviceKey d) async {
   }
 }
 
+/// Whether [k], a key the server reports as its `server` key, is really one that an approved device of its OWNER signed
+/// into the verified key log, and that a key reset of the owner has not retired. This is what a phone checks before it
+/// signs anything for a server key or wraps a circle key to it; what the server merely says ("kind server, approved,
+/// pinned") is never enough. Fails closed on every doubt:
+///
+///   * the key's registration must be in [log] (not redacted, exactly one entry) and match the listed record field for
+///     field (action, user, voucher id, voucher key, fingerprint, signature), and the registration signature verifies;
+///   * the voucher is a listed `device` key of the same user whose key equals the one the log shows, and its own
+///     registration is in the log and verifies, up to a self-registered root (a chain of at most 16 hops);
+///   * an owner reset after the registration retires the key unless the owner's NEW root phone (the key that made the
+///     latest reset) signed a re-attachment (log action 13) of exactly this key afterwards; then the chain hangs on that
+///     root phone, which must be active and approved. A reset is recognised from the log AND from the key list
+///     (a listed key of the owner registered by a reset and created after this key), so a server that serves the
+///     owner's reset entry redacted gains nothing: the key list still shows the reset root and the attach is required.
+///
+/// [byId] is every key of the circle by device id (the server's key list).
+///
+/// In a circle ([admins] and [circleId] given) the key must also belong to a circle admin, or a circle admin must have
+/// signed its approval for this circle into the log (action 9). A key an ordinary member made for themselves, which a
+/// lying server pins as "the server", is therefore never the server key. Without them (the owner's own account, at a
+/// reset) this extra test is skipped: the key list then is the account's own.
+Future<bool> serverKeyVouched(List<LogEntry> log, DeviceKey k, Map<String, DeviceKey> byId, {Set<String>? admins, String? circleId}) async {
+  try {
+    if (k.kind != 'server' || k.revokedAt != null) return false;
+    final Uint8List fp = E2ee.unhex(k.fingerprint);
+    if (admins != null && !admins.contains(k.userId)) {
+      bool approved = false;
+      for (final LogEntry e in log) {
+        if (e.redacted || e.action != E2ee.actApprove || e.circleId != circleId || e.subjectId != k.deviceId) continue;
+        if (e.ref == null || !E2ee.constEq(e.ref!, fp) || e.userId == null || !admins.contains(e.userId) || e.actorPub == null) continue;
+        final DeviceKey? a = byId[e.actorDeviceId];
+        if (a != null && a.userId == e.userId && a.kind == 'device' && a.isActive && E2ee.constEq(a.edPub, e.actorPub!)) approved = true;
+      }
+      if (!approved) return false;
+    }
+    final LogEntry? reg = _registrationEntry(log, k);
+    if (reg == null || k.isRoot || !await verifyRegistration(k)) return false;
+    final List<LogEntry> resets = <LogEntry>[
+      for (final LogEntry e in log)
+        if (!e.redacted && e.action == E2ee.actReset && e.userId == k.userId) e
+    ];
+    final List<DeviceKey> resetKeys = <DeviceKey>[
+      for (final DeviceKey d in byId.values)
+        if (d.userId == k.userId && d.kind == 'device' && d.registrationAction == E2ee.actReset) d
+    ];
+    final bool reset = resets.any((LogEntry e) => e.seq > reg.seq) || resetKeys.any((DeviceKey d) => d.createdAt.isAfter(k.createdAt));
+    if (!reset) return await _chainToRoot(log, k, byId);
+    // Retired by a reset: needs the re-attachment of exactly this key by the owner's newest root phone.
+    DateTime newest = resetKeys.isEmpty ? k.createdAt : resetKeys.first.createdAt;
+    for (final DeviceKey d in resetKeys) {
+      if (d.createdAt.isAfter(newest)) newest = d.createdAt;
+    }
+    for (final LogEntry a in log) {
+      if (a.redacted || a.action != E2ee.actServerAttach || a.subjectId != k.deviceId || a.userId != k.userId) continue;
+      if (a.ref == null || !E2ee.constEq(a.ref!, fp) || a.actorPub == null) continue;
+      if (a.circleId != null && a.circleId != E2ee.zeroUuid) continue;
+      final DeviceKey? actor = byId[a.actorDeviceId];
+      if (actor == null || actor.userId != k.userId || actor.kind != 'device' || !actor.isActive || actor.approved != true) continue;
+      if (!E2ee.constEq(a.actorPub!, actor.edPub) || actor.registrationAction != E2ee.actReset || !actor.isRoot) continue;
+      if (actor.createdAt.isBefore(newest)) continue; // not the newest reset root
+      final LogEntry? areg = _registrationEntry(log, actor);
+      if (areg == null || areg.seq <= reg.seq || a.seq <= areg.seq || !await verifyRegistration(actor)) continue;
+      if (resets.any((LogEntry e) => e.seq > areg.seq)) continue; // a later reset retired that root
+      return true;
+    }
+    return false;
+  } catch (_) {
+    return false;
+  }
+}
+
+/// The one registration entry of [d] in [log], when it matches the listed record field for field; else null.
+LogEntry? _registrationEntry(List<LogEntry> log, DeviceKey d) {
+  LogEntry? found;
+  for (final LogEntry e in log) {
+    if (e.redacted || e.subjectId != d.deviceId) continue;
+    final int? a = e.action;
+    if (a != E2ee.actRegister && a != E2ee.actRecovery && a != E2ee.actReset && a != E2ee.actRotate) continue;
+    if (found != null) return null; // registered twice: the log is not trustworthy for this key
+    found = e;
+  }
+  final LogEntry? e = found;
+  if (e == null || e.action != d.registrationAction || e.userId != d.userId || e.actorDeviceId != d.registeredByDeviceId) return null;
+  if (e.ref == null || e.signature == null || e.actorPub == null) return null;
+  try {
+    if (!E2ee.constEq(e.ref!, E2ee.unhex(d.fingerprint))) return null;
+  } catch (_) {
+    return null;
+  }
+  if (!E2ee.constEq(e.signature!, d.registrationSignature) || !E2ee.constEq(e.actorPub!, d.registeredByPub)) return null;
+  return e;
+}
+
+Future<bool> _chainToRoot(List<LogEntry> log, DeviceKey start, Map<String, DeviceKey> byId) async {
+  DeviceKey cur = start;
+  for (int depth = 0; depth < 16; depth++) {
+    final LogEntry? reg = _registrationEntry(log, cur);
+    if (reg == null || !await verifyRegistration(cur)) return false;
+    if (cur.isRoot) return depth > 0 && E2ee.constEq(cur.edPub, cur.registeredByPub);
+    final DeviceKey? v = byId[cur.registeredByDeviceId];
+    if (v == null || v.userId != start.userId || v.kind != 'device' || !E2ee.constEq(v.edPub, cur.registeredByPub)) return false;
+    if (v.revokedAt != null && v.revokedAt!.isBefore(cur.createdAt)) return false; // a retired key cannot mint keys
+    cur = v;
+  }
+  return false;
+}
+
 // --------------------------------------------------------------------------
 // Wrap policy: when may my phone issue a circle key to someone's key?
 

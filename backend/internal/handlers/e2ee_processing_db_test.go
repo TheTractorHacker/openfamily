@@ -216,6 +216,16 @@ func TestLanesMigrationIdempotentAndDown(t *testing.T) {
 			t.Fatalf("250 up is not idempotent (run %d): %v", i+2, err)
 		}
 	}
+	// Migration 410 redefines e2ee_item_guard and e2ee_device_approved after 250: re-apply it too.
+	up410, err := os.ReadFile("../db/migrations/000410_server_key_across_reset.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if _, err := e.pool.Exec(context.Background(), string(up410)); err != nil {
+			t.Fatalf("410 up is not idempotent (run %d): %v", i+2, err)
+		}
+	}
 	if after := e.count(`SELECT count(*) FROM e2ee_processing_pref`); after != before {
 		t.Fatalf("prefs changed by re-running the migration: %d -> %d", before, after)
 	}
@@ -247,6 +257,13 @@ func TestLanesMigrationIdempotentAndDown(t *testing.T) {
 		if _, err := tx.Exec(context.Background(), q); err != nil {
 			t.Fatalf("%s: %v", q, err)
 		}
+	}
+	down410, err := os.ReadFile("../db/migrations/000410_server_key_across_reset.down.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(context.Background(), string(down410)); err != nil {
+		t.Fatalf("410 down migration: %v", err)
 	}
 	down250, err := os.ReadFile("../db/migrations/000250_chat_e2ee.down.sql")
 	if err != nil {
@@ -955,6 +972,17 @@ func TestLegacyCircleStaysLegacyAndNewCirclesCannotBe(t *testing.T) {
 	}
 	if e.count(`SELECT count(*) FROM circles WHERE id = $1 AND server_legacy_ck`, e.circle) != 1 {
 		t.Fatal("migration did not flag a circle that already had a server consent")
+	}
+	// 220 redefines e2ee_item_guard; later migrations redefine it again. Re-apply them so the
+	// shared test database keeps the current functions for the tests that follow.
+	for _, f := range []string{"000250_chat_e2ee", "000410_server_key_across_reset"} {
+		later, err := os.ReadFile("../db/migrations/" + f + ".up.sql")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := e.pool.Exec(context.Background(), string(later)); err != nil {
+			t.Fatalf("%s: %v", f, err)
+		}
 	}
 }
 

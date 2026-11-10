@@ -122,9 +122,11 @@ void main() {
     expect(await bob2.lanes.serverChoiceLostToNewKey(priv), isNull);
   });
 
-  test('required_server circles and child accounts are not auto-signed', () async {
+  test('required_server: the member phone signs by itself (a rule, not a default); a child account is not auto-signed in an optional circle', () async {
     await policyOn(optOut: E2ee.optOutRequiredServer);
-    expect(await bob.lanes.autoApplyIfDue(priv, autoApply: true), AutoApplyOutcome.consentRequired);
+    expect((await bob.lanes.refresh(priv)).status, LaneStatus.serverPending);
+    expect(await bob.lanes.autoApplyIfDue(priv, autoApply: false), AutoApplyOutcome.applied, reason: 'no server setting needed');
+    expect((await bob.lanes.refresh(priv, force: true)).status, LaneStatus.serverAssisted);
     await alice.lanes.publishPolicy(priv, serverAssist: true, memberOptOut: E2ee.optOutAllowed);
     server.childUsers.add(uC);
     expect(await carol.lanes.autoApplyIfDue(priv, autoApply: true), AutoApplyOutcome.child);
@@ -184,10 +186,10 @@ void main() {
     await alice.lanes.publishPolicy(priv, serverAssist: true, defaultForNew: E2ee.linePhone);
     expect(await bob.lanes.autoApplyIfDue(priv, autoApply: false, followCircleDefault: true), AutoApplyOutcome.disabled);
     expect(prefsOf(uB), 0);
-    // required_server keeps its explicit consent, also with the circle default.
+    // required_server is a rule: the member's own phone signs it, with or without the circle default.
     await alice.lanes.publishPolicy(priv, serverAssist: true, defaultForNew: E2ee.lineServer, memberOptOut: E2ee.optOutRequiredServer);
-    expect(await carol.lanes.autoApplyIfDue(priv, autoApply: false, followCircleDefault: true), AutoApplyOutcome.consentRequired);
-    expect(prefsOf(uC), 0);
+    expect(await carol.lanes.autoApplyIfDue(priv, autoApply: false, followCircleDefault: true), AutoApplyOutcome.applied);
+    expect(prefsOf(uC), 1);
   });
 
   test('the app-open path follows the circle default only when the server says so', () async {

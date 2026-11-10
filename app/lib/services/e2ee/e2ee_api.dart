@@ -230,8 +230,9 @@ class ApiE2eeApi implements E2eeApi {
 
   @override
   Future<({List<LogEntry> entries, LogHead head})> log(int after) async {
-    // owner_approval=1: this app understands action 12 (older apps get it redacted).
-    final Map<String, dynamic> r = (await ApiClient.get('/e2ee/log', query: <String, String>{'after': '$after', 'owner_approval': '1'})) as Map<String, dynamic>;
+    // owner_approval=1 / server_attach=1: this app understands actions 12 and 13 (older apps get them redacted).
+    final Map<String, dynamic> r = (await ApiClient.get('/e2ee/log',
+        query: <String, String>{'after': '$after', 'owner_approval': '1', 'server_attach': '1'})) as Map<String, dynamic>;
     final Map<String, dynamic> h = r['head'] as Map<String, dynamic>;
     final String hash = (h['hash'] as String?) ?? '';
     return (

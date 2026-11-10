@@ -365,6 +365,48 @@ func (e *Embedded) NoteRevoked(deviceID string) {
 	}
 }
 
+// Reattach moves the server key's trust anchor to the owner's NEW root phone after an
+// owner key reset that KEPT this key (docs/design/E2EE.md "Server key across an owner
+// reset"). The API process calls it right after the reset committed. The device checks
+// the new phone's signed ActServerAttach statement ITSELF, over this device's own user,
+// id and fingerprint, so it never relies on the caller's word. The keypair, circle keys,
+// session and every other file stay exactly as they were. Nothing is created and no
+// secret leaves the directory.
+func (e *Embedded) Reattach(actorDeviceID string, actorPub, signature []byte) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.id == nil || e.id.f.RegisteredAt == "" || e.id.f.RevokedAt != "" || e.id.f.UserID == "" {
+		return errors.New("the server key is not registered")
+	}
+	if e2ee.CheckID(actorDeviceID) != nil || len(actorPub) != e2ee.PubLen || len(signature) != e2ee.SigLen {
+		return errors.New("malformed attach statement")
+	}
+	if err := e2ee.VerifyLogAction(actorPub, e2ee.ActServerAttach, e.id.f.UserID, actorDeviceID, "", e.id.f.DeviceID, 0, e.id.fp, signature); err != nil {
+		return errors.New("the attach statement does not verify for this server key")
+	}
+	// A new identity value, so the running loop (which reads its own pointer) never sees a
+	// half-written one; it is restarted below and picks this one up.
+	next := *e.id
+	next.f.ApprovedBy, next.f.ApproverEdPub = actorDeviceID, base64.StdEncoding.EncodeToString(actorPub)
+	if err := e.st.saveIdentity(&next); err != nil {
+		return err
+	}
+	e.id = &next
+	e.goneCount, e.revokedHint = 0, ""
+	e.restartNow = true
+	cancel := e.cancelRun
+	if cancel != nil {
+		cancel()
+	}
+	select {
+	case e.wake <- struct{}{}:
+	default:
+	}
+	e.log.Info("the server key was kept across an owner key reset; the owner's new phone is now its anchor",
+		"device", e.id.f.DeviceID[:8], "phone", actorDeviceID[:8])
+	return nil
+}
+
 // replaceRevokedKey is the self-repair for a server key the API revoked behind our back (the
 // owner account's keys were reset, or an admin revoked it). Only the old key's public facts are kept in
 // archive/revoked-<time>/ (the seed, session and circle keys are removed), a new key is made and the state goes back to

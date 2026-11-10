@@ -652,7 +652,7 @@ func TestLanesClassifyItemLane(t *testing.T) {
 }
 
 func TestLanesLogActionCodes(t *testing.T) {
-	if _, err := LogActionMessage(ActOwnerApproval+1, uidA, devA, circ, "", 1, nil); err == nil {
+	if _, err := LogActionMessage(ActServerAttach+1, uidA, devA, circ, "", 1, nil); err == nil {
 		t.Fatal("unknown action accepted")
 	}
 	if _, err := LogActionMessage(ActProcessingPref, uidA, devA, circ, "", 1, nil); err != nil {

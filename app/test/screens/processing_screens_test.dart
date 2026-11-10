@@ -5,7 +5,9 @@ import 'package:openfamily/screens/legacy_upgrade_screen.dart';
 import 'package:openfamily/screens/my_processing_screen.dart';
 import 'package:openfamily/screens/processing_policy_screen.dart';
 import 'package:openfamily/screens/processing_screen.dart';
+import 'package:openfamily/services/api_client.dart' show ApiException;
 import 'package:openfamily/services/circle_service.dart';
+import 'package:openfamily/services/e2ee/e2ee_service.dart' show LocalKeyException, LocalKeyProblem;
 import 'package:openfamily/services/e2ee/e2ee_crypto.dart';
 import 'package:openfamily/services/e2ee/lanes_store.dart';
 import 'package:openfamily/services/e2ee/processing_controller.dart' show ProcessingViewer;
@@ -43,7 +45,9 @@ void main() {
       expect(txt('MEMBERS NOT YET ON THE SERVER'), findsOneWidget);
       expect(find.byKey(Key('not-on-server-$pB')), findsOneWidget);
       expect(find.byKey(Key('not-on-server-$pA')), findsNothing);
-      expect(txt('Asked on their next app open'), findsOneWidget);
+      expect(txt('Uses the phone (has not chosen)'), findsWidgets);
+      expect(txt('not choosing yet'), findsNothing);
+      expect(txt('Not chosen yet'), findsNothing);
       expect(txt('Please open the Orbitly app once'), findsOneWidget);
       expect(c.calls.where((String x) => x.startsWith('lane') || x.startsWith('policy')), isEmpty);
     });
@@ -133,26 +137,31 @@ void main() {
       expect(c.calls.where((String x) => x.startsWith('lane')), isEmpty, reason: 'never signs without an explicit confirmation');
     });
 
-    testWidgets('required_server: cannot opt out, consent card explains consent-or-leave; consenting signs server lane', (t) async {
+    testWidgets('required by the admin, not switched over yet: a calm notice, no opt-in or opt-out control, no dead end', (t) async {
       final FakeProcessingController c = FakeProcessingController(
           FakeProcessingController.snapshot(me: pB, admin: false, optOut: E2ee.optOutRequiredServer, unverified: <String>{pB}), me: pB);
       await pumpScreen(t, ProcessingScreen(circle: memberCircle, controller: c));
-      expect(find.byKey(const Key('proc-consent-required')), findsOneWidget);
-      expect(txt('Or you can leave the circle'), findsOneWidget);
-      await tapKey(t, 'proc-consent');
-      await t.tap(find.text('Allow'));
-      await t.pumpAndSettle();
-      expect(c.calls.where((String x) => x.startsWith('lane')), <String>['lane:server:fp=$fakeFp:del=false']);
+      expect(find.byKey(const Key('proc-required-notice')), findsOneWidget);
+      expect(find.text('Your family admin requires server processing.'), findsOneWidget);
+      expect(find.byKey(const Key('proc-required-catching-up')), findsOneWidget);
+      expect(txt('not delivered (check-ins and emergency alerts still are)'), findsOneWidget);
+      expect(find.byKey(const Key('my-lane-switch')), findsNothing);
+      expect(find.byKey(const Key('proc-choose')), findsNothing);
+      expect(find.byKey(const Key('proc-consent-required')), findsNothing);
+      expect(find.byKey(const Key('proc-consent')), findsNothing);
+      expect(txt('leave the circle'), findsNothing);
+      expect(txt('sends nothing'), findsNothing);
+      expect(c.calls.where((String x) => x.startsWith('lane')), isEmpty);
     });
 
-    testWidgets('required_server and already consenting: the switch cannot be turned off and says why', (t) async {
+    testWidgets('required by the admin and on the server: the notice, no switch', (t) async {
       final FakeProcessingController c = FakeProcessingController(
           FakeProcessingController.snapshot(me: pB, admin: false, optOut: E2ee.optOutRequiredServer, lanes: const <String, int>{pA: E2ee.lineServer, pB: E2ee.lineServer}),
           me: pB);
       await pumpScreen(t, ProcessingScreen(circle: memberCircle, controller: c));
-      final Switch sw = t.widget<Switch>(find.descendant(of: find.byKey(const Key('my-lane-switch')), matching: find.byType(Switch)));
-      expect(sw.onChanged, isNull);
-      expect(txt('This circle requires server processing. You can only keep your data on your phone by leaving the circle.'), findsOneWidget);
+      expect(find.text('Your family admin requires server processing.'), findsOneWidget);
+      expect(find.byKey(const Key('proc-required-catching-up')), findsNothing);
+      expect(find.byKey(const Key('my-lane-switch')), findsNothing);
     });
 
     testWidgets('server assistance off: the switch is disabled and the phone does the work', (t) async {
@@ -301,15 +310,15 @@ void main() {
       await t.tap(find.byKey(const Key('opt-required')));
       await t.pumpAndSettle();
       expect(find.text('Require server processing?'), findsOneWidget);
-      expect(txt('give their own consent or leave'), findsOneWidget);
-      expect(txt('You cannot do it for them'), findsOneWidget);
+      expect(txt('Members cannot turn it off'), findsWidgets);
+      expect(txt('nobody is asked'), findsOneWidget);
       await t.tap(find.text('Require it'));
       await t.pumpAndSettle();
       await t.tap(find.byKey(const Key('default-server')));
       await t.pumpAndSettle();
       expect(c.calls.where((String x) => x.startsWith('policy')), <String>['policy:true:phone:required_server', 'policy:true:server:allowed']);
-      expect(txt('nobody, including admins, can do it for them'), findsOneWidget);
-      expect(txt('child\'s or teen\'s phone'), findsOneWidget);
+      expect(txt('every member\'s phone signs it by itself'), findsOneWidget);
+      expect(txt('Applies to child accounts too'), findsOneWidget);
     });
 
     testWidgets('turning it off warns that copies stay and is not destructive-styled as consent', (t) async {
@@ -436,7 +445,7 @@ void main() {
       await pumpScreen(t, ProcessingScreen(circle: memberCircle, controller: c));
       expect(find.byKey(const Key('proc-undelivered')), findsOneWidget);
       expect(txt('3 items were not delivered'), findsOneWidget);
-      expect(txt('requires server processing'), findsWidgets);
+      expect(txt('requires server processing and the server did not accept this phone\'s choice'), findsOneWidget);
     });
 
     testWidgets('required_server with a child account says the rule applies to the child', (t) async {
@@ -468,6 +477,86 @@ void main() {
       expect(txt('Alice has a web viewer'), findsOneWidget);
       expect(txt('including members who keep data on their phone'), findsOneWidget);
       expect(txt('reads members who allowed server processing, not phone-only members'), findsOneWidget);
+    });
+  });
+
+  group('ProcessingScreen: required by the admin, admin view', () {
+    testWidgets('the admin sees who is on the server and who is catching up, in plain words; no reminder needed', (t) async {
+      final FakeProcessingController c = FakeProcessingController(FakeProcessingController.snapshot(
+          optOut: E2ee.optOutRequiredServer, lanes: const <String, int>{pA: E2ee.lineServer, pB: E2ee.linePhone, pC: E2ee.linePhone}, unverified: const <String>{pC}));
+      await pumpScreen(t, ProcessingScreen(circle: adminCircle, controller: c), size: const Size(390, 6000));
+      expect(find.text('Required by the admin (1 of 3 on the server)'), findsOneWidget);
+      expect(find.descendant(of: find.byKey(Key('member-$pA')), matching: find.text('On the server')), findsOneWidget);
+      expect(find.descendant(of: find.byKey(Key('member-$pB')), matching: find.text('Catching up')), findsWidgets);
+      expect(find.descendant(of: find.byKey(Key('member-$pC')), matching: find.text('Catching up')), findsWidgets);
+      expect(find.byKey(Key('catching-up-$pB')), findsOneWidget);
+      expect(find.byKey(Key('catching-up-$pC')), findsOneWidget);
+      expect(find.byKey(const Key('remind-copy')), findsNothing);
+      expect(find.byKey(Key('remind-$pC')), findsNothing);
+      expect(txt('positions may not arrive'), findsWidgets);
+      expect(txt('not choosing yet'), findsNothing);
+      expect(txt('Not chosen yet'), findsNothing);
+    });
+  });
+
+  group('ProcessingScreen: errors are specific, never "Something went wrong"', () {
+    Future<void> pumpFailing(WidgetTester t, Object error) async {
+      final FakeProcessingController c = FakeProcessingController(FakeProcessingController.snapshot())..loadFails = error;
+      await pumpScreen(t, ProcessingScreen(circle: adminCircle, controller: c));
+    }
+
+    testWidgets('offline', (t) async {
+      await pumpFailing(t, const ApiException(0, 'Could not reach the server. Check your connection.'));
+      expect(find.text('No connection'), findsOneWidget);
+      expect(txt('You appear to be offline'), findsOneWidget);
+      expect(txt('Something went wrong'), findsNothing);
+    });
+
+    testWidgets('an unreadable answer is not called offline', (t) async {
+      await pumpFailing(t, const ApiException(0, 'The server sent an unreadable answer. Please try again.'));
+      expect(txt('offline'), findsNothing);
+      expect(txt('unreadable answer'), findsOneWidget);
+      expect(txt('Something went wrong'), findsNothing);
+    });
+
+    testWidgets('server trouble', (t) async {
+      await pumpFailing(t, const ApiException(503, 'unavailable'));
+      expect(txt('The server had a problem. Try again shortly.'), findsOneWidget);
+      expect(txt('offline'), findsNothing);
+    });
+
+    testWidgets("this phone's key cannot be opened", (t) async {
+      await pumpFailing(t, const LocalKeyException(LocalKeyProblem.locked));
+      expect(txt("This phone's encryption key cannot be opened right now"), findsOneWidget);
+      expect(txt('Unlock the phone'), findsOneWidget);
+      expect(txt('Something went wrong'), findsNothing);
+    });
+
+    testWidgets('waiting for approval', (t) async {
+      await pumpFailing(t, const ApiException(403, 'this device is not approved in this circle'));
+      expect(find.text('Waiting for approval'), findsOneWidget);
+      expect(txt('pull down to check again'), findsOneWidget);
+    });
+
+    testWidgets('anything else names the step and keeps Try again', (t) async {
+      await pumpFailing(t, const FormatException('boom'));
+      expect(txt("Could not check this circle's server processing settings."), findsOneWidget);
+      expect(find.text('Try again'), findsOneWidget);
+      expect(txt('Something went wrong'), findsNothing);
+      expect(txt('boom'), findsNothing);
+    });
+
+    testWidgets('a snapshot with a problem shows it and the rest of the screen', (t) async {
+      final FakeProcessingController c = FakeProcessingController(FakeProcessingController.snapshot(problem: 'Could not confirm X.'));
+      await pumpScreen(t, ProcessingScreen(circle: adminCircle, controller: c));
+      expect(find.byKey(const Key('proc-problem')), findsOneWidget);
+      expect(find.byKey(const Key('proc-status-card')), findsOneWidget);
+      // Honest about what it does not know: no lane claim in the status card or the member rows, no promise of a retry.
+      expect(txt('Not confirmed right now'), findsWidgets);
+      expect(txt('The server cannot read this circle'), findsNothing);
+      expect(txt('Keeps data on their phone'), findsNothing);
+      expect(txt('tries again by itself'), findsNothing);
+      expect(find.byKey(const Key('proc-required-notice')), findsNothing);
     });
   });
 

@@ -46,12 +46,15 @@ If it happens anyway:
    Send it to your server operator.
 3. Only if the key stays unreadable, use **Set this phone up again**. The old
    key is put aside on the phone, not deleted, and **Encryption keys** offers
-   to bring it back if it becomes readable later.
+   to bring it back if it becomes readable later. The copy kept for reinstalls
+   is removed by this step.
 
 Prepare once, so a lost key is never a problem: write down your **recovery
 phrase** (Encryption keys, Recovery phrase), and make sure each Private
 circle has a **second admin** who can approve a new phone. Uninstalling the
-app deletes its keys; never uninstall to update.
+app deletes the keys inside the app. Since 0.26.28 a sealed copy brings the key
+back when you reinstall and sign in to the same account with Google backup on (see
+[Reinstalling Orbitly](user/reinstalling.md)); still, never uninstall to update.
 
 ## Release file names
 

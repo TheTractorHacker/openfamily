@@ -246,7 +246,7 @@ type itemCircle struct {
 // author's lane is passed in, already verified). It parses the payload header
 // with the Phase 1 functions, so line and generation are those the sender
 // signed. It returns the decoded ciphertext, the line, or an error code.
-func checkE2EEItemLine(it e2eeItemIn, c itemCircle, laneServer, devLanes2 bool) ([]byte, e2ee.Line, string) {
+func checkE2EEItemLine(it e2eeItemIn, c itemCircle, laneServer, catchingUp, devLanes2 bool) ([]byte, e2ee.Line, string) {
 	maxB, ok := e2eeMaxBucket[it.Purpose]
 	if !ok {
 		return nil, 0, "bad_purpose"
@@ -323,11 +323,11 @@ func checkE2EEItemLine(it e2eeItemIn, c itemCircle, laneServer, devLanes2 bool) 
 	if c.LegacyMax > 0 && it.Epoch <= c.LegacyMax {
 		return nil, 0, "legacy_epoch_closed"
 	}
-	// Check-ins (SOS) and events are exempt: help requests must never be blocked
-	// by a consent or server-key problem.
-	if c.OptOut == "required_server" && !laneServer && it.Purpose != "checkin" && it.Purpose != "event" && it.Purpose != "chat" {
-		// The owner decision of ADR 16.1: the server does not relay phone-lane
-		// items from members of a required_server circle.
+	// Phone line in a required_server circle (the owner decision of ADR 16.1): refused unless the
+	// author's own verified lane is server, the purpose is exempt (check-ins/SOS, events and chat must
+	// never be blocked by a consent or key problem), or the author is CATCHING UP: a genuine pref of
+	// theirs went stale because the server key was replaced less than 72 h ago (memberStates).
+	if c.OptOut == "required_server" && !laneServer && !catchingUp && it.Purpose != "checkin" && it.Purpose != "event" && it.Purpose != "chat" {
 		return nil, 0, "required_server"
 	}
 	return ct, declared, ""
@@ -428,12 +428,18 @@ func (s *Server) E2EEPostBatch(w http.ResponseWriter, r *http.Request) {
 		// on the server line and no author counts as lane server.
 		laneServer = s.policyVerified(ctx, tx, m.CircleID) && s.verifiedLaneServer(ctx, tx, m.CircleID, uid)
 	}
+	// A required_server circle refuses phone-line items of a member without a server lane, except for
+	// one who is catching up after a server-key replacement (Go re-verifies; the trigger agrees).
+	catchingUp := false
+	if ic.OptOut == "required_server" && !laneServer {
+		catchingUp = s.memberCatchingUp(ctx, tx, m.CircleID, uid)
+	}
 	results := make([]e2eeItemResult, 0, len(req.Items))
 	var stored []e2eeItemOut
 	var wake bool
 	placeCount := -1
 	for _, it := range req.Items {
-		ct, line, code := checkE2EEItemLine(it, ic, laneServer, devLanes2)
+		ct, line, code := checkE2EEItemLine(it, ic, laneServer, catchingUp, devLanes2)
 		if code != "" {
 			results = append(results, e2eeItemResult{Seq: it.Seq, Status: "rejected", Error: code})
 			continue

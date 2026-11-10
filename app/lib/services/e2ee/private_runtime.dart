@@ -783,9 +783,6 @@ class PrivateRuntime {
       final List<String> missingKey = <String>[];
       for (final String circle in await privateCircles()) {
         if (only != null && !only.contains(circle)) continue;
-        // A circle that requires server processing and this member has not consented to:
-        // nothing is sealed or sent for it (the server would refuse a phone-lane item anyway).
-        if (await consentBlocks(circle)) continue;
         final WireItem it;
         try {
           it = await sealer.seal(me, circle, ChannelPurpose.fix, body, at: ts);
@@ -821,22 +818,6 @@ class PrivateRuntime {
       // Delivery screen can say "this phone's key cannot be read" instead of "waiting for the circle key".
       await _noteSealError(e);
       await _park(loc, circles: only?.toList());
-    }
-  }
-
-  /// Whether this member's fixes must not be sealed for [circleId]: the stored status says consent is required AND
-  /// the stored verified policy still says `required_server` with assistance on. The status is only rewritten by a
-  /// successful verification pass; a status left over from an earlier policy (the admin has since allowed opting
-  /// out, or turned assistance off) while every later pass failed or never ran used to keep the phone sealing
-  /// NOTHING for the circle, with no error and nothing parked. Such a stale status no longer counts: the fix is
-  /// sealed in this member's verified lane as usual (the phone line unless their own signed pref says server).
-  Future<bool> consentBlocks(String circleId) async {
-    try {
-      if (await lanes.store.status(circleId) != LaneStatus.consentRequired) return false;
-      final StoredPolicy p = await lanes.store.policy(circleId);
-      return p.assist && p.memberOptOut == E2ee.optOutRequiredServer;
-    } catch (_) {
-      return false;
     }
   }
 
@@ -946,6 +927,21 @@ class PrivateRuntime {
     try {
       final int held = await keys.latestEpoch(circleId);
       final CircleE2eeState st = await api.circleState(circleId);
+      // Remember (a flag only) whether this phone's key still waits for an admin's approval, for the plain diagnostics line.
+      try {
+        final String? myDevice = (await service.identity())?.deviceId;
+        bool waiting = false;
+        for (final CircleE2eeMember m in st.members) {
+          for (final DeviceKey d in m.devices) {
+            if (d.deviceId == myDevice && d.approved == false) waiting = true;
+          }
+        }
+        if (waiting) {
+          await kv.set(_approvalWaitKey(circleId), '1');
+        } else {
+          await kv.remove(_approvalWaitKey(circleId));
+        }
+      } catch (_) {}
       if (!st.isPrivate || st.epoch <= held) return false;
       final bool got = await service.syncCircleKeys(circleId) > 0;
       _keyCache.invalidate(circleId);
@@ -954,6 +950,8 @@ class PrivateRuntime {
       return false;
     }
   }
+
+  static String _approvalWaitKey(String circleId) => 'approvalwait/$circleId';
 
   Future<void> _keysThenDrain(String circleId) async {
     final bool got = await ensureKeys(circleId);
@@ -1039,7 +1037,7 @@ class PrivateRuntime {
       final SenderIdentity? me = await _me();
       if (me == null) return 0;
       // What is already sealed goes first: the newest position must not wait for old parked fixes.
-      int n = await queue.flush(channel, deviceFor: (_) => me.deviceId, lanes: lanes, onNeedKeySync: (String c) => unawaited(_syncKeys(c)));
+      int n = await queue.flush(channel, deviceFor: (_) => me.deviceId, lanes: lanes, onNeedKeySync: (String c) => unawaited(_syncKeys(c)), onLaneRefused: _laneRefused, onRequiredServerRefused: _requiredServerRefused, onIdentityRefused: service.forgetCachedIdentity);
       // Fixes parked for want of a key are sealed as soon as the key is here, whichever path brought it.
       final DateTime now = clock.now();
       final DateTime? tried = _parkedTriedAt;
@@ -1047,7 +1045,7 @@ class PrivateRuntime {
           (await kv.getFresh(_parkedKey) ?? '').isNotEmpty) {
         _parkedTriedAt = now;
         if (await drainParked() > 0) {
-          n += await queue.flush(channel, deviceFor: (_) => me.deviceId, lanes: lanes, onNeedKeySync: (String c) => unawaited(_syncKeys(c)));
+          n += await queue.flush(channel, deviceFor: (_) => me.deviceId, lanes: lanes, onNeedKeySync: (String c) => unawaited(_syncKeys(c)), onLaneRefused: _laneRefused, onRequiredServerRefused: _requiredServerRefused, onIdentityRefused: service.forgetCachedIdentity);
         }
       }
       return n;
@@ -1065,12 +1063,11 @@ class PrivateRuntime {
 
   /// Private circles in which this member is PHONE-ONLY (their own signed pref):
   /// results for them are computed here and sealed in the phone lane. A circle
-  /// where the member is server-assisted gets none (the server computes), and a
-  /// circle awaiting required consent gets none (nothing is shared there).
+  /// where the member is server-assisted gets none (the server computes). A circle that requires server processing
+  /// where this phone has not signed yet counts as phone-only meanwhile (its positions are sealed on the phone line, which the relay refuses there until it has signed; they wait in the queue).
   Future<Set<String>> phoneOnlyCircles() async {
     final Set<String> out = <String>{};
     for (final String c in await privateCircles()) {
-      if (await consentBlocks(c)) continue;
       if ((await lanes.ownLane(c)).line == E2ee.linePhone) out.add(c);
     }
     return out;
@@ -1361,7 +1358,6 @@ class PrivateRuntime {
     int n = 0;
     for (final String c in await privateCircles()) {
       try {
-        if (await consentBlocks(c)) continue;
         if (await placesNeedSharing(c)) n += await sharePlaces(c);
       } catch (_) {
         // no key yet / offline: the next app open tries again
@@ -1457,6 +1453,44 @@ class PrivateRuntime {
     } catch (_) {}
   }
 
+  /// The relay would not take this phone's SERVER copy of a position (its signed choice names a server key the relay no
+  /// longer accepts, or the policy changed). From now on this phone seals on the phone line for this circle (the queue
+  /// turns the waiting server copies into their phone-line twins and sends them: no position is dropped, none goes out
+  /// in the clear), and the phone repairs its own choice in the background.
+  Future<void> _laneRefused(String circleId, String code) async {
+    try {
+      await lanes.store.suspendServerLane(circleId);
+    } catch (_) {}
+    unawaited(() async {
+      try {
+        await _declareCaps();
+        await lanesService.selfHeal(circleId);
+      } catch (_) {}
+    }());
+  }
+
+  /// The relay refused phone-line items because the circle requires server processing and this member has no valid
+  /// server lane (it never signed, or the 72 hour catch-up after a server key change is over, or the circle's policy waits for an admin phone). The phone-line twin
+  /// is NOT a fallback here: this phone signs its own server lane for the current server key (bounded by the
+  /// re-sign interval, no loop). If it cannot (an app that predates `required_server`, no server key held), the
+  /// processing screen and the delivery check say so in words.
+  final Map<String, DateTime> _requiredAskedAt = <String, DateTime>{};
+  Future<void> _requiredServerRefused(String circleId) async {
+    // Throttled per circle: every refused upload would otherwise start a refresh (several requests) even when the phone
+    // cannot sign (no server key held, a policy waiting for an admin phone).
+    final DateTime now = DateTime.now();
+    final DateTime? last = _requiredAskedAt[circleId];
+    if (last != null && now.difference(last) < const Duration(minutes: 2)) return;
+    _requiredAskedAt[circleId] = now;
+    unawaited(() async {
+      try {
+        await _declareCaps();
+        final AutoApplyOutcome o = await lanesService.signRequiredLaneIfDue(circleId);
+        if (o == AutoApplyOutcome.applied) await queue.clearUndelivered(circleId); // signed: what waits goes out now
+      } catch (_) {}
+    }());
+  }
+
   /// Tells the server what this app understands, once per phone key, so a key
   /// registered by an older build is also known to read encrypted chat.
   Future<void> _declareCaps() async {
@@ -1530,9 +1564,14 @@ class PrivateRuntime {
     if (stale.isNotEmpty) await resendLastFix(circles: stale);
     await flush();
     await tickPlaces();
+    // A phone that kept using a key an owner reset has since revoked reads the vault's current identity again.
+    await service.dropStaleIdentity();
+    await _declareCaps(); // the server only accepts a lane pref from a phone that declared it can read the server line
     for (final String id in privs) {
       try {
-        await lanesService.maintain(id);
+        // Repairs by itself after a key reset or a replaced server key: re-signs this member's own choice, the admin's
+        // policy, wraps the new server key generation. Then the usual duties (maintain runs inside).
+        await lanesService.selfHeal(id);
       } catch (_) {
         // offline or an older server: the last verified lane facts stay in force
       }
@@ -1606,13 +1645,14 @@ class PrivateRuntime {
     for (final String c in circles) {
       String kind = 'phone';
       int gen = 0, prefGen = 0;
-      bool noSk = false;
+      bool noSk = false, refused = false;
       try {
         final LaneStatus st = await lanes.store.status(c);
-        if (await consentBlocks(c)) {
-          kind = 'consent';
-        } else if (st == LaneStatus.verificationFailed) {
+        refused = await lanes.store.serverLaneSuspended(c);
+        if (st == LaneStatus.verificationFailed) {
           kind = 'failed';
+        } else if (st == LaneStatus.serverPending) {
+          kind = 'pending'; // the admin requires server processing; this phone signs it by itself, sealing on the phone line meanwhile, which the relay refuses for positions
         } else {
           final LaneChoice own = await lanes.ownLane(c);
           if (own.line == E2ee.lineServer && await lanes.serverLaneAllowed(c)) {
@@ -1627,7 +1667,15 @@ class PrivateRuntime {
       try {
         sealed = await lastSealedAt(c);
       } catch (_) {}
+      bool noCircleKey = false, waitingApproval = false;
+      try {
+        noCircleKey = await keys.latestEpoch(c) < 1;
+        waitingApproval = (await kv.getFresh(_approvalWaitKey(c))) == '1';
+      } catch (_) {}
       out.add(PrivateCircleDelivery(
+        circleKeyMissing: noCircleKey,
+        awaitingApproval: waitingApproval,
+        serverCopyRefused: refused,
         laneKind: kind,
         serverGen: gen,
         prefGen: prefGen,

@@ -4,6 +4,10 @@ import 'package:openfamily/models/circle.dart';
 import 'package:openfamily/screens/circle_detail_screen.dart';
 import 'package:openfamily/screens/circles_screen.dart';
 import 'package:openfamily/services/circle_service.dart';
+import 'package:openfamily/services/e2ee/e2ee_crypto.dart';
+import 'package:openfamily/services/e2ee/processing_controller.dart';
+
+import '../support/fake_processing_controller.dart';
 import 'package:openfamily/theme/app_theme.dart';
 
 class FakeCircleService implements CircleService {
@@ -298,5 +302,55 @@ void main() {
     ));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
+  });
+
+  group('Require server processing (owner switch)', () {
+    Future<FakeProcessingController> pump(WidgetTester tester, FakeCircleService svc, ProcessingSnapshot snap, {String mode = 'private'}) async {
+      final FakeProcessingController c = FakeProcessingController(snap);
+      tester.view.physicalSize = const Size(800, 3000);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final Circle circle = _circle(svc, 0).copyWith(e2eeMode: mode);
+      await tester.pumpWidget(_app(CircleDetailScreen(circle: circle, service: svc, processing: c)));
+      await tester.pumpAndSettle();
+      return c;
+    }
+
+    testWidgets('the admin of a Private circle with a server key sees one switch with the plain explanation; it calls setRequireServer',
+        (WidgetTester tester) async {
+      final FakeCircleService svc = FakeCircleService();
+      final FakeProcessingController c = await pump(tester, svc, FakeProcessingController.snapshot());
+      expect(find.byKey(const Key('circle-require-server')), findsOneWidget);
+      expect(find.text('Require server processing'), findsOneWidget);
+      expect(find.text("Everyone's phone sends its location to your Orbitly server for processing. Members cannot turn it off."), findsOneWidget);
+      await tester.tap(find.descendant(of: find.byKey(const Key('circle-require-server')), matching: find.byType(Switch)));
+      await tester.pumpAndSettle();
+      expect(c.calls, contains('require:true'));
+      final Switch sw = tester.widget<Switch>(find.descendant(of: find.byKey(const Key('circle-require-server')), matching: find.byType(Switch)));
+      expect(sw.value, isTrue);
+      await tester.tap(find.descendant(of: find.byKey(const Key('circle-require-server')), matching: find.byType(Switch)));
+      await tester.pumpAndSettle();
+      expect(c.calls, contains('require:false'));
+    });
+
+    testWidgets('hidden for a member, a normal circle, and without a server key', (WidgetTester tester) async {
+      final FakeCircleService svc = FakeCircleService();
+      await pump(tester, svc, FakeProcessingController.snapshot(admin: false));
+      expect(find.byKey(const Key('circle-require-server')), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+      await pump(tester, svc, FakeProcessingController.snapshot(), mode: 'off');
+      expect(find.byKey(const Key('circle-require-server')), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+      await pump(tester, svc, FakeProcessingController.snapshot(assist: false, serverKey: false));
+      expect(find.byKey(const Key('circle-require-server')), findsNothing);
+    });
+
+    testWidgets('shown as on when the circle already requires it', (WidgetTester tester) async {
+      final FakeCircleService svc = FakeCircleService();
+      await pump(tester, svc, FakeProcessingController.snapshot(optOut: E2ee.optOutRequiredServer));
+      final Switch sw = tester.widget<Switch>(find.descendant(of: find.byKey(const Key('circle-require-server')), matching: find.byType(Switch)));
+      expect(sw.value, isTrue);
+    });
   });
 }

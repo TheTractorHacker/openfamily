@@ -66,6 +66,27 @@ you are responsible for backups yourself, for example with
 ./scripts/restore.sh --from-local latest         # newest backup taken by the backup service
 ```
 
+## The server's own key
+
+The Orbitly server has its own identity (the key every phone pinned when an admin approved the server). It lives
+in the Docker volume `server_device` (`/data/server-device`) and survives restarts, image rebuilds and
+container recreation. It is created once and never regenerated while it exists. It is **not** in the database,
+so the database backup does not contain it.
+
+- `./scripts/backup.sh` with `BACKUP_PASSPHRASE_FILE` set also writes
+  `backups/openfamily-<time>.server-key.tar.enc` (encrypted with the same passphrase). Without a passphrase the
+  key directory is **not** saved: the secret key never goes into an unencrypted file.
+- The nightly **backup service** does **not** include it (it runs as another user and cannot read the key
+  directory). Honest gap: if you only use the backup service and lose the `server_device` volume, the server makes
+  a new key and an admin phone has to approve it again (a prompt on the admin's phone, compare the code); the family's
+  phones then pick it up by themselves. Run `./scripts/backup.sh` with a passphrase now and then, or copy the volume
+  yourself.
+- Restore the key onto a new machine after restoring the database:
+  `BACKUP_PASSPHRASE_FILE=... ./scripts/restore-server-key.sh backups/<file>.server-key.tar.enc`.
+- Never run `docker compose down -v` (or `docker volume rm`) unless you want a new server key.
+- To replace the key on purpose (for example you think the volume leaked), use **Replace the server key** as the
+  server's admin; nothing else changes the key.
+
 ## Do not forget
 
 - Back up your `.env` (it holds the secrets that unlock sealed settings).

@@ -41,7 +41,7 @@ class _CreateCircleScreenState extends State<CreateCircleScreen> {
   NewCircleMode _mode = NewCircleMode.normal;
   bool _modeTouched = false;
   bool _serverAvailable = false;
-  bool _requireServer = false;
+  bool _requireServer = true; // default ON for a new Private circle with the server; the owner can switch it off here or later
 
   NewCircleSetup? _setupOrNull() {
     try {

@@ -203,6 +203,16 @@ void main() {
       expect((await sealFix(b)).seq, 1);
     });
 
+    test('a device id restored after a reinstall starts above its floor, an existing counter is kept', () async {
+      await senderKv.set(ChannelSealer.seqFloorKey(a.deviceId), '1700000000000');
+      expect((await sealFix(a)).seq, 1700000000001);
+      expect((await sealFix(a)).seq, 1700000000002);
+      // Another device id has no floor; a counter that already exists is never lowered or moved by it.
+      expect((await sealFix(b)).seq, 1);
+      await senderKv.set(ChannelSealer.seqFloorKey(b.deviceId), '5');
+      expect((await sealFix(b)).seq, 2);
+    });
+
     test('a member cannot forge an item from another member\'s phone', () async {
       // C shares the circle key and knows A's device id, but only has its own signing key.
       dir.devices[c.deviceId] = c.key();

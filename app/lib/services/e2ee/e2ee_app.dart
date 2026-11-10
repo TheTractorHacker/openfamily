@@ -5,6 +5,9 @@ import 'e2ee_api.dart';
 import 'e2ee_service.dart';
 import 'e2ee_trust.dart';
 import 'e2ee_vault.dart';
+import 'key_backup.dart';
+import 'private_channel.dart';
+import 'private_runtime.dart';
 
 /// SharedPreferences-backed [TrustKv]. Holds public fingerprints and the pinned
 /// log head only. (Cleared with app data, which also clears the private keys.)
@@ -30,7 +33,24 @@ class E2eeApp {
         vault: SecureVault(),
         trust: TrustStore(PrefsTrustKv()),
         userIdProvider: () => CircleService.instance.myUserId(),
+        keyBackup: keyBackup,
+        onPlatformRestore: (String deviceId) => const PrefsChannelKv()
+            .set(ChannelSealer.seqFloorKey(deviceId), '${ChannelSealer.seqFloorNow(DateTime.now())}'),
       ));
+
+  static KeyBackup? _keyBackup;
+  static bool _keyBackupMade = false;
+
+  /// "Keep this phone's key safe through reinstalls" (Android Block Store, iOS Keychain), or null where the
+  /// platform has no such store. Tests inject theirs through [override] instead.
+  static KeyBackup? get keyBackup {
+    if (!_keyBackupMade) {
+      _keyBackupMade = true;
+      final PlatformKeyStore? store = KeyBackup.platformStore();
+      _keyBackup = store == null ? null : KeyBackup(store: store);
+    }
+    return _keyBackup;
+  }
 
   static void reset() => _service = null;
 }
