@@ -74,7 +74,7 @@ phone** (or **Encryption keys, Link another phone**) on each. The screen first a
    **Finish linking**. The new phone says **This phone is linked**.
 
 No other phone? Restore with your recovery phrase instead. Without either, **No other phone?** on the same
-screen offers **Reset my keys** (see [If you reset your encryption keys](server-processing.md#if-you-reset-your-encryption-keys)).
+screen offers **Reset my keys** (see [If you reset your encryption keys](server-processing.md#if-you-reset-your-encryption-keys-or-replace-your-phone)).
 
 Deleting and reinstalling the app keeps your key: see
 [Reinstalling Orbitly](reinstalling.md).
