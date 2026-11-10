@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:openfamily/models/circle.dart';
+import 'package:openfamily/services/diagnostics/diag_model.dart' show PrivateCircleDelivery;
 import 'package:openfamily/services/e2ee/e2ee_crypto.dart';
 import 'package:openfamily/services/e2ee/e2ee_models.dart';
 import 'package:openfamily/services/e2ee/e2ee_service.dart';
@@ -242,6 +243,29 @@ void main() {
       expect(await bob.service.heldServerGens(priv), <int>[1, 2]);
       // The gen-2 key differs from gen 1 (a real rotation).
       expect(E2ee.hex((await bob.service.serverKey(priv, 2))!) == E2ee.hex((await bob.service.serverKey(priv, 1))!), isFalse);
+    });
+
+    test('a pref that names an OLDER server-key generation still delivers: server line, current gen, shown in diagnostics', () async {
+      // The production case: the circle's policy moved to a newer SK generation after this member signed the pref.
+      await policyOn();
+      await bobOptsIn();
+      await alice.lanes.maintain(priv);
+      server.removeMember(priv, uC);
+      await alice.lanes.maintain(priv); // rotates: SK gen 2, Bob's pref still names gen 1
+      expect(server.circles[priv]!.skGen, 2);
+      await bob.lanes.refresh(priv);
+      expect(await bob.lanes.status(priv), LaneStatus.serverAssisted);
+      expect((await bob.ownLane()).skGen, 2, reason: 'the sealer uses the policy generation, not the pref one');
+      expect(await bob.store.ownPrefGen(priv), 1);
+      channel.items.clear();
+      await sealFixes(bob, 2);
+      expect(await bob.runtime.queue.length(), 2, reason: 'fixes are sealed and queued, never skipped');
+      expect(await bob.runtime.flush(), 2);
+      expect(channel.items.where((WireItem i) => i.purpose == ChannelPurpose.fix).every((WireItem i) => i.line == E2ee.lineServer && i.epoch == 2), isTrue);
+      final PrivateCircleDelivery c = (await bob.runtime.deliveryFacts()).circles.single;
+      expect(c.laneLabel, 'server gen 2 (pref names gen 1)');
+      expect(c.stalePref, isTrue);
+      expect(c.queued, 0);
     });
 
     test('policy off: server key loses its wraps, every consent ends, nobody is silently re-opted-in later', () async {

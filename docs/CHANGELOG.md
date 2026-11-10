@@ -10,6 +10,17 @@ for the **last 5 minor versions** of the app (see
 [API compatibility](api-compat.md)), so you can update the server first and
 the phones afterwards.
 
+## v0.26.23 (2026-11-10)
+
+App-only release (the server needs no change). Install over the current app.
+
+- **A phone in a Private circle can no longer stop sending its position without a word.** Several ways it could go quiet while still looking alive (its regular check-ins kept arriving) are closed:
+  - Encrypting a position and uploading the encrypted queue each run one at a time. If one step never finished (for example a call to the phone's key store that never answered in the background), every later position waited behind it until the phone restarted: nothing was encrypted, nothing was sent and no error was recorded. Each step now gives up after a time limit, notes why, and the next position goes through.
+  - The background service kept the phone's upload key from the moment it started. After signing in again, which gives the phone a new upload key and voids the old one, its encrypted uploads were refused with "not signed in" and kept for later, forever. It now reads the current key before every upload.
+  - A background service that had not yet received a position (a phone lying still after a restart or a sign-in) never sent what was already waiting. Its regular check-in now sends the queue too.
+  - A left-over "consent required" state from an earlier circle setting no longer stops the phone from encrypting, as long as the circle's current, verified setting lets members choose. While the circle really requires server processing and you have not agreed, nothing is sent, as before, and the report now says so.
+- **The Diagnostics report has a new "Private circle delivery" section.** It shows how positions are sent (encrypted only, or both), and for each Private circle: whether it goes through the phone or the server (and which server key generation), how many updates are waiting, how many positions are waiting for a key, how long ago the last one was encrypted, how long ago the server last accepted an upload, and the last problem as a short code with its time (for example `http_401` or `seal_timeout`). It warns when the phone has fresh positions but has not encrypted one for half an hour. It holds counts, times and codes only: no places, positions, names or ids. The admin Fleet health page does not show it yet (that needs a server update).
+
 ## v0.26.22 (2026-11-10)
 
 Server only: update the server, no app update needed.

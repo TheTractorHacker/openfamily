@@ -218,6 +218,10 @@ class DiagnosticsProbe {
       }
     }
 
+    // The Private pipeline (counts, times, short codes): not in the light probe, which feeds the fleet report.
+    final PrivateDeliveryFacts? delivery =
+        hasPrivate && !light ? await _try(() => PrivateRuntime.instance.deliveryFacts()) : null;
+
     return DiagFacts(
       now: DateTime.now().toUtc(),
       isAndroid: _android,
@@ -255,6 +259,7 @@ class DiagnosticsProbe {
       vaultNeedsUnlock: needsUnlock,
       vaultUserAuth: userAuth,
       deviceIdSuffix: deviceId == null || deviceId.length < 4 ? '' : deviceId.substring(deviceId.length - 4),
+      privateDelivery: delivery,
     );
   }
 }

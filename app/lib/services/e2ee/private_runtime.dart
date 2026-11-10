@@ -37,6 +37,7 @@ import '../chat/chat_store.dart';
 import '../chat_service.dart' show ChatEvents;
 import '../notification_prefs_service.dart' show NotificationNames;
 import '../perf/perf_profile.dart';
+import '../diagnostics/diag_model.dart' show PrivateCircleDelivery, PrivateDeliveryFacts;
 
 /// SharedPreferences-backed [ChannelKv]. The queue, cursors, sequence numbers,
 /// dedupe windows and the on-device history live here. Everything stored is
@@ -241,25 +242,47 @@ class HttpChannelApi implements ChannelApi {
 /// per-device ingest key (the session token is not reachable there) and only
 /// uploads. Pulling needs the session and happens in the foreground.
 class IngestKeyChannelApi implements ChannelApi {
-  const IngestKeyChannelApi(this.apiBaseUrl, this.headers);
+  const IngestKeyChannelApi(this.apiBaseUrl, this.headers, {this.fresh});
   final String apiBaseUrl;
   final Map<String, String> headers;
 
+  /// Reads the CURRENT base URL and ingest-key headers before every upload. The background isolate keeps one
+  /// runtime for its whole life (days), and a sign-in that registers the device again issues a new ingest key and
+  /// voids the old one on the server: with the headers fixed at the first fix, every upload of that isolate was
+  /// answered 401 (refused before any handler, so the server logged nothing) and kept "for later" forever, while
+  /// the heartbeat, which re-reads the key each tick, kept the phone looking alive. Null: no credentials (signed
+  /// out): nothing is sent and the items stay queued.
+  final Future<({String apiBaseUrl, Map<String, String> headers})?> Function()? fresh;
+
   @override
   Future<List<BatchResult>> postBatch(String circleId, String deviceId, List<WireItem> items) async {
+    String base = apiBaseUrl;
+    Map<String, String> h = headers;
+    final Future<({String apiBaseUrl, Map<String, String> headers})?> Function()? read = fresh;
+    if (read != null) {
+      final ({String apiBaseUrl, Map<String, String> headers})? c;
+      try {
+        c = await read().timeout(const Duration(seconds: 15));
+      } catch (_) {
+        throw const UploadUnavailable('credentials');
+      }
+      if (c == null) throw const UploadUnavailable('credentials');
+      base = c.apiBaseUrl;
+      h = c.headers;
+    }
     final http.Response r;
     try {
       r = await http
-          .post(Uri.parse('$apiBaseUrl/circles/$circleId/e2ee/batch'),
-              headers: headers,
+          .post(Uri.parse('$base/circles/$circleId/e2ee/batch'),
+              headers: h,
               body: jsonEncode(<String, dynamic>{
                 'sender_device_id': deviceId,
                 'items': items.map((WireItem i) => i.toUpload()).toList(),
               }))
           .timeout(const Duration(seconds: 15));
     } catch (e) {
-      // No connection / timeout in the background: not the batch's fault.
-      throw UploadUnavailable('$e');
+      // No connection / timeout in the background: not the batch's fault. (A code, not the error text: it may name the host.)
+      throw const UploadUnavailable('offline');
     }
     if (r.statusCode >= 200 && r.statusCode < 300) {
       final List<dynamic> list = ((jsonDecode(r.body) as Map<String, dynamic>)['results'] as List<dynamic>?) ?? <dynamic>[];
@@ -399,7 +422,11 @@ class PrivateRuntime {
   /// uploads use the ingest key, nothing needs the app session. If the vault is
   /// unreachable from that isolate, fixes are parked and sealed by the
   /// foreground runtime later (never sent in plaintext).
-  factory PrivateRuntime.background({required String apiBaseUrl, required Map<String, String> headers}) {
+  factory PrivateRuntime.background({
+    required String apiBaseUrl,
+    required Map<String, String> headers,
+    Future<({String apiBaseUrl, Map<String, String> headers})?> Function()? freshCredentials,
+  }) {
     late final E2eeService svc;
     svc = E2eeService(
       api: _OfflineE2eeApi(),
@@ -411,7 +438,7 @@ class PrivateRuntime {
       service: svc,
       api: _OfflineE2eeApi(),
       kv: const PrefsChannelKv(),
-      channel: IngestKeyChannelApi(apiBaseUrl, headers),
+      channel: IngestKeyChannelApi(apiBaseUrl, headers, fresh: freshCredentials),
       directory: _NoDirectory(),
       historyWriteBehind: null, // the headless isolate may be killed at any moment: write at once
     );
@@ -643,11 +670,37 @@ class PrivateRuntime {
     unawaited(_runSeals());
   }
 
+  /// Longest one fix may take to be sealed and queued. [_sealRunning] lets one seal run at a time, so a seal that
+  /// never finishes (a key-store or preferences call of a background engine that never answers) used to stop every
+  /// later fix of this isolate for its whole life: nothing sealed, nothing parked, no error, the dot frozen on the
+  /// others' maps. After this long the fix is given up on (it may still finish), the reason is recorded and the next
+  /// fix is sealed.
+  Duration sealTimeout = const Duration(minutes: 2);
+
+  /// Longest one upload round may run before the next [flush] may start a new one (same reasoning as [sealTimeout];
+  /// a round that finishes late is harmless: the relay drops duplicates by circle, device and seq).
+  Duration flushTimeout = const Duration(minutes: 10);
+
+  /// Seals given up on after [sealTimeout] since this runtime started (diagnostics, tests).
+  int sealTimeouts = 0;
+
+  Future<void> _sealBounded(Map<String, dynamic> loc, {Set<String>? only, bool resend = false}) async {
+    bool timedOut = false;
+    await _sealFix(loc, only: only, resend: resend).timeout(sealTimeout, onTimeout: () {
+      timedOut = true;
+    });
+    if (timedOut) {
+      sealTimeouts++;
+      await _noteSealError(TimeoutException('seal')).timeout(const Duration(seconds: 10), onTimeout: () {});
+    }
+  }
+
   Future<void> _runSeals() async {
     try {
       while (_sealWaiting.isNotEmpty) {
-        await _sealFix(_sealWaiting.removeAt(0)); // never throws
+        await _sealBounded(_sealWaiting.removeAt(0)); // never throws
       }
+    } catch (_) {
     } finally {
       _sealRunning = false;
     }
@@ -704,7 +757,7 @@ class PrivateRuntime {
         try {
           final Map<String, dynamic> m = (e as Map<dynamic, dynamic>).cast<String, dynamic>();
           final Object? only = m['for'];
-          await _sealFix(m, only: only is List ? only.cast<String>().toSet() : null);
+          await _sealBounded(m, only: only is List ? only.cast<String>().toSet() : null);
           n++;
         } catch (_) {}
       }
@@ -732,7 +785,7 @@ class PrivateRuntime {
         if (only != null && !only.contains(circle)) continue;
         // A circle that requires server processing and this member has not consented to:
         // nothing is sealed or sent for it (the server would refuse a phone-lane item anyway).
-        if (await lanes.store.status(circle) == LaneStatus.consentRequired) continue;
+        if (await consentBlocks(circle)) continue;
         final WireItem it;
         try {
           it = await sealer.seal(me, circle, ChannelPurpose.fix, body, at: ts);
@@ -771,6 +824,22 @@ class PrivateRuntime {
     }
   }
 
+  /// Whether this member's fixes must not be sealed for [circleId]: the stored status says consent is required AND
+  /// the stored verified policy still says `required_server` with assistance on. The status is only rewritten by a
+  /// successful verification pass; a status left over from an earlier policy (the admin has since allowed opting
+  /// out, or turned assistance off) while every later pass failed or never ran used to keep the phone sealing
+  /// NOTHING for the circle, with no error and nothing parked. Such a stale status no longer counts: the fix is
+  /// sealed in this member's verified lane as usual (the phone line unless their own signed pref says server).
+  Future<bool> consentBlocks(String circleId) async {
+    try {
+      if (await lanes.store.status(circleId) != LaneStatus.consentRequired) return false;
+      final StoredPolicy p = await lanes.store.policy(circleId);
+      return p.assist && p.memberOptOut == E2ee.optOutRequiredServer;
+    } catch (_) {
+      return false;
+    }
+  }
+
   static const String _sealErrKey = 'sealerr/v1';
   bool _sealErrSet = true; // unknown at start: the first success clears whatever an earlier run left
 
@@ -780,7 +849,7 @@ class PrivateRuntime {
       final LocalKeyException? k = localKeyProblemOf(e);
       await kv.set(_sealErrKey, jsonEncode(<String, dynamic>{
         'at': clock.now().toUtc().toIso8601String(),
-        'problem': k?.problem.name ?? 'other',
+        'problem': k?.problem.name ?? (e is TimeoutException ? 'timeout' : 'other'),
         'cause': k?.cause ?? e.runtimeType.toString(),
       }));
       _sealErrSet = true;
@@ -855,7 +924,7 @@ class PrivateRuntime {
       final Map<String, dynamic> loc = (jsonDecode(raw) as Map<String, dynamic>).cast<String, dynamic>();
       final DateTime? ts = DateTime.tryParse((loc['ts'] as String?) ?? '');
       if (ts == null || clock.now().difference(ts) > maxAge) return false;
-      await _sealFix(loc, resend: true, only: circles);
+      await _sealBounded(loc, resend: true, only: circles);
       return true;
     } catch (_) {
       return false;
@@ -944,8 +1013,19 @@ class PrivateRuntime {
     try {
       do {
         _flushAgain = false;
-        n += await _flushOnce();
+        bool timedOut = false;
+        n += await _flushOnce().timeout(flushTimeout, onTimeout: () {
+          timedOut = true;
+          return 0;
+        });
+        if (timedOut) {
+          // The round is still stuck somewhere: release the one-upload-at-a-time flag (the next flush starts afresh)
+          // and say so in the diagnostic report.
+          await queue.noteUpload(code: 'flush_timeout').timeout(const Duration(seconds: 10), onTimeout: () {});
+          break;
+        }
       } while (_flushAgain);
+    } catch (_) {
     } finally {
       _flushing = null;
     }
@@ -971,7 +1051,8 @@ class PrivateRuntime {
         }
       }
       return n;
-    } catch (_) {
+    } catch (e) {
+      await queue.noteUpload(code: 'flush_${localKeyProblemOf(e)?.problem.name ?? 'error'}');
       return 0;
     }
   }
@@ -989,7 +1070,7 @@ class PrivateRuntime {
   Future<Set<String>> phoneOnlyCircles() async {
     final Set<String> out = <String>{};
     for (final String c in await privateCircles()) {
-      if (await lanes.store.status(c) == LaneStatus.consentRequired) continue;
+      if (await consentBlocks(c)) continue;
       if ((await lanes.ownLane(c)).line == E2ee.linePhone) out.add(c);
     }
     return out;
@@ -1280,7 +1361,7 @@ class PrivateRuntime {
     int n = 0;
     for (final String c in await privateCircles()) {
       try {
-        if (await lanes.store.status(c) == LaneStatus.consentRequired) continue;
+        if (await consentBlocks(c)) continue;
         if (await placesNeedSharing(c)) n += await sharePlaces(c);
       } catch (_) {
         // no key yet / offline: the next app open tries again
@@ -1498,6 +1579,88 @@ class PrivateRuntime {
       lastPulledCursor: await sync.cursor(circleId),
       undelivered: und?.count ?? 0,
       undeliveredCode: und?.code ?? '',
+    );
+  }
+
+  /// The "Private circle delivery" section of the diagnostic report: uplink mode, the lane, queued and parked
+  /// counts and the last seal per Private circle, the newest GPS fix, the last accepted upload and the last seal or
+  /// upload problem. Counts, times and short codes only (no ids, names, positions or content). Never throws.
+  Future<PrivateDeliveryFacts> deliveryFacts() async {
+    final UplinkMode mode = await uplinkMode();
+    final List<String> circles = (await privateCircles()).toList()..sort();
+    Map<String, int> queued = <String, int>{};
+    try {
+      queued = await queue.countByCircle();
+    } catch (_) {}
+    final List<Set<String>?> parked = <Set<String>?>[];
+    try {
+      final String? raw = await kv.getFresh(_parkedKey);
+      if (raw != null && raw.isNotEmpty) {
+        for (final dynamic e in jsonDecode(raw) as List<dynamic>) {
+          final Object? only = e is Map ? e['for'] : null;
+          parked.add(only is List ? only.map((Object? x) => '$x').toSet() : null);
+        }
+      }
+    } catch (_) {}
+    final List<PrivateCircleDelivery> out = <PrivateCircleDelivery>[];
+    for (final String c in circles) {
+      String kind = 'phone';
+      int gen = 0, prefGen = 0;
+      bool noSk = false;
+      try {
+        final LaneStatus st = await lanes.store.status(c);
+        if (await consentBlocks(c)) {
+          kind = 'consent';
+        } else if (st == LaneStatus.verificationFailed) {
+          kind = 'failed';
+        } else {
+          final LaneChoice own = await lanes.ownLane(c);
+          if (own.line == E2ee.lineServer && await lanes.serverLaneAllowed(c)) {
+            kind = 'server';
+            gen = own.skGen;
+            prefGen = await lanes.store.ownPrefGen(c);
+            noSk = await _keyCache.serverKey(c, gen) == null;
+          }
+        }
+      } catch (_) {}
+      DateTime? sealed;
+      try {
+        sealed = await lastSealedAt(c);
+      } catch (_) {}
+      out.add(PrivateCircleDelivery(
+        laneKind: kind,
+        serverGen: gen,
+        prefGen: prefGen,
+        serverKeyMissing: noSk,
+        queued: queued[c] ?? 0,
+        parked: parked.where((Set<String>? f) => f == null || f.contains(c)).length,
+        lastSealedAt: sealed,
+      ));
+    }
+    DateTime? fixAt;
+    try {
+      final String? raw = await kv.getFresh(_lastFixKey);
+      if (raw != null) fixAt = DateTime.tryParse('${(jsonDecode(raw) as Map<String, dynamic>)['ts']}')?.toUtc();
+    } catch (_) {}
+    final ({DateTime? okAt, String code, DateTime? codeAt}) up = await queue.uploadStatus();
+    final ({DateTime? at, String problem, String cause})? se = await lastSealError();
+    String code = up.code;
+    DateTime? codeAt = up.codeAt;
+    if (se != null && (codeAt == null || (se.at != null && se.at!.isAfter(codeAt)))) {
+      code = 'seal_${se.problem}';
+      codeAt = se.at;
+    }
+    return PrivateDeliveryFacts(
+      uplink: switch (mode) {
+        UplinkMode.sealedOnly => 'sealed only',
+        UplinkMode.both => 'both',
+        UplinkMode.plaintextOnly => 'plaintext only',
+      },
+      circles: out,
+      lastFixAt: fixAt,
+      lastUploadOkAt: up.okAt,
+      lastErrorCode: code,
+      lastErrorAt: codeAt,
     );
   }
 

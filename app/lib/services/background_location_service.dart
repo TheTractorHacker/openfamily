@@ -85,9 +85,12 @@ Future<void> onHeartbeatTick() async {
           _sendLocationBatch(credentials, batch),
     );
     // Private circles: upload sealed fixes still in the queue (and seal the
-    // parked ones whose key has arrived) from the background too.
-    final PrivateRuntime? rt = _privateRuntime;
-    if (rt != null) await rt.flush();
+    // parked ones whose key has arrived) from the background too. The runtime
+    // is created here if no fix has reached this isolate yet: a fresh isolate
+    // (after a restart or a sign-in) on a phone lying still used to leave the
+    // queue untouched until the first accepted fix, however long that took.
+    final PrivateRuntime rt = _runtimeFor(credentials);
+    if ((await rt.privateCircles()).isNotEmpty) await rt.flush();
   } catch (_) {
     // Never throw from the background callback.
   }
@@ -297,12 +300,26 @@ bool _iosGate(LocationDto location, DateTime now) {
 
 PrivateRuntime? _privateRuntime;
 
+/// This isolate's Private runtime (one for its whole life). Its uploads read
+/// the CURRENT ingest key before every request: a sign-in that registered the
+/// device again voided the key this isolate started with.
+PrivateRuntime _runtimeFor(_BackgroundCredentials c) =>
+    _privateRuntime ??= PrivateRuntime.background(
+      apiBaseUrl: c.apiBaseUrl,
+      headers: _ingestHeaders(c),
+      freshCredentials: () async {
+        final _BackgroundCredentials? now = await _readCredentials();
+        return now == null
+            ? null
+            : (apiBaseUrl: now.apiBaseUrl, headers: _ingestHeaders(now));
+      },
+    );
+
 /// Never throws. On failure the plaintext path is kept: the server refuses it
 /// (409) for a user whose circles are all private, so nothing readable leaves.
 Future<bool> _routePrivate(_BackgroundCredentials c, Map<String, dynamic> body) async {
   try {
-    final PrivateRuntime rt = _privateRuntime ??=
-        PrivateRuntime.background(apiBaseUrl: c.apiBaseUrl, headers: _ingestHeaders(c));
+    final PrivateRuntime rt = _runtimeFor(c);
     return await rt.routeFix(body);
   } catch (_) {
     return true;
