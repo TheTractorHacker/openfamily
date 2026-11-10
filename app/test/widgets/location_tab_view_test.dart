@@ -152,7 +152,15 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Soccer team'), findsOneWidget);
-    expect(find.textContaining('Shown on the map'), findsOneWidget);
+    // The row no longer spells "Shown on the map" out (run-on line); the
+    // trailing check carries it, for sighted users and for TalkBack.
+    expect(
+      find.byWidgetPredicate(
+        (Widget w) => w is Icon && w.semanticLabel == 'Shown on the map',
+      ),
+      findsOneWidget,
+    );
+    expect(find.textContaining('Shown on the map'), findsNothing);
 
     await tester.tap(find.text('Soccer team'));
     await tester.pumpAndSettle();
@@ -408,7 +416,7 @@ void main() {
       expect(find.text('Location sharing: paused'), findsOneWidget);
     });
 
-    testWidgets('sheet header opens details of the selected circle without '
+    testWidgets('the sheet row opens details of the selected circle without '
         'changing selection', (tester) async {
       _phone(tester);
       final calls = _Calls();
@@ -459,8 +467,10 @@ void main() {
       await tester.pump();
       await tester.tap(find.text('Soccer team'));
       await tester.pumpAndSettle();
-      // Pill line and sheet chip.
-      expect(find.text('Location sharing: paused'), findsNWidgets(2));
+      // The pill says it once; the sheet no longer repeats it as a chip. The
+      // paused circle's row says it in its facts.
+      expect(find.text('Location sharing: paused'), findsOneWidget);
+      expect(find.textContaining('Sharing paused'), findsWidgets);
     });
 
     testWidgets('"All circles" scope has no single-circle header', (

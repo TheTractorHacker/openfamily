@@ -303,7 +303,6 @@ class _LocationTabViewState extends State<LocationTabView> {
         return SafeArea(
           child: DsSheetScaffold(
             title: 'Your circles',
-            header: _circleSheetHeader(ctx),
             child: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -311,9 +310,8 @@ class _LocationTabViewState extends State<LocationTabView> {
                   if (circles.isEmpty)
                     DsListRow(
                       title: widget.circleName,
-                      subtitle: 'Shown on the map',
                       leading: DsListRow.iconTile(ctx, Icons.groups_outlined),
-                      trailing: Icon(Icons.check, color: brand.accentInk),
+                      trailing: _shownCheck(brand),
                       onTap: () => Navigator.of(ctx).pop(),
                     ),
                   if (circles.length > 1 && widget.onSelectCircle != null)
@@ -322,7 +320,7 @@ class _LocationTabViewState extends State<LocationTabView> {
                       subtitle: 'Everyone from every circle',
                       leading: DsListRow.iconTile(ctx, Icons.public),
                       trailing: widget.selectedCircleId == 'all'
-                          ? Icon(Icons.check, color: brand.accentInk)
+                          ? _shownCheck(brand)
                           : null,
                       onTap: () {
                         Navigator.of(ctx).pop();
@@ -332,32 +330,38 @@ class _LocationTabViewState extends State<LocationTabView> {
                   for (final Circle c in circles)
                     DsListRow(
                       title: c.name,
-                      subtitle:
-                          '${c.memberCount} '
-                          '${c.memberCount == 1 ? 'person' : 'people'}'
-                          '${c.isAdmin ? ' - Admin' : ''}'
-                          '${c.isPrivate ? (c.e2eeServerMember ? ' - Server can read' : c.serverAssist ? ' - Private + server' : ' - End-to-end encrypted') : ''}'
-                          '${c.sharingEnabled ? '' : ' - Sharing paused'}'
-                          '${_isActive(c) ? ' - Shown on the map' : ''}',
+                      // Facts only; the check says "shown on the map", and the
+                      // map header badge is the one place for Private + server.
+                      subtitle: dsMeta(<String?>[
+                        '${c.memberCount} '
+                            '${c.memberCount == 1 ? 'person' : 'people'}',
+                        if (c.isAdmin) 'Admin',
+                        if (!c.sharingEnabled) 'Sharing paused',
+                      ]),
                       leading: _circleLeading(ctx, c),
                       trailing: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: <Widget>[
-                          if (_isActive(c))
-                            Icon(Icons.check, color: brand.accentInk),
+                          if (_isActive(c)) _shownCheck(brand),
                           if (widget.onOpenCircle != null)
-                            IconButton(
-                              key: ValueKey<String>('circle-info-${c.id}'),
-                              tooltip: 'Open details for ${c.name}',
-                              constraints: const BoxConstraints(
-                                minWidth: kMinTarget,
-                                minHeight: kMinTarget,
+                            // The (i) glyph lines up with the chevrons of the
+                            // action rows under it (its 48 dp box overhangs the
+                            // row's side padding by 12 dp).
+                            Transform.translate(
+                              offset: const Offset(12, 0),
+                              child: IconButton(
+                                key: ValueKey<String>('circle-info-${c.id}'),
+                                tooltip: 'Open details for ${c.name}',
+                                constraints: const BoxConstraints(
+                                  minWidth: kMinTarget,
+                                  minHeight: kMinTarget,
+                                ),
+                                icon: const Icon(Icons.info_outline),
+                                onPressed: () {
+                                  Navigator.of(ctx).pop();
+                                  widget.onOpenCircle!.call(c);
+                                },
                               ),
-                              icon: const Icon(Icons.info_outline),
-                              onPressed: () {
-                                Navigator.of(ctx).pop();
-                                widget.onOpenCircle!.call(c);
-                              },
                             ),
                         ],
                       ),
@@ -371,6 +375,26 @@ class _LocationTabViewState extends State<LocationTabView> {
                         } else if (!_isActive(c)) {
                           widget.onOpenCircle?.call(c);
                         }
+                      },
+                    ),
+                  // Actions: the same row as a circle, under a hairline.
+                  if (circles.isNotEmpty || widget.onOpenCircle != null)
+                    const Divider(
+                      height: 1,
+                      indent: AppSpace.xl,
+                      endIndent: AppSpace.xl,
+                    ),
+                  if (_activeCircle != null && widget.onOpenCircle != null)
+                    DsListRow(
+                      title: 'Open circle details',
+                      leading: DsListRow.iconTile(
+                        ctx,
+                        Icons.manage_accounts_outlined,
+                      ),
+                      chevron: true,
+                      onTap: () {
+                        Navigator.of(ctx).pop();
+                        widget.onOpenCircle!.call(_activeCircle!);
                       },
                     ),
                   DsListRow(
@@ -411,39 +435,12 @@ class _LocationTabViewState extends State<LocationTabView> {
         : c.name == widget.circleName;
   }
 
-  /// Pinned header of the circle sheet: for the selected circle, whether
-  /// location sharing is on or paused (icon plus words) and a clear way to
-  /// open its details (members, roles, sharing, invites).
-  Widget? _circleSheetHeader(BuildContext ctx) {
-    final Circle? c = _activeCircle;
-    if (c == null || widget.onOpenCircle == null) return null;
-    final bool paused = !c.sharingEnabled;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        AppSpace.xl,
-        0,
-        AppSpace.xl,
-        AppSpace.sm,
-      ),
-      child: Wrap(
-        spacing: AppSpace.sm,
-        runSpacing: AppSpace.sm,
-        crossAxisAlignment: WrapCrossAlignment.center,
-        children: <Widget>[
-          _SharingChip(paused: paused),
-          DsPillButton(
-            label: 'Open circle details',
-            icon: Icons.info_outline,
-            style: DsPillStyle.tonal,
-            onPressed: () {
-              Navigator.of(ctx).pop();
-              widget.onOpenCircle!.call(c);
-            },
-          ),
-        ],
-      ),
-    );
-  }
+  /// The trailing check of the circle shown on the map.
+  Widget _shownCheck(BrandTheme brand) => Icon(
+        Icons.check,
+        color: brand.accentInk,
+        semanticLabel: 'Shown on the map',
+      );
 
   Widget _circleLeading(BuildContext ctx, Circle c) {
     final String? icon = c.icon;
@@ -1232,24 +1229,6 @@ class _CirclePill extends StatelessWidget {
       ),
     );
   }
-}
-
-/// "Location sharing: on / paused" with an icon, so colour is never the only
-/// signal.
-class _SharingChip extends StatelessWidget {
-  const _SharingChip({required this.paused});
-
-  final bool paused;
-
-  @override
-  Widget build(BuildContext context) => Semantics(
-        container: true,
-        child: DsStatusChip(
-          label: paused ? 'Location sharing: paused' : 'Location sharing: on',
-          icon: paused ? Icons.pause_circle_outline : Icons.location_on,
-          color: paused ? AppColors.statusOrange : AppColors.statusGreen,
-        ),
-      );
 }
 
 /// Shown when the user turned sharing off in the selected circle: the circle's
