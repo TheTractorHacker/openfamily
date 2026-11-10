@@ -84,7 +84,7 @@ class PrivateCircleDelivery {
   final bool serverCopyRefused;
 
   /// 'phone' | 'server' | 'pending' (the family admin requires server processing and this phone has not signed its
-  /// own choice for the current server key yet: it sends on the phone line meanwhile) | 'failed' (the processing
+  /// own choice for the current server key yet: the relay refuses its positions until it has) | 'failed' (the processing
   /// records did not verify: the phone lane is used).
   final String laneKind;
 
@@ -112,7 +112,7 @@ class PrivateCircleDelivery {
       case 'server':
         return 'server gen $serverGen${stalePref ? ' (pref names gen $prefGen)' : ''}${serverKeyMissing ? ' (no server key here: phone line used)' : ''}';
       case 'pending':
-        return 'server processing required (phone signs by itself; phone line meanwhile)';
+        return 'server processing required (phone signs by itself; positions refused until it has)';
       case 'failed':
         return 'phone (verification failed)';
       default:
@@ -714,8 +714,8 @@ String plainDeliveryProblem(String code) {
         'and renews its server processing choice by itself';
   }
   if (c == 'required_server' || c == 'rejected_required_server') {
-    return 'the family admin requires server processing and this phone has not signed its server choice (or its choice is for an older server key), so the server refuses these positions; '
-        'check-ins and alerts still go through. The phone signs its choice by itself; update the app if it does not';
+    return 'the family admin requires server processing and this phone has not signed its server choice (or its choice is for an older server key), so the server refuses these positions (they wait on the phone); '
+        'it can also mean an admin phone has to sign the circle policy again. Check-ins, events and chat still go through. The phone signs its choice by itself; update the app if it does not';
   }
   if (c == 'rejected_bad_epoch' || c == 'rejected_legacy_epoch_closed') {
     return 'the family\'s encryption key changed; the phone fetches the new one and sends again';

@@ -46,8 +46,8 @@ class ProcessingCopy {
   static const String requiredTitle = 'Require server processing?';
   static const String requiredBody =
       'Everyone\'s phone sends its location to your Orbitly server for processing. Members cannot turn it off.\n\n'
-      'Each member\'s own phone signs this by itself the next time it runs; nobody is asked and nobody\'s positions stop '
-      'meanwhile (they keep arriving encrypted for the family until the phone has switched over). Members see a notice that '
+      'Each member\'s own phone signs this by itself the next time it runs; nobody is asked and a phone '
+      'that has not switched over yet cannot send positions until it has (check-ins, events and chat are not affected). Members see a notice that '
       'you require it. Every change is a signed entry in the key log that all members can see.\n\n$operatorCanRead';
 
   /// The one owner switch on the circle settings screen.
@@ -134,7 +134,7 @@ class ProcessingBadgeChip extends StatelessWidget {
   }
 }
 
-/// Neutral chip for a member whose phone is still switching over to what the admin requires (positions keep arriving).
+/// Neutral chip for a member whose phone is still switching over to what the admin requires (its positions wait until it has).
 class CatchingUpChip extends StatelessWidget {
   const CatchingUpChip({super.key});
   @override
@@ -327,5 +327,5 @@ ProcessingErrorText processingErrorText(Object e, {String step = "Could not chec
     return ProcessingErrorText("The server's answer could not be read", '$step The server sent something this app did not expect. Try again in a moment.');
   }
   return ProcessingErrorText('Could not load server processing',
-      '$step Your phone keeps sending your position to the family meanwhile. Try again in a moment.');
+      '$step Your position is never sent unencrypted meanwhile. Try again in a moment.');
 }

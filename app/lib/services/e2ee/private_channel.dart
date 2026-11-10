@@ -746,9 +746,13 @@ class SealedQueue {
       void Function()? onIdentityRefused}) async {
     int delivered = 0;
     final Set<String> laneRetried = <String>{}; // one immediate re-send per circle and call: no hot loop
+    // Items the relay refused with required_server in THIS call: they stay queued (counted once against the retry
+    // counter) and are not asked again until the next call, so they neither loop nor block exempt items behind them.
+    final Set<String> requiredKeys = <String>{};
+    String keyOf(Map<String, dynamic> m) => '${m['c']}/${m['d']}/${m['s']}';
     while (true) {
       await reconcileLanes(lanes);
-      final List<Map<String, dynamic>> all = await _locked(_load);
+      final List<Map<String, dynamic>> all = (await _locked(_load)).where((Map<String, dynamic> m) => !requiredKeys.contains(keyOf(m))).toList();
       if (all.isEmpty) return delivered;
       // One request is for one circle + device.
       final Map<String, dynamic> first = all.first;
@@ -800,6 +804,7 @@ class SealedQueue {
       bool needSync = false;
       String? rejectedCode;
       final Set<String> requiredRefused = <String>{};
+      final Set<int> requiredSeqs = <int>{};
       for (final BatchResult r in results) {
         if (r.status != 'rejected') {
           // stored/duplicate: the server has it.
@@ -822,12 +827,19 @@ class SealedQueue {
           laneCode ??= code;
           continue;
         }
-        // Permanent. A required_server refusal is NOT silent: the user is told the data was not delivered, and
-        // the phone is asked to sign its OWN server lane now (bounded by its own re-sign interval, so this
-        // cannot loop). The phone line is no longer a fallback in a circle that requires the server.
+        // required_server: the circle's owner requires the server lane and this phone has none that the relay accepts
+        // (never signed, or a signed choice that is stale beyond the catch-up window, or the circle's policy waits for an
+        // admin phone). The phone line is not a fallback there. NOT silent: the user is told, and the phone is asked to
+        // sign its OWN server lane now (bounded by its re-sign interval, so this cannot loop). The item is KEPT (the
+        // phone line twin goes out as soon as the signed lane is accepted) and bounded by the retry counter.
         if (code == 'required_server') {
-          await noteUndelivered(circle, code);
+          // Counted once per item (its first refusal), not at every retry.
+          final bool firstTime = batch.any((Map<String, dynamic> m) => m['s'] == r.seq && ((m['n'] as int?) ?? 0) == 0);
+          if (firstTime) await noteUndelivered(circle, code);
           requiredRefused.add(circle);
+          requiredKeys.add('$circle/$device/${r.seq}');
+          requiredSeqs.add(r.seq);
+          continue;
         }
         done.add(r.seq);
       }
@@ -854,6 +866,10 @@ class SealedQueue {
       }
       // Items the server did not mention stay queued.
       await _remove(batch, done);
+      if (requiredSeqs.isNotEmpty) {
+        await _bump(<Map<String, dynamic>>[for (final Map<String, dynamic> m in batch) if (requiredSeqs.contains(m['s'])) m]);
+        continue; // exempt items behind them (check-ins, events, chat) still go out in this call
+      }
       if (done.isEmpty) {
         await _bump(batch);
         return delivered;

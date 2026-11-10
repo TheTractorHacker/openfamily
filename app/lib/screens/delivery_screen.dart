@@ -91,8 +91,8 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
     }
     if (l.queued > 0) out.add('${l.queued} update${l.queued == 1 ? ' is' : 's are'} waiting for a connection.');
     if (l.undelivered > 0 && l.undeliveredCode == 'required_server') {
-      out.add('${l.undelivered} update${l.undelivered == 1 ? ' was' : 's were'} refused: your family admin requires server processing and this phone has not signed its server choice yet. '
-          'The phone signs it by itself; if it does not, update the app.');
+      out.add('${l.undelivered} update${l.undelivered == 1 ? ' was' : 's were'} refused because your family admin requires server processing and the server does not accept this phone\'s choice yet (it was not signed, it is out of date after a server key change, or an admin phone has to sign the circle policy again). '
+          'The phone signs its own choice by itself and sends what is waiting; if that does not happen, update the app or ask an admin.');
     } else if (l.undelivered > 0) {
       out.add('${l.undelivered} update${l.undelivered == 1 ? ' was' : 's were'} refused by the server (${l.undeliveredCode}). Updating the app or asking an admin to approve this phone usually fixes it.');
     }

@@ -43,18 +43,19 @@ CREATE TRIGGER trg_e2ee_server_gen_stamp BEFORE UPDATE OF e2ee_server_gen ON cir
     EXECUTE FUNCTION e2ee_server_gen_stamp();
 
 -- The member's stored lane=server pref is stale because the server key was replaced, and that
--- happened within the last 72 hours (measured from the oldest applicable server-side record:
--- e2ee_server_device.set_at for another pinned key, device_keys.revoked_at for a revoked
--- named key, circles.e2ee_server_gen_at for an older SK generation). An unknown time counts
--- as "not recent". Legacy conversions are not covered. See docs/design/PRIVACY_PROCESSING.md 16.1.
+-- happened within the last 72 hours. The replacement counts as complete at the LATEST server-side
+-- record of it (a member cannot sign for the new key before it is pinned, so a revocation long
+-- before the pin must not eat the window): e2ee_server_device.set_at for another pinned key (only
+-- moved when the pinned device CHANGES, never by an idempotent re-pin), device_keys.revoked_at for
+-- a revoked named key, circles.e2ee_server_gen_at for an older SK generation. A cause without a
+-- recorded time is ignored; with no recorded time at all it is not "recent". Legacy conversions
+-- are not covered. See docs/design/PRIVACY_PROCESSING.md 16.1.
 CREATE OR REPLACE FUNCTION e2ee_member_catching_up(circ UUID, usr UUID) RETURNS BOOLEAN AS $$
     SELECT COALESCE(bool_or(w.since > now() - interval '72 hours'), FALSE) FROM (
-        SELECT LEAST(
-                 CASE WHEN pk.device_id IS NOT NULL AND pk.device_id <> p.server_device_id
-                      THEN COALESCE(sd.set_at, '-infinity'::timestamptz) END,
+        SELECT GREATEST(
+                 CASE WHEN pk.device_id IS NOT NULL AND pk.device_id <> p.server_device_id THEN sd.set_at END,
                  CASE WHEN nk.revoked_at IS NOT NULL THEN nk.revoked_at END,
-                 CASE WHEN p.sk_gen < c.e2ee_server_gen
-                      THEN COALESCE(c.e2ee_server_gen_at, '-infinity'::timestamptz) END) AS since
+                 CASE WHEN p.sk_gen < c.e2ee_server_gen THEN c.e2ee_server_gen_at END) AS since
           FROM circles c
           JOIN e2ee_processing_pref p ON p.circle_id = c.id AND p.user_id = usr
           JOIN live_circle_members m ON m.circle_id = c.id AND m.user_id = usr

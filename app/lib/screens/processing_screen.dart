@@ -263,8 +263,8 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
                     icon: Icons.report_problem_outlined,
                     color: AppColors.statusRed,
                     text: '${s.undeliveredCount} ${s.undeliveredCount == 1 ? 'item was' : 'items were'} not delivered to this circle'
-                        '${s.undeliveredCode == 'required_server' ? ' because your family admin requires server processing and this phone had not signed its server choice yet' : ''}. '
-                        '${s.undeliveredCode == 'required_server' ? 'They are not kept. This phone signs its choice by itself; if that does not happen, update the app.' : 'They are not kept. New positions are sent normally.'}'),
+                        '${s.undeliveredCode == 'required_server' ? ' because your family admin requires server processing and the server did not accept this phone\'s choice (not signed yet, out of date after a server key change, or an admin phone has to sign the circle policy again)' : ''}. '
+                        '${s.undeliveredCode == 'required_server' ? 'This phone signs its choice by itself and sends what is waiting; if that does not happen, update the app or ask an admin.' : 'They are not kept. New positions are sent normally.'}'),
               ),
             if (s.required && s.members.any((ProcessingMember m) => m.isChild))
               const Padding(
@@ -421,7 +421,7 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
 
   Widget _statusCard(ProcessingSnapshot s) {
     final (IconData icon, Color color, String title, String sub) = s.unconfirmed
-        ? (Icons.sync_problem, AppColors.statusOrange, 'Not confirmed right now', 'Your phone keeps sending your position to the family, encrypted.')
+        ? (Icons.sync_problem, AppColors.statusOrange, 'Not confirmed right now', 'Your position is never sent unencrypted. Where the admin requires server processing it waits until this phone has signed.')
         : s.legacy
         ? (Icons.dns_outlined, AppColors.sosRed, ProcessingCopy.legacyStatusTitle, ProcessingCopy.legacyStatusBody)
         : !s.assistOn
@@ -433,7 +433,7 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
             'Required by the admin (${s.serverCount} of ${s.members.length} on the server)',
             s.serverCount == s.members.length
                 ? ProcessingCopy.requireSwitchBody
-                : 'Everyone\'s phone switches over by itself. Positions keep arriving meanwhile.'
+                : 'Everyone\'s phone switches over by itself. A phone that has not switched over cannot send positions until it has.'
           )
         : (
             Icons.dns_outlined,

@@ -383,7 +383,7 @@ void main() {
         lastFixAt: now,
       ));
       final String report = buildDiagnosticReport(f, evaluateDiagnostics(f));
-      expect(report, contains('circle1 lane="server processing required (phone signs by itself; phone line meanwhile)"'));
+      expect(report, contains('circle1 lane="server processing required (phone signs by itself; positions refused until it has)"'));
       expect(report, contains('circle2 lane="phone (verification failed)" queued=2'));
       final String section = report.substring(report.indexOf('\nPrivate circle delivery\n'));
       expect(section, isNot(matches(RegExp(r'\d+\.\d{3,}'))), reason: 'nothing that looks like a coordinate');

@@ -201,7 +201,7 @@ class _ProcessingPolicyScreenState extends State<ProcessingPolicyScreen> {
                 s.policy.memberOptOut == E2ee.optOutAllowed, canEdit ? () => _setOptOut(E2ee.optOutAllowed) : null),
             _option(const Key('opt-required'), 'No, server processing is required',
                 'Everyone\'s phone sends its location to your Orbitly server for processing. Members cannot turn it off. Each '
-                    'member\'s phone switches over by itself, without a question; positions keep arriving meanwhile. Applies to child accounts too.',
+                    'member\'s phone switches over by itself, without a question; a phone that has not switched over yet cannot send positions until it has. Applies to child accounts too.',
                 s.policy.memberOptOut == E2ee.optOutRequiredServer, canEdit ? () => _setOptOut(E2ee.optOutRequiredServer) : null),
           ]),
           const DsSectionHeader('Default for members', padding: EdgeInsets.fromLTRB(0, AppSpace.xl, 0, AppSpace.xs)),

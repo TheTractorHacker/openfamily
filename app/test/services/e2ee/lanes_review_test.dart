@@ -92,21 +92,23 @@ void main() {
       expect(await q.undelivered('c1'), isNull);
     });
 
-    test('required_server is not silent: the item goes and the user can be told', () async {
+    test('required_server is not silent and not lost: the items stay queued, the user can be told, counted once', () async {
       final MemoryKv kv = MemoryKv();
       final SealedQueue q = SealedQueue(kv: kv);
       await q.enqueue(item(1));
       await q.enqueue(item(2));
       final _Api api = _Api((List<WireItem> b) => <BatchResult>[for (final WireItem w in b) BatchResult(w.seq, 'rejected', error: 'required_server')]);
       await q.flush(api, deviceFor: (_) => 'd1');
-      expect(await q.length(), 0);
+      expect(await q.length(), 2, reason: 'kept: the phone signs its lane and they go out then');
       final u = await q.undelivered('c1');
       expect((u!.count, u.code), (2, 'required_server'));
+      await q.flush(api, deviceFor: (_) => 'd1');
+      expect((await q.undelivered('c1'))!.count, 2, reason: 'the same items are not counted again');
       await q.clearUndelivered('c1');
       expect(await q.undelivered('c1'), isNull);
     });
 
-    test('required_server asks the phone to sign its own server lane once per flush, and never loops', () async {
+    test('required_server asks the phone to sign once per flush, never loops, and bounded retries drop the item in the end', () async {
       final SealedQueue q = SealedQueue(kv: MemoryKv());
       await q.enqueue(item(1));
       await q.enqueue(item(2));
@@ -119,11 +121,52 @@ void main() {
       await q.flush(api, deviceFor: (_) => 'd1', onRequiredServerRefused: (String c) async => asked.add(c));
       expect(asked, <String>['c1']);
       expect(posts, 1);
+      expect(await q.length(), 2);
+      for (int i = 0; i < 25; i++) {
+        await q.flush(api, deviceFor: (_) => 'd1');
+      }
+      expect(await q.length(), 0, reason: 'bounded by the retry counter: no endless queue');
+    });
+
+    test('after the phone signed, what waited goes out; exempt items behind refused ones are not blocked', () async {
+      final SealedQueue q = SealedQueue(kv: MemoryKv());
+      await q.enqueue(item(1));
+      await q.enqueue(WireItem(circleId: 'c1', deviceId: 'd1', seq: 2, purpose: 'checkin', epoch: 1, sizeBucket: 256, ciphertext: Uint8List.fromList(<int>[2])));
+      bool signed = false;
+      final _Api api = _Api((List<WireItem> b) => <BatchResult>[
+            for (final WireItem w in b)
+              (w.purpose == 'fix' && !signed) ? BatchResult(w.seq, 'rejected', error: 'required_server') : BatchResult(w.seq, 'stored')
+          ]);
+      final int n = await q.flush(api, deviceFor: (_) => 'd1');
+      expect(n, 1, reason: 'the check-in went out');
+      expect((await q.peek()).map((WireItem i) => i.seq), <int>[1]);
+      signed = true;
+      expect(await q.flush(api, deviceFor: (_) => 'd1'), 1);
       expect(await q.length(), 0);
-      // Nothing left to send: another flush does not post and does not ask again.
-      await q.flush(api, deviceFor: (_) => 'd1', onRequiredServerRefused: (String c) async => asked.add(c));
-      expect(asked, <String>['c1']);
-      expect(posts, 1);
+    });
+
+    test('a stale server copy: lane_not_server, then its phone twin refused with required_server stays queued (not lost)', () async {
+      final SealedQueue q = SealedQueue(kv: MemoryKv());
+      final WireItem twin = item(1);
+      await q.enqueue(WireItem(
+          circleId: 'c1', deviceId: 'd1', seq: 1, purpose: 'fix', epoch: 1, sizeBucket: 256, ciphertext: Uint8List.fromList(<int>[9]), line: E2ee.lineServer, twin: twin));
+      final List<List<int>> lines = <List<int>>[];
+      final _Api api = _Api((List<WireItem> b) {
+        lines.add(<int>[for (final WireItem w in b) w.line]);
+        return <BatchResult>[
+          for (final WireItem w in b) BatchResult(w.seq, 'rejected', error: w.line == E2ee.lineServer ? 'lane_not_server' : 'required_server')
+        ];
+      });
+      final List<String> asked = <String>[];
+      await q.flush(api,
+          deviceFor: (_) => 'd1',
+          lanes: _AllowServer(),
+          onRequiredServerRefused: (String c) async => asked.add(c),
+          onLaneRefused: (String c, String code) async => asked.add('lane:$code'));
+      expect(lines.first, <int>[E2ee.lineServer]);
+      expect(lines.last, <int>[E2ee.linePhone]);
+      expect(await q.length(), 1, reason: 'the twin waits for the fresh signature');
+      expect(asked, contains('c1'));
     });
 
     test('other permanent rejections are dropped as before', () async {
@@ -364,4 +407,15 @@ class MemoryKvView implements ChannelKv {
   Future<void> set(String key, String value) => base.set(key, value);
   @override
   Future<void> remove(String key) => base.remove(key);
+}
+
+class _AllowServer implements LaneSource {
+  @override
+  Future<LaneChoice> ownLane(String c) async => const LaneChoice(E2ee.lineServer, 1);
+  @override
+  Future<bool> serverLaneAllowed(String c) async => true;
+  @override
+  Future<List<PrefEntry>> prefsOf(String c, String u) async => <PrefEntry>[];
+  @override
+  Future<bool> serverAssistOn(String c) async => true;
 }

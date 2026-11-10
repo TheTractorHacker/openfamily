@@ -157,9 +157,9 @@ class LanesProcessingController implements ProcessingController {
 
   /// What the screen shows when the processing records could not be checked (anything that is not a transport
   /// failure or this phone's own key): the circle and its members from the server, the lane facts this phone verified
-  /// earlier, and a plain [ProcessingSnapshot.problem]. Never a dead end: positions keep going to the family.
-  static const String checkProblem = "Could not confirm this circle's server processing settings right now. Your phone keeps "
-      'sending your position to the family, encrypted. Pull down to try again.';
+  /// earlier, and a plain [ProcessingSnapshot.problem]. Never a dead end: pull down to try again.
+  static const String checkProblem = "Could not confirm this circle's server processing settings right now. Your position is "
+      'never sent unencrypted. Pull down to try again.';
 
   Future<ProcessingSnapshot> _degraded(String circleId, String me) async {
     final CircleE2eeState st = await lanes.api.circleState(circleId); // a transport failure here is the real error

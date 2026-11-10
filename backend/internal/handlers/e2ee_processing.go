@@ -250,8 +250,8 @@ const catchUpWindow = 72 * time.Hour
 // only for a pref that is GENUINE: lane server, not a legacy conversion, signed by the member's own live
 // phone key over the server key and generation it names (re-verified here, SQL cannot do that), and the
 // member's latest in the key log; and STALE: that server key is no longer the pinned one, or is revoked,
-// or its SK generation is older than the circle's. since is the oldest server-side record of such a
-// replacement (the zero time when a cause has no recorded time, which is never recent).
+// or its SK generation is older than the circle's. since is the latest server-side record of such a
+// replacement (the zero time when none of the causes has a recorded time, which is never recent).
 func prefStaleGenuine(p prefRow, l logRef, haveLog bool, circleID, userID string) (stale bool, since time.Time) {
 	if p.Lane != "server" || p.Legacy || !p.CircleAssist || p.ServerDevice == "" || p.SKGen < 1 || len(p.ServerFP) != 32 || len(p.Nonce) != e2ee.ProcessingNonceLen {
 		return false, time.Time{}
@@ -277,11 +277,11 @@ func prefStaleGenuine(p prefRow, l logRef, haveLog bool, circleID, userID string
 	if len(times) == 0 {
 		return false, time.Time{}
 	}
+	// The replacement is complete at the LATEST recorded event (a member cannot sign for the new key before it
+	// is pinned, so a revocation long before the pin must not eat the window). An unrecorded time is ignored;
+	// if none is recorded the pref is stale but never "recent".
 	for _, t := range times {
-		if t == nil {
-			return true, time.Time{}
-		}
-		if since.IsZero() || t.Before(since) {
+		if t != nil && t.After(since) {
 			since = *t
 		}
 	}
@@ -513,6 +513,10 @@ type processingMemberOut struct {
 	// items (the exact rule checkE2EEItemLine and the e2ee_item_guard trigger enforce). Everybody else who
 	// is not on the server lane in a required circle is refused, not "catching up".
 	CatchingUp bool `json:"catching_up"`
+	// WaitingPolicy: the member's own lane is server, but the circle's stored policy is not backed by a live admin
+	// phone (after an owner reset), so nothing is relayed on the server line and a required_server circle refuses the
+	// phone line too, until an admin phone signs the policy again. Not a catch-up case; nothing for the member to sign.
+	WaitingPolicy bool `json:"waiting_for_policy"`
 	// The member's signed statement, so phones verify it against the key log.
 	Pref *prefStatementOut `json:"pref,omitempty"`
 }
@@ -685,6 +689,7 @@ func (s *Server) E2EEProcessingState(w http.ResponseWriter, r *http.Request) {
 		}
 		mo.Processed = mo.Lane
 		if mo.Lane == "server" && assist && !legacy && !policyOK {
+			mo.WaitingPolicy = optOut == "required_server"
 			// The member's pref is fine, but the stored policy is not backed by a live admin phone key
 			// (the admin phone that signed it was reset): nothing is read on the server until an admin
 			// phone signs it again.

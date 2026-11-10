@@ -1064,7 +1064,7 @@ class PrivateRuntime {
   /// Private circles in which this member is PHONE-ONLY (their own signed pref):
   /// results for them are computed here and sealed in the phone lane. A circle
   /// where the member is server-assisted gets none (the server computes). A circle that requires server processing
-  /// where this phone has not signed yet counts as phone-only meanwhile: nothing is ever held back.
+  /// where this phone has not signed yet counts as phone-only meanwhile (its positions are sealed on the phone line, which the relay refuses there until it has signed; they wait in the queue).
   Future<Set<String>> phoneOnlyCircles() async {
     final Set<String> out = <String>{};
     for (final String c in await privateCircles()) {
@@ -1470,15 +1470,23 @@ class PrivateRuntime {
   }
 
   /// The relay refused phone-line items because the circle requires server processing and this member has no valid
-  /// server lane (it never signed, or the 72 hour catch-up after a server key change is over). The phone-line twin
+  /// server lane (it never signed, or the 72 hour catch-up after a server key change is over, or the circle's policy waits for an admin phone). The phone-line twin
   /// is NOT a fallback here: this phone signs its own server lane for the current server key (bounded by the
   /// re-sign interval, no loop). If it cannot (an app that predates `required_server`, no server key held), the
   /// processing screen and the delivery check say so in words.
+  final Map<String, DateTime> _requiredAskedAt = <String, DateTime>{};
   Future<void> _requiredServerRefused(String circleId) async {
+    // Throttled per circle: every refused upload would otherwise start a refresh (several requests) even when the phone
+    // cannot sign (no server key held, a policy waiting for an admin phone).
+    final DateTime now = DateTime.now();
+    final DateTime? last = _requiredAskedAt[circleId];
+    if (last != null && now.difference(last) < const Duration(minutes: 2)) return;
+    _requiredAskedAt[circleId] = now;
     unawaited(() async {
       try {
         await _declareCaps();
-        await lanesService.signRequiredLaneIfDue(circleId);
+        final AutoApplyOutcome o = await lanesService.signRequiredLaneIfDue(circleId);
+        if (o == AutoApplyOutcome.applied) await queue.clearUndelivered(circleId); // signed: what waits goes out now
       } catch (_) {}
     }());
   }
@@ -1644,7 +1652,7 @@ class PrivateRuntime {
         if (st == LaneStatus.verificationFailed) {
           kind = 'failed';
         } else if (st == LaneStatus.serverPending) {
-          kind = 'pending'; // the admin requires server processing; this phone signs it by itself, sending on the phone line meanwhile
+          kind = 'pending'; // the admin requires server processing; this phone signs it by itself, sealing on the phone line meanwhile, which the relay refuses for positions
         } else {
           final LaneChoice own = await lanes.ownLane(c);
           if (own.line == E2ee.lineServer && await lanes.serverLaneAllowed(c)) {

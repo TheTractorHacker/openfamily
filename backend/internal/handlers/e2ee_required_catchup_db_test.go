@@ -378,3 +378,97 @@ ALTER TABLE circles DROP COLUMN IF EXISTS e2ee_server_gen_at;`
 		t.Fatalf("after down+up: %v", err)
 	}
 }
+
+// The server device pins its (unchanged) key again on every start. That must never re-open the window:
+// set_at records the replacement, not the restart.
+func TestRequiredServerRepinningTheSameKeyDoesNotReopenTheWindow(t *testing.T) {
+	e := requiredEnv(t)
+	s2 := newTDev(t, e.ids["A"])
+	e.mustCode("A", "POST", "/e2ee/devices", regBody(t, s2, "server", e.a, e2ee.ActRegister, false), 201)
+	e.sql(`UPDATE e2ee_server_device SET device_id = $1, set_at = now() - interval '100 hours'`, s2.id)
+	e.wantRefused("replaced 100 hours ago", "B", e.b, true)
+	for i := 0; i < 2; i++ {
+		if c, _, raw := e.tok(testServerToken, "PUT", "/internal/e2ee/server-device", map[string]string{"device_id": s2.id}); c != 200 {
+			t.Fatalf("re-pin: %d %s", c, raw)
+		}
+		e.wantRefused("same key re-pinned, nothing was replaced", "B", e.b, true)
+	}
+	e.wantFlags("A", "B", true, false)
+	// A real replacement (another key) does move it.
+	s3 := newTDev(t, e.ids["A"])
+	e.mustCode("A", "POST", "/e2ee/devices", regBody(t, s3, "server", e.a, e2ee.ActRegister, false), 201)
+	e.sql(`UPDATE device_keys SET revoked_at = now() - interval '100 hours' WHERE device_id = $1`, s2.id)
+	if c, _, raw := e.tok(testServerToken, "PUT", "/internal/e2ee/server-device", map[string]string{"device_id": s3.id}); c != 200 {
+		t.Fatalf("pin s3: %d %s", c, raw)
+	}
+	e.wantRelayed("a different key was pinned just now", "B", e.b)
+}
+
+// The old key was revoked long ago, the new one is pinned only now: the replacement is complete at the pin,
+// so the window starts there (the member could not sign for the new key before).
+func TestRequiredServerWindowStartsWhenTheReplacementKeyIsPinned(t *testing.T) {
+	e := requiredEnv(t)
+	oldS := e.s
+	s2 := newTDev(t, e.ids["A"])
+	e.mustCode("A", "POST", "/e2ee/devices", regBody(t, s2, "server", e.a, e2ee.ActRegister, false), 201)
+	e.sql(`UPDATE device_keys SET revoked_at = now() - interval '100 hours' WHERE device_id = $1`, oldS.id)
+	e.wantRefused("old key revoked 100 h ago, nothing pinned yet", "B", e.b, true)
+	e.s = s2
+	e.pin()
+	e.wantRelayed("old key revoked 100 h ago, replacement pinned now", "B", e.b)
+	e.wantFlags("A", "B", true, true)
+	e.sql(`UPDATE e2ee_server_device SET set_at = now() - interval '73 hours'`)
+	e.wantRefused("replacement pinned 73 h ago", "B", e.b, true)
+	e.wantFlags("A", "B", true, false)
+}
+
+// A pref that is stale for two reasons (older generation with an unrecorded time AND a replaced key):
+// the recorded replacement counts; with no recorded time at all it never counts.
+func TestCatchUpDefinitionForCombinedCauses(t *testing.T) {
+	e := requiredEnv(t)
+	s2 := newTDev(t, e.ids["A"])
+	e.mustCode("A", "POST", "/e2ee/devices", regBody(t, s2, "server", e.a, e2ee.ActRegister, false), 201)
+	e.sql(`UPDATE circles SET e2ee_server_gen = 2 WHERE id = $1`, e.circle)
+	e.sql(`UPDATE circles SET e2ee_server_gen_at = NULL WHERE id = $1`, e.circle)
+	e.sql(`UPDATE e2ee_server_device SET device_id = $1, set_at = now() - interval '1 hour'`, s2.id)
+	stale, catching, err := memberStates(context.Background(), e.pool, e.circle, "")
+	if err != nil || !e.sqlCatching("B") || !stale[e.ids["B"]] || !catching[e.ids["B"]] {
+		t.Fatalf("recorded recent key replacement: SQL=%v stale=%v catching=%v err=%v", e.sqlCatching("B"), stale, catching, err)
+	}
+	e.sql(`UPDATE e2ee_server_device SET set_at = now() - interval '80 hours'`)
+	stale, catching, _ = memberStates(context.Background(), e.pool, e.circle, "")
+	if e.sqlCatching("B") || !stale[e.ids["B"]] || catching[e.ids["B"]] {
+		t.Fatalf("both causes old or unrecorded: SQL=%v stale=%v catching=%v", e.sqlCatching("B"), stale, catching)
+	}
+}
+
+// After an owner reset the policy is signed by a revoked admin phone. A stale pref is still protected by the
+// 72 h catch-up (the rule does not depend on the policy). Once the member has signed a fresh pref they are no
+// longer stale; the phone line stays refused until an admin phone signs the policy again, and the state API
+// says so (waiting_for_policy) instead of showing nothing wrong. Trigger and handler: the trigger accepts
+// (it does not verify signatures or the policy), the handler is the stricter judge.
+func TestRequiredServerAfterOwnerResetWaitsForThePolicy(t *testing.T) {
+	e := requiredEnv(t)
+	oldS := e.s
+	s2 := newTDev(t, e.ids["A"])
+	e.mustCode("A", "POST", "/e2ee/devices", regBody(t, s2, "server", e.a, e2ee.ActRegister, false), 201)
+	e.sql(`UPDATE device_keys SET revoked_at = now() WHERE device_id IN ($1,$2)`, oldS.id, e.a.id)
+	e.s = s2
+	e.pin()
+	if st, code := e.phoneItem("B", e.b, "fix"); st != "stored" {
+		t.Fatalf("stale pref after the reset, inside the window: %s %s", st, code)
+	}
+	mo, state := e.memberOut("B", "B")
+	if mo["pref_stale"] != true || mo["catching_up"] != true || state["policy_verified"] != false {
+		t.Fatalf("state: %v policy_verified=%v", mo, state["policy_verified"])
+	}
+	e.setLane("B", e.b, "server", 1, 200)
+	if st, code := e.phoneItem("B", e.b, "fix"); st != "rejected" || code != "required_server" {
+		t.Fatalf("fresh pref but policy not re-signed: %s %s", st, code)
+	}
+	mo, _ = e.memberOut("B", "B")
+	if mo["waiting_for_policy"] != true || mo["pref_stale"] == true || mo["catching_up"] == true {
+		t.Fatalf("the state must say the member waits for the policy: %v", mo)
+	}
+	e.exemptPurposesPass("B", e.b)
+}

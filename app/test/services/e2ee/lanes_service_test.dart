@@ -612,11 +612,11 @@ void main() {
   });
 
   group('member_opt_out: required_server', () {
-    test('a member whose phone has not signed yet keeps sending on the phone line; then the phone signs by itself', () async {
+    test('a member whose phone has not signed yet seals on the phone line (the relay refuses it there); then the phone signs by itself', () async {
       await policyOn(optOut: E2ee.optOutRequiredServer);
       final CircleLanes v = await bob.lanes.refresh(priv);
       expect((v.status, v.policy.memberOptOut), (LaneStatus.serverPending, E2ee.optOutRequiredServer));
-      // Nothing is held back: the position is sealed on the phone line (never plaintext, never nothing).
+      // The position is sealed on the phone line (never plaintext, never nothing).
       await sealFixes(bob, 3);
       final List<WireItem> q = (await bob.runtime.queue.peek()).where((WireItem i) => i.purpose == 'fix').toList();
       expect(q.length, 3);

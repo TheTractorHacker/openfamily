@@ -104,7 +104,7 @@ String processingRowSubtitle({required bool legacy, ({LaneStatus status, bool as
     case LaneStatus.serverAssisted:
       return 'On for you';
     case LaneStatus.serverPending:
-      return 'Switching on for you (positions keep arriving)';
+      return 'Switching on for you';
     case LaneStatus.verificationFailed:
       return 'Phone only (could not be confirmed)';
     case LaneStatus.phoneOnly:

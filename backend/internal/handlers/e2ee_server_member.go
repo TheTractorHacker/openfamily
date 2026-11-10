@@ -597,8 +597,11 @@ func (s *Server) E2EEPinServerDevice(w http.ResponseWriter, r *http.Request) {
 		writeE2EECode(w, http.StatusConflict, "already_pinned", "another active server key is pinned; revoke it first")
 		return
 	}
+	// set_at is the server-side record of WHEN THE KEY WAS REPLACED (it opens the 72 h catch-up window), so
+	// the idempotent re-pin every server start performs must not move it.
 	if _, err := s.Pool.Exec(ctx, `INSERT INTO e2ee_server_device (singleton, device_id) VALUES (TRUE, $1)
-		ON CONFLICT (singleton) DO UPDATE SET device_id = EXCLUDED.device_id, set_at = now()`, req.DeviceID); err != nil {
+		ON CONFLICT (singleton) DO UPDATE SET device_id = EXCLUDED.device_id,
+		  set_at = CASE WHEN e2ee_server_device.device_id IS DISTINCT FROM EXCLUDED.device_id THEN now() ELSE e2ee_server_device.set_at END`, req.DeviceID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to pin")
 		return
 	}

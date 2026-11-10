@@ -445,7 +445,7 @@ void main() {
       await pumpScreen(t, ProcessingScreen(circle: memberCircle, controller: c));
       expect(find.byKey(const Key('proc-undelivered')), findsOneWidget);
       expect(txt('3 items were not delivered'), findsOneWidget);
-      expect(txt('requires server processing and this phone had not signed its server choice yet'), findsOneWidget);
+      expect(txt('requires server processing and the server did not accept this phone\'s choice'), findsOneWidget);
     });
 
     testWidgets('required_server with a child account says the rule applies to the child', (t) async {
