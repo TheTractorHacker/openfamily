@@ -124,6 +124,17 @@ func (b *dawarichBackoff) success(key string) int {
 	return n
 }
 
+// rewind sets a destination's failure count back to zero but keeps its last
+// message and log timestamps, so the next failure counts as the first one
+// (a two minute wait) without logging again for an unchanged message.
+func (b *dawarichBackoff) rewind(key string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if s := b.st[key]; s != nil {
+		s.failures = 0
+	}
+}
+
 // snapshot returns the current failure count, next retry time and last error
 // message of a destination (zero values when it is healthy).
 func (b *dawarichBackoff) snapshot(key string) (failures int, next time.Time, msg string) {

@@ -420,7 +420,18 @@ func (s *Server) syncDawarichOnce(ctx context.Context, force bool) {
 		total += sent
 		msg := ""
 		if perr != nil {
+			if ctx.Err() != nil {
+				// The request was aborted (browser closed, server shutting
+				// down); that says nothing about Dawarich, and the stored
+				// row could not be updated anyway.
+				return
+			}
 			msg = perr.Error()
+			if force {
+				// "Sync now" starts over: repeated presses must not
+				// escalate the wait to an hour.
+				bo.rewind(t.UserID)
+			}
 			f := bo.failure(t.UserID, msg)
 			if f.Log {
 				slog.Warn("dawarich sync failed; backing off", "user", t.UserID, "err", perr,

@@ -329,3 +329,38 @@ func TestDawarichBackoffIsPerDestinationAndSettingsChangeResets(t *testing.T) {
 		t.Fatalf("still rejected, so failures restart at 1: %+v", r)
 	}
 }
+
+// Pressing "Sync now" repeatedly while Dawarich is down must not escalate the
+// wait: after a forced failure the automatic retry is still two minutes away.
+func TestDawarichForcedSyncFailuresDoNotEscalate(t *testing.T) {
+	e := newDawarichTestEnv(t, func(string) int { return 503 })
+	ctx := context.Background()
+	e.saveSettings("main-key")
+	e.fix("A", time.Minute)
+	for i := 0; i < 6; i++ {
+		e.srv.syncDawarichOnce(ctx, true)
+	}
+	r := e.row()
+	if r.Failures != 1 || r.NextRetryAt == nil ||
+		!r.NextRetryAt.Truncate(time.Second).Equal(e.clk.now().Add(2*time.Minute)) {
+		t.Fatalf("forced failures escalated the backoff: %+v", r)
+	}
+}
+
+// An aborted request (browser closed, server shutting down) says nothing about
+// Dawarich and must not count as a failure. The fake server cancels the
+// caller's context while it answers 503, so the push really does fail.
+func TestDawarichCancelledContextIsNotAFailure(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	e := newDawarichTestEnv(t, func(string) int { cancel(); return 503 })
+	e.saveSettings("main-key")
+	e.fix("A", time.Minute)
+	e.srv.syncDawarichOnce(ctx, true)
+	if e.hits.Load() == 0 {
+		t.Fatal("the fake Dawarich was never called, the test proves nothing")
+	}
+	if n, _, _ := e.srv.dawarichBO.snapshot(""); n != 0 {
+		t.Fatalf("a cancelled request was counted as %d failures", n)
+	}
+}
