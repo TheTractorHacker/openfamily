@@ -11,6 +11,7 @@ import {
 import type { DawarichSettings } from '../lib/types'
 import { Badge, Button, Card } from '../components/primitives'
 import { DawarichUserMap } from './DawarichUserMap'
+import { agoText, dawarichProblem } from '../lib/dawarichStatus'
 
 type FormMessage = { tone: 'success' | 'error'; text: string } | null
 
@@ -20,15 +21,6 @@ const LOCAL_PLACEHOLDER = 'http://192.168.1.50:3000'
 function messageFromError(error: unknown, fallback: string): string {
   if (error instanceof ApiError || error instanceof Error) return error.message || fallback
   return fallback
-}
-
-function ago(iso: string | null): string {
-  if (!iso) return 'never'
-  const secs = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000))
-  if (secs < 60) return 'just now'
-  if (secs < 3600) return `${Math.floor(secs / 60)}m ago`
-  if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`
-  return `${Math.floor(secs / 86400)}d ago`
 }
 
 export function DawarichSettingsCard() {
@@ -104,8 +96,8 @@ export function DawarichSettingsCard() {
     <Card>
       <div className="wb-settings-title-row">
         <h3 className="wb-settings-title">Dawarich sync</h3>
-        <Badge tone={on ? 'green' : 'grey'} dot>
-          {loading ? 'Checking…' : on ? 'Syncing' : 'Off'}
+        <Badge tone={on ? (settings?.last_error ? 'orange' : 'green') : 'grey'} dot>
+          {loading ? 'Checking…' : on ? (settings?.last_error ? 'Retrying' : 'Syncing') : 'Off'}
         </Badge>
       </div>
       <p className="wb-settings-section-help">
@@ -114,10 +106,12 @@ export function DawarichSettingsCard() {
 
       {settings && configured && (
         <p className="wb-help" role="status">
-          Last sync {ago(settings.last_sync_at)} · {settings.total_sent.toLocaleString()} sent ·{' '}
-          {settings.pending.toLocaleString()} waiting
-          {settings.last_error && <> · <span className="wb-error-text">{settings.last_error}</span></>}
+          Last check {agoText(settings.last_sync_at)} · last delivery {agoText(settings.last_ok_at)} ·{' '}
+          {settings.total_sent.toLocaleString()} sent · {settings.pending.toLocaleString()} waiting
         </p>
+      )}
+      {settings && configured && dawarichProblem(settings) && (
+        <p className="wb-error-text" role="alert">{dawarichProblem(settings)}</p>
       )}
 
       <form className="wb-settings-section wb-settings-section-flush" onSubmit={save}>

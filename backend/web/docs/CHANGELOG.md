@@ -10,6 +10,10 @@ for the **last 5 minor versions** of the app (see
 [API compatibility](api-compat.md)), so you can update the server first and
 the phones afterwards.
 
+## v0.26.34 (2026-11-11)
+
+- **Dawarich sync backs off when Dawarich is down, and says so.** Before, an unreachable or key-rejecting Dawarich was tried, and logged as a warning, once a minute for as long as it stayed down, and the admin card kept saying "Last sync just now" because that time moved on every failed try. Now each destination (the main account, or one mapped person) waits 2, 4, 8, 16 and 32 minutes after consecutive failures, then one hour; it never holds back another destination. A failure is logged once, again if the message changes, and otherwise at most every 30 minutes (with a count of the skipped ones); recovery is logged once. The last error, the failures in a row, the next retry time and the last delivery are stored and shown on the admin Dawarich card (orange "Retrying" badge) and under each mapped person. A success, saving or removing the settings or a mapping, or **Sync now** starts over; a 401 or 403 answer now says to check the API key. The wait is held in memory (a server restart tries again at once). **Server needs the new image** (the admin web in it changed too: rebuilt into `backend/web/dist`); the new columns are added at start-up by `EnsureDawarichSchema`, so no numbered migration. Covered by Go tests with an injectable clock and a fake Dawarich server (backoff timing, reset, per-destination, stored state) and a web unit test; not tried against a real Dawarich. The separate `e2ee-bridge` Dawarich mode has its own loop and was not changed.
+
 ## v0.26.33 (2026-11-11)
 
 App-only release (the server needs no change). Install over the current app. **Not tried on a real phone**: nothing here was run on the phone that showed the problem, or on any phone. The Dart parts are covered by unit tests; the Android (Kotlin) parts were only type-checked with the Kotlin compiler against the Android API 36 stubs and read line by line, not built into an app and not run.

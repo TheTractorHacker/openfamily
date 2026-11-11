@@ -46,6 +46,10 @@ type Server struct {
 	ViewerVault        ViewerVaultConfig
 	viewerVaultTickets viewerVaultTickets
 
+	// dawarichBO is the retry/backoff state of the Dawarich sync loop
+	// (dawarich_backoff.go). The zero value is ready to use.
+	dawarichBO dawarichBackoff
+
 	// Direct is the built-in direct push channel (nil = disabled, see
 	// docs/push.md).
 	Direct *push.DirectBroker
