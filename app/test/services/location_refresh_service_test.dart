@@ -61,6 +61,29 @@ void main() {
     expect(posts.single.$2['battery_pct'], 73);
   });
 
+  test('a requested fix without a speed never uploads a made-up 0', () async {
+    final List<(String, Map<String, dynamic>)> posts =
+        <(String, Map<String, dynamic>)>[];
+    final LocationRefreshHandler handler = _handler(
+      now: now,
+      posts: posts,
+      getPosition: () async => Position(
+        longitude: -122.2,
+        latitude: 37.1,
+        timestamp: now,
+        accuracy: 10,
+        altitude: 12,
+        altitudeAccuracy: 2,
+        heading: 90,
+        headingAccuracy: 4,
+        speed: 0, // Android: "no speed" arrives as 0.0
+        speedAccuracy: 0, // and no stated accuracy
+      ),
+    );
+    await handler.handle(command());
+    expect(posts.single.$2.containsKey('speed_mps'), isFalse);
+  });
+
   test('falls back to a heartbeat when GPS has no fix', () async {
     final List<(String, Map<String, dynamic>)> posts =
         <(String, Map<String, dynamic>)>[];

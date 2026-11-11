@@ -120,6 +120,47 @@ void main() {
           isTrue);
     });
 
+    test('background: parked with speed-less fixes still leaves drive', () {
+      final TrackingCadence c = TrackingCadence()..setBackground(true);
+      for (int s = 0; s <= 4; s++) {
+        c.onFix(now: at(s), speedMps: 15, lat: 40 + s * 0.0005, lon: -74);
+      }
+      expect(c.isDriving, isTrue);
+      // Parked: every fix has no speed (-1) and sits at one spot.
+      for (int s = 5; s <= 260; s++) {
+        c.onFix(now: at(s), speedMps: -1, lat: 40.003, lon: -74);
+      }
+      expect(c.isDriving, isFalse);
+      expect(c.profile(at(260)).tier, isNot(CadenceTier.driving));
+    });
+
+    test('background: speed-less fixes that keep moving never end the drive '
+        'and never start one', () {
+      final TrackingCadence c = TrackingCadence()..setBackground(true);
+      for (int s = 0; s <= 4; s++) {
+        c.onFix(now: at(s), speedMps: 15, lat: 40 + s * 0.0005, lon: -74);
+      }
+      for (int s = 5; s <= 260; s++) {
+        c.onFix(now: at(s), speedMps: -1, lat: 40.003 + s * 0.0005, lon: -74);
+      }
+      expect(c.isDriving, isTrue);
+      // Steady 11 m/s with no speed on the fixes: the anchor moves only every
+      // few fixes, yet the drive must not time out.
+      final TrackingCadence e = TrackingCadence()..setBackground(true);
+      for (int s = 0; s <= 4; s++) {
+        e.onFix(now: at(s), speedMps: 15, lat: 40 + s * 0.0001, lon: -74);
+      }
+      for (int s = 5; s <= 400; s++) {
+        e.onFix(now: at(s), speedMps: -1, lat: 40 + s * 0.0001, lon: -74);
+      }
+      expect(e.isDriving, isTrue);
+      final TrackingCadence d = TrackingCadence()..setBackground(true);
+      for (int s = 0; s <= 30; s++) {
+        d.onFix(now: at(s), speedMps: -1, lat: 40 + s * 0.0005, lon: -74);
+      }
+      expect(d.isDriving, isFalse);
+    });
+
     test('background: moving again during the jam stays in drive', () {
       final TrackingCadence c = TrackingCadence()..setBackground(true);
       c.onFix(now: at(0), speedMps: 15);

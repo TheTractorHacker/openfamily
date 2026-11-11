@@ -186,15 +186,27 @@ bool isSlowFix({
 /// on-screen speed from the marker motion hub when there is one; it is judged
 /// instead of the stored speed.
 extension MemberDriving on Member {
-  DrivingView drivingView({double? liveSpeedMps, DateTime? now}) =>
-      resolveDriving(
-        movement: movement,
-        speedMps: liveSpeedMps ?? speedMps,
+  DrivingView drivingView({double? liveSpeedMps, DateTime? now}) {
+    double? speed = liveSpeedMps ?? speedMps;
+    if (liveSpeedMps != null && liveSpeedMps < kStoppedBelowMps) {
+      // The hub snaps its speed to a synthetic 0 when fixes stop for a few
+      // seconds (tunnel, upload gap). That is a guess, not a measurement:
+      // believe a live standstill only when the stored speed says the same.
+      final double? stored = trustedSpeedMps(
+        speedMps: speedMps,
         accuracyMeters: accuracyMeters,
-        fixTime: fixTime,
-        slowSince: slowSince,
-        now: now,
       );
+      if (stored == null || stored >= kStoppedBelowMps) speed = null;
+    }
+    return resolveDriving(
+      movement: movement,
+      speedMps: speed,
+      accuracyMeters: accuracyMeters,
+      fixTime: fixTime,
+      slowSince: slowSince,
+      now: now,
+    );
+  }
 
   /// Whether the pin / row shows a movement badge: a car only while the
   /// driving rule says it is still in a vehicle; other movements as tagged.

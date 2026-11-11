@@ -240,6 +240,27 @@ void main() {
       expect(m.drivingView().speedMps, isNull);
     });
 
+    test('an hours-old previous fix cannot back-date a standstill', () {
+      final DateTime t0 = DateTime.now().toUtc().subtract(const Duration(hours: 3));
+      Member m = Member(
+        id: 'u1',
+        name: 'Sam',
+        position: const LatLng(40, -74),
+        status: MemberStatus.normal,
+        batteryPercent: 80,
+        address: 'Home',
+        movement: MovementType.none,
+        speedMps: 0,
+        fixTime: t0,
+        accuracyMeters: 10,
+      );
+      m = memberFromLocationUpdate(
+          m, json(DateTime.now().toUtc(), speed: null));
+      expect(m.slowSince, isNull);
+      expect(m.movement, MovementType.car);
+      expect(m.drivingView().phase, DrivingPhase.driving);
+    });
+
     test('refreshStaleness retires a car tag whose fix went quiet', () {
       final Member m = Member(
         id: 'u1',
@@ -316,10 +337,18 @@ void main() {
       expect(m.showsMovementBadge, isTrue);
     });
 
-    test('a live speed of 0 from the marker hub reads Stopped', () {
-      final Member m = car(speed: 12);
+    test('a live 0 that the stored speed confirms reads Stopped', () {
+      final Member m = car(speed: 0);
       expect(memberStatusLine(m, speedMps: 0), 'Stopped');
       expect(memberStatusLine(m, speedMps: 0), isNot(contains('mph')));
+    });
+
+    test('a synthetic live 0 (fixes stopped) over a moving stored speed is '
+        'plain Driving, not Stopped', () {
+      final Member m = car(speed: 12);
+      expect(memberStatusLine(m, speedMps: 0), 'Driving');
+      expect(m.drivingView(liveSpeedMps: 0).speedMps, isNull);
+      expect(m.drivingView(liveSpeedMps: 0).isStopped, isFalse);
     });
   });
 }

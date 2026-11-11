@@ -246,6 +246,12 @@ DateTime? _slowSinceAfter(
   if (prev != null && prevTime != null && position != null && fixTime != null) {
     dist = const Distance().as(LengthUnit.Meter, prev, position);
     elapsed = fixTime.difference(prevTime);
+    // A gap this long spans time nobody observed (the server stores no rows
+    // while a phone sits still): it cannot back-date a standstill.
+    if (elapsed > kDrivingFixMaxAge * 2) {
+      dist = null;
+      elapsed = null;
+    }
   }
   final bool slow = isSlowFix(
     speedMps: speedMps,
