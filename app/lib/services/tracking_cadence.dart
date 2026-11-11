@@ -262,8 +262,23 @@ class TrackingCadence {
   }) {
     _lastFixAt = now;
     _motionActive = isMovingMotionState(motionState);
-    _updateIdleAnchor(now, speedMps, lat, lon);
-    if (speedMps == null || speedMps.isNaN || speedMps < 0) return;
+    final bool stirred = _updateIdleAnchor(now, speedMps, lat, lon);
+    if (speedMps == null || speedMps.isNaN || speedMps < 0) {
+      // No speed on this fix. It cannot start or extend a drive or walk, but a
+      // fix that provably stood still (inside the idle radius of the anchor,
+      // no moving activity) counts as 0 for EXIT purposes only. Otherwise a
+      // parked phone whose fixes carry no speed would stay in the driving tier.
+      final bool stood = lat != null &&
+          lon != null &&
+          !lat.isNaN &&
+          !lon.isNaN &&
+          !stirred &&
+          _stillSince != null &&
+          now.difference(_stillSince!) >= const Duration(seconds: 30);
+      if (stirred) _driveBelowSince = null;
+      if (!stood || !(_driving || _walking)) return;
+      speedMps = 0;
+    }
 
     final double a = config.speedSmoothing;
     final double prev = _smoothed ?? speedMps;
@@ -315,15 +330,18 @@ class TrackingCadence {
   /// Tracks how long the device has stayed around one spot. Any sign of
   /// movement (a fix beyond the radius, walking-or-faster speed, moving
   /// activity state) restarts the timer.
-  void _updateIdleAnchor(
+  ///
+  /// Returns true when this fix showed (or could not rule out) movement.
+  bool _updateIdleAnchor(
       DateTime now, double? speedMps, double? lat, double? lon) {
     if (lat == null || lon == null || lat.isNaN || lon.isNaN) {
       // No position: cannot prove stillness, so never idle on this evidence.
-      if (_anchorLat == null) return;
-      _stillSince = null;
-      _anchorLat = null;
-      _anchorLon = null;
-      return;
+      if (_anchorLat != null) {
+        _stillSince = null;
+        _anchorLat = null;
+        _anchorLon = null;
+      }
+      return true;
     }
     final bool fast = speedMps != null &&
         !speedMps.isNaN &&
@@ -333,11 +351,13 @@ class TrackingCadence {
     final bool moved = aLat == null ||
         aLon == null ||
         distanceMeters(aLat, aLon, lat, lon) > config.idleRadiusM;
-    if (moved || fast || _motionActive) {
+    final bool stirred = moved || fast || _motionActive;
+    if (stirred) {
       _anchorLat = lat;
       _anchorLon = lon;
       _stillSince = now;
     }
+    return stirred;
   }
 
   /// The OS woke the tracker because the phone probably moved (iOS: exit of

@@ -7,6 +7,7 @@ import '../models/trip.dart';
 import '../models/trip_report.dart';
 import '../services/api_client.dart';
 import '../services/delivery_status.dart';
+import '../services/driving_presence.dart';
 import '../services/location_refresh_service.dart';
 import '../services/member_day_service.dart';
 import '../services/speed_units.dart';
@@ -49,12 +50,14 @@ String memberDetailStatus(
     return seen == null ? 'Updates stopped' : 'Last seen ${agoLabel(seen.toLocal(), n)}';
   }
   if (m.movement == MovementType.car) {
-    final double? v = speedMps ?? m.speedMps;
-    return v == null ? 'Driving' : 'Driving · ${units.formatSpeed(v)}';
+    final DrivingView d = m.drivingView(liveSpeedMps: speedMps, now: n);
+    if (d.isDriving) return d.line(units, separator: ' · ');
   }
   final PlacePresence? p = m.placePresence;
   if (p != null && p.isAt) return placePresenceLabel(p, now: n);
   if (p != null) return placePresenceLabel(p, now: n);
+  // A car tag the rule retired but the stored address still says "Driving".
+  if (m.movement == MovementType.car) return m.address == 'Driving' || m.address.isEmpty ? 'Not moving' : m.address;
   if (m.address.isNotEmpty) return m.address;
   return m.movement == MovementType.none ? 'Not moving' : m.movement.label;
 }

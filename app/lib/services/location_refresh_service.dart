@@ -9,6 +9,7 @@ import 'api_client.dart';
 import 'battery_report.dart';
 import 'device_service.dart';
 import 'e2ee/private_runtime.dart';
+import 'fix_quality.dart';
 import 'location_sharing_service.dart';
 import 'tracking_wake.dart';
 
@@ -140,7 +141,13 @@ class LocationRefreshHandler {
         'altitude_meters': position.altitude,
         'source': 'requested',
       };
-      if (position.speed >= 0) body['speed_mps'] = position.speed;
+      // Same speed rule as the reporter: a 0 only when it is trustworthy
+      // (Android reports 0.0 for a fix that has no speed).
+      body.addAll(speedFields(
+        speedMps: position.speed,
+        speedAccuracyMps: position.speedAccuracy,
+        accuracyM: position.accuracy,
+      ));
       if (position.heading >= 0) body['heading_deg'] = position.heading;
       addBatteryFields(body, batteryPct, charging);
       await post('/locations', body);

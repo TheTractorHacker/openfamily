@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/member.dart';
 import '../services/delivery_status.dart';
+import '../services/driving_presence.dart';
 import '../services/speed_units.dart';
 import '../theme/app_theme.dart';
 import '../utils/member_status.dart';
@@ -84,7 +85,7 @@ class MemberTile extends StatelessWidget {
                 ],
               ),
             ),
-            if (member.movement != MovementType.none) ...[
+            if (member.showsMovementBadge) ...[
               const SizedBox(width: 8),
               MovementIcon(movement: member.movement, size: 20),
             ],
@@ -99,8 +100,14 @@ class MemberTile extends StatelessWidget {
   /// parked with place history, otherwise the plain address ("Driving", ...).
   String _placeOrAddress() {
     final PlacePresence? p = member.placePresence;
-    final bool moving = member.movement == MovementType.car ||
-        member.movement == MovementType.bike;
+    // The one driving rule decides between "Driving", "Stopped" and parked.
+    final DrivingView d = member.drivingView();
+    final bool car = member.movement == MovementType.car;
+    final bool moving = (car && d.isDriving) || member.movement == MovementType.bike;
+    if (car && d.isStopped) return d.word;
+    if (car && !d.isDriving && member.address == 'Driving') {
+      return p == null ? 'Stationary' : placePresenceLabel(p);
+    }
     if (p == null || moving || member.status == MemberStatus.stopped) {
       return member.address;
     }
@@ -153,12 +160,16 @@ class MemberTile extends StatelessWidget {
       chips.add(
         LiveSpeedBuilder(
           member: member,
-          builder: (BuildContext _, double? mps, UnitSystem units) =>
-              DsStatusChip(
-            icon: Icons.directions_car,
-            color: isSpeedingMps(mps) ? AppColors.statusOrange : accent,
-            label: speedText(mps, units) ?? '—',
-          ),
+          builder: (BuildContext _, double? mps, UnitSystem units) {
+            // No chip for "Stopped" or an unknown speed: the row says so.
+            final double? shown = member.drivingView(liveSpeedMps: mps).speedMps;
+            if (shown == null) return const SizedBox.shrink();
+            return DsStatusChip(
+              icon: Icons.directions_car,
+              color: isSpeedingMps(shown) ? AppColors.statusOrange : accent,
+              label: speedText(shown, units) ?? '—',
+            );
+          },
         ),
       );
     }

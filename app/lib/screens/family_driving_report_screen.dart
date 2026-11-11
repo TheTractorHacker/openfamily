@@ -9,6 +9,7 @@ import '../models/trip.dart';
 import '../models/trip_report.dart';
 import '../services/circle_selection.dart' show kAllCircles;
 import '../services/driving/driving_settings.dart';
+import '../services/driving_presence.dart';
 import '../services/speed_units.dart';
 import '../services/trip_report_service.dart';
 import '../services/trips_service.dart';
@@ -508,10 +509,10 @@ class _State extends State<FamilyDrivingReportScreen> {
                             DrivingNowStrip(
                           driving: <Member>[
                             ...all.where((Member m) =>
-                                m.movement == MovementType.car &&
+                                m.drivingView().isDriving &&
                                 m.id == widget.userId.value),
                             ...all.where((Member m) =>
-                                m.movement == MovementType.car &&
+                                m.drivingView().isDriving &&
                                 m.id != widget.userId.value),
                           ],
                           selfId: widget.userId.value,

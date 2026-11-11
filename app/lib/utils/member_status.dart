@@ -1,5 +1,6 @@
 import '../models/member.dart';
 import '../services/delivery_status.dart' show DeliveryHints;
+import '../services/driving_presence.dart';
 import '../services/speed_units.dart';
 
 /// "3:10 pm" (12-hour, locale-neutral, no intl dependency).
@@ -51,6 +52,7 @@ String memberStatusLine(
   bool sharingPaused = false,
   double? speedMps,
   UnitSystem units = UnitSystem.imperial,
+  DateTime? now,
 }) {
   if (sharingPaused) return 'Location sharing paused';
   // A Private circle explains itself: the server knows why a member is silent (no key yet, old app, phone off).
@@ -66,10 +68,21 @@ String memberStatusLine(
         ? 'Updates stopped, last seen ${lastSeenAgo(seen, DateTime.now())}'
         : 'Updates stopped, last seen ${formatClock(seen.toLocal())}';
   }
+  String untagged() {
+    final PlacePresence? presence = m.placePresence;
+    if (presence != null) return placePresenceLabel(presence);
+    // A car tag the rule retired but the stored address still says "Driving".
+    final String where =
+        m.movement == MovementType.car && m.address == 'Driving' ? 'Stationary' : m.address;
+    return where.isEmpty ? 'Location shared' : where;
+  }
+
   switch (m.movement) {
     case MovementType.car:
-      final double? v = speedMps ?? m.speedMps;
-      return v == null ? 'Driving' : 'Driving ${units.formatSpeed(v)}';
+      // The one driving rule: "Driving 42 mph", "Driving", "Stopped", or no
+      // longer driving at all (stale car tag, parked).
+      final DrivingView d = m.drivingView(liveSpeedMps: speedMps, now: now);
+      return d.isDriving ? d.line(units) : untagged();
     case MovementType.bike:
     case MovementType.boat:
     case MovementType.plane:
@@ -79,9 +92,7 @@ String memberStatusLine(
     case MovementType.star:
       return m.movement.label;
     case MovementType.none:
-      final PlacePresence? presence = m.placePresence;
-      if (presence != null) return placePresenceLabel(presence);
-      return m.address.isEmpty ? 'Location shared' : m.address;
+      return untagged();
   }
 }
 

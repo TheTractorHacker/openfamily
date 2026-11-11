@@ -1,0 +1,1 @@
+Fixed: family members sitting still no longer show as driving at 0 mph. A car at a red light shows Stopped, and when the phone gives no speed Orbitly shows Driving without a number. Nothing was tried on a real phone yet.

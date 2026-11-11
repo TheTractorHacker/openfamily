@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:math' as math;
 
 import '../../models/member.dart';
+import '../driving_presence.dart';
 import '../../utils/member_status.dart';
 import '../delivery_status.dart' show DeliveryHints;
 
@@ -126,23 +127,34 @@ const double _speedStepMps = 2.2352;
     if (n.difference(seen) >= const Duration(hours: 24)) return (text: 'Updates stopped, last seen', at: seen);
     return (text: memberStatusLine(m), at: null); // "last seen 3:12 pm": a clock time, stable
   }
-  if (m.movement == MovementType.car) {
-    final double? v = m.speedMps;
-    final double? q = v == null ? null : (v / _speedStepMps).roundToDouble() * _speedStepMps;
-    return (text: memberStatusLine(m, speedMps: q), at: null);
+  final DrivingView d = m.drivingView(now: n);
+  if (m.movement == MovementType.car && d.isDriving) {
+    // The phone's driving rule decides; the number is only rounded to 5 mph
+    // steps when that keeps it a real moving speed.
+    final double? v = d.speedMps ?? m.speedMps;
+    double? q = v;
+    if (d.speedMps != null) {
+      final double stepped = (d.speedMps! / _speedStepMps).roundToDouble() * _speedStepMps;
+      if (stepped >= kStoppedBelowMps) q = stepped;
+    }
+    return (text: memberStatusLine(m, speedMps: q, now: n), at: null);
   }
   final PlacePresence? p = m.placePresence;
-  if (m.movement == MovementType.none && p != null && !p.isAt) return (text: 'Left ${p.placeName}', at: p.since);
-  return (text: memberStatusLine(m), at: null);
+  final bool untagged = m.movement == MovementType.none || m.movement == MovementType.car;
+  if (untagged && p != null && !p.isAt) return (text: 'Left ${p.placeName}', at: p.since);
+  return (text: memberStatusLine(m, now: n), at: null);
 }
 
 /// "driving", "moving", "at_place", "still", "stopped" or "none".
-String watchMemberState(Member m) {
+String watchMemberState(Member m, {DateTime? now}) {
   if (m.position == null) return 'none';
   if (m.status == MemberStatus.stopped) return 'stopped';
   switch (m.movement) {
     case MovementType.car:
-      return 'driving';
+      // A car tag the driving rule no longer backs (stale fix, parked) is a
+      // person standing somewhere, not "driving".
+      if (m.drivingView(now: now).isDriving) return 'driving';
+      return m.placePresence?.isAt == true ? 'at_place' : 'still';
     case MovementType.bike:
     case MovementType.boat:
     case MovementType.plane:
@@ -161,8 +173,9 @@ double _round5(double v) => (v * 100000).roundToDouble() / 100000;
 
 Map<String, dynamic> _member(WatchSnapshotInput i, Member m) {
   final bool priv = i.privateMemberIds.contains(m.id);
-  final String state = watchMemberState(m);
-  final double? mps = m.speedMps;
+  final String state = watchMemberState(m, now: i.now);
+  // Only a trusted moving speed goes to the watch; never a 0 for a stopped car.
+  final double? mps = m.drivingView(now: i.now).speedMps;
   final ({String text, DateTime? at}) line =
       i.statusLine != null ? (text: i.statusLine!(m), at: null) : watchMemberLine(m, now: i.now);
   return <String, dynamic>{
