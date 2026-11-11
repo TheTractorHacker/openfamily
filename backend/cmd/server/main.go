@@ -244,6 +244,7 @@ func main() {
 	}
 	// Needs notification_prefs.phone_silent, so it starts after the schema.
 	go srv.RunSilenceAlerts(ctx)
+	go srv.RunStaleWake(ctx)
 	go srv.RunArrivalWatch(ctx)
 	if err := srv.EnsureThemeSchema(ctx); err != nil {
 		slog.Warn("theme schema", "err", err)

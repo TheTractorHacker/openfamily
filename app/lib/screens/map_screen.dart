@@ -55,6 +55,7 @@ import 'check_in_screen.dart';
 import 'inbox_screen.dart';
 import 'invite_screen.dart';
 import 'join_circle_screen.dart';
+import 'keep_alive_screen.dart';
 import 'circle_detail_screen.dart';
 import 'circles_screen.dart';
 import 'places_screen.dart';
@@ -655,14 +656,16 @@ class _MapScreenState extends State<MapScreen>
           ),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Open settings'),
+            child: const Text('Open checklist'),
           ),
         ],
       ),
     );
 
     if (open == true && mounted) {
-      await BatteryOptimizationService.openSettings();
+      await Navigator.of(context).push<void>(
+        MaterialPageRoute<void>(builder: (_) => const KeepAliveScreen()),
+      );
     }
   }
 

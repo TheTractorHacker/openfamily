@@ -152,12 +152,27 @@ class IsolateHolderService : MethodChannel.MethodCallHandler, LocationUpdateList
      *  from one nobody asked for (the OS ending the service, or a stop for a missing permission). */
     private var shutdownRequested = false
 
+    /** Set when Android refused [startForeground] in [onCreate]; the start command that follows must not try again
+     *  (it would throw the same refusal outside any try/catch). */
+    private var foregroundRefused = false
+
     override fun onCreate() {
         super.onCreate()
         NativeJournal.record(this, "service_created")
         activeInstance = this
         startLocatorService(this)
-        startForeground(notificationId, getNotification())
+        try {
+            startForeground(notificationId, getNotification())
+        } catch (e: Throwable) {
+            // Android refused to let this service become a foreground service
+            // (started from the background without an exemption, or a missing
+            // location permission on Android 14+). Say so and stop instead of
+            // crashing the process; the next exempt wake-up tries again.
+            NativeJournal.record(this, "start_foreground_refused", "type=${e.javaClass.simpleName}")
+            foregroundRefused = true
+            isServiceRunning = false
+            stopSelf()
+        }
     }
 
     private fun start() {
@@ -235,6 +250,7 @@ class IsolateHolderService : MethodChannel.MethodCallHandler, LocationUpdateList
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Log.e("IsolateHolderService", "onStartCommand => intent.action : ${intent?.action}")
+        if (foregroundRefused) return START_NOT_STICKY
         if(intent == null) {
             NativeJournal.record(this, "service_restarted_by_os")
             // The OS restarted the service after killing the process

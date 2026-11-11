@@ -289,6 +289,9 @@ String _oemName(String manufacturer) {
   return '';
 }
 
+/// Whether [manufacturer] is Samsung (its own battery lists are described in [oemGuidance]).
+bool isSamsungPhone(String manufacturer) => _oemName(manufacturer) == 'Samsung';
+
 /// OEM-specific advice, shown under the battery check. Empty for stock Android.
 String oemGuidance(String manufacturer) {
   switch (_oemName(manufacturer)) {
@@ -297,10 +300,11 @@ String oemGuidance(String manufacturer) {
           'then Settings > Apps > Orbitly > Battery saver and choose "No restrictions". '
           'Also lock Orbitly in the recent-apps list (long-press its card, tap the lock).';
     case 'Samsung':
-      return 'On Samsung phones: open Settings > Apps > Orbitly > Battery and choose "Unrestricted". '
-          'Then open Settings > Battery > Background usage limits and make sure Orbitly is not in '
-          '"Sleeping apps" or "Deep sleeping apps". If "Never sleeping apps" does not offer Orbitly when you search '
-          'its list, the Unrestricted choice above does the same job.';
+      return 'On Samsung phones: open Settings > Apps > Orbitly > Battery and choose "Unrestricted". That is the '
+          'setting that counts. Samsung\'s "Never auto sleeping apps" list often says "No apps" when you search it '
+          'for an app that is already Unrestricted, so do not hunt for Orbitly there. Then open Settings > Battery > '
+          'Background usage limits and make sure Orbitly is not under "Sleeping apps" or "Deep sleeping apps"; if it '
+          'is, remove it. Android cannot read those two lists, so this one needs a look from you.';
     case 'OnePlus':
       return 'On OnePlus phones: open Settings > Battery > Battery optimization > Orbitly > "Don\'t optimize", '
           'then Settings > Apps > Orbitly > Battery > "Allow background activity". '
@@ -313,6 +317,107 @@ String oemGuidance(String manufacturer) {
           'allow Auto-launch for Orbitly and lock it in the recent-apps list.';
   }
   return '';
+}
+
+/// What Android's own records say about whether it lets Orbitly keep running: the power group it put the app in,
+/// whether the app tried to restart tracking by itself and was refused, and the last time Android stopped it the way
+/// "Force stop" does. Shared by the Diagnostics list and the "Keep tracking alive" checklist, so both always agree.
+/// Empty when the phone is not Android or nothing was collected (the light probe).
+List<DiagCheck> _staySilentChecks(DiagFacts f) {
+  final TrackingHealthFacts? t = f.tracking;
+  if (!f.isAndroid || t == null) return const <DiagCheck>[];
+  final List<DiagCheck> out = <DiagCheck>[];
+
+  final int? bucket = t.standbyBucket;
+  if (bucket != null) {
+    final String name = standbyBucketName(bucket);
+    if (bucket >= 45) {
+      out.add(DiagCheck(
+          id: 'standby_bucket',
+          title: 'Android\'s power group',
+          status: DiagStatus.fail,
+          detail: 'Android has put Orbitly in the "${name.toLowerCase()}" power group, which allows almost no work '
+              'while the app is closed. Set Orbitly\'s battery use to "Unrestricted".',
+          fix: const DiagFix(DiagFixKind.batterySettings, 'Open battery settings')));
+    } else if (bucket >= 40) {
+      out.add(DiagCheck(
+          id: 'standby_bucket',
+          title: 'Android\'s power group',
+          status: DiagStatus.warn,
+          detail: 'Android has put Orbitly in the "${name.toLowerCase()}" power group because it was not opened for a '
+              'while. It spaces out the app\'s timed wake-ups. Opening the app moves it up; "Unrestricted" battery '
+              'use keeps it from being moved down again.',
+          fix: const DiagFix(DiagFixKind.batterySettings, 'Open battery settings')));
+    } else {
+      out.add(DiagCheck(
+          id: 'standby_bucket',
+          title: 'Android\'s power group',
+          status: DiagStatus.pass,
+          detail: 'Android has Orbitly in the "${name.toLowerCase()}" power group, which does not hold it back.'));
+    }
+  }
+
+  // The newest answer of Orbitly's own "bring tracking back" attempts, written by the Android service.
+  JournalLine? attempt;
+  for (final JournalLine l in t.journal) {
+    if (l.source != 'native') continue;
+    if (l.event == 'service_restarted_by_watchdog' ||
+        l.event == 'watchdog_refused' ||
+        l.event == 'start_foreground_refused') {
+      if (attempt == null || (l.last ?? l.at).isAfter(attempt.last ?? attempt.at)) attempt = l;
+    }
+  }
+  if (attempt != null) {
+    final DateTime when = attempt.last ?? attempt.at;
+    final String ago = humanAgo(f.now.difference(when));
+    if (attempt.event == 'service_restarted_by_watchdog') {
+      out.add(DiagCheck(
+          id: 'self_restart',
+          title: 'Orbitly restarting itself',
+          status: DiagStatus.info,
+          detail: 'Orbitly found its tracking service stopped and asked Android to start it again ($ago). '
+              'That is Orbitly\'s own safety net working.'));
+    } else {
+      final String why = attempt.detail.contains('no_background_location')
+          ? 'Location is not allowed "all the time". Choose "Allow all the time" in the app permissions.'
+          : attempt.detail.contains('no_location_permission')
+              ? 'Location permission is off.'
+              : 'Android only lets an app start tracking from the background when the user has set its battery use to '
+                  '"Unrestricted". Set that and the next try can work.';
+      out.add(DiagCheck(
+          id: 'self_restart',
+          title: 'Orbitly restarting itself',
+          status: f.sharingEnabled ? DiagStatus.warn : DiagStatus.info,
+          detail: 'Orbitly found its tracking service stopped and tried to start it again ($ago), but Android '
+              'refused. $why',
+          fix: const DiagFix(DiagFixKind.batterySettings, 'Open battery settings'),
+          secondaryFix: const DiagFix(DiagFixKind.openAppSettings, 'Open app permissions')));
+    }
+  }
+
+  // Android's record of the last time it ended the app the way "Force stop" does. A stopped app receives nothing
+  // until it is opened, so no restart can happen after this.
+  final List<ProcessExit>? exits = t.exits;
+  if (exits != null && f.sharingEnabled) {
+    ProcessExit? stopped;
+    for (final ProcessExit e in exits) {
+      if ((e.reason == 10 || e.reason == 11) && f.now.difference(e.at) < const Duration(hours: 72)) {
+        if (stopped == null || e.at.isAfter(stopped.at)) stopped = e;
+      }
+    }
+    if (stopped != null) {
+      out.add(DiagCheck(
+          id: 'last_force_stop',
+          title: 'Android stopped Orbitly',
+          status: DiagStatus.warn,
+          detail: 'Android recorded that Orbitly was stopped like a "Force stop" ${humanAgo(f.now.difference(stopped.at))} '
+              '(${exitReasonName(stopped.reason)}). That can be you swiping it away on some phones, or the phone\'s own '
+              'clean-up (Samsung "Sleeping apps" and Device care do this). A stopped app cannot restart itself: it stays '
+              'silent until you open it. Open Orbitly now, and set battery use to "Unrestricted".',
+          fix: const DiagFix(DiagFixKind.batterySettings, 'Open battery settings')));
+    }
+  }
+  return out;
 }
 
 /// Evaluates every check, in the order the screen lists them. The order puts
@@ -459,6 +564,8 @@ List<DiagCheck> evaluateDiagnostics(DiagFacts f) {
           fix: DiagFix(DiagFixKind.batterySettings, 'Open battery settings')));
     }
   }
+
+  out.addAll(_staySilentChecks(f));
 
   // 6. Notifications.
   if (f.notificationsGranted == true) {

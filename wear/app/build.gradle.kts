@@ -35,7 +35,7 @@ android {
     defaultConfig {
         // Same applicationId as the phone app: the Wearable Data Layer only
         // connects apps with the same id and signature (docs/design/WATCH_APPS.md).
-        applicationId = "app.openfamily"
+        applicationId = "app.orbitly"
         minSdk = 30
         targetSdk = 35
         versionCode = wearVersionCode

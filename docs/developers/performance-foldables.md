@@ -65,9 +65,9 @@ events in the timeline; under Impeller use the DevTools Performance tab instead)
 Frame statistics (run after 30 s of use, reset first):
 
 ```
-adb shell dumpsys gfxinfo app.openfamily reset
+adb shell dumpsys gfxinfo app.orbitly reset
 # ...pan the map, drag the sheet, switch tabs...
-adb shell dumpsys gfxinfo app.openfamily framestats
+adb shell dumpsys gfxinfo app.orbitly framestats
 ```
 
 Look at "Janky frames" and the 90th / 95th / 99th percentile frame times. At 120 Hz the budget is 8.3 ms per frame.

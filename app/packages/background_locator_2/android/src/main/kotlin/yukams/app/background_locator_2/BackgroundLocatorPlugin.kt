@@ -157,6 +157,16 @@ class BackgroundLocatorPlugin
             if (!IsolateHolderService.isServiceRunning) {
                 // The service is not running
                 Log.d("BackgroundLocatorPlugin", "Locator service is not running, nothing to stop")
+                // The liveness alarm and the movement registration outlive a dead
+                // service (so the watchdog can revive it); a stop requested now
+                // must remove them, or they would keep waking the app for a user
+                // who switched sharing off.
+                try {
+                    HeartbeatScheduler.cancel(context)
+                    ActivityTransitionsManager.stop(context)
+                } catch (e: Throwable) {
+                    Log.w("BackgroundLocatorPlugin", "could not release the alarm", e)
+                }
                 result?.success(true)
                 return
             }
@@ -263,6 +273,8 @@ class BackgroundLocatorPlugin
                     result.success(service.updateLocationRequest(intervalMs, distance, high))
                 }
             }
+            Keys.METHOD_PLUGIN_ENSURE_RUNNING ->
+                result.success(ServiceWatchdog.onWake(context, "push"))
             Keys.METHOD_PLUGIN_IS_REGISTER_LOCATION_UPDATE -> isServiceRunning(result)
             Keys.METHOD_PLUGIN_IS_SERVICE_RUNNING -> isServiceRunning(result)
             Keys.METHOD_PLUGIN_UPDATE_NOTIFICATION -> {

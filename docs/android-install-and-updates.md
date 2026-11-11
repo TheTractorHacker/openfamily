@@ -61,11 +61,24 @@ app deletes the keys inside the app. Since 0.26.28 a sealed copy brings the key
 back when you reinstall and sign in to the same account with Google backup on (see
 [Reinstalling Orbitly](user/reinstalling.md)); still, never uninstall to update.
 
+## Version 0.26.34: the app changed its package id
+
+From 0.26.34 the Android package id is `app.orbitly` (it was `app.openfamily`), so that the signed build carries the
+product name. Android treats a new package id as a **different app**: the update does not replace the old one, it
+installs next to it, and nothing of the old install is carried over (sign-in, the keys in the Android key store, the
+device id, and the sealed key copy of Google backup, which belongs to the old package).
+
+To move over: install 0.26.34, sign in again, and if you use Private circles restore your key backup (recovery phrase,
+or approval from another admin), then uninstall the old Orbitly. Two Orbitly apps signed in on the same phone both
+report; remove the old one so only one does. The watch app has to be installed again, because the watch and the phone
+must have the same package id. Obtainium: add the app again (the old entry follows the old package). This was not tried
+on a real phone.
+
 ## Release file names
 
 Releases from the Orbitly rename on are called `orbitly-<version>.apk`; older
-ones are `orbitly-<version>.apk`. The app and package id are the same, so an
-installed app simply updates. If you set an APK name filter in Obtainium, use
+ones are `openfamily-<version>.apk`. **Exception: 0.26.34 changed the Android package id**
+(see below); every other update installs over the current app. If you set an APK name filter in Obtainium, use
 `^orbitly-[0-9]` (or clear it). A release also carries `orbitly-wear-<version>.apk`,
 the [Wear OS watch app](user/watch.md); that file is not for phones, so do not use
 a plain `orbitly` filter. The server's `/app.apk` and the admin Builds page take

@@ -76,25 +76,25 @@ Connect with Wireless debugging (Developer options, ADB debugging, Debug over Wi
 
 1. Cold start time:
    ```
-   adb shell am force-stop app.openfamily
-   adb shell am start-activity -W -n app.openfamily/app.openfamily.wear.MainActivity
+   adb shell am force-stop app.orbitly
+   adb shell am start-activity -W -n app.orbitly/app.orbitly.wear.MainActivity
    ```
    Read `TotalTime` and `WaitTime`. Run it 10 times, drop the first, take the median. Do this once with the profile compiled and once without:
    ```
-   adb shell cmd package compile -m speed-profile -f app.openfamily     # with profile
-   adb shell cmd package compile --reset app.openfamily                 # back to the installed state
+   adb shell cmd package compile -m speed-profile -f app.orbitly     # with profile
+   adb shell cmd package compile --reset app.orbitly                 # back to the installed state
    ```
 2. Dropped frames while scrolling the People list (open it, then scroll for 10 seconds):
    ```
-   adb shell dumpsys gfxinfo app.openfamily reset
+   adb shell dumpsys gfxinfo app.orbitly reset
    # ... scroll ...
-   adb shell dumpsys gfxinfo app.openfamily framestats
+   adb shell dumpsys gfxinfo app.orbitly framestats
    ```
    Look at "Janky frames" and the 90th, 95th and 99th percentile frame times. On a 60 Hz AMOLED the budget is 16.6 ms.
 3. SOS hold: the same `gfxinfo` while holding the SOS button for 1.5 s. Before this change the whole tree was recomposed every 50 ms; the draw-only ring should show far fewer long frames.
 4. Compass: with `adb shell dumpsys sensorservice` check that the rotation vector has an active connection only while Direction is on screen and the screen is on (nothing after you press the power button).
 5. Traces: record a Perfetto trace (`adb shell perfetto -o /data/misc/perfetto-traces/t.pb -t 20s sched freq idle am wm gfx view binder_driver ...` or the Perfetto UI over USB/Wi-Fi), open the app, scroll, then look at the main thread for `Choreographer#doFrame` over 16 ms and for any `JSONObject` or `SharedPreferences` slice on the main thread (there should be none now). Android Studio's Profiler (CPU and Energy, with the watch selected) shows the same without command lines.
-6. Battery: `adb shell dumpsys batterystats --reset`, use the watch normally for a few hours, then `adb shell dumpsys batterystats app.openfamily`. Expect almost nothing; if there is wake-up time, check the Data Layer push rate in `adb logcat -s WearableService`.
+6. Battery: `adb shell dumpsys batterystats --reset`, use the watch normally for a few hours, then `adb shell dumpsys batterystats app.orbitly`. Expect almost nothing; if there is wake-up time, check the Data Layer push rate in `adb logcat -s WearableService`.
 7. Large text: Settings, Display, Font size at the largest step, then open every screen once. Chips are limited to 1 to 3 lines and the list scrolls, so overflow should only clip a long name.
 
 ## Generate a real profile

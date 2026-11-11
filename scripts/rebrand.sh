@@ -10,7 +10,7 @@
 #   - GitHub URLs  TheTractorHacker/openfamily  (not Go imports) -> TheTractorHacker/orbitly
 #   - release artifact names  openfamily-<version>.apk|aab|...   -> orbitly-<version>...
 #   - brand file names        openfamily-icon|logo|social-card.. -> orbitly-...
-# What is NEVER touched (see docs/developers/naming.md): applicationId/bundle id app.openfamily,
+# What is NEVER touched (see docs/developers/naming.md): iOS bundle id app.openfamily (the Android applicationId is app.orbitly since 0.26.34),
 # Go module path, DB/role names, compose names, OPENFAMILY_* env vars, X-OpenFamily-* headers,
 # openfamily:// scheme, crypto/HKDF labels (lowercase openfamily/...), the Dart package name,
 # SQL migrations, vendored packages, NOTICE/LICENSE/credits/history documents.

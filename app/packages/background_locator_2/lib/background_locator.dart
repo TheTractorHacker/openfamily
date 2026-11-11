@@ -113,4 +113,22 @@ class BackgroundLocator {
       return false;
     }
   }
+
+  /// Android: restarts the tracking service when tracking is wanted (a
+  /// registration exists and the user did not stop it) and the service is not
+  /// running. The start can be refused by Android (a foreground service may not
+  /// start from the background without an exemption); that is journalled
+  /// natively and reported here, never thrown.
+  ///
+  /// Returns `running`, `restarted`, `refused`, `debounced`, `not_wanted`, or
+  /// `unsupported` (iOS or an older native build).
+  static Future<String> ensureRunning() async {
+    try {
+      return await _channel.invokeMethod<String>(
+              Keys.METHOD_PLUGIN_ENSURE_RUNNING) ??
+          'unsupported';
+    } catch (_) {
+      return 'unsupported';
+    }
+  }
 }

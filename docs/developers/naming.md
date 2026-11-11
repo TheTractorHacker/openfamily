@@ -7,7 +7,9 @@ stored data or the wire protocol, and gains nothing for users.
 
 | Identifier | Value | Why it stays |
 |---|---|---|
-| Android `applicationId` / namespace | `app.openfamily` | Android updates only apply to the same application id; it also ties push registration and the signing key. |
+| Android `applicationId` | `app.orbitly` (since 0.26.34; it was `app.openfamily`) | Changed once, on purpose, so the signed build carries the product name. Android treats a new id as a different app: local sign-in, the key-store keys and the device id of the old install are not carried over (see the 0.26.34 release notes). Phone and watch apps must keep the same id and signature. Never change it again without the same migration note. |
+| Android `namespace` (Kotlin/Java package) | `app.openfamily` | Source package only; it is not the install id, and renaming it creates churn in every file for nothing. |
+| Android method-channel names | `app.openfamily/...` | Strings shared by the Dart and Kotlin sides; not an install id. |
 | iOS bundle id | `app.openfamily` (`.RunnerTests`) | Same: app updates, keychain and associated domains. |
 | Keystore alias, release signing key | unchanged | A different key cannot update installed apps. |
 | Deep-link scheme | `openfamily://join` | Invite links already shared and stored in messages keep working. |

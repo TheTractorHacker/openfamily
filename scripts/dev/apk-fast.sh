@@ -102,6 +102,6 @@ echo "== built in $(( $(date +%s) - START ))s: $DST ($(du -h "$DST" | cut -f1)),
 if [ "$INSTALL" = 1 ]; then
   if ! command -v adb >/dev/null; then echo "adb not found; copy $DST to the phone" >&2; exit 0; fi
   if [ -z "$(adb devices | sed 1d | grep -w device || true)" ]; then echo "no authorised adb device; APK is at $DST" >&2; exit 0; fi
-  adb install -r "$DST" || { echo "install failed. If it says INSTALL_FAILED_UPDATE_INCOMPATIBLE, uninstall the other build first (adb uninstall app.openfamily); that loses its local data." >&2; exit 1; }
+  adb install -r "$DST" || { echo "install failed. If it says INSTALL_FAILED_UPDATE_INCOMPATIBLE, uninstall the other build first (adb uninstall app.openfamily, the id before 0.26.34, or app.orbitly); that loses its local data." >&2; exit 1; }
 fi
 echo "$DST"

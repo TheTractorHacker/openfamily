@@ -1,11 +1,23 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="yukams.app.background_locator_2">
     <application>
-        <!-- Fires on the repeating liveness alarm (see HeartbeatScheduler). -->
+        <!-- Fires on the liveness alarm chain (see HeartbeatScheduler). -->
         <receiver
             android:name=".HeartbeatReceiver"
             android:enabled="true"
             android:exported="false" />
+        <!-- System clock / time-zone changes: free chances to restart a dead
+             tracking service (see WatchdogReceiver). System broadcasts reach
+             non-exported receivers. -->
+        <receiver
+            android:name=".WatchdogReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.TIME_SET"/>
+                <action android:name="android.intent.action.TIMEZONE_CHANGED"/>
+            </intent-filter>
+        </receiver>
         <!-- Receives movement-state transitions from Play Services. -->
         <receiver
             android:name=".ActivityTransitionsReceiver"

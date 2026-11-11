@@ -56,6 +56,12 @@ class Keys {
         @JvmStatic
         val METHOD_PLUGIN_UPDATE_LOCATION_REQUEST = "LocatorPlugin.updateLocationRequest"
 
+        /** Asks the plugin to restart the tracking service if tracking is wanted
+         *  and the service is not running (push wake-up). Returns one of the
+         *  ServiceWatchdog outcome codes as a string. */
+        @JvmStatic
+        val METHOD_PLUGIN_ENSURE_RUNNING = "LocatorPlugin.ensureRunning"
+
         @JvmStatic
         val ARG_REQUEST_INTERVAL_MS = "request_interval_ms"
 

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:battery_plus/battery_plus.dart';
@@ -9,6 +10,7 @@ import 'battery_report.dart';
 import 'device_service.dart';
 import 'e2ee/private_runtime.dart';
 import 'location_sharing_service.dart';
+import 'tracking_wake.dart';
 
 enum LocationRefreshResult {
   notCommand,
@@ -210,6 +212,13 @@ class LocationRefreshService {
     if (wake != null) {
       return PrivateRuntime.instance.catchUp(wake).then((_) => LocationRefreshResult.wakeHandled,
           onError: (Object _) => LocationRefreshResult.failed);
+    }
+    // A location request is also a wake-up of this process: bring the tracking
+    // service back if it should be running and is not (the answer is journalled;
+    // Android may refuse a background start). Never delays or fails the fix.
+    final LocationRefreshCommand? command = LocationRefreshCommand.parse(body);
+    if (command != null && command.expiresAt.isAfter(DateTime.now().toUtc())) {
+      unawaited(TrackingWake.fromPush());
     }
     return _handler.handle(body);
   }

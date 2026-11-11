@@ -235,8 +235,9 @@ class DiagnosticsProbe {
   }
 
   /// [light] skips the server round trip and the Private-store/key-store checks:
-  /// enough for the health report, and nothing in it can hang.
-  static Future<DiagFacts> collect({PackageVersion? version, bool light = false}) async {
+  /// enough for the health report, and nothing in it can hang. [withTracking] keeps the process exits, power group and
+  /// tracking journal in a light probe (the "Keep tracking alive" checklist needs them and nothing else heavy).
+  static Future<DiagFacts> collect({PackageVersion? version, bool light = false, bool withTracking = false}) async {
     final Map<String, dynamic>? n = await nativeState();
     final bool? serviceOn = await _try(() => Geolocator.isLocationServiceEnabled());
     final bool whenInUse = await _try(() async => (await Permission.locationWhenInUse.status).isGranted) ?? false;
@@ -327,7 +328,7 @@ class DiagnosticsProbe {
       vaultUserAuth: userAuth,
       deviceIdSuffix: deviceId == null || deviceId.length < 4 ? '' : deviceId.substring(deviceId.length - 4),
       privateDelivery: delivery,
-      tracking: light ? null : await _try(() => collectTracking(native: n)),
+      tracking: light && !withTracking ? null : await _try(() => collectTracking(native: n)),
     );
   }
 }

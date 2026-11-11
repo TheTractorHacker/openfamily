@@ -65,10 +65,7 @@ object ActivityTransitionsManager {
             )
         }
 
-        var flags = PendingIntent.FLAG_UPDATE_CURRENT
-        flags = flags or PendingIntent.FLAG_IMMUTABLE
-        val intent = Intent(appContext, ActivityTransitionsReceiver::class.java)
-        val pi = PendingIntent.getBroadcast(appContext, 0, intent, flags)
+        val pi = buildPendingIntent(appContext)
 
         try {
             ActivityRecognition.getClient(appContext)
@@ -85,12 +82,27 @@ object ActivityTransitionsManager {
         }
     }
 
+    /** The same PendingIntent every time (equal intent and request code), so a
+     *  fresh process can still remove a registration made by an earlier one. */
+    private fun buildPendingIntent(appContext: Context): PendingIntent {
+        val intent = Intent(appContext, ActivityTransitionsReceiver::class.java)
+        return PendingIntent.getBroadcast(
+            appContext, 0, intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+    }
+
+    /** Removes the registration. Works from a fresh process (after the service
+     *  died the in-memory reference is gone but Play Services still holds the
+     *  registration), which is what lets the watchdog clean up after a stop
+     *  that happened while the service was not running. */
     fun stop(context: Context) {
-        val pi = pendingIntent ?: return
+        val appContext = context.applicationContext
+        val pi = pendingIntent ?: buildPendingIntent(appContext)
         pendingIntent = null
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
         try {
-            ActivityRecognition.getClient(context.applicationContext)
+            ActivityRecognition.getClient(appContext)
                 .removeActivityTransitionUpdates(pi)
         } catch (error: Exception) {
             Log.w("IsolateHolderService", "activity transition deregistration failed", error)

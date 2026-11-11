@@ -25,6 +25,7 @@ import 'about_screen.dart';
 import 'profile_screen.dart';
 import 'circles_screen.dart';
 import 'diagnostics_screen.dart';
+import 'keep_alive_screen.dart';
 import 'link_device_screen.dart';
 import 'driving_detection_screen.dart';
 import 'families_screen.dart';
@@ -721,7 +722,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   title: 'Background updates',
                   subtitle: 'Keep location fresh',
                   chevron: true,
-                  onTap: BatteryOptimizationService.openSettings,
+                  onTap: () => push(const KeepAliveScreen()),
                 )
               : const SizedBox.shrink()),
         ],
@@ -746,6 +747,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
     ];
     final List<(String, Widget)> advanced = <(String, Widget)>[
+      ('keep tracking alive battery unrestricted sleep samsung background', BatteryOptimizationService.isSupported
+          ? DsListRow(
+              leading: DsListRow.iconTile(context, Icons.battery_charging_full_outlined, decorative: true),
+              title: 'Keep tracking alive',
+              subtitle: 'Battery and background checklist',
+              chevron: true,
+              onTap: () => push(const KeepAliveScreen()),
+            )
+          : const SizedBox.shrink()),
       ('diagnostics not reporting problems', DsListRow(
         leading: DsListRow.iconTile(context, Icons.health_and_safety_outlined, decorative: true),
         title: 'Diagnostics',

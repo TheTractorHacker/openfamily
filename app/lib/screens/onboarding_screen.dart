@@ -9,6 +9,7 @@ import '../theme/app_theme.dart';
 import 'create_circle_screen.dart';
 import 'invite_screen.dart';
 import 'join_circle_screen.dart';
+import 'keep_alive_screen.dart';
 
 /// Short, skippable first-run walkthrough. Shown once per user per device
 /// (see [OnboardingService]) and replayable from Settings.
@@ -146,7 +147,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 Icons.battery_alert_outlined,
                 () => _run(
                   widget.openBatterySettings,
-                  () => BatteryOptimizationService.openSettings().then((_) {}),
+                  () => Navigator.of(context).push<void>(MaterialPageRoute<void>(builder: (_) => const KeepAliveScreen())),
                 ),
               ),
           ],

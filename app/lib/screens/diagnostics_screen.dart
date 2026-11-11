@@ -169,7 +169,7 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> with WidgetsBindi
           )
         else ...<Widget>[
           _Summary(status: overall, failures: bad, warnings: warn, busy: _busy),
-          for (final DiagCheck c in _checks) _CheckCard(check: c, onFix: _fix),
+          for (final DiagCheck c in _checks) DiagCheckCard(check: c, onFix: _fix),
           DsListRow(
             leading: DsListRow.iconTile(context, Icons.science_outlined),
             title: 'Self-test',
@@ -286,8 +286,10 @@ class _Summary extends StatelessWidget {
   }
 }
 
-class _CheckCard extends StatelessWidget {
-  const _CheckCard({required this.check, required this.onFix});
+/// One check as a card: status, the explanation and the one-tap fix buttons. Also used by the "Keep tracking alive"
+/// checklist.
+class DiagCheckCard extends StatelessWidget {
+  const DiagCheckCard({super.key, required this.check, required this.onFix});
   final DiagCheck check;
   final Future<void> Function(DiagFixKind) onFix;
 

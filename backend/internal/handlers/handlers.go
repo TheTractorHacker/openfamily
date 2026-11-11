@@ -202,6 +202,8 @@ type Server struct {
 	liveWatch *liveWatchRegistry
 	// liveBoostSend overrides command delivery (tests); nil uses push.
 	liveBoostSend func(ctx context.Context, userID string, body []byte) bool
+	// staleWakeSend overrides the delivery of a stale-phone wake-up (tests); nil uses push.
+	staleWakeSend func(ctx context.Context, body []byte, d staleWakeDevice) bool
 }
 
 // New builds a Server.
