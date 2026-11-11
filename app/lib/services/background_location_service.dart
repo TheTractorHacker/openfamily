@@ -270,11 +270,14 @@ Future<void> onLocationUpdate(LocationDto location) async {
     _initCadence();
 
     // Arms the on-device driving detection (opt-in, no-op unless enabled).
-    unawaited(DrivingBackground.onLocationFix(
-      speedMps: location.speed > 0 ? location.speed : 0,
-      lat: location.latitude,
-      lon: location.longitude,
-    ));
+    // A fix with no speed (negative) is not fed as "stopped".
+    if (location.speed >= 0) {
+      unawaited(DrivingBackground.onLocationFix(
+        speedMps: location.speed,
+        lat: location.latitude,
+        lon: location.longitude,
+      ));
+    }
 
     final DateTime now = DateTime.now().toUtc();
     await _refreshBatteryIfStale(now);

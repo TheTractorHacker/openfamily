@@ -7,17 +7,35 @@ final DateTime t0 = DateTime.utc(2026, 1, 1, 12);
 
 void main() {
   group('speedFields', () {
-    test('sends 0 when GPS says 0 and accuracy is good', () {
+    test('sends 0 when GPS says 0, accuracy is good and speed accuracy is stated', () {
       final Map<String, dynamic> m =
-          speedFields(speedMps: 0, speedAccuracyMps: 0, accuracyM: 5);
+          speedFields(speedMps: 0, speedAccuracyMps: 0.4, accuracyM: 5);
       expect(m['speed_mps'], 0);
-      expect(m.containsKey('speed_accuracy'), isFalse);
+      expect(m['speed_accuracy'], 0.4);
+    });
+
+    test('omits a 0 with no stated speed accuracy: Android reports 0.0 for "no speed"', () {
+      // A network / fused fix has no speed; getSpeed() is 0.0 and
+      // speedAccuracy reads 0. That is "unknown", not "stopped".
+      expect(speedFields(speedMps: 0, speedAccuracyMps: 0, accuracyM: 5),
+          isEmpty);
+      expect(speedFields(speedMps: 0, speedAccuracyMps: -1, accuracyM: 5),
+          isEmpty);
+    });
+
+    test('omits a speed whose stated error is too large to trust', () {
+      expect(speedFields(speedMps: 13, speedAccuracyMps: 6, accuracyM: 8),
+          isEmpty);
+      // Right at the limit it is still sent.
+      expect(
+          speedFields(speedMps: 13, speedAccuracyMps: 3, accuracyM: 8)['speed_mps'],
+          13);
     });
 
     test('omits 0 when accuracy is poor or unknown', () {
-      expect(speedFields(speedMps: 0, speedAccuracyMps: 0, accuracyM: 80),
+      expect(speedFields(speedMps: 0, speedAccuracyMps: 0.4, accuracyM: 80),
           isEmpty);
-      expect(speedFields(speedMps: 0, speedAccuracyMps: 0, accuracyM: 0),
+      expect(speedFields(speedMps: 0, speedAccuracyMps: 0.4, accuracyM: 0),
           isEmpty);
     });
 

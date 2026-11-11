@@ -54,6 +54,17 @@ Time is always passed in (`DateTime now`), so it is deterministic in tests.
    null (no speed in the fix) shows as an em dash. Display uses
    `UnitPreferenceService.units` (mph or km/h). "Speeding" is
    `round(mph) >= 70`, i.e. the number on screen.
+9. **"Driving", "Stopped" or neither** is decided by one function,
+   `resolveDriving` in `app/lib/services/driving_presence.dart`, used by the
+   map pill, the sheets, the list rows, the home-screen widget and the watch
+   snapshot (the Wear and Apple watches only print what the phone sends, so
+   they needed no change). The phone's `motion_state` ("driving") is only a
+   claim: it is dropped when the last stored fix is older than 2 minutes or
+   the car has stood still for more than 3 minutes. A trusted speed below
+   0.5 m/s reads "Stopped" (never "Driving 0 mph"). A missing speed, a 0 from
+   a fix with poor or unknown accuracy, or a speed with a stated error over
+   3 m/s shows "Driving" with no number. The web map has its own copy of the
+   older logic and does not apply this rule yet.
 
 ### Constants (`MotionConfig`)
 

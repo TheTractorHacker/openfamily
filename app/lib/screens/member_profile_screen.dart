@@ -6,6 +6,7 @@ import '../widgets/openfamily_map_layers.dart';
 import '../models/member.dart';
 import '../services/alert_service.dart' show AlertEvents;
 import '../services/api_client.dart';
+import '../services/driving_presence.dart';
 import '../services/location_refresh_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/ds/ds.dart';
@@ -198,12 +199,17 @@ class MemberProfileScreen extends StatelessWidget {
   }
 
   String _drivingStatus([double? mps, UnitSystem units = UnitSystem.imperial]) {
-    final double? v = mps ?? member.speedMps;
-    if (member.movement == MovementType.car && v != null) {
+    final DrivingView d = member.drivingView(liveSpeedMps: mps);
+    final double? v = d.speedMps;
+    if (d.isDriving) {
+      if (v == null) return d.word;
       final String speed = units.formatSpeed(v);
       return isSpeedingMps(v) ? 'Speeding · $speed' : 'Driving · $speed';
     }
-    if (member.movement == MovementType.none) return 'Not moving';
+    if (member.movement == MovementType.none ||
+        member.movement == MovementType.car) {
+      return 'Not moving';
+    }
     return member.movement.label;
   }
 
@@ -384,7 +390,7 @@ class _MovementTile extends StatelessWidget {
         borderRadius: BorderRadius.circular(AppRadius.md),
       ),
       child: Center(
-        child: member.movement == MovementType.none
+        child: !member.showsMovementBadge
             ? Icon(
                 Icons.pause_circle_outline,
                 size: 22,

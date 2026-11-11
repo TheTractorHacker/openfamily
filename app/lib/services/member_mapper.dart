@@ -3,6 +3,7 @@ import 'package:latlong2/latlong.dart';
 import '../models/member.dart';
 import '../models/place.dart';
 import '../utils/self_label.dart';
+import 'driving_presence.dart';
 
 /// Maps backend member JSON (from `GET /family/members` and the `/ws/stream`
 /// `members` frame) into a [Member].
@@ -35,9 +36,12 @@ Member memberFromJson(Map<String, dynamic> json) {
   // reporting phone does not flip to grey "stopped".
   final DateTime? lastSeenAt = _parseTs(json['last_seen_at']);
   final DateTime? effectiveLastSeen = _newer(timestamp, lastSeenAt);
-  final MovementType movement = _movementFrom(motion) ??
-      _movementFromSpeed(speedMps) ??
-      MovementType.none;
+  final MovementType movement = _ruledMovement(
+    _movementFrom(motion) ?? _movementFromSpeed(speedMps) ?? MovementType.none,
+    speedMps: speedMps?.toDouble(),
+    accuracyMeters: accuracy?.toDouble(),
+    fixTime: timestamp,
+  );
 
   return Member(
     id: (json['id'] as String?) ?? '',
@@ -147,9 +151,25 @@ Member memberFromLocationUpdate(Member existing, Map<String, dynamic> json) {
   // can omit the field. Prefer the authoritative Android motion state, then a
   // confident speed inference, then keep the existing badge rather than
   // dropping a driving member back to "none".
-  final MovementType movement = _movementFrom(motion) ??
-      _movementFromSpeed(speedMps) ??
-      existing.movement;
+  final DateTime? effectiveFixTime = fixTimestamp ?? existing.fixTime;
+  final DateTime? slowSince = _slowSinceAfter(
+    existing,
+    position: position,
+    fixTime: fixTimestamp,
+    speedMps: speedMps?.toDouble(),
+    accuracyMeters: accuracy?.toDouble(),
+  );
+  // The motion tag is only a claim; the one driving rule decides whether it
+  // still holds (see driving_presence.dart).
+  final MovementType movement = _ruledMovement(
+    _movementFrom(motion) ??
+        _movementFromSpeed(speedMps) ??
+        existing.movement,
+    speedMps: speedMps?.toDouble(),
+    accuracyMeters: accuracy?.toDouble() ?? existing.accuracyMeters,
+    fixTime: effectiveFixTime,
+    slowSince: slowSince,
+  );
 
   // For status derivation, fall back to the member's last-known battery when
   // the frame omits it, so a member at 10% does not flip to "normal" (the
@@ -182,9 +202,67 @@ Member memberFromLocationUpdate(Member existing, Map<String, dynamic> json) {
     clearSpeed: speedMps == null,
     headingDeg: _parseHeading(json['heading_deg']),
     fixTime: fixTimestamp,
+    slowSince: slowSince,
+    clearSlowSince: slowSince == null,
     lastSeen: timestamp,
     accuracyMeters: accuracy?.toDouble() ?? existing.accuracyMeters,
   );
+}
+
+/// [movement] after the driving rule: a car tag that no longer holds (stale
+/// fix, parked too long) becomes [MovementType.none]. Other movements pass.
+MovementType _ruledMovement(
+  MovementType movement, {
+  double? speedMps,
+  double? accuracyMeters,
+  DateTime? fixTime,
+  DateTime? slowSince,
+}) {
+  if (movement != MovementType.car) return movement;
+  final DrivingView v = resolveDriving(
+    movement: movement,
+    speedMps: speedMps,
+    accuracyMeters: accuracyMeters,
+    fixTime: fixTime,
+    slowSince: slowSince,
+  );
+  return v.isDriving ? MovementType.car : MovementType.none;
+}
+
+/// When [existing] first stood still without a break, extended by the new fix
+/// (null when the new fix shows movement). A fix with no trusted speed is
+/// judged by how far it moved from the previous one.
+DateTime? _slowSinceAfter(
+  Member existing, {
+  required LatLng? position,
+  required DateTime? fixTime,
+  required double? speedMps,
+  required double? accuracyMeters,
+}) {
+  final LatLng? prev = existing.position;
+  final DateTime? prevTime = existing.fixTime;
+  double? dist;
+  Duration? elapsed;
+  if (prev != null && prevTime != null && position != null && fixTime != null) {
+    dist = const Distance().as(LengthUnit.Meter, prev, position);
+    elapsed = fixTime.difference(prevTime);
+  }
+  final bool slow = isSlowFix(
+    speedMps: speedMps,
+    accuracyMeters: accuracyMeters,
+    distanceM: dist,
+    elapsed: elapsed,
+    previousAccuracyMeters: existing.accuracyMeters,
+  );
+  if (!slow) return null;
+  // The run started with the earlier fix when the standstill was judged from
+  // the step between two fixes; with a trusted speed it starts with this one.
+  final bool fromStep = trustedSpeedMps(
+        speedMps: speedMps,
+        accuracyMeters: accuracyMeters,
+      ) ==
+      null;
+  return existing.slowSince ?? (fromStep ? prevTime : null) ?? fixTime;
 }
 
 /// Applies a `/ws/stream` `presence` frame to [existing].
@@ -419,6 +497,7 @@ String _formatAgo(Duration d) {
 /// The address uses the pin-age wording (not the "Last seen" liveness label)
 /// so it never reads as a duplicate of the last-seen field.
 Member refreshStaleness(Member member) {
+  member = _retireStaleDriving(member);
   final DateTime? lastSeen = member.lastSeen;
   if (member.position == null || lastSeen == null) return member;
   final Duration age = DateTime.now().toUtc().difference(lastSeen);
@@ -441,6 +520,29 @@ Member refreshStaleness(Member member) {
     status: MemberStatus.stopped,
     address: label,
     movement: MovementType.none,
+  );
+}
+
+/// Applies the driving rule to [member] with the current time: a car tag that
+/// is stale (old fix) or parked (standing too long) is dropped, so the badge
+/// goes without waiting for a frame that a parked phone never sends.
+Member _retireStaleDriving(Member member) {
+  if (member.movement != MovementType.car) return member;
+  final MovementType m = _ruledMovement(
+    member.movement,
+    speedMps: member.speedMps,
+    accuracyMeters: member.accuracyMeters,
+    fixTime: member.fixTime,
+    slowSince: member.slowSince,
+  );
+  if (m == MovementType.car) return member;
+  return member.copyWith(
+    movement: m,
+    address: _addressFrom(
+      position: member.position,
+      lastSeen: member.lastSeen,
+      movement: m,
+    ),
   );
 }
 

@@ -126,6 +126,7 @@ class Member {
     double? speedMps,
     this.headingDeg,
     this.fixTime,
+    this.slowSince,
     this.eta,
     this.waypoints,
     this.history = const [],
@@ -207,6 +208,12 @@ class Member {
   /// GPS fix time (backend `ts`); [lastSeen] may be newer (heartbeats).
   final DateTime? fixTime;
 
+  /// When this member, tagged as driving, was first seen standing or unmoved
+  /// without a break, or null when moving or unknown. Tracked by the mapper
+  /// from live frames; the driving rule uses it to retire a stale car state
+  /// (see `resolveDriving` in services/driving_presence.dart).
+  final DateTime? slowSince;
+
   /// Estimated time of arrival, e.g. "12m" or "6:42 PM".
   final String? eta;
 
@@ -235,13 +242,8 @@ class Member {
   /// Phone number, only sent by the server to circle admins; otherwise null.
   final String? phone;
 
-  /// Whether this member is driving fast enough to show as "speeding".
-  bool get isSpeeding =>
-      movement == MovementType.car && isSpeedingMps(speedMps);
-
-  /// Whether the map pin should render a numeric speed caption.
-  bool get hasDrivingSpeed =>
-      movement == MovementType.car && speedMps != null;
+  // "Driving", "Stopped" and the speed shown for them come from
+  // `Member.drivingView()` (services/driving_presence.dart), the one rule.
 
   /// Initials used while no avatar is available.
   String get initials {
@@ -270,6 +272,8 @@ class Member {
     bool clearSpeed = false,
     double? headingDeg,
     DateTime? fixTime,
+    DateTime? slowSince,
+    bool clearSlowSince = false,
     String? eta,
     DateTime? lastSeen,
     double? accuracyMeters,
@@ -292,6 +296,7 @@ class Member {
       speedMps: clearSpeed ? null : (speedMps ?? this.speedMps),
       headingDeg: headingDeg ?? this.headingDeg,
       fixTime: fixTime ?? this.fixTime,
+      slowSince: clearSlowSince ? null : (slowSince ?? this.slowSince),
       eta: eta ?? this.eta,
       waypoints: waypoints,
       history: history,
@@ -328,6 +333,7 @@ class Member {
       speedMps: speedMps,
       headingDeg: headingDeg,
       fixTime: fixTime,
+      slowSince: slowSince,
       eta: eta,
       waypoints: waypoints,
       history: history,

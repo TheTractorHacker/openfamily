@@ -5,6 +5,7 @@ import 'dart:ui' show FontFeature;
 import 'package:flutter/material.dart';
 
 import '../models/member.dart';
+import '../services/driving_presence.dart';
 import '../services/member_avatar_cache.dart';
 import '../services/member_motion_hub.dart';
 import '../theme/app_theme.dart';
@@ -97,7 +98,7 @@ class MemberAvatarBubble extends StatelessWidget {
                             member: member,
                             size: radius * 2 + 6,
                           ),
-                          if (member.movement != MovementType.none)
+                          if (member.showsMovementBadge)
                             Positioned(
                               right: -2,
                               bottom: -2,
@@ -133,13 +134,18 @@ class MemberAvatarBubble extends StatelessWidget {
   String _tooltip() {
     final StringBuffer sb = StringBuffer(member.displayName);
     sb.write(' — ${member.status.description}');
-    if (member.movement != MovementType.none) {
-      final double? mps = MemberMotionHub.shared.liveSpeedMps(member);
-      sb.write(
-          ' · ${member.movement == MovementType.car && isSpeedingMps(mps) ? 'Speeding' : member.movement.label}');
-      if (member.hasDrivingSpeed) {
-        sb.write(' ${liveSpeedLabel(member) ?? ''}');
+    if (member.movement == MovementType.car) {
+      // The one driving rule: Driving / Stopped / (no longer driving: nothing).
+      final DrivingView d = member.drivingView(
+          liveSpeedMps: MemberMotionHub.shared.liveSpeedMps(member));
+      if (d.isDriving) {
+        sb.write(' · ${isSpeedingMps(d.speedMps) ? 'Speeding' : d.word}');
+        if (d.speedMps != null) {
+          sb.write(' ${UnitPreferenceService.units.value.formatSpeed(d.speedMps!)}');
+        }
       }
+    } else if (member.movement != MovementType.none) {
+      sb.write(' · ${member.movement.label}');
     }
     if (member.showsCharging) {
       sb.write(' · Charging, ${member.batteryPercent}%');
@@ -397,7 +403,7 @@ class ClusterBubble extends StatelessWidget {
     final List<Member> preview = members.take(3).toList();
     final double stackWidth = _avatarSize + _overlap * (preview.length - 1);
     final List<Member> moving =
-        preview.where((m) => m.movement != MovementType.none).toList();
+        preview.where((m) => m.showsMovementBadge).toList();
     final String label = _label();
 
     return Tooltip(
@@ -464,11 +470,14 @@ class ClusterBubble extends StatelessWidget {
     final StringBuffer sb = StringBuffer('${members.length} people here');
     for (final Member m in members.take(3)) {
       sb.write(' · ${m.name}: ${m.status.description}');
-      if (m.movement != MovementType.none) {
-        sb.write(' ${m.movement.label}');
-        if (m.hasDrivingSpeed) {
-          sb.write(' ${liveSpeedLabel(m) ?? ''}');
+      if (m.movement == MovementType.car) {
+        final DrivingView d = m.drivingView(
+            liveSpeedMps: MemberMotionHub.shared.liveSpeedMps(m));
+        if (d.isDriving) {
+          sb.write(' ${d.line(UnitPreferenceService.units.value)}');
         }
+      } else if (m.movement != MovementType.none) {
+        sb.write(' ${m.movement.label}');
       }
     }
     return sb.toString();
@@ -598,7 +607,9 @@ class _SpeedCaption extends StatelessWidget {
   Widget build(BuildContext context) {
     return LiveSpeedBuilder(
       member: member,
-      builder: (BuildContext _, double? mps, UnitSystem units) {
+      builder: (BuildContext _, double? liveMps, UnitSystem units) {
+        final DrivingView view = member.drivingView(liveSpeedMps: liveMps);
+        final double? mps = view.speedMps;
         final bool speeding = isSpeedingMps(mps);
         final Color ink =
             speeding ? _speedingInk : BrandTheme.of(context).accentInk;
@@ -618,7 +629,11 @@ class _SpeedCaption extends StatelessWidget {
             TextSpan(
               children: [
                 TextSpan(
-                  text: mps == null ? '—' : '${units.speedFromMps(mps).round()}',
+                  text: view.isStopped
+                      ? 'Stopped'
+                      : mps == null
+                          ? '—'
+                          : '${units.speedFromMps(mps).round()}',
                   style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w800,
@@ -628,7 +643,7 @@ class _SpeedCaption extends StatelessWidget {
                   ),
                 ),
                 TextSpan(
-                  text: ' ${units.speedLabel}',
+                  text: view.isStopped ? '' : ' ${units.speedLabel}',
                   style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,

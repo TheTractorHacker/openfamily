@@ -19,6 +19,7 @@ import 'private_circle_widgets.dart';
 import '../utils/member_status.dart';
 import '../services/perf/perf_monitor.dart';
 import 'ds/ds.dart';
+import '../services/driving_presence.dart';
 import '../services/speed_units.dart';
 import 'live_speed.dart';
 import 'invite_hero_card.dart';
@@ -662,7 +663,10 @@ class _LocationTabViewState extends State<LocationTabView> {
         child: LiveSpeedBuilder(
           member: m,
           builder: (BuildContext _, double? mps, UnitSystem u) {
-            if (mps == null) return const SizedBox.shrink();
+            // The one driving rule: no chip for "Stopped", an unknown speed
+            // or a car tag that no longer holds.
+            final double? shown = m.drivingView(liveSpeedMps: mps).speedMps;
+            if (shown == null) return const SizedBox.shrink();
             return DecoratedBox(
               key: const Key('person_speed_chip'),
               decoration: BoxDecoration(
@@ -681,7 +685,7 @@ class _LocationTabViewState extends State<LocationTabView> {
                     const Icon(Icons.directions_car,
                         size: 20, color: Colors.black87),
                     const SizedBox(width: AppSpace.sm),
-                    Text(u.formatSpeed(mps),
+                    Text(u.formatSpeed(shown),
                         style: AppType.body.copyWith(
                             color: Colors.black87, fontWeight: FontWeight.w700)),
                   ],

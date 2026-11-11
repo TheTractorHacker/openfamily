@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../models/member.dart';
 import '../models/trip_report.dart';
+import '../services/driving_presence.dart';
 import '../services/speed_units.dart';
 import '../theme/app_theme.dart';
 import 'driving_event_chips.dart';
@@ -140,9 +141,9 @@ class _NowRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final double? mps = member.speedMps;
-    final String speed =
-        mps == null ? 'Driving' : 'Driving ${units.formatSpeed(mps)}';
+    final DrivingView view = member.drivingView();
+    final double? mps = view.speedMps;
+    final String speed = view.isDriving ? view.line(units) : 'Driving';
     return Semantics(
       button: true,
       label: '$name. $speed${mps == null ? '' : ', GPS speed'}. Opens trips.',

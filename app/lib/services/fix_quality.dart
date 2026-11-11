@@ -12,6 +12,7 @@ class FixQualityConfig {
     this.maxConsecutiveJumpRejects = 3,
     this.goodAccuracyForZeroSpeedM = 30,
     this.maxPlausibleSpeedMps = 120,
+    this.badSpeedAccuracyMps = 3.0,
   });
 
   /// A fix worse than this is dropped while the user is moving.
@@ -33,6 +34,9 @@ class FixQualityConfig {
 
   /// Speeds above this are treated as garbage and omitted.
   final double maxPlausibleSpeedMps;
+
+  /// A speed whose stated error is larger than this (m/s) is omitted.
+  final double badSpeedAccuracyMps;
 }
 
 enum FixVerdict { ok, stale, poorAccuracy, jump }
@@ -116,9 +120,12 @@ class FixQualityFilter {
 /// The speed-related fields of a `POST /locations` body.
 ///
 /// `speed_mps` is the GPS Doppler speed as reported, INCLUDING 0 when the
-/// receiver says 0 and accuracy is good. A zero with poor / unknown accuracy
-/// may just mean "no speed available" and is omitted. `speed_accuracy` is
-/// sent when the platform provides a positive value.
+/// receiver says 0, accuracy is good and the platform states a speed accuracy.
+/// A zero without those may just mean "no speed available" (Android reports
+/// 0.0 for a fix without speed) and is omitted. A reading whose stated error
+/// is worse than [FixQualityConfig.badSpeedAccuracyMps] is omitted too: the
+/// server then derives speed from positions. `speed_accuracy` is sent when
+/// the platform provides a positive value.
 Map<String, dynamic> speedFields({
   required double speedMps,
   required double speedAccuracyMps,
@@ -128,8 +135,14 @@ Map<String, dynamic> speedFields({
   final Map<String, dynamic> out = <String, dynamic>{};
   if (speedMps.isNaN || speedMps.isInfinite || speedMps < 0) return out;
   if (speedMps > config.maxPlausibleSpeedMps) return out;
-  final bool goodAccuracy =
-      accuracyM > 0 && accuracyM <= config.goodAccuracyForZeroSpeedM;
+  final bool hasSpeedAccuracy =
+      speedAccuracyMps.isFinite && speedAccuracyMps > 0;
+  if (hasSpeedAccuracy && speedAccuracyMps > config.badSpeedAccuracyMps) {
+    return out;
+  }
+  final bool goodAccuracy = accuracyM > 0 &&
+      accuracyM <= config.goodAccuracyForZeroSpeedM &&
+      hasSpeedAccuracy;
   if (speedMps > 0 || goodAccuracy) {
     out['speed_mps'] = speedMps;
     if (speedAccuracyMps.isFinite && speedAccuracyMps > 0) {
