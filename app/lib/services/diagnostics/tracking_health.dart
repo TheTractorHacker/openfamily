@@ -195,7 +195,6 @@ class TrackingHealthFacts {
     this.ignoringBatteryOptimizations,
     this.stats = const StatsSnapshot(),
     this.journal = const <JournalLine>[],
-    this.utcOffset = Duration.zero,
   });
 
   /// Null: this Android (or this build) cannot say (before Android 11, or the native method is missing).
@@ -208,14 +207,11 @@ class TrackingHealthFacts {
 
   /// Oldest first.
   final List<JournalLine> journal;
-
-  /// The phone's offset from UTC, to print local times next to UTC ones.
-  final Duration utcOffset;
 }
 
-/// Flattens whitespace, keeps only printable characters and cuts at [max].
+/// Flattens whitespace, replaces control characters with spaces and cuts at [max].
 String clipCode(String s, int max) {
-  final String one = s.replaceAll(RegExp(r'[\r\n\t]+'), ' ').replaceAll(RegExp(r' {2,}'), ' ').trim();
+  final String one = s.replaceAll(RegExp(r'[\x00-\x1f\x7f]+'), ' ').replaceAll(RegExp(r' {2,}'), ' ').trim();
   return one.length <= max ? one : '${one.substring(0, max)}...';
 }
 
@@ -224,17 +220,6 @@ String _two(int n) => n.toString().padLeft(2, '0');
 String _utc(DateTime t) {
   final DateTime u = t.toUtc();
   return '${u.year}-${_two(u.month)}-${_two(u.day)} ${_two(u.hour)}:${_two(u.minute)}:${_two(u.second)}Z';
-}
-
-String _offsetLabel(Duration o) {
-  final int m = o.inMinutes.abs();
-  return 'UTC${o.isNegative ? '-' : '+'}${_two(m ~/ 60)}:${_two(m % 60)}';
-}
-
-/// `22:36:04` in the phone's own time, shifted from UTC by [offset].
-String _local(DateTime t, Duration offset) {
-  final DateTime l = t.toUtc().add(offset);
-  return '${l.year}-${_two(l.month)}-${_two(l.day)} ${_two(l.hour)}:${_two(l.minute)}:${_two(l.second)}';
 }
 
 String _ago(DateTime now, DateTime? t) {
@@ -257,9 +242,8 @@ const int kReportJournalLines = 100;
 /// The tracking sections of the report, as plain text lines (no trailing blank line).
 String renderTrackingHealth(TrackingHealthFacts t, DateTime now) {
   final StringBuffer b = StringBuffer();
-  final Duration off = t.utcOffset;
   b
-    ..writeln('Tracking health (local time zone ${_offsetLabel(off)})')
+    ..writeln('Tracking health (times are UTC)')
     ..writeln('battery_optimisation_ignored=${t.ignoringBatteryOptimizations == null ? 'unknown' : (t.ignoringBatteryOptimizations! ? 'yes' : 'no')}')
     ..writeln('standby_bucket=${t.standbyBucket == null ? 'unknown' : '${standbyBucketName(t.standbyBucket!)} (${t.standbyBucket})'}');
 
@@ -275,7 +259,7 @@ String renderTrackingHealth(TrackingHealthFacts t, DateTime now) {
     for (final ProcessExit e in exits) {
       b.writeln('  ${exitReasonName(e.reason)} importance=${processImportanceName(e.importance)} status=${e.status} '
           'process=${e.processName.isEmpty ? '?' : e.processName} '
-          'local ${_local(e.at, off)} / UTC ${_utc(e.at)} (${_ago(now, e.at)})'
+          'at ${_utc(e.at)} (${_ago(now, e.at)})'
           '${e.description.isEmpty ? '' : ' note="${e.description}"'}');
     }
   }

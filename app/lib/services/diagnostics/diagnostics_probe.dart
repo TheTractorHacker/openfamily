@@ -187,7 +187,6 @@ class DiagnosticsProbe {
       ignoringBatteryOptimizations: native?['ignoringBatteryOptimizations'] as bool?,
       stats: stats,
       journal: TrackingJournal.merge(own, nativeJournal),
-      utcOffset: DateTime.now().timeZoneOffset,
     );
   }
 

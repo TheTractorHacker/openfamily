@@ -83,6 +83,21 @@ void main() {
     expect((await bgLines()).length, 2);
   });
 
+  test('one tick seals at most `limit` fixes and leaves the rest parked (a killed process loses at most that many)', () async {
+    final List<Map<String, dynamic>> many = <Map<String, dynamic>>[
+      for (int i = 0; i < 5; i++)
+        <String, dynamic>{'ts': clock.t.add(Duration(seconds: i)).toIso8601String(), 'lat': 52.5, 'lon': 13.4},
+    ];
+    kv.data['parked/v1'] = jsonEncode(many);
+    expect(await rt.backgroundDrainTick(limit: 2), 2);
+    final List<dynamic> left = jsonDecode(kv.data['parked/v1']!) as List<dynamic>;
+    expect(left, hasLength(3));
+    expect((left.first as Map<String, dynamic>)['ts'], many[2]['ts'], reason: 'oldest first, the newest stay parked');
+    expect((await bgLines()).single.detail, 'waiting=5 sealed=2 left=3');
+    expect(await rt.backgroundDrainTick(limit: 10), 3);
+    expect(kv.data['parked/v1'], isNull);
+  });
+
   test('no key at all on the phone: blocked as missing, nothing repaired or created', () async {
     final PrivateRuntime empty = PrivateRuntime(
         service: svcOn(server, uA, MemoryVault()), api: server.client(uA), kv: kv, clock: clock, channel: channel);

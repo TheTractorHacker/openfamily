@@ -743,7 +743,7 @@ class PrivateRuntime {
   /// the vault. There is deliberately no repair here: the foreground repairs, this isolate only picks the result up.
   /// Records `background_drain` (how many were waiting and how many are left) or, once per reason, why it could
   /// not. Returns how many parked fixes were sealed. Never throws.
-  Future<int> backgroundDrainTick() async {
+  Future<int> backgroundDrainTick({int limit = backgroundDrainLimit}) async {
     try {
       final String raw = await kv.getFresh(_parkedKey) ?? '';
       if (raw.isEmpty) return 0;
@@ -761,7 +761,7 @@ class PrivateRuntime {
         TrackingStats.instance.noteSealError(e, code: k?.problem.name ?? '');
         return 0;
       }
-      await drainParked();
+      await drainParked(limit: limit);
       final int left = _parkedCount(await kv.getFresh(_parkedKey) ?? '');
       final int sealed = before > left ? before - left : 0;
       TrackingJournal.instance.record('background_drain', 'waiting=$before sealed=$sealed left=$left');
@@ -772,6 +772,11 @@ class PrivateRuntime {
       return 0;
     }
   }
+
+  /// How many parked fixes one background tick seals at most. [drainParked] takes the entries out of the queue before
+  /// it seals them, so a process killed mid-drain loses what it had taken: this bounds that loss (the rest stays
+  /// parked for the next tick).
+  static const int backgroundDrainLimit = 100;
 
   static int _parkedCount(String raw) {
     if (raw.isEmpty) return 0;
@@ -790,19 +795,28 @@ class PrivateRuntime {
   /// One drain at a time: a fix that cannot be sealed again is parked again, and its "go and get the key" step
   /// ([_keysThenDrain]) used to start another drain from inside this one, over and over, while the phone already
   /// held a key. A call while a drain runs returns 0 at once.
-  Future<int> drainParked() async {
+  ///
+  /// With [limit], at most that many (the oldest) are taken: the rest is written back as the parked queue before
+  /// sealing starts, so a process that dies mid-drain loses at most [limit] fixes.
+  Future<int> drainParked({int? limit}) async {
     if (_drainingParked) return 0;
     _drainingParked = true;
     try {
       final String? raw = await kv.getFresh(_parkedKey);
       if (raw == null || raw.isEmpty) return 0;
-      await kv.remove(_parkedKey);
       int n = 0;
       List<dynamic> entries;
       try {
         entries = jsonDecode(raw) as List<dynamic>;
       } catch (_) {
+        await kv.remove(_parkedKey);
         return 0;
+      }
+      if (limit != null && limit > 0 && entries.length > limit) {
+        await kv.set(_parkedKey, jsonEncode(entries.sublist(limit)));
+        entries = entries.sublist(0, limit);
+      } else {
+        await kv.remove(_parkedKey);
       }
       for (final dynamic e in entries) {
         // One bad entry must not lose the ones behind it (the key was removed above).

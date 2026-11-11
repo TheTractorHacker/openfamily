@@ -34,11 +34,11 @@ What to check, in this order:
 3. Sharing is on in Orbitly and the circle is not paused.
 4. Open **Settings, Advanced, Diagnostics**, tap **Copy diagnostic report** and look at these lines at the end:
    - **Recent process exits**: Android's own record of why Orbitly's process ended (for example `FREEZER`,
-     `LOW_MEMORY`, `USER_REQUESTED`, `CRASH`), with the time in your local time and in UTC. Compare the time with the
-     moment the map stopped updating. This needs Android 11 or newer.
+     `LOW_MEMORY`, `USER_REQUESTED`, `CRASH`), with the time in UTC (there is no local time in the report, so convert it). Compare the time
+     with the moment the map stopped updating. This needs Android 11 or newer.
    - **standby_bucket** and **battery_optimisation_ignored**: `RESTRICTED` or `RARE`, or `no`, means Android limits
      background work for Orbitly.
-   - **Background pipeline**: the last upload that worked, the last identity or encryption error, and counts per hour
+   - **Background pipeline**: the last location upload the server accepted, the last identity or encryption error, and counts per hour
      (received, dropped, parked, posted, credential failures, seal errors, heartbeats).
    - **Tracking journal**: service created and destroyed (with whether the stop was requested), app paused and resumed,
      the service restarted on resume, permission changes, heartbeats that could not be delivered because the service

@@ -70,13 +70,12 @@ void main() {
   });
 
   group('the report text', () {
-    test('process exits show the reason, local time and UTC', () {
+    test('process exits show the reason and the UTC time (no local time or offset)', () {
       final String s = renderTrackingHealth(
         TrackingHealthFacts(
           exits: <ProcessExit>[exit(14, note: 'freezer'), exit(3, at: DateTime.utc(2026, 11, 9, 5)), exit(10), exit(4)],
           standbyBucket: 40,
           ignoringBatteryOptimizations: false,
-          utcOffset: const Duration(hours: -5),
         ),
         now,
       );
@@ -85,11 +84,17 @@ void main() {
       expect(s, contains('LOW_MEMORY'));
       expect(s, contains('USER_REQUESTED'));
       expect(s, contains('CRASH'));
-      expect(s, contains('local 2026-11-10 17:36:04 / UTC 2026-11-10 22:36:04Z'));
+      expect(s, contains('at 2026-11-10 22:36:04Z'));
+      expect(s, isNot(contains('local')));
       expect(s, contains('note="freezer"'));
-      expect(s, contains('local time zone UTC-05:00'));
+      expect(s, contains('times are UTC'));
       expect(s, contains('standby_bucket=RARE (40)'));
       expect(s, contains('battery_optimisation_ignored=no'));
+    });
+
+    test('clipCode replaces control characters (an escape code from Android text must not reach the report)', () {
+      expect(clipCode('a\u001b[31mred\u0000x\u007fy\r\nz', 80), 'a [31mred x y z');
+      expect(clipCode('x' * 100, 10), 'xxxxxxxxxx...');
     });
 
     test('a missing method says so, and nothing recorded says so', () {

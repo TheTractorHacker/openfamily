@@ -56,6 +56,9 @@ import 'location_outbox.dart';
 /// How long to wait for a single HTTP request before giving up.
 const Duration _httpTimeout = Duration(seconds: 15);
 
+/// Longest a heartbeat tick waits for the parked-fix drain.
+const Duration _drainTimeout = Duration(seconds: 20);
+
 /// Top-level liveness callback, invoked by the plugin's native alarm (roughly
 /// every 10 minutes) even when no location fixes are produced — the device
 /// stationary, GPS deferred by the OS power manager, etc. POSTs a bare
@@ -78,11 +81,6 @@ Future<void> onHeartbeatTick() async {
       return;
     }
 
-    // Fixes parked because this isolate could not read its key are sealed as soon as it can (the foreground may
-    // have repaired the vault since): the identity is read again on every tick, never remembered as failed. This
-    // does not need the network, so it runs before the heartbeat.
-    await _drainParkedOnTick(credentials);
-
     final int? batteryPct = await _readBattery();
     final bool? charging = batteryPct == null ? null : await readCharging();
     final Map<String, dynamic> body = <String, dynamic>{
@@ -98,6 +96,11 @@ Future<void> onHeartbeatTick() async {
       _stats.noteError('heartbeat_post', e);
     }
     _stats.count(ok ? TrackCounter.heartbeatOk : TrackCounter.heartbeatFail);
+    // Fixes parked because this isolate could not read its key are sealed as soon as it can (the foreground may
+    // have repaired the vault since): the identity is read again on every tick, never remembered as failed. This
+    // does not need the network, but it runs AFTER the heartbeat so that a stuck platform call can never keep the
+    // "last seen" heartbeat from going out.
+    await _drainParkedOnTick(credentials);
     if (!ok) {
       await _stats.flush();
       return;
@@ -142,11 +145,17 @@ void _enterBackground() {
 }
 
 /// Seals the parked fixes of Private circles when this isolate can read its identity now. Never throws.
+///
+/// Skipped while the app is open: the foreground isolate drains the parked fixes itself, and the two isolates share
+/// the parked queue and the sequence counter without a cross-isolate lock (the same fix could be sealed twice, or two
+/// items could take the same sequence number and the relay would drop one). Bounded in time: a platform call that
+/// never answers must not hold this callback.
 Future<void> _drainParkedOnTick(_BackgroundCredentials credentials) async {
   try {
+    if (await _foregroundReporterAlive(DateTime.now().toUtc())) return;
     final PrivateRuntime rt = _runtimeFor(credentials);
     if ((await rt.privateCircles()).isEmpty) return;
-    await rt.backgroundDrainTick();
+    await rt.backgroundDrainTick().timeout(_drainTimeout);
   } catch (e) {
     _stats.noteError('background_drain', e);
   }
@@ -532,7 +541,8 @@ Future<bool> _report(
   );
   // 201 = stored; 200 = stationary-deduped (the server refreshed liveness
   // and skipped the locations row); 204 = heartbeat ack.
-  _noteStatus(response.statusCode, 'report');
+  // A heartbeat is not a location upload: it must not move "last upload ok" (only a refused key is noted).
+  _noteStatus(response.statusCode, 'report', upload: false);
   return response.statusCode == 201 ||
       response.statusCode == 200 ||
       response.statusCode == 204;
@@ -566,10 +576,12 @@ Future<bool> _sendLocationBatch(
   return false;
 }
 
-/// What an answer from the server means for the counters: 2xx is "the last upload that worked", a refusal of the
+/// What an answer from the server means for the counters: 2xx of a location upload is "the last upload that worked"
+/// (a heartbeat answer is not, see [_report]), a refusal of the
 /// ingest key (401/403) is a credential failure.
-void _noteStatus(int code, String where) {
+void _noteStatus(int code, String where, {bool upload = true}) {
   if (code >= 200 && code < 300) {
+    if (!upload) return;
     _stats.noteUploadOk();
   } else if (code == 401 || code == 403) {
     _stats.count(TrackCounter.credFail);
