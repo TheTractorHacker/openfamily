@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Cold-start time on a connected Android device, CI-friendly.
 #
-#   scripts/perf/startup-time.sh [runs=10] [package=app.orbitly] [activity=.MainActivity]
+#   scripts/perf/startup-time.sh [runs=10] [package=app.openfamily] [activity=.MainActivity]
 #
 # For each run: force-stop the app, drop the page cache if the device is
 # rooted (ignored otherwise), then `am start -W` and read TotalTime (process
@@ -18,7 +18,7 @@
 set -euo pipefail
 
 runs="${1:-10}"
-pkg="${2:-app.orbitly}"
+pkg="${2:-app.openfamily}"
 act="${3:-.MainActivity}"
 budget="${STARTUP_BUDGET_MS:-2000}"
 

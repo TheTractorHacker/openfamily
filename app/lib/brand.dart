@@ -1,10 +1,9 @@
 /// Product name, tagline and the project links, in one place so a repository
 /// rename or a rebrand only touches this file (and scripts/rebrand.sh).
 ///
-/// Internal identifiers (the iOS bundle id `app.openfamily`, the Dart package
-/// name `openfamily`, the `openfamily://` link scheme) stay unchanged on
-/// purpose; the Android applicationId is `app.orbitly` since 0.26.34. See
-/// docs/developers/naming.md.
+/// Internal identifiers (Android applicationId / iOS bundle id `app.openfamily`,
+/// the Dart package name `openfamily`, the `openfamily://` link scheme) stay
+/// unchanged on purpose; see docs/developers/naming.md.
 class Brand {
   const Brand._();
 

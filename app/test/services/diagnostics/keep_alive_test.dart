@@ -43,7 +43,7 @@ JournalLine native(String event, {String detail = '', DateTime? at}) =>
     JournalLine(at: at ?? now.subtract(const Duration(minutes: 20)), source: 'native', event: event, detail: detail);
 
 ProcessExit exitOf(int reason, Duration ago) => ProcessExit(
-    at: now.subtract(ago), reason: reason, importance: 125, status: 0, processName: 'app.orbitly');
+    at: now.subtract(ago), reason: reason, importance: 125, status: 0, processName: 'app.openfamily');
 
 void main() {
   test('a healthy Pixel: every row passes and there is no Samsung row', () {

@@ -47,7 +47,7 @@ lint notices.
 
 ## Release build
 
-Package: `app.orbitly` (it was `app.openfamily` before 0.26.34: a new package id is a new app listing, so check the Play Console entry before uploading). The current Flutter SDK targets Android API 36.
+Package: `app.openfamily`. The current Flutter SDK targets Android API 36.
 Use the existing upload keystore; do not generate a replacement or expose
 its private key or passwords. Never upload a debug-signed build to Play.
 

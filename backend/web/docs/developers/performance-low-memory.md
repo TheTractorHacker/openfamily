@@ -161,11 +161,11 @@ Benchmark (one tier per process for clean numbers):
 ## Testing on real phones (not run)
 
 ```
-adb shell dumpsys meminfo app.orbitly            # PSS by category; run before/after 30 min of use
-adb shell am send-trim-memory app.orbitly BACKGROUND   # then check Diagnostics / dumpsys meminfo
-adb shell am send-trim-memory app.orbitly RUNNING_CRITICAL
-adb shell cat /proc/$(adb shell pidof app.orbitly)/status | grep -E "VmRSS|RssAnon|VmSwap"
-adb shell am kill app.orbitly                    # process death, then cold start
+adb shell dumpsys meminfo app.openfamily            # PSS by category; run before/after 30 min of use
+adb shell am send-trim-memory app.openfamily BACKGROUND   # then check Diagnostics / dumpsys meminfo
+adb shell am send-trim-memory app.openfamily RUNNING_CRITICAL
+adb shell cat /proc/$(adb shell pidof app.openfamily)/status | grep -E "VmRSS|RssAnon|VmSwap"
+adb shell am kill app.openfamily                    # process death, then cold start
 ```
 
 * Emulator: create an AVD with 2 GB RAM (`hw.ramSize=2048`) and, if available, an Android Go system image (it reports `isLowRamDevice`). Use `adb shell dumpsys meminfo` to see the total; there is no on-screen tier readout yet.

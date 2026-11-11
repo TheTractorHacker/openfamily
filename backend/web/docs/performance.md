@@ -41,11 +41,11 @@ Code: `app/lib/services/perf/perf_monitor.dart`,
    drag the sheet, switch tabs, open a trip report, let a family member drive).
 2. Copy report and send it.
 3. Cross-checks without the app:
-   - `adb shell dumpsys gfxinfo app.orbitly reset` then use the app, then
-     `adb shell dumpsys gfxinfo app.orbitly framestats` (per-frame
+   - `adb shell dumpsys gfxinfo app.openfamily reset` then use the app, then
+     `adb shell dumpsys gfxinfo app.openfamily framestats` (per-frame
      timestamps; "Janky frames" and the 50/90/95/99th percentiles are at the
-     top of plain `dumpsys gfxinfo app.orbitly`).
-   - Cold start: `adb shell am start -W -n app.orbitly/.MainActivity`
+     top of plain `dumpsys gfxinfo app.openfamily`).
+   - Cold start: `adb shell am start -W -n app.openfamily/.MainActivity`
      (TotalTime).
    - Flutter DevTools: `flutter run --profile`, open the Performance tab
      (frame chart, "Track widget rebuilds"), the CPU profiler, and the Network

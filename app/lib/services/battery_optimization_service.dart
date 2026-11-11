@@ -25,7 +25,7 @@ class BatteryOptimizationService {
       'android.settings.IGNORE_BATTERY_OPTIMIZATION_SETTINGS';
 
   /// This app's Android package; the system dialog needs it to name Orbitly.
-  static const String _package = 'app.orbitly';
+  static const String _package = 'app.openfamily';
 
   static const String _promptShownKey = 'wb_suggested_battery_optimization';
 

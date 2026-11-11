@@ -32,11 +32,9 @@ your LAN. There is no vendor cloud, no analytics SDK, and no Google Play
 Services requirement on Android.
 
 > **Formerly OpenFamily.** Orbitly is the new name of this project. If you
-> already run it, just [update](#updating): nothing to migrate on the server,
-> your data and accounts stay. The one exception is the Android app: from
-> 0.26.34 its package is `app.orbitly`, which Android installs as a separate
-> app, so sign in again there (see the release notes). Some internal names
-> (the iOS bundle id, the repository address, database and Docker names,
+> already run it, just [update](#updating): nothing to migrate, your data,
+> accounts and app installs stay. Some internal names (the Android package
+> `app.openfamily`, the repository address, database and Docker names,
 > `OPENFAMILY_*` settings) keep the old spelling on purpose, see
 > [Naming](docs/developers/naming.md).
 
