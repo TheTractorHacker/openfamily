@@ -23,7 +23,8 @@ class HeartbeatReceiver : BroadcastReceiver() {
         if (intent.action != Keys.ACTION_HEARTBEAT) return
         val wanted = PreferencesManager.isTrackingWanted(context)
         if (wanted) HeartbeatScheduler.scheduleNext(context)
-        NativeJournal.record(context, "alarm_fired", "wanted=$wanted")
+        // No journal line for a normal firing: with the 40 line journal it would push out the lines that matter
+        // (service_destroyed, task_removed, refusals). ServiceWatchdog journals only a restart or a refusal.
         val outcome = ServiceWatchdog.onWake(context, "heartbeat")
         if (outcome == ServiceWatchdog.OUTCOME_RUNNING) {
             IsolateHolderService.dispatchHeartbeat(context)

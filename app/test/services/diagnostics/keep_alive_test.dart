@@ -64,9 +64,10 @@ void main() {
   group('Samsung', () {
     test('Unrestricted: a green line that says the Never auto sleeping list is not needed', () {
       final DiagCheck c = row(evaluateKeepAlive(facts(manufacturer: 'samsung')), 'samsung_sleep')!;
-      expect(c.status, DiagStatus.pass);
-      expect(c.detail, contains('should not put Orbitly to sleep'));
-      expect(c.detail, contains('No apps'));
+      expect(c.status, DiagStatus.info);
+      expect(c.detail, contains('should keep Samsung from'));
+      expect(c.detail, contains('could not confirm'));
+      expect(c.detail, isNot(contains('that is expected')));
       expect(c.detail, contains('Sleeping apps'));
       expect(c.fix, isNull);
     });
@@ -76,7 +77,7 @@ void main() {
       expect(c.status, DiagStatus.warn);
       expect(c.fix?.kind, DiagFixKind.batterySettings);
       expect(c.secondaryFix?.kind, DiagFixKind.oemBattery);
-      expect(c.detail, contains('not required'));
+      expect(c.detail, contains('cannot add itself'));
     });
 
     test('Restricted is never reported green', () {
@@ -180,7 +181,15 @@ void main() {
       DiagCheck? stopped(List<ProcessExit> e) =>
           row(evaluateKeepAlive(facts(tracking: TrackingHealthFacts(exits: e))), 'last_force_stop');
       final DiagCheck c = stopped(<ProcessExit>[exitOf(10, const Duration(hours: 2))])!;
-      expect(c.status, DiagStatus.warn);
+      // The service is running now (the default fact), so a single stop is information, not a nag.
+      expect(c.status, DiagStatus.info);
+      expect(stopped(<ProcessExit>[exitOf(10, const Duration(hours: 2)), exitOf(10, const Duration(hours: 9))])!.status,
+          DiagStatus.warn);
+      expect(
+          row(evaluateKeepAlive(facts(service: false, tracking: TrackingHealthFacts(exits: <ProcessExit>[exitOf(10, const Duration(hours: 2))]))),
+                  'last_force_stop')!
+              .status,
+          DiagStatus.warn);
       expect(c.detail, contains('USER_REQUESTED'));
       expect(c.detail, contains('cannot restart itself'));
       expect(stopped(<ProcessExit>[exitOf(11, const Duration(hours: 5))]), isNotNull);
@@ -194,6 +203,32 @@ void main() {
           row(evaluateKeepAlive(facts(sharing: false, tracking: TrackingHealthFacts(exits: <ProcessExit>[exitOf(10, const Duration(hours: 1))]))),
               'last_force_stop'),
           isNull);
+    });
+  });
+
+  group('headline verdict', () {
+    test('everything read and right on a Pixel is ok', () {
+      expect(keepAliveVerdict(evaluateKeepAlive(facts()), facts()), KeepAliveVerdict.ok);
+    });
+
+    test('a Samsung phone is never plain ok: the Sleeping apps lists are the user\'s check', () {
+      expect(keepAliveVerdict(evaluateKeepAlive(facts(manufacturer: 'samsung')), facts(manufacturer: 'samsung')), KeepAliveVerdict.yourCheck);
+    });
+
+    test('another phone maker with its own setting (battery row is a check-once note) is not plain ok either', () {
+      expect(keepAliveVerdict(evaluateKeepAlive(facts(manufacturer: 'Xiaomi')), facts(manufacturer: 'Xiaomi')), KeepAliveVerdict.yourCheck);
+    });
+
+    test('unreadable required settings are not green (probe failure defaults, unreadable battery or location)', () {
+      expect(keepAliveVerdict(evaluateKeepAlive(DiagFacts(now: now, manufacturer: 'samsung')), DiagFacts(now: now, manufacturer: 'samsung')), KeepAliveVerdict.unread);
+      expect(keepAliveVerdict(evaluateKeepAlive(facts(manufacturer: 'samsung', ignoring: null)), facts(manufacturer: 'samsung', ignoring: null)), KeepAliveVerdict.unread);
+      expect(keepAliveVerdict(evaluateKeepAlive(facts(ignoring: null)), facts(ignoring: null)), KeepAliveVerdict.unread);
+      expect(keepAliveVerdict(evaluateKeepAlive(facts(location: null)), facts(location: null)), KeepAliveVerdict.unread);
+    });
+
+    test('a failing or warning row wins over unread', () {
+      expect(keepAliveVerdict(evaluateKeepAlive(facts(location: 'denied')), facts(location: 'denied')), KeepAliveVerdict.fail);
+      expect(keepAliveVerdict(evaluateKeepAlive(facts(ignoring: false)), facts(ignoring: false)), KeepAliveVerdict.warn);
     });
   });
 

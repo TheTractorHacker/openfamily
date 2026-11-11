@@ -400,20 +400,28 @@ List<DiagCheck> _staySilentChecks(DiagFacts f) {
   final List<ProcessExit>? exits = t.exits;
   if (exits != null && f.sharingEnabled) {
     ProcessExit? stopped;
+    int stops = 0;
     for (final ProcessExit e in exits) {
       if ((e.reason == 10 || e.reason == 11) && f.now.difference(e.at) < const Duration(hours: 72)) {
+        stops++;
         if (stopped == null || e.at.isAfter(stopped.at)) stopped = e;
       }
     }
     if (stopped != null) {
+      // Reopening the app ends this problem for now, and the user cannot clear the record, so a single stop that
+      // is followed by a running service is only information. It is a warning while the service is down or when it
+      // keeps happening.
+      final bool recovered = f.backgroundServiceRunning == true && stops < 2;
       out.add(DiagCheck(
           id: 'last_force_stop',
           title: 'Android stopped Orbitly',
-          status: DiagStatus.warn,
-          detail: 'Android recorded that Orbitly was stopped like a "Force stop" ${humanAgo(f.now.difference(stopped.at))} '
-              '(${exitReasonName(stopped.reason)}). That can be you swiping it away on some phones, or the phone\'s own '
-              'clean-up (Samsung "Sleeping apps" and Device care do this). A stopped app cannot restart itself: it stays '
-              'silent until you open it. Open Orbitly now, and set battery use to "Unrestricted".',
+          status: recovered ? DiagStatus.info : DiagStatus.warn,
+          detail: 'Android recorded that Orbitly was ended the way "Force stop" does it ${humanAgo(f.now.difference(stopped.at))} '
+              '(${exitReasonName(stopped.reason)}${stops > 1 ? ', $stops times in 3 days' : ''}). That can be you '
+              'swiping it away on some phones, a switch of phone user, or the phone\'s own clean-up (Samsung '
+              '"Sleeping apps" and Device care do this). A stopped app cannot restart itself: it stays silent until '
+              '${recovered ? 'it is opened, which it now has been and tracking is running' : 'you open it'}. '
+              'Set battery use to "Unrestricted" so it is not stopped again.',
           fix: const DiagFix(DiagFixKind.batterySettings, 'Open battery settings')));
     }
   }

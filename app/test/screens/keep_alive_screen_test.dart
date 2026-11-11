@@ -6,10 +6,10 @@ import 'package:openfamily/services/diagnostics/tracking_health.dart';
 
 final DateTime now = DateTime.utc(2026, 11, 11, 12);
 
-DiagFacts samsung({bool ignoring = false, String location = 'always', bool android = true}) => DiagFacts(
+DiagFacts samsung({bool ignoring = false, String location = 'always', bool android = true, String maker = 'samsung'}) => DiagFacts(
       now: now,
       isAndroid: android,
-      manufacturer: 'samsung',
+      manufacturer: maker,
       locationService: true,
       locationPermission: location,
       notificationsGranted: true,
@@ -39,7 +39,7 @@ void main() {
     expect(find.text('Keep tracking alive'), findsOneWidget);
     expect(find.text('Location permission'), findsOneWidget);
     expect(find.text('Samsung sleep settings'), findsOneWidget);
-    expect(find.textContaining('not required'), findsOneWidget);
+    expect(find.textContaining('cannot add itself'), findsOneWidget);
     expect(find.text('Android may stop Orbitly when the app is closed'), findsOneWidget);
 
     await tester.tap(find.text('Set battery to Unrestricted'));
@@ -47,14 +47,36 @@ void main() {
     expect(fixes, <DiagFixKind>[DiagFixKind.batterySettings]);
   });
 
-  testWidgets('all good: green headline and the Samsung line says Orbitly does not need the list', (WidgetTester tester) async {
+  testWidgets('Samsung, everything readable right: not green, one check is the user\'s', (WidgetTester tester) async {
     tester.view.physicalSize = const Size(800, 4000);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     await tester.pumpWidget(MaterialApp(home: KeepAliveScreen(collect: () async => samsung(ignoring: true))));
     await tester.pumpAndSettle();
+    expect(find.text('Orbitly is set up to keep running'), findsNothing);
+    expect(find.text('Everything Orbitly can read is right'), findsOneWidget);
+    expect(find.textContaining('Sleeping apps'), findsWidgets);
+  });
+
+  testWidgets('another phone, everything right: green headline', (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(800, 4000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(MaterialApp(home: KeepAliveScreen(collect: () async => samsung(ignoring: true, maker: 'Google'))));
+    await tester.pumpAndSettle();
     expect(find.text('Orbitly is set up to keep running'), findsOneWidget);
-    expect(find.textContaining('should not put Orbitly to sleep'), findsOneWidget);
+  });
+
+  testWidgets('the probe fails: no green headline, a plain "could not check" message', (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(800, 4000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(MaterialApp(home: KeepAliveScreen(collect: () async => throw StateError('probe'))));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('keep-alive-unreadable')), findsOneWidget);
+    expect(find.textContaining('Could not check this phone'), findsOneWidget);
+    expect(find.text('Orbitly is set up to keep running'), findsNothing);
+    expect(find.byKey(const Key('keep-alive-headline')), findsNothing);
   });
 
   testWidgets('re-checks when the app comes back from a settings page', (WidgetTester tester) async {
@@ -79,7 +101,7 @@ void main() {
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     await tester.pumpAndSettle();
     expect(calls, 2);
-    expect(find.text('Orbitly is set up to keep running'), findsOneWidget);
+    expect(find.text('Everything Orbitly can read is right'), findsOneWidget);
   });
 
   testWidgets('iPhone: says there is nothing to set', (WidgetTester tester) async {

@@ -64,14 +64,14 @@ consistently silent.
 ## Quiet-phone wake-up (`stale_wake.go`, since 0.26.34)
 
 A different job from the silence alert: it does not tell anybody, it asks the quiet phone to report. Every 5 minutes the
-server looks for Android devices whose last report or heartbeat (`devices.last_seen`) is older than 15 minutes and
+server looks for Android devices whose last report or heartbeat (`devices.last_seen`) is older than 30 minutes and
 younger than 24 hours, and sends **that one device** the same `location_request` command a viewer's refresh sends
 (direct channel and UnifiedPush, whichever it has). The phone answers with one fix, and its handler also asks the Android
 tracking service to restart if tracking is wanted and the service is gone (Android may refuse that start from the
 background; the phone's journal says so). Rules: only the member's newest Android device; only members sharing in a
 live circle and not in a paused-sharing window; not iPhones; at most one ask per device per 15 minutes (one atomic
 `UPDATE`, recorded in `devices.last_stale_wake_at` and `stale_wake_count`); after 8 unanswered asks in a row it stops until
-the device reports again; nothing when 5 or more devices and at least half of the active ones look quiet at once
+the device reports again; at most 12 asks per device in any 24 hours, whether or not it answered; nothing when 5 or more devices and at least half of the active ones look quiet at once
 (outage guard); at most 50 asks per pass. It is on whenever the server runs and has no setting yet.
 
 Limits: a phone that is off, signed out or force-stopped (Samsung "Sleeping apps") cannot answer. The direct channel is a

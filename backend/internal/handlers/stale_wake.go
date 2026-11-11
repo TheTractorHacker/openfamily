@@ -28,15 +28,20 @@ import (
 //     stale_wake_count).
 //   - After staleWakeMaxUnanswered asks in a row with no report in between, it stops until the device reports again
 //     (a phone that is off, signed out or force-stopped cannot answer, and pushing it forever helps nobody).
+//   - A daily ceiling that a report does NOT reset: at most staleWakeMaxPerDay asks per device in any 24 hours. A
+//     phone that is fine but spends long stretches in Doze answers every ask, so the unanswered counter alone would
+//     never stop it, and it would be pushed and made to take a GPS fix every ~30 minutes around the clock.
 //   - Nothing for a device quiet longer than staleWakeGiveUp.
 //   - If many devices look quiet at once it is treated as a server or network outage and nothing is sent.
 //   - At most staleWakeMaxPerTick asks per run.
 const (
 	staleWakeTick           = 5 * time.Minute
-	staleWakeAfter          = 15 * time.Minute
+	staleWakeAfter          = 30 * time.Minute // the nominal 10 minute heartbeat plus Doze slack must not look quiet
 	staleWakeCooldown       = 15 * time.Minute
 	staleWakeGiveUp         = 24 * time.Hour
 	staleWakeMaxUnanswered  = 8
+	staleWakeMaxPerDay      = 12
+	staleWakeDay            = 24 * time.Hour
 	staleWakeMaxPerTick     = 50
 	staleWakeOutageMin      = 5
 	staleWakeParallel       = 8
@@ -92,6 +97,7 @@ func (s *Server) staleWakeCandidates(ctx context.Context, now time.Time) ([]stal
 		  AND (d.push_transport = 'direct' OR COALESCE(d.unifiedpush_endpoint, '') <> '')
 		  AND (d.last_stale_wake_at IS NULL OR d.last_stale_wake_at < $3)
 		  AND (d.last_stale_wake_at IS NULL OR d.last_seen > d.last_stale_wake_at OR d.stale_wake_count < $4)
+		  AND (d.stale_wake_day_start IS NULL OR d.stale_wake_day_start < $6 OR d.stale_wake_day_count < $7)
 		  AND d.id = (SELECT n.id FROM devices n
 		              WHERE n.user_id = d.user_id AND n.platform = 'android'
 		                AND (n.hidden_at IS NULL OR n.last_seen > n.hidden_at)
@@ -101,7 +107,7 @@ func (s *Server) staleWakeCandidates(ctx context.Context, now time.Time) ([]stal
 		ORDER BY d.last_seen DESC
 		LIMIT $5`,
 		now.Add(-staleWakeAfter), now.Add(-staleWakeGiveUp), now.Add(-staleWakeCooldown),
-		staleWakeMaxUnanswered, staleWakeMaxPerTick)
+		staleWakeMaxUnanswered, staleWakeMaxPerTick, now.Add(-staleWakeDay), staleWakeMaxPerDay)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -123,11 +129,14 @@ func (s *Server) claimStaleWake(ctx context.Context, deviceID string, now time.T
 	tag, err := s.Pool.Exec(ctx, `
 		UPDATE devices SET
 		  stale_wake_count = CASE WHEN last_stale_wake_at IS NULL OR last_seen > last_stale_wake_at THEN 1 ELSE stale_wake_count + 1 END,
+		  stale_wake_day_count = CASE WHEN stale_wake_day_start IS NULL OR stale_wake_day_start < $5 THEN 1 ELSE stale_wake_day_count + 1 END,
+		  stale_wake_day_start = CASE WHEN stale_wake_day_start IS NULL OR stale_wake_day_start < $5 THEN $2 ELSE stale_wake_day_start END,
 		  last_stale_wake_at = $2
 		WHERE id = $1
 		  AND (last_stale_wake_at IS NULL OR last_stale_wake_at < $3)
-		  AND (last_stale_wake_at IS NULL OR last_seen > last_stale_wake_at OR stale_wake_count < $4)`,
-		deviceID, now, now.Add(-staleWakeCooldown), staleWakeMaxUnanswered)
+		  AND (last_stale_wake_at IS NULL OR last_seen > last_stale_wake_at OR stale_wake_count < $4)
+		  AND (stale_wake_day_start IS NULL OR stale_wake_day_start < $5 OR stale_wake_day_count < $6)`,
+		deviceID, now, now.Add(-staleWakeCooldown), staleWakeMaxUnanswered, now.Add(-staleWakeDay), staleWakeMaxPerDay)
 	return err == nil && tag.RowsAffected() == 1
 }
 

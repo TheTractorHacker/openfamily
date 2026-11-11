@@ -38,6 +38,7 @@ class _KeepAliveScreenState extends State<KeepAliveScreen> with WidgetsBindingOb
   DiagFacts? _facts;
   bool _busy = true;
   bool _again = false;
+  bool _failed = false;
 
   @override
   void initState() {
@@ -65,7 +66,7 @@ class _KeepAliveScreenState extends State<KeepAliveScreen> with WidgetsBindingOb
       return;
     }
     if (mounted) setState(() => _busy = true);
-    DiagFacts facts;
+    DiagFacts? facts;
     try {
       if (widget.collect != null) {
         facts = await widget.collect!();
@@ -78,12 +79,16 @@ class _KeepAliveScreenState extends State<KeepAliveScreen> with WidgetsBindingOb
         facts = await DiagnosticsProbe.collect(version: PackageVersion(version), light: true, withTracking: true);
       }
     } catch (_) {
-      facts = DiagFacts(now: DateTime.now().toUtc());
+      // Not guessed: default facts would read as "sharing on, nothing wrong".
+      facts = null;
     }
     if (!mounted) return;
     setState(() {
-      _facts = facts;
-      _checks = evaluateKeepAlive(facts);
+      _failed = facts == null;
+      if (facts != null) {
+        _facts = facts;
+        _checks = evaluateKeepAlive(facts);
+      }
       _busy = false;
     });
     if (_again) {
@@ -150,6 +155,12 @@ class _KeepAliveScreenState extends State<KeepAliveScreen> with WidgetsBindingOb
             padding: EdgeInsets.all(AppSpace.xxl),
             child: Center(child: CircularProgressIndicator()),
           )
+        else if (_failed && _facts == null)
+          const Padding(
+            key: Key('keep-alive-unreadable'),
+            padding: EdgeInsets.all(AppSpace.lg),
+            child: Text('Could not check this phone. Tap "Check again".'),
+          )
         else if (!android)
           const Padding(
             key: Key('keep-alive-not-android'),
@@ -158,7 +169,7 @@ class _KeepAliveScreenState extends State<KeepAliveScreen> with WidgetsBindingOb
                 'Orbitly in the iPhone settings.'),
           )
         else ...<Widget>[
-          _Headline(failures: n.fail, warnings: n.warn, busy: _busy),
+          _Headline(failures: n.fail, warnings: n.warn, verdict: keepAliveVerdict(_checks, _facts ?? DiagFacts(now: DateTime.now().toUtc())), busy: _busy),
           const Padding(
             padding: EdgeInsets.fromLTRB(AppSpace.lg, 0, AppSpace.lg, AppSpace.sm),
             child: Text(
@@ -176,28 +187,36 @@ class _KeepAliveScreenState extends State<KeepAliveScreen> with WidgetsBindingOb
 }
 
 class _Headline extends StatelessWidget {
-  const _Headline({required this.failures, required this.warnings, required this.busy});
+  const _Headline({required this.failures, required this.warnings, required this.verdict, required this.busy});
   final int failures;
   final int warnings;
+  final KeepAliveVerdict verdict;
   final bool busy;
 
   @override
   Widget build(BuildContext context) {
-    final DiagStatus status = failures > 0
-        ? DiagStatus.fail
-        : warnings > 0
-            ? DiagStatus.warn
-            : DiagStatus.pass;
-    final String headline = switch (status) {
-      DiagStatus.pass => 'Orbitly is set up to keep running',
-      DiagStatus.warn => 'Almost: a few things to check',
-      _ => 'Android may stop Orbitly when the app is closed',
+    final DiagStatus status = switch (verdict) {
+      KeepAliveVerdict.fail => DiagStatus.fail,
+      KeepAliveVerdict.warn => DiagStatus.warn,
+      KeepAliveVerdict.unread || KeepAliveVerdict.yourCheck => DiagStatus.info,
+      KeepAliveVerdict.ok => DiagStatus.pass,
     };
-    final String sub = failures + warnings == 0
-        ? 'Every setting you control is right.'
-        : '${failures == 0 ? '' : '$failures to fix'}'
-            '${failures > 0 && warnings > 0 ? ' and ' : ''}'
-            '${warnings == 0 ? '' : '$warnings to check'}. Use the buttons below.';
+    final String headline = switch (verdict) {
+      KeepAliveVerdict.ok => 'Orbitly is set up to keep running',
+      KeepAliveVerdict.yourCheck => 'Everything Orbitly can read is right',
+      KeepAliveVerdict.unread => 'Some settings could not be read',
+      KeepAliveVerdict.warn => 'Almost: a few things to check',
+      KeepAliveVerdict.fail => 'Android may stop Orbitly when the app is closed',
+    };
+    final String counts = '${failures == 0 ? '' : '$failures to fix'}'
+        '${failures > 0 && warnings > 0 ? ' and ' : ''}'
+        '${warnings == 0 ? '' : '$warnings to check'}. Use the buttons below.';
+    final String sub = switch (verdict) {
+      KeepAliveVerdict.ok => 'Every setting you control is right.',
+      KeepAliveVerdict.yourCheck => 'One check is yours: your phone maker\'s own sleep settings (see below).',
+      KeepAliveVerdict.unread => 'Tap "Check again". Nothing is confirmed until every row below could be read.',
+      _ => counts,
+    };
     final Color c = statusColor(status);
     return Semantics(
       container: true,

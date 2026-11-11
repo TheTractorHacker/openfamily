@@ -26,18 +26,18 @@ you come back from a settings page, so you can see a fix take effect.
 | Phone location switch | Location is on for the whole phone. |
 | Location permission | **Allow all the time**, not "While using". |
 | Battery and background limits | **Unrestricted**, not "Optimized" or "Restricted". |
-| Samsung sleep settings (Samsung only) | Green when Android reports Orbitly as Unrestricted. |
+| Samsung sleep settings (Samsung only) | Grey "check once" when Android reports Orbitly as Unrestricted, because the app cannot read Samsung's Sleeping apps lists. Orange when it is not. |
 | Android's power group | Not "rare" or "restricted" (Android puts an unused app there). |
 | Notifications | Allowed (Android may hide the "sharing" notice otherwise). |
 | Background tracking service | Running. |
 | Orbitly restarting itself | Only shown when it tried; says if Android refused and why. |
-| Android stopped Orbitly | Only shown when Android recorded a "Force stop" style end in the last 3 days. |
+| Android stopped Orbitly | Only shown when Android recorded a "Force stop" style end in the last 3 days. Grey information if tracking is running again and it happened once; orange if tracking is down or it keeps happening. |
 
 ### Samsung phones
 
 Samsung has an extra list, **Settings > Battery > Background usage limits > Never auto sleeping apps**. You do
-**not** need Orbitly on it. If you search it for Orbitly and it says **No apps**, that is expected: Samsung's list can
-leave out an app whose battery use is already **Unrestricted**. What counts is
+**not** need Orbitly on it. If you search it for Orbitly and it says **No apps**, we think Samsung's list leaves out an app whose battery use is
+already **Unrestricted**, but that comes from web reports and has **not** been confirmed on your phone. What counts is
 **Settings > Apps > Orbitly > Battery > Unrestricted** (the checklist has a button for it). Then open
 **Settings > Battery > Background usage limits** once and make sure Orbitly is **not** under **Sleeping apps** or
 **Deep sleeping apps**; if it is, remove it. Orbitly cannot read those two lists, so that one check is yours. Xiaomi and
@@ -47,8 +47,8 @@ Huawei phones have similar extra lists.
 
 If Android ends the tracking service while sharing is on, Orbitly tries to start it again when: a movement change is
 detected, its 10 minute check fires, the phone's clock or time zone changes, or the server asks the phone for a
-position (the server does that when a sharing phone has been quiet for 15 minutes, at most once every 15 minutes,
-never while you paused sharing). Android only allows a start from the background in some cases (the clearest one: the
+position (the server does that when a sharing phone has been quiet for 30 minutes, at most once every 15 minutes
+and 12 times a day, never while you paused sharing). Android only allows a start from the background in some cases (the clearest one: the
 app is **Unrestricted**), so a restart can be refused; the checklist then says so. Orbitly cannot do anything when the
 app was **force-stopped** (including by Samsung's sleeping apps): Android sends it nothing until you open it.
 
@@ -73,7 +73,7 @@ What to check, in this order:
      (received, dropped, parked, posted, credential failures, seal errors, heartbeats).
    - **Tracking journal**: service created and destroyed (with whether the stop was requested), app paused and resumed,
      the service restarted on resume, permission changes, heartbeats that could not be delivered because the service
-     was gone, `alarm_fired` (the 10 minute check, with a count), `service_restarted_by_watchdog` or `watchdog_refused`
+     was gone, `service_restarted_by_watchdog` or `watchdog_refused`
      (Orbitly's own restart attempts and Android's answer), `push_wake`, and `background_drain` lines when positions
      that waited for an unreadable key were sealed later.
 
