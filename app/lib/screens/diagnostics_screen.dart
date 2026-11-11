@@ -143,7 +143,7 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> with WidgetsBindi
     final DiagFacts? f = _facts;
     if (f == null) return;
     final String storage = widget.collect != null ? '' : await StorageEventLog.instance.render();
-    await Clipboard.setData(ClipboardData(text: '${buildDiagnosticReport(f, _checks)}\n$storage'));
+    await Clipboard.setData(ClipboardData(text: buildDiagnosticReport(f, _checks, storageEvents: storage)));
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Copied. The report has no locations or tokens.')),

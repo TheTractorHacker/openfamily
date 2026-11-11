@@ -9,6 +9,8 @@
 /// report" produces is built from these same redacted facts only.
 library;
 
+import 'tracking_health.dart';
+
 enum DiagStatus { pass, warn, fail, info }
 
 /// What the one-tap fix button does. The screen maps each kind to an action.
@@ -194,7 +196,11 @@ class DiagFacts {
     this.vaultUserAuth = false,
     this.deviceIdSuffix = '',
     this.privateDelivery,
+    this.tracking,
   });
+
+  /// Process exits, standby bucket, hourly counters and the tracking journal (null: not collected, e.g. the light probe).
+  final TrackingHealthFacts? tracking;
 
   /// The Private-circle pipeline of this phone (null: no Private circle or not collected).
   final PrivateDeliveryFacts? privateDelivery;
@@ -867,7 +873,7 @@ String statusWord(DiagStatus s) {
 /// built only from [DiagFacts] fields, which never hold coordinates, tokens,
 /// emails, passwords or key material. Free-text details are the plain-language
 /// verdicts above, which contain only counts, ages and the server host name.
-String buildDiagnosticReport(DiagFacts f, List<DiagCheck> checks) {
+String buildDiagnosticReport(DiagFacts f, List<DiagCheck> checks, {String storageEvents = ''}) {
   final StringBuffer b = StringBuffer()
     ..writeln('Orbitly diagnostic report')
     ..writeln('Time (UTC): ${f.now.toUtc().toIso8601String()}')
@@ -895,6 +901,18 @@ String buildDiagnosticReport(DiagFacts f, List<DiagCheck> checks) {
     b
       ..writeln('gps_fix_s=${_ageS(f.now, p.lastFixAt)} upload_ok_s=${_ageS(f.now, p.lastUploadOkAt)}')
       ..writeln('last_error=${p.lastErrorCode.isEmpty ? 'none' : p.lastErrorCode} error_s=${p.lastErrorCode.isEmpty ? '-' : _ageS(f.now, p.lastErrorAt)}');
+  }
+  if (storageEvents.isNotEmpty) {
+    b
+      ..writeln()
+      ..write(storageEvents);
+  }
+  // Last: the tracking journal ends the report, so the newest events are what a reader sees first from the bottom.
+  final TrackingHealthFacts? t = f.tracking;
+  if (t != null) {
+    b
+      ..writeln()
+      ..write(renderTrackingHealth(t, f.now));
   }
   b
     ..writeln()

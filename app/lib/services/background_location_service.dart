@@ -17,6 +17,9 @@ import 'fix_quality.dart';
 import 'ios_location_profile.dart';
 import 'live_boost.dart';
 import 'tracking_cadence.dart';
+import 'diagnostics/tracking_health.dart' show TrackCounter;
+import 'diagnostics/tracking_journal.dart';
+import 'diagnostics/tracking_stats.dart';
 import 'direct_push_service.dart';
 import 'e2ee/private_runtime.dart';
 import 'driving/driving_background.dart';
@@ -59,6 +62,7 @@ const Duration _httpTimeout = Duration(seconds: 15);
 /// heartbeat so the family's "last seen" stays fresh without a location row.
 @pragma('vm:entry-point')
 Future<void> onHeartbeatTick() async {
+  _enterBackground();
   try {
     // Keep this isolate's direct-push connection (alerts without ntfy) alive.
     DirectPushService.ensureRunningInBackground();
@@ -67,7 +71,17 @@ Future<void> onHeartbeatTick() async {
     // boosts and stale drive state fall back to the slow profile.
     unawaited(_applyProfile(_cadence.profile(DateTime.now().toUtc())));
     final _BackgroundCredentials? credentials = await _readCredentials();
-    if (credentials == null) return;
+    if (credentials == null) {
+      _stats.count(TrackCounter.credFail);
+      _stats.noteError('heartbeat_credentials', const _NoCredentials());
+      await _stats.flush();
+      return;
+    }
+
+    // Fixes parked because this isolate could not read its key are sealed as soon as it can (the foreground may
+    // have repaired the vault since): the identity is read again on every tick, never remembered as failed. This
+    // does not need the network, so it runs before the heartbeat.
+    await _drainParkedOnTick(credentials);
 
     final int? batteryPct = await _readBattery();
     final bool? charging = batteryPct == null ? null : await readCharging();
@@ -76,8 +90,18 @@ Future<void> onHeartbeatTick() async {
     };
     addBatteryFields(body, batteryPct, charging);
 
-    final bool ok = await _report(credentials, '/devices/heartbeat', body);
-    if (!ok) return;
+    bool ok = false;
+    try {
+      ok = await _report(credentials, '/devices/heartbeat', body);
+    } catch (e) {
+      // No connection or a timeout: the exception TYPE only (its text may name the host).
+      _stats.noteError('heartbeat_post', e);
+    }
+    _stats.count(ok ? TrackCounter.heartbeatOk : TrackCounter.heartbeatFail);
+    if (!ok) {
+      await _stats.flush();
+      return;
+    }
     // The server answers again: deliver what queued up while it did not, so
     // a backlog never waits for the next moving fix or for the app to open.
     await LocationOutbox.drain(
@@ -91,8 +115,40 @@ Future<void> onHeartbeatTick() async {
     // queue untouched until the first accepted fix, however long that took.
     final PrivateRuntime rt = _runtimeFor(credentials);
     if ((await rt.privateCircles()).isNotEmpty) await rt.flush();
-  } catch (_) {
-    // Never throw from the background callback.
+    await _stats.flush();
+  } catch (e) {
+    // Never throw from the background callback; but say what happened (the exception TYPE only).
+    _stats.noteError('heartbeat', e);
+    unawaited(_stats.flush());
+  }
+}
+
+/// The type recorded when a callback had no credentials to use.
+class _NoCredentials implements Exception {
+  const _NoCredentials();
+}
+
+TrackingStats get _stats => TrackingStats.instance;
+
+bool _isolateNoted = false;
+
+/// First thing of every background entry point: this isolate writes the "bg" journal and counters, and its start
+/// (a new isolate means the process or the engine was recreated) is noted once.
+void _enterBackground() {
+  TrackingJournal.markBackground();
+  if (_isolateNoted) return;
+  _isolateNoted = true;
+  TrackingJournal.instance.record('bg_isolate_started');
+}
+
+/// Seals the parked fixes of Private circles when this isolate can read its identity now. Never throws.
+Future<void> _drainParkedOnTick(_BackgroundCredentials credentials) async {
+  try {
+    final PrivateRuntime rt = _runtimeFor(credentials);
+    if ((await rt.privateCircles()).isEmpty) return;
+    await rt.backgroundDrainTick();
+  } catch (e) {
+    _stats.noteError('background_drain', e);
   }
 }
 
@@ -155,8 +211,9 @@ Future<void> _applyProfile(CadenceProfile profile) async {
     if (!ok && Platform.isAndroid) {
       await BackgroundLocationService._register(next);
     }
-  } catch (_) {
-    // Never throw from the background callback.
+  } catch (e) {
+    // Never throw from the background callback; but say what happened (the exception TYPE only).
+    _stats.noteError('apply_profile', e);
   }
 }
 
@@ -195,9 +252,11 @@ Future<bool> _foregroundReporterAlive(DateTime now) async {
 /// so the plugin can look it up by callback handle across isolates.
 @pragma('vm:entry-point')
 Future<void> onLocationUpdate(LocationDto location) async {
+  _enterBackground();
   try {
     // Skip spoofed locations (Android mock-location detection).
     if (location.isMocked) return;
+    _stats.count(TrackCounter.received);
     DirectPushService.ensureRunningInBackground();
     _initCadence();
 
@@ -211,7 +270,10 @@ Future<void> onLocationUpdate(LocationDto location) async {
     final DateTime now = DateTime.now().toUtc();
     await _refreshBatteryIfStale(now);
     await _refreshPersistedBoost(now);
-    if (!_iosGate(location, now)) return;
+    if (!_iosGate(location, now)) {
+      _stats.count(TrackCounter.dropped);
+      return;
+    }
 
     final DateTime fixTs = DateTime.fromMillisecondsSinceEpoch(
       location.time.toInt(),
@@ -225,7 +287,10 @@ Future<void> onLocationUpdate(LocationDto location) async {
       speedMps: location.speed,
       lastSentTs: _lastSentTs,
     );
-    if (verdict != FixVerdict.ok) return;
+    if (verdict != FixVerdict.ok) {
+      _stats.count(TrackCounter.dropped);
+      return;
+    }
 
     _cadence.onFix(
       now: now,
@@ -241,12 +306,20 @@ Future<void> onLocationUpdate(LocationDto location) async {
     // the foreground reporter is alive and running a fast profile.
     final DateTime? lastPost = _lastPostAt;
     if (lastPost != null && now.difference(lastPost) < profile.minPostInterval) {
+      _stats.count(TrackCounter.dropped);
       return;
     }
-    if (profile.isFast && await _foregroundReporterAlive(now)) return;
+    if (profile.isFast && await _foregroundReporterAlive(now)) {
+      _stats.count(TrackCounter.dropped);
+      return;
+    }
 
     final _BackgroundCredentials? credentials = await _readCredentials();
-    if (credentials == null) return;
+    if (credentials == null) {
+      _stats.count(TrackCounter.credFail);
+      _stats.noteError('location_credentials', const _NoCredentials());
+      return;
+    }
 
     final Map<String, dynamic> body =
         _buildBody(location, credentials.deviceId, _batteryCache,
@@ -265,12 +338,16 @@ Future<void> onLocationUpdate(LocationDto location) async {
     if (_posting) {
       final Map<String, dynamic>? replaced = _pendingBody;
       _pendingBody = body;
-      if (replaced != null) await LocationOutbox.enqueue(replaced);
+      if (replaced != null) {
+        _stats.count(TrackCounter.parked);
+        await LocationOutbox.enqueue(replaced);
+      }
       return;
     }
     await _sendAndDrain(credentials, body);
-  } catch (_) {
-    // Never throw from the background callback.
+  } catch (e) {
+    // Never throw from the background callback; but say what happened (the exception TYPE only).
+    _stats.noteError('location_callback', e);
   }
 }
 
@@ -321,7 +398,8 @@ Future<bool> _routePrivate(_BackgroundCredentials c, Map<String, dynamic> body) 
   try {
     final PrivateRuntime rt = _runtimeFor(c);
     return await rt.routeFix(body);
-  } catch (_) {
+  } catch (e) {
+    _stats.noteError('route_private', e);
     return true;
   }
 }
@@ -337,6 +415,7 @@ Future<void> _sendAndDrain(
       _lastPostAt = DateTime.now().toUtc();
       final _PostResult r = await _postLocation(credentials, body);
       if (r.ok) {
+        _stats.count(TrackCounter.posted);
         final DateTime? ts = DateTime.tryParse('${body['ts']}')?.toUtc();
         if (ts != null) _lastSentTs = ts;
         if (r.live) {
@@ -356,6 +435,7 @@ Future<void> _sendAndDrain(
         }
       } else {
         // Offline (or auth hiccup): park the fix for backfill.
+        _stats.count(TrackCounter.parked);
         await LocationOutbox.enqueue(body);
       }
       body = _pendingBody;
@@ -385,8 +465,10 @@ Future<_PostResult> _postLocation(
       body,
     );
     final bool ok = response.statusCode == 201 || response.statusCode == 200;
+    _noteStatus(response.statusCode, 'post_location');
     return _PostResult(ok, ok && LiveBoost.responseIsLive(response.body));
-  } catch (_) {
+  } catch (e) {
+    _stats.noteError('post_location', e);
     return const _PostResult(false, false);
   }
 }
@@ -450,6 +532,7 @@ Future<bool> _report(
   );
   // 201 = stored; 200 = stationary-deduped (the server refreshed liveness
   // and skipped the locations row); 204 = heartbeat ack.
+  _noteStatus(response.statusCode, 'report');
   return response.statusCode == 201 ||
       response.statusCode == 200 ||
       response.statusCode == 204;
@@ -462,18 +545,41 @@ Future<bool> _sendLocationBatch(
   List<Map<String, dynamic>> points,
 ) async {
   if (points.isEmpty) return true; // Nothing to send.
-  final http.Response response = await _post(
-    credentials.apiBaseUrl,
-    _ingestHeaders(credentials),
-    '/locations/batch',
-    LocationOutbox.batchBody(points),
-  );
+  final http.Response response;
+  try {
+    response = await _post(
+      credentials.apiBaseUrl,
+      _ingestHeaders(credentials),
+      '/locations/batch',
+      LocationOutbox.batchBody(points),
+    );
+  } catch (e) {
+    _stats.noteError('post_batch', e);
+    rethrow; // the outbox keeps the points, as before
+  }
+  _noteStatus(response.statusCode, 'post_batch');
   if (response.statusCode >= 200 && response.statusCode < 300) return true;
   final int c = response.statusCode;
   // A 4xx the server will never accept strikes the points; everything else
   // (offline, 5xx, 401, 408, 429) keeps them without a strike.
   if (c >= 400 && c < 500 && c != 401 && c != 408 && c != 429) throw const OutboxRejected();
   return false;
+}
+
+/// What an answer from the server means for the counters: 2xx is "the last upload that worked", a refusal of the
+/// ingest key (401/403) is a credential failure.
+void _noteStatus(int code, String where) {
+  if (code >= 200 && code < 300) {
+    _stats.noteUploadOk();
+  } else if (code == 401 || code == 403) {
+    _stats.count(TrackCounter.credFail);
+    _stats.noteError('$where:$code', const _HttpStatus());
+  }
+}
+
+/// The "type" recorded for a refused request (the status code is in the tag).
+class _HttpStatus implements Exception {
+  const _HttpStatus();
 }
 
 Map<String, String> _ingestHeaders(_BackgroundCredentials c) =>
@@ -556,6 +662,10 @@ class BackgroundLocationService {
   /// leaving the foreground service running after logout.
   static bool _shouldRun = false;
 
+  /// When [start] last began (this isolate), so a resume check does not start the service a second time right
+  /// behind it.
+  static DateTime? lastStartAt;
+
   /// Starts background location tracking.
   ///
   /// Tuned for battery: a 60-second interval is far less aggressive than the
@@ -574,6 +684,8 @@ class BackgroundLocationService {
   /// native plugin's 5 minute timer drives [onHeartbeatTick] there.
   static Future<void> start() async {
     _shouldRun = true;
+    lastStartAt = DateTime.now();
+    TrackingJournal.instance.record('service_start_requested');
     await BackgroundLocator.initialize();
     if (!_shouldRun) return;
     // The background isolate's foreground service needs background location
@@ -584,6 +696,7 @@ class BackgroundLocationService {
     try {
       final LocationPermission permission = await Geolocator.checkPermission();
       if (permission != LocationPermission.always) {
+        TrackingJournal.instance.record('service_start_skipped', 'permission=${permission.name}');
         return;
       }
     } catch (_) {
@@ -626,15 +739,18 @@ class BackgroundLocationService {
         // the cadence then moves it with updateLocationRequest.
         iosSettings: iosRegistrationSettings(),
       );
-    } catch (_) {
+    } catch (e) {
       // Never throw from start(): it is called fire-and-forget, and a failure
       // here (e.g. permission revoked mid-flight) must not crash the app.
+      TrackingStats.instance.noteError('register_service', e);
     }
   }
 
-  /// Stops background location tracking.
-  static Future<void> stop() async {
+  /// Stops background location tracking. [reason] is a short code for the tracking journal (`sharing_off`,
+  /// `sign_out`).
+  static Future<void> stop({String reason = 'unspecified'}) async {
     _shouldRun = false;
+    TrackingJournal.instance.record('service_stop_requested', 'reason=$reason');
     DirectPushService.instance.stop();
     await BackgroundLocator.unRegisterLocationUpdate();
   }

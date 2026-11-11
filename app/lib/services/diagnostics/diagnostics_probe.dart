@@ -18,6 +18,9 @@ import '../location_sharing_service.dart';
 import '../server_config.dart';
 import '../token_storage.dart';
 import 'diag_model.dart';
+import 'tracking_health.dart';
+import 'tracking_journal.dart';
+import 'tracking_stats.dart';
 
 /// What the server said about this account (GET /me/diagnostics), reduced to
 /// the fields the checks need. No coordinates exist in this response.
@@ -139,6 +142,53 @@ class DiagnosticsProbe {
   static Future<String?> openOemSettings(String kind) async {
     if (!_android) return null;
     return _try(() => _ch.invokeMethod<String>('openOemSettings', <String, dynamic>{'kind': kind}));
+  }
+
+  /// Android's record of why this app's processes ended (API 30+), or null when this Android or this build cannot
+  /// say (the native method is missing or throws).
+  @visibleForTesting
+  static List<ProcessExit>? parseExits(Object? raw) {
+    if (raw is! List) return null;
+    final List<ProcessExit> out = <ProcessExit>[];
+    for (final Object? m in raw) {
+      final ProcessExit? e = ProcessExit.fromMap(m);
+      if (e != null) out.add(e);
+    }
+    return out;
+  }
+
+  /// The Android service's own journal lines (`t` first time, `l` last, `n` repeats, `e` event, `d` detail).
+  @visibleForTesting
+  static List<JournalLine> parseNativeJournal(Object? raw) {
+    if (raw is! List) return <JournalLine>[];
+    final List<JournalLine> out = <JournalLine>[];
+    for (final Object? m in raw) {
+      final JournalLine? l = m is Map ? TrackingJournal.lineFromMap(m, 'native') : null;
+      if (l != null) out.add(l);
+    }
+    return out;
+  }
+
+  /// Process exits, standby bucket, counters and the tracking journal. Every part is optional: a missing native
+  /// method (an older build, iOS) leaves that part empty and the report says so.
+  static Future<TrackingHealthFacts> collectTracking({Map<String, dynamic>? native}) async {
+    List<ProcessExit>? exits;
+    List<JournalLine> nativeJournal = <JournalLine>[];
+    if (_android) {
+      exits = parseExits(await _try(() => _ch.invokeMethod<List<dynamic>>('exitReasons')));
+      nativeJournal = parseNativeJournal(await _try(() => _ch.invokeMethod<List<dynamic>>('trackingJournal')));
+    }
+    final StatsSnapshot stats = await _try(() => TrackingStats.instance.read()) ?? const StatsSnapshot();
+    final List<JournalLine> own = await _try(() => TrackingJournal.instance.readAll()) ?? <JournalLine>[];
+    final Object? bucket = native?['standbyBucket'];
+    return TrackingHealthFacts(
+      exits: exits,
+      standbyBucket: bucket is num && bucket >= 0 ? bucket.toInt() : null,
+      ignoringBatteryOptimizations: native?['ignoringBatteryOptimizations'] as bool?,
+      stats: stats,
+      journal: TrackingJournal.merge(own, nativeJournal),
+      utcOffset: DateTime.now().timeZoneOffset,
+    );
   }
 
   static Future<ServerView> server() async {
@@ -278,6 +328,7 @@ class DiagnosticsProbe {
       vaultUserAuth: userAuth,
       deviceIdSuffix: deviceId == null || deviceId.length < 4 ? '' : deviceId.substring(deviceId.length - 4),
       privateDelivery: delivery,
+      tracking: light ? null : await _try(() => collectTracking(native: n)),
     );
   }
 }

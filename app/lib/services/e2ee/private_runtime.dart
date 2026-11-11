@@ -38,6 +38,9 @@ import '../chat_service.dart' show ChatEvents;
 import '../notification_prefs_service.dart' show NotificationNames;
 import '../perf/perf_profile.dart';
 import '../diagnostics/diag_model.dart' show PrivateCircleDelivery, PrivateDeliveryFacts;
+import '../diagnostics/tracking_health.dart' show TrackCounter;
+import '../diagnostics/tracking_journal.dart';
+import '../diagnostics/tracking_stats.dart';
 
 /// SharedPreferences-backed [ChannelKv]. The queue, cursors, sequence numbers,
 /// dedupe windows and the on-device history live here. Everything stored is
@@ -728,7 +731,56 @@ class PrivateRuntime {
         return t != null && t.millisecondsSinceEpoch >= cut;
       }).toList();
       await kv.set(_parkedKey, jsonEncode(kept.length > 720 ? kept.sublist(kept.length - 720) : kept));
-    } catch (_) {}
+      TrackingStats.instance.count(TrackCounter.parked);
+    } catch (e) {
+      // The fix is lost (it could not even be kept for later): say so, with the exception TYPE only.
+      TrackingStats.instance.noteError('park', e);
+    }
+  }
+
+  /// The heartbeat tick of the headless background isolate: when fixes are parked, read this phone's identity again
+  /// (it is never remembered as failed) and seal them as soon as it can be read, for example after the app repaired
+  /// the vault. There is deliberately no repair here: the foreground repairs, this isolate only picks the result up.
+  /// Records `background_drain` (how many were waiting and how many are left) or, once per reason, why it could
+  /// not. Returns how many parked fixes were sealed. Never throws.
+  Future<int> backgroundDrainTick() async {
+    try {
+      final String raw = await kv.getFresh(_parkedKey) ?? '';
+      if (raw.isEmpty) return 0;
+      final int before = _parkedCount(raw);
+      if (before == 0) return 0;
+      try {
+        if (await _me() == null) {
+          TrackingJournal.instance.record('background_drain_blocked', 'reason=missing');
+          return 0;
+        }
+      } catch (e) {
+        final LocalKeyException? k = localKeyProblemOf(e);
+        final String why = k == null ? TrackingStats.typeName(e) : k.problem.name;
+        TrackingJournal.instance.record('background_drain_blocked', 'reason=$why');
+        TrackingStats.instance.noteSealError(e, code: k?.problem.name ?? '');
+        return 0;
+      }
+      await drainParked();
+      final int left = _parkedCount(await kv.getFresh(_parkedKey) ?? '');
+      final int sealed = before > left ? before - left : 0;
+      TrackingJournal.instance.record('background_drain', 'waiting=$before sealed=$sealed left=$left');
+      if (sealed > 0) unawaited(flush());
+      return sealed;
+    } catch (e) {
+      TrackingStats.instance.noteError('background_drain', e);
+      return 0;
+    }
+  }
+
+  static int _parkedCount(String raw) {
+    if (raw.isEmpty) return 0;
+    try {
+      final Object? d = jsonDecode(raw);
+      return d is List ? d.length : 0;
+    } catch (_) {
+      return 0;
+    }
   }
 
   bool _drainingParked = false;
@@ -828,6 +880,8 @@ class PrivateRuntime {
   Future<void> _noteSealError(Object e) async {
     try {
       final LocalKeyException? k = localKeyProblemOf(e);
+      TrackingStats.instance.count(TrackCounter.sealErr);
+      TrackingStats.instance.noteSealError(e, code: k?.problem.name ?? (e is TimeoutException ? 'timeout' : ''));
       await kv.set(_sealErrKey, jsonEncode(<String, dynamic>{
         'at': clock.now().toUtc().toIso8601String(),
         'problem': k?.problem.name ?? (e is TimeoutException ? 'timeout' : 'other'),

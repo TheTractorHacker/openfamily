@@ -30,6 +30,7 @@ The screen being off is normal; Android or iOS stopping the app is the problem.
 
 - Allow location **all the time**, allow notifications, and switch off battery saving for Orbitly ([Battery and permissions](../user/battery-and-permissions.md)).
 - Run **Settings, Advanced, Diagnostics** in the app: it checks permissions, battery exemptions and connectivity.
+- Since 0.26.33 the Diagnostics report also says why Android last ended the app (**Recent process exits**) and keeps a short journal of the tracking service; see [Tracking stopped while the app was closed](../user/battery-and-permissions.md#tracking-stopped-while-the-app-was-closed).
 - Some phone makers close apps aggressively; see what happens when Android freezes the app in [Push](../push.md) and [Reliability](../reliability.md).
 - The admin **Fleet** page shows the last time each phone reported and why it may have gone silent.
 

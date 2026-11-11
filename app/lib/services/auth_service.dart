@@ -117,7 +117,7 @@ class AuthService {
     }
     // Stop background reporting before clearing credentials, so the background
     // isolate never reports with a dead session.
-    await BackgroundLocationService.stop();
+    await BackgroundLocationService.stop(reason: 'sign_out');
     await TokenStorage.clear(reason: 'logout');
     // Family-scoped caches must never outlive the account.
     PlaceService.invalidateCache();

@@ -88,12 +88,21 @@ class IsolateHolderService : MethodChannel.MethodCallHandler, LocationUpdateList
         @JvmStatic
         fun dispatchHeartbeat(context: Context?) {
             val appContext = context?.applicationContext ?: return
-            if (backgroundEngine == null) return
+            if (backgroundEngine == null) {
+                NativeJournal.record(appContext, "heartbeat_dropped", "reason=no_engine")
+                return
+            }
             val callback = PreferencesManager.getCallbackHandle(
                 appContext,
                 Keys.HEARTBEAT_CALLBACK_HANDLE_KEY,
-            ) ?: return
-            val messenger = getBinaryMessenger(appContext) ?: return
+            ) ?: run {
+                NativeJournal.record(appContext, "heartbeat_dropped", "reason=no_callback")
+                return
+            }
+            val messenger = getBinaryMessenger(appContext) ?: run {
+                NativeJournal.record(appContext, "heartbeat_dropped", "reason=no_messenger")
+                return
+            }
             val channel = MethodChannel(messenger, Keys.BACKGROUND_CHANNEL_ID)
             Handler(appContext.mainLooper).post {
                 channel.invokeMethod(
@@ -139,8 +148,13 @@ class IsolateHolderService : MethodChannel.MethodCallHandler, LocationUpdateList
         return null
     }
 
+    /** Set when this service was asked to shut down (SHUTDOWN action), so [onDestroy] can tell a requested stop
+     *  from one nobody asked for (the OS ending the service, or a stop for a missing permission). */
+    private var shutdownRequested = false
+
     override fun onCreate() {
         super.onCreate()
+        NativeJournal.record(this, "service_created")
         activeInstance = this
         startLocatorService(this)
         startForeground(notificationId, getNotification())
@@ -222,6 +236,7 @@ class IsolateHolderService : MethodChannel.MethodCallHandler, LocationUpdateList
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Log.e("IsolateHolderService", "onStartCommand => intent.action : ${intent?.action}")
         if(intent == null) {
+            NativeJournal.record(this, "service_restarted_by_os")
             // The OS restarted the service after killing the process
             // (START_STICKY). Without re-registering the location client, the
             // heartbeat alarm, and the motion transitions here, the service
@@ -231,10 +246,12 @@ class IsolateHolderService : MethodChannel.MethodCallHandler, LocationUpdateList
             if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED
                 || ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
                 Log.e("IsolateHolderService", "location permission missing after restart, stopping")
+                NativeJournal.record(this, "restart_stopped", "reason=no_location_permission")
                 stopSelf()
                 return START_NOT_STICKY
             }
             if (!restartFromStoredSettings()) {
+                NativeJournal.record(this, "restart_stopped", "reason=no_stored_settings")
                 stopSelf()
                 return START_NOT_STICKY
             }
@@ -243,10 +260,14 @@ class IsolateHolderService : MethodChannel.MethodCallHandler, LocationUpdateList
 
         when {
             ACTION_SHUTDOWN == intent?.action -> {
+                NativeJournal.record(this, "shutdown_requested")
+                shutdownRequested = true
                 isServiceRunning = false
                 shutdownHolderService()
             }
             ACTION_START == intent?.action -> {
+                NativeJournal.record(this, "start_requested", "was_running=$isServiceRunning")
+                shutdownRequested = false
                 if (isServiceRunning) {
                     isServiceRunning = false
                     shutdownHolderService()
@@ -425,14 +446,35 @@ class IsolateHolderService : MethodChannel.MethodCallHandler, LocationUpdateList
 
             result.success(null)
         } catch (e: Exception) {
-
+            NativeJournal.record(this, "method_call_error", "type=${e.javaClass.simpleName}")
         }
     }
 
     override fun onDestroy() {
+        NativeJournal.record(
+            this,
+            "service_destroyed",
+            if (shutdownRequested) "reason=requested" else "reason=not_requested",
+        )
         isServiceRunning = false
         activeInstance = null
         super.onDestroy()
+    }
+
+    /** The user swiped the app away from the recent apps. The service is not stopped by this on stock Android, but
+     *  some phone makers end it right after, so the journal keeps the moment. */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        NativeJournal.record(this, "task_removed")
+        super.onTaskRemoved(rootIntent)
+    }
+
+    /** Memory pressure while the service runs. Only the serious levels (critical while running, or the process
+     *  being a candidate to be killed) are kept; the harmless "UI hidden" level arrives on every app switch. */
+    override fun onTrimMemory(level: Int) {
+        if (level >= 40 || level == 15) {
+            NativeJournal.record(this, "trim_memory", "level=$level")
+        }
+        super.onTrimMemory(level)
     }
 
 
@@ -649,7 +691,7 @@ class IsolateHolderService : MethodChannel.MethodCallHandler, LocationUpdateList
                 sendLocationEvent(result)
             }
         } catch (e: Exception) {
-
+            NativeJournal.record(this, "location_dispatch_error", "type=${e.javaClass.simpleName}")
         }
     }
 

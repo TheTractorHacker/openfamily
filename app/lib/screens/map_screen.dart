@@ -59,6 +59,8 @@ import 'circle_detail_screen.dart';
 import 'circles_screen.dart';
 import 'places_screen.dart';
 import '../services/diagnostics/diagnostics_reporter.dart';
+import '../services/diagnostics/tracking_journal.dart';
+import '../services/tracking_resume.dart';
 import 'settings_screen.dart';
 import 'sos_screen.dart';
 import '../services/error_copy.dart';
@@ -700,17 +702,25 @@ class _MapScreenState extends State<MapScreen>
     super.dispose();
   }
 
+  DateTime? _pausedAt;
+
   /// Pauses foreground location reporting when the app is backgrounded and
   /// resumes it when the app returns to the foreground. This is explicit
   /// rather than relying on geolocator's implicit stream pause/resume.
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.paused) {
+      _pausedAt = DateTime.now();
+      TrackingJournal.instance.record('app_paused');
       unawaited(PrivateRuntime.instance.flushStores().catchError((Object _) {}));
       _reporter.stop();
       _appResumed = false;
       _syncWatch();
     } else if (state == AppLifecycleState.resumed) {
+      final DateTime? away = _pausedAt;
+      _pausedAt = null;
+      TrackingJournal.instance.record(
+          'app_resumed', away == null ? '' : 'away_s=${DateTime.now().difference(away).inSeconds}');
       _appResumed = true;
       _syncWatch();
       _onResumed();
@@ -732,6 +742,9 @@ class _MapScreenState extends State<MapScreen>
     if (LocationSharingService.enabled.value) {
       _reporter.start();
     }
+    // The background service may have been ended by Android while the app was away: start it again when tracking
+    // is wanted (never when sharing is off or "Allow all the time" is missing).
+    unawaited(TrackingResume.onResume());
     if (_circles.isNotEmpty) {
       unawaited(_activateAndExplain(_circles));
     }
@@ -782,7 +795,7 @@ class _MapScreenState extends State<MapScreen>
       }
     } else {
       _reporter.stop();
-      BackgroundLocationService.stop();
+      BackgroundLocationService.stop(reason: 'sharing_off');
     }
   }
 

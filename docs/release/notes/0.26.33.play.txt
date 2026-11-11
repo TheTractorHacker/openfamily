@@ -1,0 +1,1 @@
+Opening the app now restarts background sharing if Android stopped it. Diagnostics now shows why Android ended the app and keeps a short tracking journal. If Android ends the app, this cannot prevent it. Nothing was tried on a real phone yet.
