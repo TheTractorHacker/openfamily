@@ -38,6 +38,9 @@ type dawarichRow struct {
 	LastSyncAt   *time.Time
 	LastError    string
 	TotalSent    int64
+	LastOKAt     *time.Time
+	Failures     int
+	NextRetryAt  *time.Time
 }
 
 type dawarichResponse struct {
@@ -51,6 +54,13 @@ type dawarichResponse struct {
 	LastError    string     `json:"last_error"`
 	TotalSent    int64      `json:"total_sent"`
 	Pending      int64      `json:"pending"`
+	// LastOKAt is when a batch was last accepted by Dawarich (a pass with
+	// nothing to send does not count). Failures is the number of failed
+	// attempts in a row and NextRetryAt when the next attempt is due; the
+	// admin web shows them so an outage is visible and not just a log line.
+	LastOKAt    *time.Time `json:"last_ok_at"`
+	Failures    int        `json:"failures"`
+	NextRetryAt *time.Time `json:"next_retry_at"`
 }
 
 type dawarichPutRequest struct {
@@ -86,6 +96,9 @@ func (r dawarichRow) postPoints(ctx context.Context, key string, body []byte) er
 		}
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
 		resp.Body.Close()
+		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+			return fmt.Errorf("Dawarich answered %d (check the API key)", resp.StatusCode)
+		}
 		if resp.StatusCode >= 300 {
 			return fmt.Errorf("Dawarich answered %d", resp.StatusCode)
 		}
@@ -119,9 +132,11 @@ func (s *Server) sealDawarichKey(plain string) (string, error) {
 func (s *Server) readDawarich(ctx context.Context) (dawarichRow, bool, error) {
 	var row dawarichRow
 	err := s.Pool.QueryRow(ctx, `
-		SELECT base_url, local_url, api_key, enabled, send_unmapped, since, last_sync_at, last_error, total_sent
+		SELECT base_url, local_url, api_key, enabled, send_unmapped, since, last_sync_at, last_error, total_sent,
+		       last_ok_at, consecutive_failures, next_retry_at
 		FROM dawarich_settings WHERE id = 1`).Scan(
-		&row.BaseURL, &row.LocalURL, &row.APIKey, &row.Enabled, &row.SendUnmapped, &row.Since, &row.LastSyncAt, &row.LastError, &row.TotalSent)
+		&row.BaseURL, &row.LocalURL, &row.APIKey, &row.Enabled, &row.SendUnmapped, &row.Since, &row.LastSyncAt, &row.LastError, &row.TotalSent,
+		&row.LastOKAt, &row.Failures, &row.NextRetryAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return dawarichRow{}, false, nil
 	}
@@ -175,6 +190,9 @@ func (s *Server) dawarichJSON(ctx context.Context, row dawarichRow) dawarichResp
 		LastError:    row.LastError,
 		TotalSent:    row.TotalSent,
 		Pending:      s.dawarichPending(ctx, row),
+		LastOKAt:     row.LastOKAt,
+		Failures:     row.Failures,
+		NextRetryAt:  row.NextRetryAt,
 	}
 }
 
@@ -246,12 +264,14 @@ func (s *Server) AdminPutDawarich(w http.ResponseWriter, r *http.Request) {
 		VALUES (1, $1, $4, $2, $3, $5, now() - make_interval(days => $6), '', now())
 		ON CONFLICT (id) DO UPDATE SET
 			base_url = EXCLUDED.base_url, local_url = EXCLUDED.local_url, api_key = EXCLUDED.api_key,
-			enabled = EXCLUDED.enabled, send_unmapped = EXCLUDED.send_unmapped, last_error = '', updated_at = now()`,
+			enabled = EXCLUDED.enabled, send_unmapped = EXCLUDED.send_unmapped, last_error = '',
+			consecutive_failures = 0, next_retry_at = NULL, updated_at = now()`,
 		base, sealedKey, req.Enabled, local, req.SendUnmapped, days)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to save Dawarich settings")
 		return
 	}
+	s.dawarichBO.reset() // new settings: try again now, not after the old backoff
 	s.logAudit(r.Context(), claims.UserID, "", "dawarich.settings_updated", "updated Dawarich sync settings", clientIP(r))
 	row, _, _ := s.readDawarich(r.Context())
 	writeJSON(w, http.StatusOK, s.dawarichJSON(r.Context(), row))
@@ -270,6 +290,7 @@ func (s *Server) AdminDeleteDawarich(w http.ResponseWriter, r *http.Request) {
 	}
 	_, _ = s.Pool.Exec(r.Context(), `DELETE FROM dawarich_cursor`)
 	_, _ = s.Pool.Exec(r.Context(), `DELETE FROM dawarich_user_map`)
+	s.dawarichBO.reset()
 	s.logAudit(r.Context(), claims.UserID, "", "dawarich.settings_cleared", "disconnected Dawarich sync", clientIP(r))
 	writeJSON(w, http.StatusOK, s.dawarichJSON(r.Context(), dawarichRow{}))
 }
@@ -385,29 +406,88 @@ func (s *Server) syncDawarichOnce(ctx context.Context, force bool) {
 		slog.Warn("dawarich targets", "err", err)
 		return
 	}
+	bo := &s.dawarichBO
 	var total int64
-	var firstErr string
+	attempted := false
 	for _, t := range targets {
+		// A destination that failed recently waits for its retry time; the
+		// admin's "Sync now" (force) skips the wait.
+		if !force && !bo.due(t.UserID) {
+			continue
+		}
+		attempted = true
 		sent, perr := s.pushDawarich(ctx, row, t)
 		total += sent
 		msg := ""
 		if perr != nil {
-			msg = perr.Error()
-			slog.Warn("dawarich sync", "user", t.UserID, "err", perr)
-			if firstErr == "" {
-				firstErr = msg
+			if ctx.Err() != nil {
+				// The request was aborted (browser closed, server shutting
+				// down); that says nothing about Dawarich, and the stored
+				// row could not be updated anyway.
+				return
 			}
+			msg = perr.Error()
+			if force {
+				// "Sync now" starts over: repeated presses must not
+				// escalate the wait to an hour.
+				bo.rewind(t.UserID)
+			}
+			f := bo.failure(t.UserID, msg)
+			if f.Log {
+				slog.Warn("dawarich sync failed; backing off", "user", t.UserID, "err", perr,
+					"failures", f.Failures, "retry_in", dawarichBackoffDelay(f.Failures).String(),
+					"similar_not_logged", f.Suppressed)
+			}
+		} else if n := bo.success(t.UserID); n > 0 {
+			slog.Info("dawarich sync recovered", "user", t.UserID, "after_failures", n)
 		}
 		if t.UserID != "" {
+			fails, next, _ := bo.snapshot(t.UserID)
 			_, _ = s.Pool.Exec(ctx, `
-				UPDATE dawarich_user_map SET last_error = $1, total_sent = total_sent + $2
-				WHERE user_id = $3`, msg, sent, t.UserID)
+				UPDATE dawarich_user_map
+				SET last_error = $1, total_sent = total_sent + $2::bigint,
+				    last_ok_at = CASE WHEN $2::bigint > 0 THEN now() ELSE last_ok_at END,
+				    failures = $4, next_retry_at = $5
+				WHERE user_id = $3`, msg, sent, t.UserID, fails, nullTime(next))
+		}
+	}
+	if !attempted {
+		return // everything is waiting for its retry time; keep what the admin sees
+	}
+	// The row shows the worst state across destinations, including ones that
+	// were skipped this pass because they are still backing off.
+	var firstErr string
+	maxFails := 0
+	var soonest time.Time
+	for _, t := range targets {
+		fails, next, msg := bo.snapshot(t.UserID)
+		if fails == 0 {
+			continue
+		}
+		if firstErr == "" {
+			firstErr = msg
+		}
+		if fails > maxFails {
+			maxFails = fails
+		}
+		if soonest.IsZero() || next.Before(soonest) {
+			soonest = next
 		}
 	}
 	_, _ = s.Pool.Exec(ctx, `
 		UPDATE dawarich_settings
-		SET last_sync_at = now(), last_error = $1, total_sent = total_sent + $2
-		WHERE id = 1`, firstErr, total)
+		SET last_sync_at = now(), last_error = $1, total_sent = total_sent + $2::bigint,
+		    last_ok_at = CASE WHEN $2::bigint > 0 THEN now() ELSE last_ok_at END,
+		    consecutive_failures = $3, next_retry_at = $4
+		WHERE id = 1`, firstErr, total, maxFails, nullTime(soonest))
+}
+
+// nullTime maps the zero time to SQL NULL.
+func nullTime(t time.Time) *time.Time {
+	if t.IsZero() {
+		return nil
+	}
+	return &t
 }
 
 func (s *Server) pushDawarich(ctx context.Context, row dawarichRow, t dawarichTarget) (int64, error) {
@@ -522,6 +602,9 @@ type dawarichUserOut struct {
 	Since     *time.Time `json:"since"`
 	LastError string     `json:"last_error"`
 	TotalSent int64      `json:"total_sent"`
+	LastOKAt    *time.Time `json:"last_ok_at"`
+	Failures    int        `json:"failures"`
+	NextRetryAt *time.Time `json:"next_retry_at"`
 }
 
 type dawarichUserPut struct {
@@ -536,7 +619,8 @@ func (s *Server) AdminListDawarichUsers(w http.ResponseWriter, r *http.Request) 
 	rows, err := s.Pool.Query(r.Context(), `
 		SELECT u.id::text, u.name, u.email, m.user_id IS NOT NULL, COALESCE(m.label, ''),
 		       COALESCE(m.enabled, FALSE), COALESCE(m.api_key, '') <> '', m.since,
-		       COALESCE(m.last_error, ''), COALESCE(m.total_sent, 0)
+		       COALESCE(m.last_error, ''), COALESCE(m.total_sent, 0),
+		       m.last_ok_at, COALESCE(m.failures, 0), m.next_retry_at
 		FROM users u LEFT JOIN dawarich_user_map m ON m.user_id = u.id
 		ORDER BY lower(u.name), u.email`)
 	if err != nil {
@@ -548,7 +632,7 @@ func (s *Server) AdminListDawarichUsers(w http.ResponseWriter, r *http.Request) 
 	for rows.Next() {
 		var u dawarichUserOut
 		if err := rows.Scan(&u.UserID, &u.Name, &u.Email, &u.Mapped, &u.Label, &u.Enabled,
-			&u.APIKeySet, &u.Since, &u.LastError, &u.TotalSent); err != nil {
+			&u.APIKeySet, &u.Since, &u.LastError, &u.TotalSent, &u.LastOKAt, &u.Failures, &u.NextRetryAt); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to load users")
 			return
 		}
@@ -604,7 +688,7 @@ func (s *Server) AdminPutDawarichUser(w http.ResponseWriter, r *http.Request) {
 		_, err := s.Pool.Exec(r.Context(), `
 			UPDATE dawarich_user_map
 			SET api_key = CASE WHEN $2 = '' THEN api_key ELSE $2 END,
-			    label = $3, enabled = $4, last_error = ''
+			    label = $3, enabled = $4, last_error = '', failures = 0, next_retry_at = NULL
 			WHERE user_id = $1`, userID, sealedKey, label, req.Enabled)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to save mapping")
@@ -623,6 +707,7 @@ func (s *Server) AdminPutDawarichUser(w http.ResponseWriter, r *http.Request) {
 		_, _ = s.Pool.Exec(r.Context(), `
 			DELETE FROM dawarich_cursor WHERE device_id IN (SELECT id FROM devices WHERE user_id = $1)`, userID)
 	}
+	s.dawarichBO.reset()
 	s.logAudit(r.Context(), claims.UserID, "", "dawarich.user_mapped", "mapped a user to a Dawarich account", clientIP(r))
 	s.AdminListDawarichUsers(w, r)
 }
@@ -638,6 +723,7 @@ func (s *Server) AdminDeleteDawarichUser(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, "failed to remove mapping")
 		return
 	}
+	s.dawarichBO.reset()
 	s.logAudit(r.Context(), claims.UserID, "", "dawarich.user_unmapped", "removed a Dawarich user mapping", clientIP(r))
 	s.AdminListDawarichUsers(w, r)
 }
@@ -660,6 +746,15 @@ func (s *Server) EnsureDawarichSchema(ctx context.Context) error {
 			total_sent BIGINT NOT NULL DEFAULT 0,
 			created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 		);
+		-- Failure backoff state, so an outage stays visible in the admin web.
+		ALTER TABLE dawarich_settings
+			ADD COLUMN IF NOT EXISTS last_ok_at TIMESTAMPTZ,
+			ADD COLUMN IF NOT EXISTS consecutive_failures INT NOT NULL DEFAULT 0,
+			ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMPTZ;
+		ALTER TABLE dawarich_user_map
+			ADD COLUMN IF NOT EXISTS last_ok_at TIMESTAMPTZ,
+			ADD COLUMN IF NOT EXISTS failures INT NOT NULL DEFAULT 0,
+			ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMPTZ;
 		-- Earlier builds could store the request URL (and so the key) in an error.
 		UPDATE dawarich_settings SET last_error = '' WHERE last_error LIKE '%api_key=%';
 		UPDATE dawarich_user_map SET last_error = '' WHERE last_error LIKE '%api_key=%'`)

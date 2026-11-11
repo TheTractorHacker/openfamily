@@ -195,6 +195,12 @@ export interface DawarichSettings {
   last_error: string
   total_sent: number
   pending: number
+  /** When Dawarich last accepted a batch (null: never). */
+  last_ok_at: string | null
+  /** Failed attempts in a row; 0 when healthy. */
+  failures: number
+  /** When the next attempt is due while failing. */
+  next_retry_at: string | null
 }
 
 /** One Orbitly account and its Dawarich mapping. */
@@ -209,6 +215,9 @@ export interface DawarichUser {
   since: string | null
   last_error: string
   total_sent: number
+  last_ok_at: string | null
+  failures: number
+  next_retry_at: string | null
 }
 
 /** One live DNS or HTTPS check for the admin domain status card. */

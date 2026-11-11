@@ -1,6 +1,7 @@
 import React from 'react'
 import { ApiError, listDawarichUsers, removeDawarichUser, saveDawarichUser } from '../lib/api'
 import type { DawarichUser } from '../lib/types'
+import { dawarichProblem } from '../lib/dawarichStatus'
 import { Badge, Button, Spinner } from '../components/primitives'
 
 const BACKFILL_OPTIONS = [
@@ -109,7 +110,7 @@ function UserRow({
           </Button>
         )}
       </div>
-      {user.last_error && <p className="wb-error-text" role="alert">{user.last_error}</p>}
+      {dawarichProblem(user) && <p className="wb-error-text" role="alert">{dawarichProblem(user)}</p>}
       {error && <p className="wb-error-text" role="alert">{error}</p>}
     </li>
   )

@@ -26,6 +26,14 @@ Integrations**: address, API key, per-member mapping. Deleting points in Orbitly
 does not delete them in Dawarich. In Private circles the Dawarich bridge is an
 approved device that members must allow. Design notes: [Dawarich](../design/DAWARICH.md).
 
+If Dawarich cannot be reached or refuses the key, the card turns orange ("Retrying")
+and says what failed, how many times in a row, when the next try is and when
+something last arrived. Orbitly waits longer after each failure (2, 4, 8, 16, 32
+minutes, then an hour) instead of asking every minute, and writes the problem to
+the server log once, not every minute. Fix the cause, or press **Sync now** to try
+at once; saving the settings also starts over. Nothing is lost while it waits: the
+points are sent later, oldest first.
+
 ## Privacy of integrations
 
 Both only receive what the circle's [privacy mode](../user/privacy-modes.md)
