@@ -66,6 +66,7 @@ Future<void> _pump(
   LatLng? me,
   VoidCallback? onMessage,
   MemberDayLoader? day,
+  Future<void> Function(String)? requestUpdate,
 }) async {
   t.view.physicalSize = const Size(390, 900);
   t.view.devicePixelRatio = 1;
@@ -80,6 +81,7 @@ Future<void> _pump(
         selfId: selfId,
         myPosition: me,
         onMessage: onMessage,
+        requestUpdate: requestUpdate,
         alerts: alerts ?? _Alerts(),
         weekly: weekly ?? _Weekly(const WeekStat(), const WeekStat()),
         dayLoader: day ?? (_, __) async => const MemberDay(),
@@ -114,6 +116,20 @@ void main() {
     expect(find.byKey(const Key('person_stale_banner')), findsOneWidget);
     expect(find.text('Sam’s location isn’t updating'), findsOneWidget);
     expect(find.text('Last updated 1 hr. ago'), findsOneWidget);
+  });
+
+  testWidgets('stale banner offers one tap to ask the phone to update',
+      (t) async {
+    final List<String> asked = <String>[];
+    await _pump(
+        t,
+        _m(
+            status: MemberStatus.stopped,
+            seen: _now.subtract(const Duration(hours: 1))),
+        requestUpdate: (String id) async => asked.add(id));
+    await t.tap(find.byKey(const Key('person_stale_ask')));
+    await t.pump();
+    expect(asked, <String>['u1']);
   });
 
   testWidgets('place alert switch loads and saves through the service',

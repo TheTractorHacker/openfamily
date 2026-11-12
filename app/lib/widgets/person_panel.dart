@@ -282,7 +282,11 @@ class _PersonPanelState extends State<PersonPanel> {
               padding: const EdgeInsets.symmetric(horizontal: AppSpace.lg),
               sliver: SliverList(
                 delegate: SliverChildListDelegate(<Widget>[
-                  if (stale) _StaleBanner(name: m.name),
+                  if (stale)
+                    _StaleBanner(
+                        name: m.name,
+                        busy: _requesting,
+                        onAsk: _requestUpdate),
                   Padding(
                     padding: const EdgeInsets.fromLTRB(
                         AppSpace.xs, AppSpace.sm, 0, AppSpace.md),
@@ -790,9 +794,11 @@ class _Card extends StatelessWidget {
 }
 
 class _StaleBanner extends StatelessWidget {
-  const _StaleBanner({required this.name});
+  const _StaleBanner({required this.name, required this.onAsk, this.busy = false});
 
   final String name;
+  final bool busy;
+  final VoidCallback onAsk;
 
   @override
   Widget build(BuildContext context) {
@@ -819,6 +825,12 @@ class _StaleBanner extends StatelessWidget {
                 style: AppType.body
                     .copyWith(color: ink, fontWeight: FontWeight.w700),
               ),
+            ),
+            TextButton(
+              key: const Key('person_stale_ask'),
+              onPressed: busy ? null : onAsk,
+              style: TextButton.styleFrom(foregroundColor: ink),
+              child: Text(busy ? 'Asking…' : 'Ask to update'),
             ),
           ],
         ),
