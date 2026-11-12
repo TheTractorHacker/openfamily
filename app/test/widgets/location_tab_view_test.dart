@@ -396,13 +396,15 @@ void main() {
   });
 
   group('circle details are reachable from the pill', () {
-    testWidgets('pill shows location sharing on / paused as words', (
+    testWidgets('pill shows the family pulse, and paused as words', (
       tester,
     ) async {
       _phone(tester);
       await tester.pumpWidget(_app(selectable: true, selectedCircleId: 'c1'));
       await tester.pump();
-      expect(find.text('Location sharing: on'), findsOneWidget);
+      // The old static "Location sharing: on" is now the family pulse (docs/user/family-pulse.md).
+      expect(find.text('Location sharing: on'), findsNothing);
+      expect(find.textContaining('Sam driving'), findsOneWidget);
 
       await tester.pumpWidget(
         _app(

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../models/circle.dart';
 import '../models/member.dart';
+import '../utils/family_pulse.dart';
 import '../models/place.dart';
 import '../screens/chat_screen.dart';
 import '../services/person_launcher.dart';
@@ -605,6 +606,10 @@ class _LocationTabViewState extends State<LocationTabView> {
                       child: _CirclePill(
                         name: widget.circleName,
                         sharingPaused: widget.circleSharingPaused,
+                        pulse: familyPulse(
+                          widget.membersListenable?.value ?? widget.members,
+                          selfId: widget.selfId,
+                        ),
                         onTap: _showCircles,
                       ),
                     ),
@@ -1157,10 +1162,14 @@ class _CirclePill extends StatelessWidget {
     required this.name,
     required this.onTap,
     this.sharingPaused = false,
+    this.pulse,
   });
 
   final String name;
   final bool sharingPaused;
+
+  /// The live line (see [familyPulse]); null keeps "Location sharing: on".
+  final FamilyPulse? pulse;
   final VoidCallback onTap;
 
   @override
@@ -1168,8 +1177,9 @@ class _CirclePill extends StatelessWidget {
     final BrandTheme brand = BrandTheme.of(context);
     return Semantics(
       button: true,
-      label: 'Circle: $name. Location sharing: '
-          '${sharingPaused ? 'paused' : 'on'}. Switch circle or open details',
+      label: 'Circle: $name. '
+          '${sharingPaused || pulse == null ? 'Location sharing: ${sharingPaused ? 'paused' : 'on'}' : pulse!.text}'
+          '. Switch circle or open details',
       excludeSemantics: true,
       onTap: onTap,
       child: DecoratedBox(
@@ -1211,12 +1221,12 @@ class _CirclePill extends StatelessWidget {
                             Text(
                               sharingPaused
                                   ? 'Location sharing: paused'
-                                  : 'Location sharing: on',
+                                  : pulse?.text ?? 'Location sharing: on',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: AppType.secondary.copyWith(
                                 fontSize: 12,
-                                color: sharingPaused
+                                color: sharingPaused || (pulse?.needsAttention ?? false)
                                     ? AppColors.statusOrange
                                     : Theme.of(context)
                                         .colorScheme
