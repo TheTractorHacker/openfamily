@@ -1,5 +1,5 @@
 # Build stage
-FROM golang:1.27.3-alpine@sha256:dbaa054703263d06c8b49576667418473b6231f8c0fa69dee103207fdb8e3654 AS build
+FROM golang:1.27.4-alpine@sha256:0a5f7fe796599ff487605987432e7619ae45beeb2fba4c2ce0b907879932aebf AS build
 RUN apk add --no-cache ca-certificates openssl
 COPY scripts/distrust-compromised-cas.sh /usr/local/bin/distrust-compromised-cas
 RUN sh /usr/local/bin/distrust-compromised-cas && update-ca-certificates --fresh
