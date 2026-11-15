@@ -56,6 +56,7 @@ class LocationTabView extends StatefulWidget {
     this.selectedCircleId,
     this.circleSharingPaused = false,
     this.onSelectCircle,
+    this.onRefreshCircles,
     this.onResumeCircleSharing,
     this.loading = false,
     this.error,
@@ -112,6 +113,10 @@ class LocationTabView extends StatefulWidget {
   /// A circle (or `all`) was picked in the pill sheet. When null the sheet
   /// falls back to opening the circle's detail (legacy behaviour).
   final ValueChanged<String>? onSelectCircle;
+
+  /// Asked each time the circle list opens, so a circle added or joined elsewhere (the admin page, another phone) shows
+  /// without restarting the app.
+  final VoidCallback? onRefreshCircles;
   final VoidCallback? onResumeCircleSharing;
   final bool loading;
   final String? error;
@@ -182,6 +187,7 @@ class _LocationTabViewState extends State<LocationTabView> {
   // A solo circle has nothing to look at but the invite card, so the sheet
   // opens to half height once (never again, so the user's own dragging wins).
   bool _soloOpened = false;
+  final ValueNotifier<int> _circlesTick = ValueNotifier<int>(0);
 
   // Tall enough for the handle, tabs, your own row and the whole invite card;
   // clamped to the sheet's maximum in build.
@@ -201,6 +207,7 @@ class _LocationTabViewState extends State<LocationTabView> {
   @override
   void didUpdateWidget(LocationTabView old) {
     super.didUpdateWidget(old);
+    if (widget.circles != old.circles || widget.selectedCircleId != old.selectedCircleId) _circlesTick.value++;
     if (widget.personId != old.personId) {
       _selectedId = widget.personId;
       if (_selectedId != null) _openSheetFor();
@@ -226,6 +233,7 @@ class _LocationTabViewState extends State<LocationTabView> {
 
   @override
   void dispose() {
+    _circlesTick.dispose();
     _sheet.dispose();
     _panelScroll.dispose();
     _extent.dispose();
@@ -296,11 +304,16 @@ class _LocationTabViewState extends State<LocationTabView> {
 
   void _showCircles() {
     final BrandTheme brand = BrandTheme.of(context);
+    widget.onRefreshCircles?.call();
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (BuildContext ctx) {
+        // Rebuilt whenever the refreshed list arrives while the sheet is open.
+        return ValueListenableBuilder<int>(
+          valueListenable: _circlesTick,
+          builder: (BuildContext ctx, int _, Widget? __) {
         final List<Circle> circles = widget.circles;
         return SafeArea(
           child: DsSheetScaffold(
@@ -418,6 +431,8 @@ class _LocationTabViewState extends State<LocationTabView> {
               ),
             ),
           ),
+        );
+          },
         );
       },
     );

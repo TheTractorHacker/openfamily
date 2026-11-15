@@ -1205,6 +1205,7 @@ class _MapScreenState extends State<MapScreen>
       circleSharingPaused: _selection.sharingPaused,
       onResumeCircleSharing: _resumeSharing,
       onSelectCircle: _selectCircle,
+      onRefreshCircles: () => unawaited(_loadCircles()),
       loading: _loading,
       error: _error,
       hasFamily: _hasFamily,

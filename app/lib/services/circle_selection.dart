@@ -67,7 +67,16 @@ class CircleSelection extends ChangeNotifier {
   String? get selectedId => _selected;
 
   /// The id to scope requests to, or null for the legacy unscoped behaviour.
-  String? get effectiveId => _circles.length < 2 ? null : _selected;
+  ///
+  /// The legacy endpoints answer for the person's primary (legacy group) circle only. A single circle that is the
+  /// primary one needs no scope, but a single circle that is NOT primary (one made in the app, joined by code) is
+  /// invisible to them: the map would say "No family" and "You are not in a circle yet" with the circle right there
+  /// in the list. So that one circle is scoped like any other.
+  String? get effectiveId {
+    if (_circles.isEmpty) return null;
+    if (_circles.length == 1) return _circles.first.isPrimary ? null : _circles.first.id;
+    return _selected;
+  }
 
   bool get isAll => effectiveId == kAllCircles;
 

@@ -36,6 +36,17 @@ void main() {
     expect(sel.sharingPaused, isFalse);
   });
 
+  test('one circle that is NOT the primary one (made in the app, joined by code) is scoped, not "No family"', () {
+    final sel = CircleSelection(store: _MemStore());
+    sel.update(<Circle>[_c('foleys')]);
+    expect(sel.effectiveId, 'foleys');
+    expect(sel.selectedCircle?.name, 'Circle foleys');
+    expect(sel.nameOr('No family'), 'Circle foleys');
+    // Leaving it empties the list: back to unscoped.
+    sel.update(const <Circle>[]);
+    expect(sel.effectiveId, isNull);
+  });
+
   test('several circles default to the primary one', () {
     final sel = CircleSelection(store: _MemStore());
     sel.update(<Circle>[_c('a'), _c('b', primary: true)]);
