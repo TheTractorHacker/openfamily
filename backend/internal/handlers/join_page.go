@@ -1,8 +1,12 @@
 package handlers
 
 import (
+	"bytes"
+	"encoding/json"
 	"html/template"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"regexp"
 	"strings"
@@ -54,6 +58,15 @@ a.btn.alt{background:transparent;color:var(--accent);border:1.5px solid var(--ac
 .desk p{margin:0;color:var(--muted);font-size:.92rem}
 .desk strong{color:var(--fg);display:block;font-size:1rem}
 @media (hover:hover) and (pointer:fine){.desk{display:flex}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:10px}
+.card h2{font-size:1.05rem;margin:0}
+label{display:flex;flex-direction:column;gap:4px;font-size:.86rem;color:var(--muted)}
+input{font:inherit;font-size:1rem;color:var(--fg);background:var(--bg);border:1.5px solid var(--line);border-radius:12px;padding:12px 14px;min-height:48px}
+input:focus-visible{outline:3px solid var(--accent);outline-offset:1px}
+button.btn{font:inherit;border:0;cursor:pointer;background:var(--accent);color:var(--accent-fg);padding:14px 18px;border-radius:999px;font-weight:700;min-height:48px}
+.err{background:#fde7e7;color:#7a1212;border-radius:12px;padding:10px 12px;font-size:.9rem}
+.ok{background:var(--accent-soft);color:var(--fg);border-radius:12px;padding:12px 14px}
+@media (prefers-color-scheme:dark){.err{background:#3a1717;color:#f5b5b5}}
 .fine{color:var(--muted);font-size:.8rem;text-align:center;text-wrap:balance}
 .fine b{color:var(--fg)}
 a:focus-visible{outline:3px solid var(--accent);outline-offset:3px}
@@ -65,12 +78,34 @@ a:focus-visible{outline:3px solid var(--accent);outline-offset:3px}
 <svg viewBox="0 0 48 48" aria-hidden="true"><rect width="48" height="48" rx="12" fill="var(--accent)"/><path d="M24 11c-5.5 0-9.5 4.2-9.5 9.6 0 6.6 9.5 16.4 9.5 16.4s9.5-9.800 9.5-16.400C33.500 15.200 29.500 11 24 11z" fill="var(--accent-fg)"/><circle cx="24" cy="20.800" r="3.600" fill="var(--accent)"/></svg>
 Orbitly
 </div>
-{{if .Code}}
+{{if .Entry}}
 <div>
-<h1>You&rsquo;re invited to join a family circle</h1>
+<h1>Join a family circle</h1>
+<p class="lead">Type the invite code you were given. You will then choose your email and password.</p>
+</div>
+<form class="card" method="get" action="/join">
+{{if .EntryError}}<div class="err" role="alert">That code doesn&rsquo;t look right. It is 8 letters and numbers.</div>{{end}}
+<label>Invite code<input name="code" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="16" required autofocus></label>
+<button class="btn" type="submit">Continue</button>
+</form>
+{{else if .Code}}
+<div>
+<h1>{{if .Done}}You&rsquo;re in{{else}}You&rsquo;re invited to join a family circle{{end}}</h1>
 <p class="lead">See where your family is, get arrival alerts and check in, on a private server run by your family. No ads, no tracking, nothing sold.</p>
 </div>
+{{if .Done}}
+<div class="ok" role="status">Done. Install the app and sign in with the email and password you just chose to share your location. If that email already had an account on this server, nothing was changed: sign in with its existing password, or ask your admin for a reset code.</div>
+{{else}}
 <div class="code"><small>Your invite code</small><b aria-label="Invite code">{{.Code}}</b></div>
+<form class="card" method="post" action="/join/{{.Code}}">
+<h2>Create your account</h2>
+{{if .Error}}<div class="err" role="alert">{{.Error}}</div>{{end}}
+<label>Your name<input name="name" autocomplete="name" maxlength="80" required value="{{.Name}}"></label>
+<label>Email<input name="email" type="email" autocomplete="email" maxlength="254" required value="{{.Email}}"></label>
+<label>Password (at least 8 characters)<input name="password" type="password" autocomplete="new-password" minlength="8" maxlength="256" required></label>
+<button class="btn" type="submit">Create account and join</button>
+</form>
+{{end}}
 <ol>
 <li><span class="n">1</span><h2>Get the app</h2>
 <p>Android phones. It&rsquo;s a free, signed app that comes straight from your family&rsquo;s server.</p>
@@ -78,9 +113,11 @@ Orbitly
 <li><span class="n">2</span><h2>Allow the install</h2>
 <p>Open the downloaded file. If Android asks, allow your browser to install apps, then tap <b>Install</b>.</p>
 <div class="help">If Google Play Protect offers to scan the app, tap <b>Scan app</b>. If it blocks the install, tap <b>More details &rarr; Install anyway</b>.</div></li>
-<li><span class="n">3</span><h2>Open it and join</h2>
-<p>This fills in your server and invite code for you.</p>
-<a class="btn alt" href="{{.AppLink}}">Open Orbitly &amp; join</a></li>
+{{if .Done}}<li><span class="n">3</span><h2>Sign in</h2>
+<p>Open Orbitly, enter the server <b>{{.Server}}</b> and sign in with your email and password.</p></li>
+{{else}}<li><span class="n">3</span><h2>Open it and join</h2>
+<p>Already have an account? This fills in your server and invite code for you.</p>
+<a class="btn alt" href="{{.AppLink}}">Open Orbitly &amp; join</a></li>{{end}}
 </ol>
 <div class="desk">{{.QR}}<p><strong>On a computer?</strong>Scan this with your phone&rsquo;s camera to open this page there.</p></div>
 <p class="fine">Button does nothing? Open the app, tap <b>Join</b>, and enter the server <b>{{.Server}}</b> and the code above.<br>Orbitly is Android-only for now. The invite expires and has limited uses, so only share it with family.</p>
@@ -96,6 +133,16 @@ Orbitly
 
 // joinPageData is what the landing page template renders.
 type joinPageData struct {
+	// Entry is the "type your code" page at /join; EntryError says the last code was malformed.
+	Entry      bool
+	EntryError bool
+	// Done is the success view after the web sign-up; Error and the echoed Name/Email belong to a failed attempt
+	// (the password is never echoed).
+	Done  bool
+	Error string
+	Name  string
+	Email string
+
 	Code     string
 	Server   string
 	AppLink  template.URL
@@ -151,7 +198,104 @@ func (s *Server) JoinLanding(w http.ResponseWriter, r *http.Request) {
 	h.Set("Cache-Control", "no-store")
 	h.Set("Referrer-Policy", "no-referrer")
 	h.Set("X-Content-Type-Options", "nosniff")
-	h.Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+	h.Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
 	w.WriteHeader(status)
+	_ = joinPageTmpl.Execute(w, data)
+}
+
+func writeJoinHeaders(w http.ResponseWriter) {
+	h := w.Header()
+	h.Set("Content-Type", "text/html; charset=utf-8")
+	h.Set("Cache-Control", "no-store")
+	h.Set("Referrer-Policy", "no-referrer")
+	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
+}
+
+// joinDataFor builds the page data for a well-formed code on this server, or ok=false.
+func (s *Server) joinDataFor(r *http.Request, code string) (joinPageData, bool) {
+	server := s.publicOrigin(r)
+	if !inviteLinkCodePattern.MatchString(code) || server == "" {
+		return joinPageData{}, false
+	}
+	q := url.Values{}
+	q.Set("server", server)
+	q.Set("code", code)
+	return joinPageData{
+		Code:     code,
+		Server:   server,
+		AppLink:  template.URL("openfamily://join?" + q.Encode()),
+		Download: "/app.apk",
+		QR:       qrSVG(server + "/join/" + code),
+	}, true
+}
+
+// JoinEntry serves GET /join: a box to type an invite code. It only checks the code's shape and sends the person on to
+// /join/{code}; like the landing page it never touches the database, so it cannot be used to probe which codes exist.
+func (s *Server) JoinEntry(w http.ResponseWriter, r *http.Request) {
+	writeJoinHeaders(w)
+	if raw := r.URL.Query().Get("code"); raw != "" {
+		code := normalizeCode(raw)
+		if inviteLinkCodePattern.MatchString(code) {
+			http.Redirect(w, r, "/join/"+code, http.StatusSeeOther)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_ = joinPageTmpl.Execute(w, joinPageData{Entry: true, EntryError: true})
+		return
+	}
+	_ = joinPageTmpl.Execute(w, joinPageData{Entry: true})
+}
+
+// JoinSignUp handles the form on /join/{code}: it creates the account and joins the circle through the same Register
+// path the app uses (same invite rules, password rules and per-IP rate limit), then shows the next step. No session is
+// created here: the tokens Register returns are dropped, and the person signs in from the app.
+func (s *Server) JoinSignUp(w http.ResponseWriter, r *http.Request) {
+	code := normalizeCode(chi.URLParam(r, "code"))
+	data, ok := s.joinDataFor(r, code)
+	writeJoinHeaders(w)
+	if !ok {
+		w.WriteHeader(http.StatusNotFound)
+		_ = joinPageTmpl.Execute(w, joinPageData{})
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 8<<10)
+	if err := r.ParseForm(); err != nil {
+		data.Error = "That form was too large or unreadable. Please try again."
+		w.WriteHeader(http.StatusBadRequest)
+		_ = joinPageTmpl.Execute(w, data)
+		return
+	}
+	data.Name = strings.TrimSpace(r.PostFormValue("name"))
+	data.Email = strings.TrimSpace(r.PostFormValue("email"))
+	body, _ := json.Marshal(registerRequest{
+		Email:      data.Email,
+		Password:   r.PostFormValue("password"),
+		Name:       data.Name,
+		InviteCode: code,
+	})
+	inner := r.Clone(r.Context())
+	inner.Body = io.NopCloser(bytes.NewReader(body))
+	inner.ContentLength = int64(len(body))
+	inner.Header = r.Header.Clone()
+	inner.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.Register(rec, inner)
+	if rec.Code >= 200 && rec.Code < 300 {
+		data.Done = true
+		data.Name, data.Email = "", ""
+		w.WriteHeader(http.StatusOK)
+		_ = joinPageTmpl.Execute(w, data)
+		return
+	}
+	var out struct {
+		Error string `json:"error"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &out)
+	if out.Error == "" {
+		out.Error = "Could not create the account. Please try again."
+	}
+	data.Error = out.Error
+	w.WriteHeader(rec.Code)
 	_ = joinPageTmpl.Execute(w, data)
 }

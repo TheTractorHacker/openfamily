@@ -76,6 +76,52 @@ func TestJoinLandingHasInstallPathAndQR(t *testing.T) {
 	}
 }
 
+func TestJoinEntryRedirectsAWellFormedCodeAndNeverTouchesTheDatabase(t *testing.T) {
+	s := &Server{PublicBaseURL: "https://fam.example.com"}
+	r := chi.NewRouter()
+	r.Get("/join", s.JoinEntry)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/join?code=ab23-cdef", nil))
+	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/join/AB23CDEF" {
+		t.Fatalf("redirect: %d %q", rec.Code, rec.Header().Get("Location"))
+	}
+
+	rec = httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/join?code=%3Cscript%3E", nil))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "doesn&rsquo;t look right") || strings.Contains(rec.Body.String(), "<script") {
+		t.Fatalf("bad code page: %d %s", rec.Code, rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/join", nil))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `name="code"`) {
+		t.Fatalf("entry page: %d", rec.Code)
+	}
+}
+
+func TestJoinLandingHasTheSignUpForm(t *testing.T) {
+	body := joinReq(&Server{PublicBaseURL: "https://fam.example.com"}, "/join/AB23CDEF", "x").Body.String()
+	for _, want := range []string{`method="post" action="/join/AB23CDEF"`, `name="email"`, `name="password"`, `name="name"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("form missing %q", want)
+		}
+	}
+}
+
+func TestJoinSignUpRejectsABadCodeWithoutTouchingTheDatabase(t *testing.T) {
+	s := &Server{PublicBaseURL: "https://fam.example.com"}
+	r := chi.NewRouter()
+	r.Post("/join/{code}", s.JoinSignUp)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/join/short", strings.NewReader("name=a&email=a@b.co&password=longenough"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status %d", rec.Code)
+	}
+}
+
 func TestQRSVGEncodesAndIsDeterministic(t *testing.T) {
 	a := qrSVG("https://fam.example.com/join/AB23CDEF")
 	if !strings.HasPrefix(string(a), "<svg") || !strings.Contains(string(a), "<path") {
