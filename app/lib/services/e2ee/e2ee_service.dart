@@ -1808,8 +1808,16 @@ class E2eeService {
     final CircleE2eeState st = await api.circleState(circleId);
     final int epoch = st.epoch + 1;
     final Uint8List key = E2ee.randomBytes(32);
+    final List<DeviceKey> recipients = await _recipients(st, me);
+    // The server refuses a first key that is not also wrapped to the caller's own phone ("at least one wrap is required",
+    // "the new key must be wrapped to the caller's own device"). That happens when this phone's key is not approved in
+    // this circle yet (a replaced or re-registered phone): say so instead of showing the server's wording.
+    if (!recipients.any((DeviceKey k) => k.deviceId == me.deviceId)) {
+      throw StateError("This phone's key is not approved in this circle yet, so it cannot turn on Private mode. "
+          'Open Settings > Encryption keys, choose this circle and approve this phone first.');
+    }
     final List<Map<String, dynamic>> wraps = <Map<String, dynamic>>[
-      for (final DeviceKey k in await _recipients(st, me)) await _wrapTo(me, circleId, epoch, key, k)
+      for (final DeviceKey k in recipients) await _wrapTo(me, circleId, epoch, key, k)
     ];
     await api.enable(circleId, await _epochBody(me, E2ee.actEnable, circleId, epoch, key, wraps));
     await vault.write(_ckName(circleId, epoch), key);

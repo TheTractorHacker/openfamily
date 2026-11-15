@@ -260,6 +260,15 @@ void main() {
       expect(r.needConfirm.length + r.wrapped, 2); // now only the normal policy applies
     });
 
+    test('turning Private on from a phone whose key is not approved in the circle says so, not the server wording', () async {
+      final (Phone a, Phone _) = await twoMembers();
+      final Phone a2 = Phone(server, uA);
+      await a2.svc.registerThisDevice(reset: true); // a new root: not approved in this circle
+      await expectLater(
+          a2.svc.enableCircle(circle),
+          throwsA(isA<StateError>().having((StateError e) => e.message, 'message', contains('not approved in this circle'))));
+    });
+
     test('replacement key of a VERIFIED member waits for explicit approval, then confirm', () async {
       final (Phone a, Phone b) = await twoMembers();
       await a.svc.enableCircle(circle);
