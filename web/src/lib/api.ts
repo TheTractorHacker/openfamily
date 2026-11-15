@@ -723,6 +723,18 @@ export function listAdminCircleMembers(circleId: string): Promise<AdminCircleMem
   return request<AdminCircleMember[]>(`/api/admin/circles/${encodeURIComponent(circleId)}/members`)
 }
 
+/** Puts an existing account into a circle (no invite code is used). */
+export function addAdminCircleMember(
+  circleId: string,
+  userId: string,
+  role: 'member' | 'admin',
+): Promise<{ status: string; circle_id: string }> {
+  return request<{ status: string; circle_id: string }>(
+    `/api/admin/circles/${encodeURIComponent(circleId)}/members`,
+    { method: 'POST', body: { user_id: userId, role } },
+  )
+}
+
 export function removeAdminCircleMember(circleId: string, userId: string): Promise<{ status: string }> {
   return request<{ status: string }>(
     `/api/admin/circles/${encodeURIComponent(circleId)}/members/${encodeURIComponent(userId)}`,

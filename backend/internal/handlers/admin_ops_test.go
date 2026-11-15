@@ -110,6 +110,7 @@ func adminOpsEnv(t *testing.T) *circleEnv {
 	e.srv.BuildVersion = "v-test"
 	e.rt.Get("/api/admin/circles/{id}/members", e.srv.AdminListCircleMembers)
 	e.rt.Delete("/api/admin/circles/{id}/members/{user_id}", e.srv.AdminRemoveCircleMember)
+	e.rt.Post("/api/admin/circles/{id}/members", e.srv.AdminAddCircleMember)
 	e.rt.Get("/api/admin/audit/export", e.srv.AdminExportAudit)
 	e.rt.Get("/api/admin/alerts", e.srv.AdminListAlerts)
 	e.rt.Get("/api/admin/health", e.srv.AdminHealth)
@@ -154,6 +155,93 @@ func TestAdminCircleMembersListAndRemove(t *testing.T) {
 	_ = e.pool.QueryRow(context.Background(), `SELECT count(*) FROM audit_log WHERE action = 'admin.circle.member_removed' AND user_id = $1`, e.ids["A"]).Scan(&audits)
 	if audits != 1 {
 		t.Fatalf("removal not audited: %d", audits)
+	}
+}
+
+// An admin who created someone's account can put that account into an app-made circle
+// (joining by code always joins the signed-in user, so it could not).
+func TestAdminAddCircleMember(t *testing.T) {
+	e := adminOpsEnv(t)
+	c := e.createCircle("A", "Crew")
+	path := "/api/admin/circles/" + c + "/members"
+
+	e.mustCode("A", "POST", path, map[string]string{"user_id": e.ids["C"]}, 200)
+	e.mustCode("A", "POST", path, map[string]string{"user_id": e.ids["C"]}, 409) // already in
+	e.mustCode("A", "POST", path, map[string]string{"user_id": e.ids["D"], "role": "admin"}, 200)
+	e.mustCode("A", "POST", path, map[string]string{"user_id": e.ids["E"], "role": "boss"}, 400)
+	e.mustCode("A", "POST", path, map[string]string{"user_id": "nope"}, 400)
+	e.mustCode("A", "POST", path, map[string]string{"user_id": "00000000-0000-0000-0000-000000000000"}, 404)
+	e.mustCode("A", "POST", "/api/admin/circles/00000000-0000-0000-0000-000000000000/members",
+		map[string]string{"user_id": e.ids["E"]}, 404)
+
+	roles := map[string]string{}
+	rows, err := e.pool.Query(context.Background(), `SELECT user_id::text, role FROM circle_members WHERE circle_id = $1`, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var u, r string
+		if err := rows.Scan(&u, &r); err != nil {
+			t.Fatal(err)
+		}
+		roles[u] = r
+	}
+	rows.Close()
+	if len(roles) != 3 || roles[e.ids["C"]] != "member" || roles[e.ids["D"]] != "admin" {
+		t.Fatalf("members after add: %v", roles)
+	}
+	var audits int
+	_ = e.pool.QueryRow(context.Background(), `SELECT count(*) FROM audit_log WHERE action = 'admin.circle.member_added' AND user_id = $1`, e.ids["A"]).Scan(&audits)
+	if audits != 2 {
+		t.Fatalf("adds not audited: %d", audits)
+	}
+}
+
+// The web form on /join/{code} signs a new person up through the same path as the app and puts them in the circle.
+func TestJoinSignUpCreatesAccountAndJoinsCircle(t *testing.T) {
+	e := adminOpsEnv(t)
+	e.srv.PublicBaseURL = "https://fam.example.com"
+	e.rt.Post("/auth/register", e.srv.Register)
+	e.rt.Post("/join/{code}", e.srv.JoinSignUp)
+	c := e.createCircle("A", "Crew")
+	inv := e.mustCode("A", "POST", "/circles/"+c+"/invites", map[string]any{}, 201)["code"].(string)
+
+	email := "web-join-" + time.Now().Format("150405.000000") + "@example.com"
+	t.Cleanup(func() { _, _ = e.pool.Exec(context.Background(), `DELETE FROM users WHERE email = $1`, email) })
+	post := func(form string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest("POST", "/join/"+inv, strings.NewReader(form))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rec := httptest.NewRecorder()
+		e.rt.ServeHTTP(rec, req)
+		return rec
+	}
+
+	if rec := post("name=Web+Joiner&email=" + email + "&password=short"); rec.Code != 400 || !strings.Contains(rec.Body.String(), "at least 8") {
+		t.Fatalf("short password: %d %s", rec.Code, rec.Body.String())
+	}
+	rec := post("name=Web+Joiner&email=" + email + "&password=correct-horse-battery")
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "sign in with the email and password") {
+		t.Fatalf("sign-up: %d %s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "correct-horse") {
+		t.Fatal("the password must never be echoed")
+	}
+	var n int
+	if err := e.pool.QueryRow(context.Background(), `
+		SELECT count(*) FROM circle_members cm JOIN users u ON u.id = cm.user_id
+		WHERE cm.circle_id = $1 AND u.email = $2`, c, email).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("not in circle: %d %v", n, err)
+	}
+	// The same email again looks identical (no account enumeration) and changes nothing.
+	post("name=Other&email=" + email + "&password=another-long-password")
+	if err := e.pool.QueryRow(context.Background(), `SELECT count(*) FROM users WHERE email = $1`, email).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("duplicate created a second account: %d %v", n, err)
+	}
+	// The code is single-use-counted: it was consumed once.
+	var uses int
+	_ = e.pool.QueryRow(context.Background(), `SELECT uses FROM invite_codes WHERE code = $1`, inv).Scan(&uses)
+	if uses != 1 {
+		t.Fatalf("invite uses: %d", uses)
 	}
 }
 

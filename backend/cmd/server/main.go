@@ -307,7 +307,9 @@ func main() {
 	// new members read them without an account. Static, no database access.
 	r.Get("/privacy", srv.LegalPrivacy)
 	r.Get("/terms", srv.LegalTerms)
+	r.Get("/join", srv.JoinEntry)
 	r.Get("/join/{code}", srv.JoinLanding)
+	r.Post("/join/{code}", srv.JoinSignUp)
 	// What an invite holder may know about the circle's privacy setup before joining
 	// (public, per-IP rate limited, generic 404).
 	r.Get("/invites/{code}/preview", srv.InvitePreview)
@@ -653,6 +655,7 @@ func main() {
 		r.Get("/api/admin/circles", srv.AdminListCircles)
 		r.Patch("/api/admin/circles/{id}", srv.AdminUpdateCircle)
 		r.Get("/api/admin/circles/{id}/members", srv.AdminListCircleMembers)
+		r.Post("/api/admin/circles/{id}/members", srv.AdminAddCircleMember)
 		r.Delete("/api/admin/circles/{id}/members/{user_id}", srv.AdminRemoveCircleMember)
 		r.Get("/api/admin/alerts", srv.AdminListAlerts)
 		r.Get("/api/admin/settings/map-style", srv.AdminGetMapStyle)

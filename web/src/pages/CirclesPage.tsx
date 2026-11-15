@@ -3,7 +3,9 @@
 
 import React from 'react'
 import {
+  addAdminCircleMember,
   ApiError,
+  listUsers,
   listAdminCircleMembers,
   listAdminCircles,
   listInvites,
@@ -35,8 +37,30 @@ function errorText(e: unknown): string {
 /** Members of one circle with role and sharing state; no locations are loaded. */
 function CircleMembers({ circle, onChanged }: { circle: AdminCircle; onChanged: () => void }) {
   const q = useAsync(() => listAdminCircleMembers(circle.id), [circle.id])
+  const usersQ = useAsync(listUsers, [])
   const [busy, setBusy] = React.useState<string | null>(null)
   const [err, setErr] = React.useState<string | null>(null)
+  const [pick, setPick] = React.useState('')
+  const [pickRole, setPickRole] = React.useState<'member' | 'admin'>('member')
+
+  const inCircle = new Set((q.data ?? []).map((m) => m.user_id))
+  const candidates = (usersQ.data ?? []).filter((u) => !inCircle.has(u.id))
+
+  const add = async () => {
+    if (!pick) return
+    setBusy('add')
+    setErr(null)
+    try {
+      await addAdminCircleMember(circle.id, pick, pickRole)
+      setPick('')
+      q.refetch()
+      onChanged()
+    } catch (e) {
+      setErr(errorText(e))
+    } finally {
+      setBusy(null)
+    }
+  }
 
   const remove = async (m: AdminCircleMember) => {
     if (!window.confirm(`Remove ${m.name} from “${circle.name}”? They stop sharing with this circle at once.`)) return
@@ -68,6 +92,35 @@ function CircleMembers({ circle, onChanged }: { circle: AdminCircle; onChanged: 
           {err}
         </p>
       )}
+      <div className="wb-row" style={{ marginBottom: 12 }}>
+        <select
+          className="wb-input"
+          aria-label={`Add an account to ${circle.name}`}
+          value={pick}
+          onChange={(e) => setPick(e.target.value)}
+          disabled={busy !== null || usersQ.loading}
+        >
+          <option value="">{usersQ.loading ? 'Loading accounts…' : candidates.length ? 'Add an account…' : 'Everyone is already in'}</option>
+          {candidates.map((u) => (
+            <option key={u.id} value={u.id}>
+              {u.name} ({u.email})
+            </option>
+          ))}
+        </select>
+        <select
+          className="wb-input"
+          aria-label="Role in this circle"
+          value={pickRole}
+          onChange={(e) => setPickRole(e.target.value === 'admin' ? 'admin' : 'member')}
+          disabled={busy !== null}
+        >
+          <option value="member">Member</option>
+          <option value="admin">Admin</option>
+        </select>
+        <Button size="sm" loading={busy === 'add'} disabled={!pick || busy !== null} onClick={() => void add()}>
+          Add
+        </Button>
+      </div>
       <table className="wb-table" aria-label={`Members of ${circle.name}`}>
         <thead>
           <tr>

@@ -1,10 +1,13 @@
 package handlers
 
 import (
+	"encoding/json"
+	"errors"
 	"net/http"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/TheTractorHacker/openfamily/backend/internal/circles"
 	"github.com/TheTractorHacker/openfamily/backend/internal/middleware"
@@ -122,4 +125,128 @@ func (s *Server) AdminRemoveCircleMember(w http.ResponseWriter, r *http.Request)
 	s.auditCircle(r.Context(), claims.UserID, circleID, "admin.circle.member_removed", "removed user "+target, clientIP(r))
 	s.auditRekeyIfNeeded(r.Context(), claims.UserID, circleID, clientIP(r))
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+type adminAddCircleMemberRequest struct {
+	UserID string `json:"user_id"`
+	Role   string `json:"role"`
+}
+
+// AdminAddCircleMember puts an existing account into a circle. Joining by invite
+// code always joins the signed-in user, so an admin who created someone's account
+// had no way to place that person in an app-made circle; this is that way.
+// It applies the same rules as joining by code: a live circle, not already a
+// member, the per-user circle limit and the old-app guard. No code is consumed.
+// POST /api/admin/circles/{id}/members  {"user_id": "...", "role": "member"|"admin"}
+func (s *Server) AdminAddCircleMember(w http.ResponseWriter, r *http.Request) {
+	claims := middleware.ClaimsFromContext(r.Context())
+	if claims == nil {
+		writeError(w, http.StatusUnauthorized, "unauthenticated")
+		return
+	}
+	circleID := chi.URLParam(r, "id")
+	var req adminAddCircleMemberRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Role == "" {
+		req.Role = string(circles.RoleMember)
+	}
+	if req.Role != string(circles.RoleMember) && req.Role != string(circles.RoleAdmin) {
+		writeError(w, http.StatusBadRequest, "role must be member or admin")
+		return
+	}
+	if !circles.ValidID(circleID) {
+		writeError(w, http.StatusNotFound, "circle not found")
+		return
+	}
+	if !circles.ValidID(req.UserID) {
+		writeError(w, http.StatusBadRequest, "user_id is required")
+		return
+	}
+
+	tx, err := s.Pool.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to begin transaction")
+		return
+	}
+	defer tx.Rollback(r.Context())
+
+	var familyBacked bool
+	err = tx.QueryRow(r.Context(), `
+		SELECT EXISTS (SELECT 1 FROM families f WHERE f.id = c.id)
+		FROM circles c WHERE c.id = $1 AND `+circleLiveSQL+` FOR UPDATE OF c`, circleID).Scan(&familyBacked)
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "circle not found or already ended")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load circle")
+		return
+	}
+	var primary *string
+	err = tx.QueryRow(r.Context(), `SELECT family_id::text FROM users WHERE id = $1 FOR UPDATE`, req.UserID).Scan(&primary)
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "user not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load user")
+		return
+	}
+	var already bool
+	if err := tx.QueryRow(r.Context(),
+		`SELECT EXISTS (SELECT 1 FROM circle_members WHERE circle_id = $1 AND user_id = $2)`,
+		circleID, req.UserID).Scan(&already); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to check membership")
+		return
+	}
+	if already {
+		writeError(w, http.StatusConflict, "already a member of this circle")
+		return
+	}
+	var n int
+	if err := tx.QueryRow(r.Context(), `SELECT count(*) FROM live_circle_members WHERE user_id = $1`, req.UserID).Scan(&n); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to count circles")
+		return
+	}
+	if n >= maxCirclesPerUser {
+		writeError(w, http.StatusConflict, "circle limit reached")
+		return
+	}
+	if oldAppBlocksJoin(r.Context(), tx, circleID, req.UserID) {
+		writeUpdateRequired(w, nil)
+		return
+	}
+
+	if familyBacked && primary == nil {
+		// Same as joining by code with no group yet: the circle becomes the primary one and
+		// users.role takes the role. The trigger adds the membership row.
+		_, err = tx.Exec(r.Context(),
+			`UPDATE users SET family_id = $1, role = $2, updated_at = now() WHERE id = $3`,
+			circleID, req.Role, req.UserID)
+	} else {
+		_, err = tx.Exec(r.Context(),
+			`INSERT INTO circle_members (circle_id, user_id, role) VALUES ($1, $2, $3)
+			 ON CONFLICT (circle_id, user_id) DO NOTHING`, circleID, req.UserID, req.Role)
+	}
+	if err != nil {
+		if isUpdateRequiredErr(err) {
+			writeUpdateRequired(w, nil)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to add member")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to commit")
+		return
+	}
+	if s.hub != nil {
+		s.hub.subscribeUser(req.UserID, circleID)
+	}
+	s.auditCircle(r.Context(), claims.UserID, circleID, "admin.circle.member_added",
+		"added user "+req.UserID+" as "+req.Role, clientIP(r))
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "circle_id": circleID})
 }
