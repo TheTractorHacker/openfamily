@@ -261,7 +261,7 @@ void main() {
     });
 
     test('turning Private on from a phone whose key is not approved in the circle says so, not the server wording', () async {
-      final (Phone a, Phone _) = await twoMembers();
+      await twoMembers();
       final Phone a2 = Phone(server, uA);
       await a2.svc.registerThisDevice(reset: true); // a new root: not approved in this circle
       await expectLater(
