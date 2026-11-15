@@ -63,45 +63,54 @@ func normalizeCode(code string) string {
 // single-use code. A user-facing failure returns an *inviteError; a real
 // database failure returns the underlying error.
 func (s *Server) consumeInviteCode(ctx context.Context, tx pgx.Tx, code string) (string, models.Role, error) {
+	familyID, _, role, err := s.redeemInviteCode(ctx, tx, code, false)
+	if err != nil {
+		return "", "", err
+	}
+	return *familyID, role, nil
+}
+
+// redeemInviteCode validates and consumes a code. With circleOK false a code for a circle that is not a legacy family is
+// refused (only POST /circles/join can redeem it for an existing account). With circleOK true, sign-up accepts it too and
+// the caller adds the new account to the returned circle; familyID is then nil.
+func (s *Server) redeemInviteCode(ctx context.Context, tx pgx.Tx, code string, circleOK bool) (familyID *string, circleID string, role models.Role, err error) {
 	code = normalizeCode(code)
 	if code == "" {
-		return "", "", &inviteError{msg: "invalid invite code"}
+		return nil, "", "", &inviteError{msg: "invalid invite code"}
 	}
 	var (
 		id        string
-		familyID  *string
-		role      models.Role
 		maxUses   int
 		uses      int
 		expiresAt *time.Time
 	)
-	err := tx.QueryRow(ctx, `
-		SELECT id, family_id, role, max_uses, uses, expires_at
+	err = tx.QueryRow(ctx, `
+		SELECT id, family_id, COALESCE(circle_id, family_id)::text, role, max_uses, uses, expires_at
 		FROM invite_codes ic WHERE code = $1
 		  AND NOT EXISTS (SELECT 1 FROM circles c WHERE c.id = COALESCE(ic.circle_id, ic.family_id) AND NOT `+circleLiveSQL+`)
 		FOR UPDATE`, code,
-	).Scan(&id, &familyID, &role, &maxUses, &uses, &expiresAt)
+	).Scan(&id, &familyID, &circleID, &role, &maxUses, &uses, &expiresAt)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return "", "", &inviteError{msg: "invalid invite code"}
+		return nil, "", "", &inviteError{msg: "invalid invite code"}
 	}
 	if err != nil {
-		return "", "", err
+		return nil, "", "", err
 	}
 	if expiresAt != nil && time.Now().After(*expiresAt) {
-		return "", "", &inviteError{msg: "invite code has expired"}
+		return nil, "", "", &inviteError{msg: "invite code has expired"}
 	}
 	if uses >= maxUses {
-		return "", "", &inviteError{msg: "invite code has already been used"}
+		return nil, "", "", &inviteError{msg: "invite code has already been used"}
 	}
-	if familyID == nil {
+	if familyID == nil && !circleOK {
 		// A code for a circle that is not a legacy family: only
 		// POST /circles/join can redeem it. Rejected before it is consumed.
-		return "", "", &inviteError{msg: "invalid invite code"}
+		return nil, "", "", &inviteError{msg: "invalid invite code"}
 	}
 	if _, err := tx.Exec(ctx, `UPDATE invite_codes SET uses = uses + 1 WHERE id = $1`, id); err != nil {
-		return "", "", err
+		return nil, "", "", err
 	}
-	return *familyID, role, nil
+	return familyID, circleID, role, nil
 }
 
 // insertInviteCode generates a unique code and inserts it within tx, returning

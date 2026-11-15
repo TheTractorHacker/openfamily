@@ -81,9 +81,11 @@ func (s *Server) Register(w http.ResponseWriter, r *http.Request) {
 
 	// Resolve the family and role for the new user.
 	var familyID *string
+	var joinCircleID string // a code for an app-made circle: the new account joins it below
+	joinCircleRole := models.RoleMember
 	role := models.RoleMember
 	if req.InviteCode != "" {
-		fid, rl, err := s.consumeInviteCode(r.Context(), tx, req.InviteCode)
+		fid, cid, rl, err := s.redeemInviteCode(r.Context(), tx, req.InviteCode, true)
 		if err != nil {
 			var ie *inviteError
 			if errors.As(err, &ie) {
@@ -93,8 +95,13 @@ func (s *Server) Register(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
-		familyID = &fid
+		familyID = fid
 		role = rl
+		if fid == nil {
+			// users.role is the legacy family role: an app-made circle's invite role applies to the circle only.
+			joinCircleID, joinCircleRole = cid, rl
+			role = models.RoleMember
+		}
 	} else if s.RequireInvite {
 		writeError(w, http.StatusForbidden, "an invite code is required to register")
 		return
@@ -121,9 +128,25 @@ func (s *Server) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if joinCircleID != "" {
+		cr := "member"
+		if joinCircleRole == models.RoleAdmin {
+			cr = "admin"
+		}
+		if _, err := tx.Exec(r.Context(), `
+			INSERT INTO circle_members (circle_id, user_id, role) VALUES ($1, $2, $3)
+			ON CONFLICT (circle_id, user_id) DO NOTHING`, joinCircleID, user.ID, cr); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to join circle")
+			return
+		}
+	}
+
 	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to commit")
 		return
+	}
+	if joinCircleID != "" && s.hub != nil {
+		s.hub.subscribeUser(user.ID, joinCircleID)
 	}
 
 	s.logAudit(r.Context(), user.ID, "", "auth.register", "registered "+user.Email, clientIP(r))
