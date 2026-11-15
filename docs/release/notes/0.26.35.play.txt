@@ -1,0 +1,1 @@
+Fixed: a phone in one circle no longer says "No family"; Orbitly remembers the circle you last picked after closing or updating, and the circle list refreshes when opened. New: join a circle by code on a web page, and admins can add accounts to circles. Not tried on a real phone yet.
