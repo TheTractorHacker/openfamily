@@ -85,7 +85,9 @@ void main() {
     final fell = sel.update(<Circle>[_c('a', primary: true), _c('b')]);
     expect(fell, isTrue);
     expect(sel.effectiveId, 'a');
-    expect(store.value, 'a');
+    // Shown as the primary for now, but the pick is not forgotten: a list can lack a circle for a moment (stale or
+    // offline copy). Only removeCircle, where the server said it is gone, replaces what is remembered.
+    expect(store.value, 'c');
   });
 
   test('removeCircle on the last other circle goes back to unscoped', () {
@@ -102,6 +104,40 @@ void main() {
     await sel.restore();
     sel.update(<Circle>[_c('a', primary: true), _c('b')]);
     expect(sel.effectiveId, 'a');
+  });
+
+  test('a list that temporarily lacks the remembered circle does not make the app forget it', () async {
+    final store = _MemStore('b');
+    final sel = CircleSelection(store: store);
+    await sel.restore();
+    sel.update(<Circle>[_c('a', primary: true)]); // stale list: no b yet
+    expect(sel.effectiveId, isNull);
+    sel.update(<Circle>[_c('a', primary: true), _c('c')]); // still no b: fallback shows, b stays remembered
+    expect(sel.effectiveId, 'a');
+    expect(store.value, 'b');
+    expect(sel.update(<Circle>[_c('a', primary: true), _c('b'), _c('c')]), isTrue); // b is back: the map must reload it
+    expect(sel.effectiveId, 'b');
+    expect(store.value, 'b');
+  });
+
+  test('the remembered circle wins even when the list loaded before it was read', () async {
+    final store = _MemStore('b');
+    final sel = CircleSelection(store: store);
+    sel.update(<Circle>[_c('a', primary: true), _c('b')]); // list first: primary fallback
+    expect(sel.effectiveId, 'a');
+    await sel.restore();
+    expect(sel.effectiveId, 'b');
+    expect(store.value, 'b');
+  });
+
+  test('a pick made before the saved value is read is not overwritten by it', () async {
+    final store = _MemStore('b');
+    final sel = CircleSelection(store: store);
+    sel.update(<Circle>[_c('a', primary: true), _c('b'), _c('c')]);
+    sel.select('c');
+    await sel.restore();
+    expect(sel.effectiveId, 'c');
+    expect(store.value, 'c');
   });
 
   test('sharing paused reflects only the selected circle', () {

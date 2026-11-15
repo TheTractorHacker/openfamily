@@ -59,6 +59,13 @@ class CircleSelection extends ChangeNotifier {
   final CircleSelectionStore _store;
   List<Circle> _circles = const <Circle>[];
   String? _selected;
+
+  /// The last circle the person picked (or the one remembered from the last launch). Kept even while a list that lacks it
+  /// is showing (a stale offline copy, a refresh that has not caught up), so the choice is not lost and comes back as soon
+  /// as the circle is in the list again. Only an explicit pick, or the server saying the circle is gone, changes what is
+  /// stored.
+  String? _preferred;
+  bool _userPicked = false;
   bool _restored = false;
 
   List<Circle> get circles => _circles;
@@ -107,7 +114,9 @@ class CircleSelection extends ChangeNotifier {
     if (_restored) return;
     _restored = true;
     final String? saved = await _store.read();
-    if (_selected == null && saved != null) {
+    // A list that loaded first only chose a fallback; the remembered circle still wins. A pick made meanwhile wins over both.
+    if (!_userPicked && saved != null) {
+      _preferred = saved;
       _selected = saved;
       _validate();
       notifyListeners();
@@ -118,9 +127,7 @@ class CircleSelection extends ChangeNotifier {
   /// when the previous selection no longer exists and a fallback was chosen.
   bool update(List<Circle> circles) {
     _circles = List<Circle>.unmodifiable(circles);
-    final String? before = _selected;
     final bool fellBack = _validate();
-    if (before != _selected) _persist();
     notifyListeners();
     return fellBack;
   }
@@ -131,7 +138,12 @@ class CircleSelection extends ChangeNotifier {
     if (id != kAllCircles && !_circles.any((Circle c) => c.id == id)) {
       return false;
     }
-    if (_selected == id) return false;
+    _userPicked = true;
+    _preferred = id;
+    if (_selected == id) {
+      _persist();
+      return false;
+    }
     _selected = id;
     _persist();
     notifyListeners();
@@ -160,21 +172,29 @@ class CircleSelection extends ChangeNotifier {
   /// Drops [id] from the list locally (the server said it is gone) and picks a
   /// fallback if it was selected.
   bool removeCircle(String id) {
-    return update(_circles.where((Circle c) => c.id != id).toList());
+    // The server said it is gone: forget it as the preferred one and remember the fallback instead.
+    if (_preferred == id) _preferred = null;
+    final bool fellBack = update(_circles.where((Circle c) => c.id != id).toList());
+    if (_selected != null) _persist();
+    return fellBack;
   }
 
-  // Returns true when an existing selection had to be replaced.
+  // Returns true when an existing selection changed (the preferred circle left the list, or came back).
   bool _validate() {
     if (_circles.isEmpty) return false;
-    final String? s = _selected;
-    if (s == kAllCircles && _circles.length > 1) return false;
-    if (s != null && _circles.any((Circle c) => c.id == s)) return false;
-    final bool hadSelection = s != null;
-    _selected = (_circles.firstWhere(
-      (Circle c) => c.isPrimary,
-      orElse: () => _circles.first,
-    )).id;
-    return hadSelection;
+    final String? previous = _selected;
+    final String? want = _preferred ?? _selected;
+    if (want == kAllCircles && _circles.length > 1) {
+      _selected = want;
+    } else if (want != null && _circles.any((Circle c) => c.id == want)) {
+      _selected = want;
+    } else {
+      _selected = (_circles.firstWhere(
+        (Circle c) => c.isPrimary,
+        orElse: () => _circles.first,
+      )).id;
+    }
+    return previous != null && previous != _selected;
   }
 
   void _persist() => _store.write(_selected);
