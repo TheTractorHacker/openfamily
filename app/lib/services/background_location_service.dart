@@ -24,6 +24,7 @@ import 'direct_push_service.dart';
 import 'e2ee/private_runtime.dart';
 import 'driving/driving_background.dart';
 import 'location_outbox.dart';
+import 'send_policy.dart';
 
 /// Background location reporting: keeps the device's GPS position flowing to
 /// the backend (`POST /locations`) even when the app is backgrounded or killed.
@@ -75,6 +76,7 @@ Future<void> onHeartbeatTick() async {
     unawaited(_applyProfile(_cadence.profile(DateTime.now().toUtc())));
     final _BackgroundCredentials? credentials = await _readCredentials();
     if (credentials == null) {
+      _resetPolicyState();
       _stats.count(TrackCounter.credFail);
       _stats.noteError('heartbeat_credentials', const _NoCredentials());
       await _stats.flush();
@@ -101,6 +103,7 @@ Future<void> onHeartbeatTick() async {
     // does not need the network, but it runs AFTER the heartbeat so that a stuck platform call can never keep the
     // "last seen" heartbeat from going out.
     await _drainParkedOnTick(credentials);
+    await _heartbeatSend(credentials);
     if (!ok) {
       await _stats.flush();
       return;
@@ -123,6 +126,36 @@ Future<void> onHeartbeatTick() async {
     // Never throw from the background callback; but say what happened (the exception TYPE only).
     _stats.noteError('heartbeat', e);
     unawaited(_stats.flush());
+  }
+}
+
+/// Heartbeat-driven flush of aged held points, or a refresh of the freshest
+/// cached fix when nothing was sent for a while. Never throws.
+Future<void> _heartbeatSend(_BackgroundCredentials credentials) async {
+  try {
+    if (_posting) return;
+    final DateTime now = DateTime.now().toUtc();
+    final HeartbeatAction a = heartbeatAction(
+      now: now,
+      lastSentAt: _lastSentAt,
+      heldOldestAt: _heldOldestAt,
+      cachedFix: _fixOfBody(_lastFixBody),
+      lastSentTs: _lastSentTs,
+    );
+    if (a == HeartbeatAction.flushHeld) {
+      await _flushHeldNow();
+    } else if (a == HeartbeatAction.refreshFreshest) {
+      final Map<String, dynamic>? b = _lastFixBody;
+      if (b == null) return;
+      // Whatever is held is older than the cached fix: ship it with it.
+      final List<Map<String, dynamic>> pts =
+          List<Map<String, dynamic>>.of(_held);
+      _clearHeld();
+      pts.removeWhere((Map<String, dynamic> p) => identical(p, b));
+      await _flushHeldAndSend(credentials, pts, b);
+    }
+  } catch (e) {
+    _stats.noteError('heartbeat_send', e);
   }
 }
 
@@ -170,6 +203,152 @@ final FixQualityFilter _fixFilter = FixQualityFilter();
 bool _cadenceInitialized = false;
 
 bool _posting = false;
+
+// Send policy state (this isolate only, memory only: held points are lost if
+// the isolate dies, at most ~45 s of walking history). The newest fix may be held
+// too, so a one-shot timer (_holdTimer) flushes it without waiting for a later fix.
+final List<Map<String, dynamic>> _held = <Map<String, dynamic>>[];
+DateTime? _heldOldestAt;
+({double lat, double lon})? _lastSentPos;
+DateTime? _lastSentAt;
+SendTier? _lastTier;
+Map<String, dynamic>? _lastFixBody;
+
+/// Drops held points without any network call (sharing off, credentials lost, isolate stop).
+void _clearHeld() {
+  _held.clear();
+  _heldOldestAt = null;
+  _holdTimer?.cancel();
+  _holdTimer = null;
+}
+
+Timer? _holdTimer;
+String? _stateDeviceId;
+
+/// Full reset of the policy state (credentials lost or changed): nothing of a previous identity may be re-sent
+/// or compared against.
+void _resetPolicyState() {
+  _clearHeld();
+  _lastFixBody = null;
+  _lastSentAt = null;
+  _lastSentPos = null;
+  _lastTier = null;
+  _lastSentTs = null;
+  _stateDeviceId = null;
+}
+
+/// Drops state built under another device identity.
+void _bindPolicyState(String deviceId) {
+  if (_stateDeviceId != null && _stateDeviceId != deviceId) _resetPolicyState();
+  _stateDeviceId = deviceId;
+}
+
+void _noteSent(Map<String, dynamic> body) {
+  _lastSentAt = DateTime.now().toUtc();
+  final Object? la = body['lat'];
+  final Object? lo = body['lon'];
+  if (la is num && lo is num) {
+    _lastSentPos = (lat: la.toDouble(), lon: lo.toDouble());
+  }
+}
+
+SendTier _sendTierOf(CadenceTier t) {
+  switch (t) {
+    case CadenceTier.idle:
+    case CadenceTier.stationary:
+      return SendTier.stillIdle;
+    case CadenceTier.walking:
+      return SendTier.walking;
+    case CadenceTier.driving:
+    case CadenceTier.boosted:
+    case CadenceTier.sos:
+      return SendTier.fast;
+  }
+}
+
+SendFix? _fixOfBody(Map<String, dynamic>? b) {
+  if (b == null) return null;
+  final DateTime? ts = DateTime.tryParse('${b['ts']}')?.toUtc();
+  final Object? la = b['lat'];
+  final Object? lo = b['lon'];
+  if (ts == null || la is! num || lo is! num) return null;
+  return SendFix(lat: la.toDouble(), lon: lo.toDouble(), ts: ts);
+}
+
+/// Sends [held] (batch) and then [freshest] (single) through the policy flush.
+Future<void> _flushHeldAndSend(
+  _BackgroundCredentials credentials,
+  List<Map<String, dynamic>> held,
+  Map<String, dynamic> freshest,
+) async {
+  bool live = false;
+  bool stored = false;
+  _posting = true;
+  try {
+    _lastPostAt = DateTime.now().toUtc();
+    final FlushResult r = await flushHeld(
+      held: held,
+      freshest: freshest,
+      chunkSize: const SendPolicyConfig().batchChunk,
+      sendBatch: (List<Map<String, dynamic>> chunk) =>
+          _sendLocationBatch(credentials, chunk),
+      sendSingle: (Map<String, dynamic> b) async {
+        final _PostResult pr = await _postLocation(credentials, b);
+        live = pr.live;
+        stored = pr.ok;
+        if (pr.ok) return SingleOutcome.ok;
+        // 400 not newer: the server already has it. 409: refused for good (all circles private now), so it is
+        // dropped, not spilled, and the cached copy goes.
+        if (pr.refused) _lastFixBody = null;
+        if (pr.notNewer || pr.refused) return SingleOutcome.notNewer;
+        return SingleOutcome.failed;
+      },
+      spill: (List<Map<String, dynamic>> pts) async {
+        for (final Map<String, dynamic> p in pts) {
+          _stats.count(TrackCounter.parked);
+          await LocationOutbox.enqueue(p);
+        }
+      },
+    );
+    if (r.singleSent) {
+      if (stored) _stats.count(TrackCounter.posted);
+      _noteSent(freshest);
+      final DateTime? ts = DateTime.tryParse('${freshest['ts']}')?.toUtc();
+      if (ts != null) _lastSentTs = ts;
+      if (live) {
+        final DateTime n = DateTime.now().toUtc();
+        _cadence.startBoost(_cadence.config.liveFlagBoost, n);
+        unawaited(_applyProfile(_cadence.profile(n)));
+      }
+    }
+  } finally {
+    _posting = false;
+  }
+  final Map<String, dynamic>? pending = _pendingBody;
+  _pendingBody = null;
+  if (pending != null) await _sendAndDrain(credentials, pending);
+}
+
+/// Flushes every held point at once (a watcher appeared, heartbeat, ...). The
+/// newest held point is the "freshest" single. Never throws.
+Future<void> _flushHeldNow() async {
+  try {
+    if (_held.isEmpty || _posting) return;
+    final _BackgroundCredentials? c = await _readCredentials();
+    if (c == null) {
+      _resetPolicyState();
+      return;
+    }
+    if (_held.isEmpty || _posting) return;
+    final List<Map<String, dynamic>> pts =
+        List<Map<String, dynamic>>.of(_held);
+    _clearHeld();
+    final Map<String, dynamic> freshest = pts.removeLast();
+    await _flushHeldAndSend(c, pts, freshest);
+  } catch (e) {
+    _stats.noteError('flush_held', e);
+  }
+}
 Map<String, dynamic>? _pendingBody;
 DateTime? _lastPostAt;
 DateTime? _lastSentTs;
@@ -197,6 +376,7 @@ void _initCadence() {
   );
   LiveBoost.register(_cadence, onBoost: () {
     unawaited(_applyProfile(_cadence.profile(DateTime.now().toUtc())));
+    unawaited(_flushHeldNow()); // a new watcher: no waiting for held points
   });
 }
 
@@ -242,7 +422,10 @@ Future<void> _refreshPersistedBoost(DateTime now) async {
   if (at != null && now.difference(at) < const Duration(seconds: 5)) return;
   _boostReadAt = now;
   final DateTime? until = await LiveBoost.readActive(now);
-  if (until != null) _cadence.startBoost(until.difference(now), now);
+  if (until != null) {
+    _cadence.startBoost(until.difference(now), now);
+    if (_held.isNotEmpty) unawaited(_flushHeldNow());
+  }
 }
 
 Future<bool> _foregroundReporterAlive(DateTime now) async {
@@ -328,11 +511,13 @@ Future<void> onLocationUpdate(LocationDto location) async {
 
     final _BackgroundCredentials? credentials = await _readCredentials();
     if (credentials == null) {
+      _resetPolicyState();
       _stats.count(TrackCounter.credFail);
       _stats.noteError('location_credentials', const _NoCredentials());
       return;
     }
 
+    _bindPolicyState(credentials.deviceId);
     final Map<String, dynamic> body =
         _buildBody(location, credentials.deviceId, _batteryCache,
             charging: _chargingCache);
@@ -342,6 +527,52 @@ Future<void> onLocationUpdate(LocationDto location) async {
     if (!await _routePrivate(credentials, body)) {
       _lastPostAt = now;
       _lastSentTs = fixTs;
+      return;
+    }
+
+    // Send policy: hold (walking, nobody watching), suppress (still inside the
+    // server's dedupe envelope) or send now.
+    final SendTier sendTier = _sendTierOf(profile.tier);
+    final SendDecision decision = SendPolicy.decide(SendInput(
+      tier: sendTier,
+      liveBoostActive: _cadence.isBoosted(now),
+      fgPresenceFresh: await _foregroundReporterAlive(now),
+      source: '${body['source']}',
+      now: now,
+      lastSentAt: _lastSentAt,
+      lastSentPos: _lastSentPos,
+      lastTier: _lastTier,
+      fix: SendFix(
+        lat: location.latitude,
+        lon: location.longitude,
+        ts: fixTs,
+        speed: location.speed,
+        accuracy: location.accuracy,
+      ),
+      heldOldestAt: _heldOldestAt,
+      heldCount: _held.length,
+    ));
+    _lastTier = sendTier;
+    _lastFixBody = body;
+    if (decision.action == SendAction.suppress) {
+      _lastPostAt = now;
+      return;
+    }
+    if (decision.action == SendAction.hold) {
+      _lastPostAt = now;
+      _heldOldestAt ??= now;
+      _held.add(body);
+      _holdTimer ??= Timer(const SendPolicyConfig().holdMaxAge, () {
+        _holdTimer = null;
+        unawaited(_flushHeldNow());
+      });
+      return;
+    }
+    if (decision.flushHeldFirst && _held.isNotEmpty && !_posting) {
+      final List<Map<String, dynamic>> pts =
+          List<Map<String, dynamic>>.of(_held);
+      _clearHeld();
+      await _flushHeldAndSend(credentials, pts, body);
       return;
     }
 
@@ -430,6 +661,7 @@ Future<void> _sendAndDrain(
         _stats.count(TrackCounter.posted);
         final DateTime? ts = DateTime.tryParse('${body['ts']}')?.toUtc();
         if (ts != null) _lastSentTs = ts;
+        _noteSent(body);
         if (r.live) {
           final DateTime n = DateTime.now().toUtc();
           _cadence.startBoost(_cadence.config.liveFlagBoost, n);
@@ -459,9 +691,15 @@ Future<void> _sendAndDrain(
 }
 
 class _PostResult {
-  const _PostResult(this.ok, this.live);
+  const _PostResult(this.ok, this.live, {this.notNewer = false, this.refused = false});
   final bool ok;
   final bool live;
+
+  /// The server refused with 400 "ts is not newer": the point is already covered.
+  final bool notNewer;
+
+  /// 409: the server refuses plaintext for this user (every circle is private).
+  final bool refused;
 }
 
 /// POSTs one location; reports success and the server's `"live": true` hint.
@@ -478,7 +716,10 @@ Future<_PostResult> _postLocation(
     );
     final bool ok = response.statusCode == 201 || response.statusCode == 200;
     _noteStatus(response.statusCode, 'post_location');
-    return _PostResult(ok, ok && LiveBoost.responseIsLive(response.body));
+    final bool notNewer =
+        response.statusCode == 400 && response.body.contains('not newer');
+    return _PostResult(ok, ok && LiveBoost.responseIsLive(response.body),
+        notNewer: notNewer, refused: response.statusCode == 409);
   } catch (e) {
     _stats.noteError('post_location', e);
     return const _PostResult(false, false);
@@ -765,6 +1006,9 @@ class BackgroundLocationService {
   /// `sign_out`).
   static Future<void> stop({String reason = 'unspecified'}) async {
     _shouldRun = false;
+    // Runs in the UI isolate: the background isolate's state is dropped when it is torn down, or when it next
+    // finds no credentials (sign-out); it cannot be cleared from here.
+    _resetPolicyState();
     TrackingJournal.instance.record('service_stop_requested', 'reason=$reason');
     DirectPushService.instance.stop();
     await BackgroundLocator.unRegisterLocationUpdate();
