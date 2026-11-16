@@ -85,6 +85,6 @@ apksigner verify --print-certs orbitly-<version>.apk
 ```
 
 The `SHA-256 digest` of the certificate must equal the one from your keystore
-(`docs/android-release.md`). Also check the file against `SHA256SUMS.txt` from
+(`docs/android-release.md`). The server also checks APK and IPA downloads against the published release checksums and refuses the download if no checksum is published. Also check the file against `SHA256SUMS.txt` from
 the release (`sha256sum -c SHA256SUMS.txt`); the watch app has `SHA256SUMS-wear.txt`. If the fingerprint ever differs,
 do not install. Android itself refuses an update signed with a different key.

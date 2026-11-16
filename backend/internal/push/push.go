@@ -114,6 +114,11 @@ func resolveEndpoint(raw string) ([]net.IP, error) {
 	if host == "" {
 		return nil, errors.New("push: endpoint host is required")
 	}
+	if ntfyGuarded(host) {
+		if err := validateNtfyTopic(u); err != nil {
+			return nil, err
+		}
+	}
 	ips, err := net.LookupIP(host)
 	if err != nil {
 		return nil, fmt.Errorf("push: resolve endpoint host: %w", err)
@@ -318,6 +323,9 @@ func (d *DispatcherImpl) dispatchUnifiedPush(ctx context.Context, n Notification
 	}
 	req.Header.Set("Content-Type", "text/plain")
 	req.Header.Set("Title", n.Title)
+	if tok := ntfyAuthFor(req.URL.Hostname()); tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
+	}
 
 	resp, err := client.Do(req)
 	if err != nil {

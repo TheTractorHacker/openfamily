@@ -243,8 +243,8 @@ func TestSyncIPADownloadsAndKeepsApkCacheSeparate(t *testing.T) {
 		switch r.URL.Path {
 		case "/repos/acme/orbitly/releases":
 			_ = json.NewEncoder(w).Encode([]release{
-				{TagName: "v0.24.1", Assets: []asset{{ID: 1, Name: "orbitly-0.24.1.apk", URL: "http://" + r.Host + "/a/1"}}},
-				{TagName: "v0.24.0", Assets: []asset{{ID: 2, Name: "orbitly-0.24.0-unsigned.ipa", URL: "http://" + r.Host + "/a/2"}}},
+				{TagName: "v0.24.1", Assets: []asset{{ID: 1, Name: "orbitly-0.24.1.apk", URL: "http://" + r.Host + "/a/1", Digest: sha256Hex("apk")}}},
+				{TagName: "v0.24.0", Assets: []asset{{ID: 2, Name: "orbitly-0.24.0-unsigned.ipa", URL: "http://" + r.Host + "/a/2", Digest: sha256Hex("ipa")}}},
 			})
 		case "/a/1":
 			_, _ = io.WriteString(w, "apk")

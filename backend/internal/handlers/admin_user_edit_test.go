@@ -53,6 +53,7 @@ func newEditEnv(t *testing.T) *editEnv {
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.RequirePlatformAdmin(pool))
 		r.Patch("/api/admin/users/{id}", srv.AdminUpdateUser)
+		r.Patch("/api/admin/users/{id}/password", srv.AdminResetUserPassword)
 	})
 	e.rt = r
 
@@ -184,5 +185,64 @@ func TestAdminUpdateUserSuccess(t *testing.T) {
 	}
 	if code, m = e.patch("admin", "admin", map[string]any{"email": "self-" + e.emails["admin"]}); code != 200 {
 		t.Fatalf("self email: %d %v", code, m)
+	}
+}
+
+// An admin email change cuts off everything the old identity held: refresh
+// sessions, device ingest keys and public share links.
+func TestAdminUpdateUserEmailRevokesCredentials(t *testing.T) {
+	e := newEditEnv(t)
+	ctx := context.Background()
+	uid := e.ids["a"]
+	seed := func() {
+		must := func(_ any, err error) {
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		must(e.pool.Exec(ctx, `INSERT INTO refresh_sessions (jti, family_id, user_id, expires_at) VALUES ($1,$1,$2, now()+interval '1 day')`, "jti-"+uid, uid))
+		must(e.pool.Exec(ctx, `INSERT INTO devices (user_id, platform, name, ingest_key_hash) VALUES ($1,'android','t','abc')`, uid))
+		must(e.pool.Exec(ctx, `INSERT INTO share_links (user_id, token_hash, expires_at) VALUES ($1, decode(repeat('ab',32),'hex'), now()+interval '1 day')`, uid))
+	}
+	seed()
+	if code, m := e.patch("admin", "a", map[string]any{"email": "rev-" + e.emails["a"]}); code != 200 {
+		t.Fatalf("got %d: %v", code, m)
+	}
+	var live, keys, links int
+	_ = e.pool.QueryRow(ctx, `SELECT count(*) FROM refresh_sessions WHERE user_id=$1 AND revoked_at IS NULL`, uid).Scan(&live)
+	_ = e.pool.QueryRow(ctx, `SELECT count(*) FROM devices WHERE user_id=$1 AND ingest_key_hash IS NOT NULL`, uid).Scan(&keys)
+	_ = e.pool.QueryRow(ctx, `SELECT count(*) FROM share_links WHERE user_id=$1 AND revoked_at IS NULL`, uid).Scan(&links)
+	if live != 0 || keys != 0 || links != 0 {
+		t.Fatalf("after email change: sessions=%d ingest keys=%d share links=%d, want all 0", live, keys, links)
+	}
+}
+
+func TestAdminResetPasswordRevokesCredentials(t *testing.T) {
+	e := newEditEnv(t)
+	ctx := context.Background()
+	uid := e.ids["a"]
+	for _, q := range []string{
+		`INSERT INTO refresh_sessions (jti, family_id, user_id, expires_at) VALUES ('jti-pw-` + uid + `','f',$1, now()+interval '1 day')`,
+		`INSERT INTO devices (user_id, platform, name, ingest_key_hash) VALUES ($1,'android','t','abc')`,
+		`INSERT INTO share_links (user_id, token_hash, expires_at) VALUES ($1, decode(repeat('cd',32),'hex'), now()+interval '1 day')`,
+	} {
+		if _, err := e.pool.Exec(ctx, q, uid); err != nil {
+			t.Fatal(err)
+		}
+	}
+	b, _ := json.Marshal(map[string]string{"password": "a-brand-new-password-1"})
+	req := httptest.NewRequest(http.MethodPatch, "/api/admin/users/"+uid+"/password", bytes.NewReader(b))
+	req.Header.Set("X-Test-User", e.ids["admin"])
+	rec := httptest.NewRecorder()
+	e.rt.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("got %d %s", rec.Code, rec.Body.String())
+	}
+	var live, keys, links int
+	_ = e.pool.QueryRow(ctx, `SELECT count(*) FROM refresh_sessions WHERE user_id=$1 AND revoked_at IS NULL`, uid).Scan(&live)
+	_ = e.pool.QueryRow(ctx, `SELECT count(*) FROM devices WHERE user_id=$1 AND ingest_key_hash IS NOT NULL`, uid).Scan(&keys)
+	_ = e.pool.QueryRow(ctx, `SELECT count(*) FROM share_links WHERE user_id=$1 AND revoked_at IS NULL`, uid).Scan(&links)
+	if live != 0 || keys != 0 || links != 0 {
+		t.Fatalf("after admin reset: sessions=%d ingest keys=%d share links=%d, want all 0", live, keys, links)
 	}
 }

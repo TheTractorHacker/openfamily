@@ -38,3 +38,18 @@ func (s *Server) revokeIngestKeys(ctx context.Context, userID string) error {
 
 // newIngestKeyExpiry is the expiry to store alongside a freshly issued key.
 func newIngestKeyExpiry() *time.Time { return middleware.NewIngestKeyExpiry(time.Now()) }
+
+// revokeCredentialArtifacts is the full cut-off for a credential event done on
+// someone's behalf (admin password reset, admin email change): every refresh
+// family, every device ingest key and every public share link of the user. The
+// caller bumps token_version itself (access tokens). Public share links are
+// bearer credentials for the live location, so they must not survive it.
+func (s *Server) revokeCredentialArtifacts(ctx context.Context, userID string) error {
+	if err := s.revokeAllSessions(ctx, userID); err != nil {
+		return err
+	}
+	if err := s.revokeIngestKeys(ctx, userID); err != nil {
+		return err
+	}
+	return s.revokeShareLinks(ctx, userID)
+}

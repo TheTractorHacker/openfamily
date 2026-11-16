@@ -185,13 +185,14 @@ class _LocationTabViewState extends State<LocationTabView> {
   Widget get _map => KeyedSubtree(key: _mapKey, child: widget.map);
 
   // A solo circle has nothing to look at but the invite card, so the sheet
-  // opens to half height once (never again, so the user's own dragging wins).
+  // opens to half height once (never higher, so your own pin stays visible; never reopened, so the
+  // user's own dragging wins).
   bool _soloOpened = false;
   final ValueNotifier<int> _circlesTick = ValueNotifier<int>(0);
 
   // Tall enough for the handle, tabs, your own row and the whole invite card;
   // clamped to the sheet's maximum in build.
-  double _soloTarget = 0.72;
+  double _soloTarget = 0.6;
 
   bool get _isSolo =>
       !widget.loading && widget.hasFamily && widget.members.length <= 1;
@@ -488,7 +489,7 @@ class _LocationTabViewState extends State<LocationTabView> {
           // Leave the top row (settings / circle pill) visible when fully open.
           final double full = (1 - (MediaQuery.paddingOf(context).top + 72) / h)
               .clamp(0.5, 0.92);
-          _soloTarget = math.min(0.72, full);
+          _soloTarget = math.min(0.6, full);
           final double textScale = MediaQuery.textScalerOf(
             context,
           ).scale(1).clamp(1.0, 2.0);

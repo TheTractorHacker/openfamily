@@ -1857,16 +1857,6 @@ class E2eeService {
     return (epoch: epoch, body: b, commit: () => vault.write(_ckName(circleId, epoch), key));
   }
 
-  Future<void> disableCircle(String circleId) async {
-    final LocalIdentity me = await requireIdentity();
-    final CircleE2eeState st = await api.circleState(circleId);
-    final Uint8List msg = E2ee.logActionMessage(E2ee.actDisable, me.userId, me.deviceId, circleId: circleId, epoch: st.epoch);
-    await api.disable(circleId, <String, dynamic>{
-      'actor_device_id': me.deviceId,
-      'log_signature': E2ee.b64(await E2ee.sign(me.edSeed, msg)),
-    });
-  }
-
   /// Wraps this phone refused in the last [syncCircleKeys] because the key did
   /// not match the publisher's signed commitment (or the epoch record was missing).
   int rejectedWraps = 0;
@@ -2117,6 +2107,82 @@ class E2eeService {
       if (password != null) 'password': password,
       if (totpCode != null && totpCode.isNotEmpty) 'totp_code': totpCode,
     });
+  }
+
+  /// "Repair encryption" for one circle: the self-heal path for a phone whose own key is not approved in a circle (a
+  /// reinstalled or replaced phone, or a circle created after that) or that lost the circle key. In order:
+  ///  1. makes sure this phone's PUBLIC key is registered (never resets anything: a phone that needs linking or a
+  ///     reset says so, [RepairStatus.keyNotRegistered]);
+  ///  2. if this phone's key is not approved in the circle: the circle's creator approves it themselves, switching the
+  ///     owner-approval rule on first when needed (both with [password], and [totpCode] when 2FA is on, so the
+  ///     rule's signed key-log entries stay what every member's phone verifies); anyone else is told who can approve;
+  ///  3. in a Private circle: fetches the wraps addressed to this phone, and, holding the key, issues it to the
+  ///     member keys that wait for it. When no member's phone can hand the key over, an admin may start a new key
+  ///     ([publishNewKeyIfLost]; older history stays unreadable on this phone).
+  /// Every step is idempotent: running it again after a partial run continues where it stopped.
+  Future<RepairResult> repairOwnEncryption(String circleId,
+      {String? password, String? totpCode, bool publishNewKeyIfLost = false}) async {
+    LocalIdentity me = (await identity(create: true))!; // a phone that lost its key makes a new one here
+    final List<DeviceKey> mine = await api.myKeys();
+    if (!mine.any((DeviceKey k) => k.isActive && k.deviceId == me.deviceId)) {
+      try {
+        await registerThisDevice();
+      } on NeedsCrossSignatureException {
+        return const RepairResult(RepairStatus.keyNotRegistered,
+            'This account already has other encryption keys. Link this phone from your other device, restore with your recovery phrase, or reset your keys.');
+      }
+      me = await requireIdentity();
+    }
+    CircleE2eeState st = await api.circleState(circleId);
+    DeviceKey? my;
+    for (final DeviceKey d in st.allDevices) {
+      if (d.deviceId == me.deviceId) my = d;
+    }
+    if (my == null) throw StateError('This phone is not a member of this circle.');
+    if (my.approved == false) {
+      final OwnKeyApproval a = ownKeyApproval(st, me.userId);
+      switch (a.action) {
+        case OwnKeyAction.askOtherAdmin:
+        case OwnKeyAction.soleAdmin:
+          return RepairResult(RepairStatus.waitingForAdmin,
+              a.otherAdminNames.isEmpty
+                  ? "You're the only admin. Make another member an admin so they can approve this phone."
+                  : 'Ask ${a.otherAdminNames.join(' or ')} to open this circle in Encryption keys and approve this phone.',
+              adminNames: a.otherAdminNames);
+        case OwnKeyAction.soleAdminCanEnable:
+          if (password == null || password.isEmpty) {
+            return const RepairResult(RepairStatus.needsPassword, 'Confirm with your password to approve this phone as the circle owner.');
+          }
+          await setOwnerApproval(circleId, true, password: password, totpCode: totpCode);
+          await approveDevice(circleId, my, password: password, totpCode: totpCode);
+        case OwnKeyAction.approveAsOwner:
+          if (password == null || password.isEmpty) {
+            return const RepairResult(RepairStatus.needsPassword, 'Confirm with your password to approve this phone as the circle owner.');
+          }
+          await approveDevice(circleId, my, password: password, totpCode: totpCode);
+      }
+      st = await api.circleState(circleId);
+    }
+    if (!st.isPrivate) {
+      return const RepairResult(RepairStatus.ok, 'This phone is approved in this circle.');
+    }
+    Uint8List? key = await circleKey(circleId, st.epoch);
+    if (key == null) {
+      await syncCircleKeys(circleId);
+      key = await circleKey(circleId, st.epoch);
+    }
+    if (key == null) {
+      if (publishNewKeyIfLost && st.adminIds.contains(me.userId)) {
+        await bumpEpoch(circleId);
+        return const RepairResult(RepairStatus.newKeyPublished, 'A new circle key was published. Earlier history stays unreadable on this phone.');
+      }
+      return RepairResult(RepairStatus.needsNewKey,
+          st.adminIds.contains(me.userId)
+              ? 'No phone has handed this phone the circle key. Ask a member to open the app, or publish a new key (earlier history stays unreadable here).'
+              : 'This phone does not hold the circle key yet. Ask a member to open the app so it can share the key, or ask an admin to publish a new one.');
+    }
+    final PendingReport r = await processPending(circleId);
+    return RepairResult(RepairStatus.ok, 'Encryption is repaired for this circle.', wrapped: r.wrapped);
   }
 
   /// What this phone may do about its OWN key waiting for approval in a circle.
@@ -2420,6 +2486,34 @@ enum OwnKeyAction {
 
   /// I am the only admin but not the creator: make someone an admin.
   soleAdmin,
+}
+
+enum RepairStatus {
+  /// This phone's key is approved and the circle key is in order.
+  ok,
+
+  /// The password (and 2FA code) of the account is needed to approve this phone as the owner.
+  needsPassword,
+
+  /// Another admin has to approve this phone.
+  waitingForAdmin,
+
+  /// This phone holds no circle key and nobody has handed it over; an admin may publish a new key.
+  needsNewKey,
+
+  /// An admin started a new circle key because the old one was lost.
+  newKeyPublished,
+
+  /// This phone's key cannot be registered without linking or resetting (the account has other keys).
+  keyNotRegistered,
+}
+
+class RepairResult {
+  const RepairResult(this.status, this.message, {this.adminNames = const <String>[], this.wrapped = 0});
+  final RepairStatus status;
+  final String message;
+  final List<String> adminNames;
+  final int wrapped;
 }
 
 class OwnKeyApproval {

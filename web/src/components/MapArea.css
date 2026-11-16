@@ -8,6 +8,8 @@
   background-color: var(--surface-soft);
   background-image: none;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 .wb-maparea-loading {
   display: flex;

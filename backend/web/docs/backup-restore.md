@@ -36,7 +36,7 @@ Backups** in the admin panel; **System health** shows the last backup.
 
 | Script | Purpose |
 |---|---|
-| `scripts/backup.sh [file]` | `pg_dump --format=custom` of the running `postgres` service into `backups/` (mode 700/600). `BACKUP_KEEP=N` prunes old automatic backups. With `BACKUP_PASSPHRASE_FILE=/path` the dump is encrypted (AES-256-CBC, PBKDF2 600k iterations) and written as `*.dump.enc`. |
+| `scripts/backup.sh [file]` | `pg_dump --format=custom` of the running `postgres` service into `backups/` (mode 700/600). `BACKUP_KEEP=N` prunes old automatic backups. With `BACKUP_PASSPHRASE_FILE=/path` the dump is encrypted (authenticated AES-256-CTR + HMAC-SHA256, format OFBK2, PBKDF2 600k iterations; see `scripts/lib-crypt.sh`; old CBC backups still restore with a warning) and written as `*.dump.enc`. |
 | `scripts/restore.sh <file> [--yes]` | DESTRUCTIVE. Stops the api, recreates the database, runs `timescaledb_pre_restore()`, `pg_restore`, `timescaledb_post_restore()`, restarts the api. `.enc` files need `BACKUP_PASSPHRASE_FILE`. |
 | `scripts/verify-backup.sh <file>` | Restores the backup into a throwaway TimescaleDB container (the image pinned in `docker-compose.yml`), never the live database, and prints a row count per table. Exits non-zero if the restore errors, the schema is empty, or counts differ from `--expect-counts FILE` / `--source-container NAME`. |
 | `scripts/restore.sh --from-s3 [latest\|NAME]` | Same restore, but downloads from your S3 bucket first: SHA-256 checked against the manifest, then age-decrypted with `BACKUP_AGE_IDENTITY_FILE`. `--from-local` does the same for the `backup` service's local directory. See [S3 and scheduled backups](#s3-and-scheduled-backups). |

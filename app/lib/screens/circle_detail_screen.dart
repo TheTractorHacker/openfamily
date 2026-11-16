@@ -149,6 +149,8 @@ class _CircleDetailScreenState extends State<CircleDetailScreen> {
               'data cannot be recovered.';
 
   Future<void> _togglePrivate(bool on) async {
+    // A private circle can never go back to normal mode (the server refuses it), so only turning on is offered.
+    if (!on) return;
     final E2eeService? svc = _e2ee;
     if (svc == null || _e2eeBusy) return;
     // When the admin recommends trusting the server, offer the choice (trusted
@@ -169,14 +171,9 @@ class _CircleDetailScreenState extends State<CircleDetailScreen> {
             null)
         : await showDsConfirm(
       context,
-      title: on ? 'Make this a private circle?' : 'Turn off private mode?',
-      message: on
-          ? _privateOnMessage
-          : 'The circle goes back to normal mode and its encrypted items and key copies are deleted from the '
-              'server. Places and history that exist only on phones stay there; the server will not have them. '
-              'Keys already on phones stay there.',
-      confirmLabel: on ? 'Turn on' : 'Turn off',
-      destructive: !on,
+      title: 'Make this a private circle?',
+      message: _privateOnMessage,
+      confirmLabel: 'Turn on',
     );
     if (!ok || !mounted) return;
     setState(() => _e2eeBusy = true);
@@ -199,8 +196,6 @@ class _CircleDetailScreenState extends State<CircleDetailScreen> {
                     '"Share places with the circle" to retry.')));
           }
         }
-      } else {
-        await svc.disableCircle(_circle.id);
       }
       await _loadE2ee();
       try {
@@ -224,7 +219,7 @@ class _CircleDetailScreenState extends State<CircleDetailScreen> {
       if (mounted) {
         if (err.keyProblem != null) {
           setState(() => _e2eeBusy = false);
-          await showPrivateKeyProblem(context, err, turningOff: !on);
+          await showPrivateKeyProblem(context, err);
         } else {
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err.message)));
         }
@@ -284,11 +279,12 @@ class _CircleDetailScreenState extends State<CircleDetailScreen> {
                     ? 'OLD TRUSTED-SERVER MODE: the Orbitly server can read this circle (every member allowed it). An admin can upgrade it under Encryption keys > Server processing.'
                     : 'Positions, history, places and events are end-to-end encrypted: only the members can read them, '
                         'except the data of members who use server processing, which the server can read too. '
-                        'Each member\'s own setting is under Encryption keys > Server processing. Chat is always end-to-end encrypted.')
+                        'Each member\'s own setting is under Encryption keys > Server processing. Chat is always end-to-end encrypted.\n\n'
+                        'A private circle cannot be switched back to normal mode. If you need a normal circle, create a new one.')
                 : 'Turning it on encrypts locations so the server cannot read them. Some server features are not available in private circles.',
             infoTitle: 'Private circle',
             value: st.isPrivate,
-            onChanged: _e2eeBusy ? null : _togglePrivate,
+            onChanged: (_e2eeBusy || st.isPrivate) ? null : _togglePrivate,
           ),
           if (st.isPrivate)
             DsListRow(
@@ -929,19 +925,14 @@ class _CircleDetailScreenState extends State<CircleDetailScreen> {
 
 /// This phone's own encryption key cannot be used, so a Private-circle action
 /// that must be signed by it failed. Says why and leads to the repair instead of
-/// a dead end. Turning Private OFF is signed by a circle admin's phone key on
-/// purpose (the key log shows every phone who did it, and the server can never
-/// switch a circle back to readable on its own), so there is no server-side
-/// shortcut: repair this phone's key, or switch it off from another admin phone.
-Future<void> showPrivateKeyProblem(BuildContext context, CircleException err, {required bool turningOff}) async {
+/// a dead end.
+Future<void> showPrivateKeyProblem(BuildContext context, CircleException err) async {
   final bool open = await showDsConfirm(
     context,
     title: "This phone's encryption key can't be used",
     message: '${err.message}\n\n'
-        '${turningOff ? 'Turning Private off must be signed by a circle admin\'s phone key. ' : ''}'
         'In Encryption keys you can restore the key with your recovery phrase, link this phone from your other phone, '
-        'or create new keys for this phone (the other members then see that your key changed).'
-        '${turningOff ? ' Another admin of this circle can also turn Private off from their phone.' : ''}',
+        'or create new keys for this phone (the other members then see that your key changed).',
     confirmLabel: 'Open Encryption keys',
   );
   if (!open || !context.mounted) return;

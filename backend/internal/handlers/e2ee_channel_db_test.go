@@ -33,6 +33,7 @@ func newChanEnv(t *testing.T) *chanEnv {
 	e.route("POST", "/locations/batch", e.srv.IngestLocationBatch)
 	e.route("POST", "/family/places", e.srv.CreatePlace)
 	e.route("POST", "/checkins", e.srv.PostCheckinTo)
+	e.route("POST", "/alerts/sos", e.srv.PostSOS)
 	e.route("DELETE", "/me/locations", e.srv.DeleteMyLocations)
 	c := e.e2eeFamily(map[string]string{"A": "admin", "B": "member", "C": "member"})
 	ce := &chanEnv{circleEnv: e, circle: c, key: bytes.Repeat([]byte{7}, 32)}
@@ -63,6 +64,7 @@ func (e *circleEnv) e2eeFamily(roles map[string]string) string {
 			e.t.Fatal(err)
 		}
 	}
+	e.backdateJoins(fam)
 	return fam
 }
 
@@ -334,12 +336,22 @@ func TestE2EEChannelRetentionAndErase(t *testing.T) {
 	if left != 0 {
 		t.Fatalf("circle erase left %d", left)
 	}
-	// Switching the circle off deletes whatever is left.
+	// A private circle can never be switched back to normal mode: the call is
+	// refused and nothing is deleted or downgraded.
 	e.post("B", e.b, e.circle, 201, e.seal(t, e.b, e.circle, "fix", 1, 77, []byte("x")))
-	e.mustCode("A", "POST", "/circles/"+e.circle+"/e2ee/disable", simpleAction(t, e2ee.ActDisable, e.a, e.circle, 1, "", nil), 200)
+	_, dm, _ := e.do("A", "POST", "/circles/"+e.circle+"/e2ee/disable", simpleAction(t, e2ee.ActDisable, e.a, e.circle, 1, "", nil))
+	if msg, _ := dm["error"].(string); msg != errPrivateCircleIsPermanent {
+		t.Fatalf("disable answer: %v", dm)
+	}
+	e.mustCode("A", "POST", "/circles/"+e.circle+"/e2ee/disable", simpleAction(t, e2ee.ActDisable, e.a, e.circle, 1, "", nil), 409)
 	_ = e.pool.QueryRow(ctx, `SELECT count(*) FROM e2ee_items WHERE circle_id = $1`, e.circle).Scan(&left)
-	if left != 0 {
-		t.Fatalf("disable left %d", left)
+	if left != 1 {
+		t.Fatalf("a refused disable must keep the data, left %d", left)
+	}
+	var mode string
+	_ = e.pool.QueryRow(ctx, `SELECT e2ee_mode FROM circles WHERE id = $1`, e.circle).Scan(&mode)
+	if mode != "private" {
+		t.Fatalf("circle mode %q after refused disable", mode)
 	}
 }
 
@@ -498,5 +510,21 @@ func TestE2EEChannelWebSocketFanOut(t *testing.T) {
 	}
 	if out != nil {
 		out.quiet() // a non-member never receives it
+	}
+}
+
+// SOS from a member of a private circle never stores or relays a plaintext
+// position, even when the phone sends one (the sealed item carries it).
+func TestE2EEPrivateCircleSOSWithholdsPlaintextPosition(t *testing.T) {
+	e := newChanEnv(t)
+	ctx := context.Background()
+	got := e.mustCode("B", "POST", "/alerts/sos", map[string]any{"lat": 41.8781, "lon": -87.6298}, 201)
+	if got["position_withheld"] != true || got["lat"] != nil || got["lon"] != nil {
+		t.Fatalf("SOS answer carries a position: %v", got)
+	}
+	var withLat int
+	_ = e.pool.QueryRow(ctx, `SELECT count(*) FROM alerts WHERE user_id = $1 AND (lat IS NOT NULL OR lon IS NOT NULL)`, e.ids["B"]).Scan(&withLat)
+	if withLat != 0 {
+		t.Fatalf("%d SOS rows hold plaintext coordinates", withLat)
 	}
 }

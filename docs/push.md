@@ -128,6 +128,24 @@ ntfy server, see `docs/self-hosting.md`). The server validates endpoints to
 https and public addresses only. Use it for phones where the direct channel is
 too fragile, or when you already run ntfy.
 
+**Lock ntfy down.** ntfy topics are the only secret between the server and a
+phone, so Orbitly only ever uses long random topics (never a name, an email or
+a circle id), and you should run ntfy with deny-all access and give the server
+a token:
+
+1. Start the `push` profile once, then create a user and a token inside the
+   container (`docker compose exec ntfy ntfy user add --role=admin orbitly`,
+   then `docker compose exec ntfy ntfy token add orbitly`).
+2. Put the token in `.env` as `NTFY_AUTH_TOKEN` and set
+   `NTFY_AUTH_DEFAULT_ACCESS=deny-all`, then `docker compose up -d`.
+   The server sends the token as a bearer on every publish to `NTFY_BASE_URL`.
+3. Phones subscribe to their random topic through UnifiedPush; with deny-all,
+   grant read access to those topics (`ntfy access '*' <topic-prefix>* read`)
+   or use your own ntfy user in the distributor app.
+
+Without a token and deny-all, anyone who learns or guesses a topic name can
+read or spoof messages on it. Never configure a guessable topic.
+
 ## APNs (iOS)
 
 Set `APNS_KEY_FILE`, `APNS_KEY_ID`, `APNS_TEAM_ID` and `APNS_TOPIC`. Alerts are

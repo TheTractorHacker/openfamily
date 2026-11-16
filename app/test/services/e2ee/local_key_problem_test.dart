@@ -119,16 +119,7 @@ void main() {
       server.circle(priv, members: <String>[uA, uB], admin: uA);
     });
 
-    test('disableCircle without a key on this phone: LocalKeyException(missing), not a TypeError', () async {
-      final E2eeService admin = svcOn(server, uA, MemoryVault());
-      await admin.registerThisDevice();
-      await admin.enableCircle(priv);
-      final E2eeService wiped = svcOn(server, uA, MemoryVault()); // same account, empty vault
-      await expectLater(
-          wiped.disableCircle(priv), throwsA(isA<LocalKeyException>().having((LocalKeyException e) => e.problem, 'problem', LocalKeyProblem.missing)));
-    });
-
-    test('disableCircle with an unreadable vault: LocalKeyException(unreadable) with the cause type', () async {
+    test('an unreadable vault: LocalKeyException(unreadable) with the cause type, nothing is wiped', () async {
       final FlakyVault v = FlakyVault();
       final E2eeService admin = svcOn(server, uA, v);
       await admin.registerThisDevice();
@@ -137,23 +128,24 @@ void main() {
       final E2eeService restarted = svcOn(server, uA, v);
       v.failWith = PlatformException(code: 'keystore', message: 'AEADBadTagException');
       await expectLater(
-          restarted.disableCircle(priv),
+          restarted.requireIdentity(),
           throwsA(isA<LocalKeyException>()
               .having((LocalKeyException e) => e.problem, 'problem', LocalKeyProblem.unreadable)
               .having((LocalKeyException e) => e.cause, 'cause', 'PlatformException')));
-      // The channel missing in an engine is the same class of problem.
       v.failWith = MissingPluginException('no keystore here');
       await expectLater(restarted.requireIdentity(),
           throwsA(isA<LocalKeyException>().having((LocalKeyException e) => e.cause, 'cause', 'MissingPluginException')));
-      // The vault's own exceptions keep their meaning.
       v.failWith = const VaultInvalidatedException();
       await expectLater(restarted.requireIdentity(), throwsA(isA<VaultInvalidatedException>()));
-      // Nothing was regenerated or wiped meanwhile: once readable, the same key signs and the circle turns off.
+      // Once readable, the same key is still there.
       v.failWith = null;
       final String before = (await admin.identity())!.deviceId;
       expect((await restarted.requireIdentity()).deviceId, before);
-      await restarted.disableCircle(priv);
-      expect(server.circles[priv]!.mode, 'off');
+    });
+
+    test('a 409 "cannot be switched back" answer keeps the server wording', () {
+      const String m = 'a private circle cannot be switched back to normal mode; create a new circle instead';
+      expect(describeCircleError(const ApiException(409, m)).message, m);
     });
 
     test('an empty user id never wipes a stored identity', () async {

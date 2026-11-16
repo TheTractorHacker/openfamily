@@ -110,6 +110,7 @@ services:
       # Advertised to the app via GET /config so a generic APK can register
       # UnifiedPush without a dart-define.
       NTFY_BASE_URL: ${NTFY_BASE_URL:-http://localhost:2586}
+      NTFY_AUTH_TOKEN: ${NTFY_AUTH_TOKEN:-}
       TILE_URL: ${TILE_URL:-}
       SATELLITE_TILE_URL: ${SATELLITE_TILE_URL:-}
       MAP_STYLE_URL: ${MAP_STYLE_URL:-}
@@ -246,6 +247,11 @@ services:
       # Public base URL the app uses to reach ntfy. Production must be https://
       # on PUSH_ADDRESS (see caddy/Caddyfile.with-push).
       NTFY_BASE_URL: ${NTFY_BASE_URL:-http://127.0.0.1:2586}
+      # Lock the server down (docs/push.md): deny anonymous read/write and give
+      # the API an access token via NTFY_AUTH_TOKEN in .env. Set
+      # NTFY_AUTH_DEFAULT_ACCESS=deny-all here once the token exists.
+      NTFY_AUTH_FILE: /etc/ntfy/user.db
+      NTFY_AUTH_DEFAULT_ACCESS: ${NTFY_AUTH_DEFAULT_ACCESS:-read-write}
     volumes:
       - ntfy_cache:/var/cache/ntfy
       - ntfy_etc:/etc/ntfy

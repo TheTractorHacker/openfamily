@@ -175,6 +175,11 @@ func (s *Server) resolveAPK(ctx context.Context) (string, error) {
 	if err == nil {
 		return path, nil
 	}
+	if errors.Is(err, apkrelease.ErrChecksum) {
+		// Never fall back to a cached file when the new one failed verification.
+		slog.Error("github apk failed checksum verification; refusing to serve", "err", err)
+		return "", err
+	}
 
 	if cached, cacheErr := latestAPK(s.APKDir); cacheErr == nil {
 		slog.Warn("github apk sync failed; serving cached apk", "err", err)

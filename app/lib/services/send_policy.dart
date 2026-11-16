@@ -190,6 +190,14 @@ DateTime? _tsOf(Map<String, dynamic> p) => DateTime.tryParse('${p['ts']}')?.toUt
 /// throwing batch chunk spills that chunk and the rest to [spill] and the
 /// single is still attempted; a failed single spills the freshest body. A
 /// "ts is not newer" answer is success and is not spilled.
+///
+/// Staleness: the live endpoint refuses a `ts` older than 15 minutes, so when
+/// the freshest point is older than [SendPolicyConfig.maxCachedFixAge] (the
+/// isolate was paused or its timers frozen, e.g. by doze) it is NOT sent as a
+/// single: it joins the batch, which accepts old points as history repair
+/// (no live fan-out, no geofence replay). Points older than [dropAfter] are
+/// dropped (the outbox would prune them anyway), so one ancient point can never
+/// fail the whole batch.
 Future<FlushResult> flushHeld({
   required List<Map<String, dynamic>> held,
   required Map<String, dynamic> freshest,
@@ -197,14 +205,22 @@ Future<FlushResult> flushHeld({
   required Future<SingleOutcome> Function(Map<String, dynamic> body) sendSingle,
   required Future<void> Function(List<Map<String, dynamic>> points) spill,
   int chunkSize = 100,
+  DateTime? now,
+  Duration dropAfter = const Duration(hours: 12),
+  Duration singleMaxAge = const Duration(minutes: 14),
 }) async {
+  final DateTime clock = (now ?? DateTime.now()).toUtc();
   final DateTime? freshTs = _tsOf(freshest);
+  final bool freshStale = freshTs != null && clock.difference(freshTs) >= singleMaxAge;
+  final bool freshTooOld = freshTs != null && clock.difference(freshTs) >= dropAfter;
   final List<Map<String, dynamic>> pts = held.where((Map<String, dynamic> p) {
     final DateTime? t = _tsOf(p);
-    return t != null && (freshTs == null || t.isBefore(freshTs));
-  }).toList()
-    ..sort((Map<String, dynamic> a, Map<String, dynamic> b) =>
-        _tsOf(a)!.compareTo(_tsOf(b)!));
+    if (t == null || clock.difference(t) >= dropAfter) return false;
+    return freshTs == null || t.isBefore(freshTs);
+  }).toList();
+  if (freshStale && !freshTooOld) pts.add(freshest);
+  pts.sort((Map<String, dynamic> a, Map<String, dynamic> b) =>
+      _tsOf(a)!.compareTo(_tsOf(b)!));
   bool batchOk = true;
   for (int i = 0; i < pts.length; i += chunkSize) {
     final List<Map<String, dynamic>> chunk =
@@ -221,6 +237,10 @@ Future<FlushResult> flushHeld({
       break;
     }
   }
+  if (freshStale) {
+    // Delivered (or spilled) with the batch; nothing goes to the live endpoint.
+    return FlushResult(singleSent: batchOk && !freshTooOld, batchSent: batchOk);
+  }
   SingleOutcome out;
   try {
     out = await sendSingle(freshest);
@@ -233,3 +253,46 @@ Future<FlushResult> flushHeld({
   return FlushResult(
       singleSent: out != SingleOutcome.failed, batchSent: batchOk);
 }
+
+/// Whether a heartbeat tick should ask the OS for a one-shot position because
+/// the continuous location stream went quiet (Android doze / OEM power
+/// management can defer fixes for many minutes while the heartbeat alarm
+/// still fires). Pure: a fix received within [quietAfter] means the stream is
+/// alive and no probe is needed.
+bool shouldProbePosition({
+  required DateTime now,
+  required DateTime? lastFixAt,
+  required bool isAndroid,
+  Duration quietAfter = const Duration(minutes: 5),
+}) {
+  if (!isAndroid) return false;
+  return lastFixAt == null || now.difference(lastFixAt) >= quietAfter;
+}
+
+/// The background-locator JSON for a one-shot probe fix, so it flows through
+/// exactly the same quality filter and send policy as a streamed fix.
+Map<String, dynamic> probeFixJson({
+  required double latitude,
+  required double longitude,
+  required double accuracy,
+  required double altitude,
+  required double speed,
+  required double speedAccuracy,
+  required double heading,
+  required DateTime time,
+  bool isMocked = false,
+}) =>
+    <String, dynamic>{
+      'latitude': latitude,
+      'longitude': longitude,
+      'accuracy': accuracy,
+      'altitude': altitude,
+      'speed': speed,
+      'speed_accuracy': speedAccuracy,
+      'heading': heading,
+      'time': time.toUtc().millisecondsSinceEpoch.toDouble(),
+      'is_mocked': isMocked,
+      'provider': 'probe',
+      'motion_state': '',
+      'native_reset': false,
+    };

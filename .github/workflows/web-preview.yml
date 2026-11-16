@@ -22,7 +22,7 @@ jobs:
       run:
         working-directory: app
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
           channel: stable
@@ -37,7 +37,7 @@ jobs:
         # the rendering engine is the web.
         run: flutter build web --release --base-href /app/ --dart-define=OPENFAMILY_PLATFORM_OVERRIDE=ios
       - name: Upload web build
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: web-build
           path: app/build/web

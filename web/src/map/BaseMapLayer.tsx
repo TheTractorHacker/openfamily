@@ -4,9 +4,12 @@
 // loads on map pages. If WebGL is unavailable or the style fails to load, a
 // raster Leaflet TileLayer is shown instead (never a blank map).
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { TileLayer, useMap } from "react-leaflet";
 import type { Layer } from "leaflet";
+import "./BaseMapLayer.css";
+import { mapNoticeText, type BaseMapStatus } from "./mapNotice";
 
 export const DEFAULT_STYLE_URL = "https://tiles.openfreemap.org/styles/liberty";
 export const DEFAULT_RASTER_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
@@ -59,10 +62,33 @@ function webglAvailable(): boolean {
   }
 }
 
+/** Seconds a vector style may take to deliver its first tile before the raster fallback takes over. */
+const VECTOR_TIMEOUT_MS = 8000;
+/** Tile errors (with no tile ever arriving) after which a layer counts as blocked. */
+const TILE_ERROR_LIMIT = 4;
+
+/** Banner inside the map container so a blank basemap is never silent. */
+function MapNotice({ status }: { status: BaseMapStatus }) {
+  const map = useMap();
+  const [dismissed, setDismissed] = useState<BaseMapStatus | null>(null);
+  const text = mapNoticeText(status);
+  if (!text || dismissed === status) return null;
+  return createPortal(
+    <div className="wb-map-notice" role="status">
+      <span>{text}</span>
+      <button type="button" className="wb-map-notice-x" aria-label="Dismiss" onClick={() => setDismissed(status)}>
+        ×
+      </button>
+    </div>,
+    map.getContainer(),
+  );
+}
+
 export function BaseMapLayer({ rasterUrl }: { rasterUrl?: string }) {
   const map = useMap();
   const [cfg, setCfg] = useState<PublicConfig | null>(null);
   const [failed, setFailed] = useState(() => !webglAvailable());
+  const [rasterDead, setRasterDead] = useState(false);
 
   useEffect(() => {
     let live = true;
@@ -97,7 +123,8 @@ export function BaseMapLayer({ rasterUrl }: { rasterUrl?: string }) {
         // Style or tile fetch problems => raster fallback. "load" alone is not enough: the style can load while every
         // tile is blocked or fails (a proxy, a blocked host, a GPU that cannot draw), which leaves a blank map. So the
         // vector layer only counts as working once a vector tile has actually arrived.
-        timer = window.setTimeout(fail, 12000);
+        timer = window.setTimeout(fail, VECTOR_TIMEOUT_MS);
+        let tileErrors = 0;
         const onData = (e: { dataType?: string; tile?: unknown }) => {
           if (e.dataType === "source" && e.tile) {
             window.clearTimeout(timer);
@@ -106,8 +133,10 @@ export function BaseMapLayer({ rasterUrl }: { rasterUrl?: string }) {
         };
         glMap.on("data", onData);
         // Style document failed to load/parse => raster fallback.
-        glMap.on("error", () => {
+        glMap.on("error", (ev) => {
+          const e = ev as unknown as { tile?: unknown };
           if (!glMap.isStyleLoaded()) fail();
+          else if (e.tile && ++tileErrors >= TILE_ERROR_LIMIT) fail();
         });
       } catch {
         fail();
@@ -129,9 +158,37 @@ export function BaseMapLayer({ rasterUrl }: { rasterUrl?: string }) {
     };
   }, [map, failed, cfg]);
 
+  const handlers = useMemo(() => rasterHandlers(setRasterDead), []);
+  const status: BaseMapStatus = failed ? (rasterDead ? "unavailable" : "fallback") : cfg ? "vector" : "loading";
+
   if (!cfg && !failed) return null;
   if (failed) {
-    return <TileLayer url={rasterUrl ?? cfg?.rasterUrl ?? DEFAULT_RASTER_URL} attribution={FALLBACK_ATTRIBUTION} />;
+    return (
+      <>
+        <TileLayer
+          url={rasterUrl ?? cfg?.rasterUrl ?? DEFAULT_RASTER_URL}
+          attribution={FALLBACK_ATTRIBUTION}
+          eventHandlers={handlers}
+        />
+        <MapNotice status={status} />
+      </>
+    );
   }
   return null;
+}
+
+/** Marks the raster layer dead when its first few tiles all fail, and alive again as soon as one loads. */
+function rasterHandlers(setDead: (dead: boolean) => void) {
+  let errors = 0;
+  let loaded = 0;
+  return {
+    tileerror: () => {
+      errors += 1;
+      if (loaded === 0 && errors >= TILE_ERROR_LIMIT) setDead(true);
+    },
+    tileload: () => {
+      loaded += 1;
+      setDead(false);
+    },
+  };
 }

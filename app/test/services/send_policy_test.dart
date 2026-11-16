@@ -48,6 +48,7 @@ void expectFlush(SendDecision d) {
 }
 
 void main() {
+  probeTests();
   group('decide: immediate sends', () {
     test('fast tier', () => expectFlush(SendPolicy.decide(inp(tier: SendTier.fast))));
     test('live boost', () => expectFlush(SendPolicy.decide(inp(boost: true))));
@@ -132,6 +133,7 @@ void main() {
       await flushHeld(
         held: held,
         freshest: fresh,
+        now: t0.add(const Duration(minutes: 1)),
         sendBatch: (List<Map<String, dynamic>> c) async {
           order.add('batch');
           batches.add(c);
@@ -158,6 +160,7 @@ void main() {
           for (int k = 0; k < 250; k++) body(t0.add(Duration(seconds: k))),
         ],
         freshest: body(t0.add(const Duration(hours: 1))),
+        now: t0.add(const Duration(hours: 1)),
         sendBatch: (List<Map<String, dynamic>> c) async {
           sizes.add(c.length);
           return true;
@@ -174,6 +177,7 @@ void main() {
       final FlushResult r = await flushHeld(
         held: <Map<String, dynamic>>[body(t0), body(t0.add(const Duration(seconds: 1)))],
         freshest: body(t0.add(const Duration(seconds: 9))),
+        now: t0.add(const Duration(minutes: 1)),
         sendBatch: (_) async => throw Exception('net'),
         sendSingle: (_) async {
           single = true;
@@ -192,6 +196,7 @@ void main() {
       await flushHeld(
         held: <Map<String, dynamic>>[body(t0)],
         freshest: fresh,
+        now: t0.add(const Duration(minutes: 1)),
         sendBatch: (_) async => true,
         sendSingle: (_) async => SingleOutcome.failed,
         spill: (List<Map<String, dynamic>> p) async => spilled.addAll(p),
@@ -203,11 +208,64 @@ void main() {
       final FlushResult r = await flushHeld(
         held: const <Map<String, dynamic>>[],
         freshest: body(t0),
+        now: t0.add(const Duration(minutes: 1)),
         sendBatch: (_) async => true,
         sendSingle: (_) async => SingleOutcome.notNewer,
         spill: (_) async => fail('no spill'),
       );
       expect(r.singleSent, isTrue);
+    });
+    test('stale freshest goes through the batch, never the live endpoint', () async {
+      final List<List<Map<String, dynamic>>> batches = <List<Map<String, dynamic>>>[];
+      final Map<String, dynamic> fresh = body(t0.add(const Duration(seconds: 30)));
+      final FlushResult r = await flushHeld(
+        held: <Map<String, dynamic>>[body(t0), body(t0.add(const Duration(seconds: 10)))],
+        freshest: fresh,
+        now: t0.add(const Duration(minutes: 40)),
+        sendBatch: (List<Map<String, dynamic>> c) async {
+          batches.add(c);
+          return true;
+        },
+        sendSingle: (_) async => fail('single must not be sent'),
+        spill: (_) async => fail('no spill'),
+      );
+      expect(batches.single.length, 3);
+      expect(batches.single.last, fresh);
+      expect(r.singleSent, isTrue);
+    });
+
+    test('points older than the drop age are dropped, not failing the batch', () async {
+      final List<List<Map<String, dynamic>>> batches = <List<Map<String, dynamic>>>[];
+      final DateTime now = t0.add(const Duration(hours: 20));
+      final Map<String, dynamic> fresh = body(now.subtract(const Duration(seconds: 5)));
+      await flushHeld(
+        held: <Map<String, dynamic>>[
+          body(t0),
+          body(now.subtract(const Duration(hours: 1))),
+        ],
+        freshest: fresh,
+        now: now,
+        sendBatch: (List<Map<String, dynamic>> c) async {
+          batches.add(c);
+          return true;
+        },
+        sendSingle: (_) async => SingleOutcome.ok,
+        spill: (_) async => fail('no spill'),
+      );
+      expect(batches.single.length, 1);
+    });
+
+    test('ancient freshest is dropped entirely', () async {
+      final DateTime now = t0.add(const Duration(days: 2));
+      final FlushResult r = await flushHeld(
+        held: const <Map<String, dynamic>>[],
+        freshest: body(t0),
+        now: now,
+        sendBatch: (_) async => fail('nothing to send'),
+        sendSingle: (_) async => fail('single must not be sent'),
+        spill: (_) async => fail('no spill'),
+      );
+      expect(r.singleSent, isFalse);
     });
   });
 
@@ -388,6 +446,32 @@ void main() {
       expect(r.maxHeldAge, lessThan(const Duration(seconds: 90)));
       // about 2 requests/min, far below 12
       expect(r.singles, lessThan(60 * 4));
+    });
+  });
+}
+
+void probeTests() {
+  group('shouldProbePosition', () {
+    test('android with a quiet stream probes', () {
+      expect(shouldProbePosition(now: t0, lastFixAt: null, isAndroid: true), isTrue);
+      expect(
+          shouldProbePosition(
+              now: t0.add(const Duration(minutes: 6)), lastFixAt: t0, isAndroid: true),
+          isTrue);
+    });
+    test('recent fix or other platform does not', () {
+      expect(
+          shouldProbePosition(
+              now: t0.add(const Duration(minutes: 2)), lastFixAt: t0, isAndroid: true),
+          isFalse);
+      expect(shouldProbePosition(now: t0, lastFixAt: null, isAndroid: false), isFalse);
+    });
+    test('probe json carries the fix with epoch-ms time', () {
+      final Map<String, dynamic> j = probeFixJson(
+          latitude: 1, longitude: 2, accuracy: 5, altitude: 0, speed: 0,
+          speedAccuracy: 0, heading: 0, time: t0);
+      expect(j['time'], t0.millisecondsSinceEpoch.toDouble());
+      expect(j['latitude'], 1);
     });
   });
 }

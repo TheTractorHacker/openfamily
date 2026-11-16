@@ -299,8 +299,8 @@ func (s *Server) AdminResetUserPassword(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusNotFound, "user not found")
 		return
 	}
-	if err := s.revokeIngestKeys(r.Context(), userID); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to revoke device keys")
+	if err := s.revokeCredentialArtifacts(r.Context(), userID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to revoke sessions, device keys and share links")
 		return
 	}
 	s.dropUserSockets(userID)
@@ -570,8 +570,8 @@ func (s *Server) AdminUpdateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if emailChanged {
-		if err := s.revokeIngestKeys(r.Context(), userID); err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to revoke device keys")
+		if err := s.revokeCredentialArtifacts(r.Context(), userID); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to revoke sessions, device keys and share links")
 			return
 		}
 		s.dropUserSockets(userID)

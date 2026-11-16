@@ -369,8 +369,8 @@ func TestServerIngestStoresVerifiedPositions(t *testing.T) {
 	if lat != 52.5 {
 		t.Fatalf("last position is %v (an older backfill point must not win)", lat)
 	}
-	// The members see it through the normal visibility rules; the server-side Dawarich
-	// batch reads it from the normal table.
+	// The members see it through the normal visibility rules; the Dawarich export
+	// never carries private-circle data, server-decrypted or not.
 	az := circles.New(e.pool)
 	if sh, _ := az.SharedWith(context.Background(), e.ids["A"], e.ids["B"]); len(sh) != 1 || sh[0] != e.circle {
 		t.Fatalf("server-member circle not visible to members: %v", sh)
@@ -379,8 +379,8 @@ func TestServerIngestStoresVerifiedPositions(t *testing.T) {
 		t.Fatal(err)
 	}
 	pts, err := e.srv.nextDawarichBatch(context.Background(), dawarichTarget{UserID: e.ids["B"], Key: "k", Since: now.Add(-48 * time.Hour)})
-	if err != nil || len(pts) != 2 {
-		t.Fatalf("Dawarich server sync did not pick the server-decrypted points up: %d %v", len(pts), err)
+	if err != nil || len(pts) != 0 {
+		t.Fatalf("Dawarich export picked private-circle points up: %d %v", len(pts), err)
 	}
 	// Circle state is reported to clients.
 	_, st, _ := e.do("A", "GET", "/circles/"+e.circle+"/e2ee/server-member", nil)
@@ -623,10 +623,14 @@ func TestServerIngestSkipsMembersOfStandardCircles(t *testing.T) {
 	}
 }
 
-// Switching private mode off ends the consents; turning it on again starts from zero.
+// The API no longer switches private mode off (see E2EEDisable), but the database
+// still ends the consents if a circle ever leaves private mode (operator action).
 func TestServerConsentsEndWhenPrivateModeEnds(t *testing.T) {
 	e := readyEnv(t)
-	e.mustCode("A", "POST", "/circles/"+e.circle+"/e2ee/disable", simpleAction(t, e2ee.ActDisable, e.a, e.circle, 1, "", nil), 200)
+	e.mustCode("A", "POST", "/circles/"+e.circle+"/e2ee/disable", simpleAction(t, e2ee.ActDisable, e.a, e.circle, 1, "", nil), 409)
+	if _, err := e.pool.Exec(context.Background(), `UPDATE circles SET e2ee_mode = 'off' WHERE id = $1`, e.circle); err != nil {
+		t.Fatal(err)
+	}
 	var n int
 	_ = e.pool.QueryRow(context.Background(), `SELECT count(*) FROM e2ee_server_consents WHERE circle_id = $1`, e.circle).Scan(&n)
 	if n != 0 {

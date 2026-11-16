@@ -38,7 +38,7 @@ import { GroupSwitcher } from "./groupSwitcher";
 import { MemberCard } from "./MemberCard";
 import { MemberList } from "./memberList";
 import { getAdminMemberAvatar, getFamilyMemberAvatar } from "../lib/api";
-import type { FamilyPlace, MyFamily } from "../lib/types";
+import type { MyFamily } from "../lib/types";
 import { useMemberAvatarUrls } from "../lib/useMemberAvatarUrls";
 import {
   applyLocationUpdate,
@@ -52,6 +52,7 @@ import {
 } from "./status";
 import type { Group, LatLng, Member, Place, RawMember, StreamFrame } from "./types";
 import { placeBubbleIcon } from "./placeBubble";
+import { placesFromApi } from "./placeMapping";
 
 /** Default OSM tile URL — privacy-first, matching the app. Swap for a self-hosted server. */
 export const DEFAULT_TILE_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
@@ -248,6 +249,8 @@ export function MapView(props: MapViewProps): JSX.Element {
   const [fetchedPlaces, setFetchedPlaces] = useState<Place[]>([]);
   const [loading, setLoading] = useState<boolean>(selfManaged);
   const [error, setError] = useState<string | null>(null);
+  // Set when members loaded but the saved places did not (shown as a banner, not a blank map).
+  const [placesError, setPlacesError] = useState<string | null>(null);
   // Bumped to re-run the fetch effect in place (Retry) without a page reload.
   const [reloadKey, setReloadKey] = useState(0);
 
@@ -328,7 +331,10 @@ export function MapView(props: MapViewProps): JSX.Element {
     message: string | null;
   } | null>(null);
   const [expandedClusters, setExpandedClusters] = useState<Set<string>>(new Set());
-  const [panelCollapsed, setPanelCollapsed] = useState(false);
+  // On phones the open panel would cover most of the map, so start collapsed there.
+  const [panelCollapsed, setPanelCollapsed] = useState(
+    () => typeof window !== "undefined" && window.matchMedia?.("(max-width: 640px)").matches === true,
+  );
   const [map, setMap] = useState<LeafletMap | null>(null);
   const [viewTick, setViewTick] = useState(0);
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -511,33 +517,36 @@ export function MapView(props: MapViewProps): JSX.Element {
         let g: Group[];
         let raw: RawMember[];
         let places: Place[];
+        let placesFailed: string | null = null;
         if (scope === "family") {
           // App-parity surface: one group (the caller's own circle), its
           // members, and its shared places.
-          const [fam, mems, famPlaces] = await Promise.all([
+          const [fam, mems] = await Promise.all([
             fetchJson<MyFamily>(`${base}/family`, token),
             fetchJson<RawMember[]>(`${base}/family/members`, token),
-            fetchJson<FamilyPlace[]>(`${base}/family/places`, token),
           ]);
           g = [{ id: fam.id, name: fam.name, created_at: fam.created_at }];
           raw = mems.map((m) => ({ ...m, family_id: fam.id, family_name: fam.name }));
-          places = famPlaces.map((p) => ({
-            id: p.id,
-            familyId: p.family_id,
-            familyName: fam.name,
-            name: p.name,
-            type: p.type,
-            lat: p.lat,
-            lon: p.lon,
-            radiusMeters: p.radius_meters ?? null,
-            address: p.address,
-          }));
+          // Places are secondary: if they fail the members still show, with a notice.
+          places = await fetchJson<unknown>(`${base}/family/places`, token)
+            .then((rows) => placesFromApi(rows, fam.name))
+            .catch((e: unknown) => {
+              placesFailed = e instanceof Error ? e.message : "request failed";
+              return [];
+            });
         } else {
-          [g, raw, places] = await Promise.all([
+          const [gr, mr] = await Promise.all([
             fetchJson<Group[]>(`${base}/api/admin/families`, token),
             fetchJson<RawMember[]>(`${base}/api/admin/members`, token),
-            fetchJson<Place[]>(`${base}/api/admin/places`, token),
           ]);
+          g = gr;
+          raw = mr;
+          places = await fetchJson<unknown>(`${base}/api/admin/places`, token)
+            .then((rows) => placesFromApi(rows))
+            .catch((e: unknown) => {
+              placesFailed = e instanceof Error ? e.message : "request failed";
+              return [];
+            });
         }
         if (cancelled) return;
         setFetchedGroups(g);
@@ -545,6 +554,7 @@ export function MapView(props: MapViewProps): JSX.Element {
         colorsRef.current = colors;
         setFetchedMembers(buildMembers(raw, colors, Date.now()));
         setFetchedPlaces(places);
+        setPlacesError(placesFailed);
         setLoading(false);
         retries = 0;
         void connect();
@@ -879,6 +889,15 @@ export function MapView(props: MapViewProps): JSX.Element {
               </span>
             </div>
           )}
+        </div>
+      ) : null}
+
+      {!loading && error == null && placesError != null ? (
+        <div className="wb-map-places-error" role="alert">
+          <span>Saved places could not be loaded ({placesError}).</span>
+          <button type="button" className="wb-state-retry" onClick={() => setReloadKey((k) => k + 1)}>
+            Retry
+          </button>
         </div>
       ) : null}
     </div>

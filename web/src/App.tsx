@@ -25,6 +25,7 @@ import { CirclesPage } from './pages/CirclesPage'
 import { ShareLinksPage } from './pages/ShareLinksPage'
 import { DocsPage } from './pages/DocsPage'
 import { EncryptionKeysPage } from './pages/EncryptionKeysPage'
+import { RouteErrorBoundary } from './components/RouteErrorBoundary'
 import { ROUTES, DEFAULT_ROUTE, routeFromHash, type RouteKey } from './lib/routes'
 import { getEmail, isAuthenticated, signOut, subscribeAuth } from './lib/auth'
 import { useMe } from './lib/me'
@@ -128,9 +129,11 @@ export default function App() {
               </div>
             }
           >
-            <div key={route} className="wb-route">
-              {renderPage(route, hash, open, email, logout, isPlatformAdmin, adminMfaRequired)}
-            </div>
+            <RouteErrorBoundary resetKey={route}>
+              <div key={route} className="wb-route">
+                {renderPage(route, hash, open, email, logout, isPlatformAdmin, adminMfaRequired)}
+              </div>
+            </RouteErrorBoundary>
           </React.Suspense>
         )}
       </main>

@@ -1,0 +1,52 @@
+/* Banner shown when the basemap fell back or its tiles are blocked (BaseMapLayer). */
+.leaflet-container .wb-map-notice {
+  position: absolute;
+  /* Bottom, clear of the group switcher, LIVE badge and zoom buttons at the top. */
+  bottom: 30px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1100;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2, 8px);
+  width: max-content;
+  max-width: min(520px, calc(100% - 24px));
+  box-sizing: border-box;
+  padding: var(--space-2, 8px) var(--space-3, 12px);
+  border-radius: var(--radius-md, 10px);
+  border: 1px solid var(--status-orange-border);
+  background: var(--status-orange-bg);
+  color: var(--status-orange-fg);
+  box-shadow: var(--shadow-sm);
+  font-size: var(--font-sm, 13px);
+  line-height: 1.4;
+}
+.leaflet-container .wb-map-notice-x {
+  flex: none;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+}
+
+/* MapView: saved places failed to load while members did. */
+.wb-map-places-error {
+  position: absolute;
+  left: 50%;
+  bottom: var(--space-4, 16px);
+  transform: translateX(-50%);
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3, 12px);
+  max-width: calc(100% - 32px);
+  padding: var(--space-2, 8px) var(--space-3, 12px);
+  border-radius: var(--radius-md, 10px);
+  border: 1px solid var(--status-orange-border);
+  background: var(--status-orange-bg);
+  color: var(--status-orange-fg);
+  font-size: var(--font-sm, 13px);
+}

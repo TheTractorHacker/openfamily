@@ -1,0 +1,1 @@
+Private circles can no longer be switched back to normal, and a new Repair encryption action fixes unapproved keys. Background location is steadier: stale points are not sent in a burst and sleeping phones take a fresh position. A battery banner guides you to Unrestricted. Pins fan out better. New members only see history from when they joined. Security fixes.

@@ -451,14 +451,6 @@ class FakeE2eeClient implements E2eeApi {
   Future<void> bumpEpoch(String circleId, Map<String, dynamic> body) => _epoch(circleId, body, E2ee.actEpoch, enabling: false);
 
   @override
-  Future<void> disable(String circleId, Map<String, dynamic> a) async {
-    final FakeCircle c = s.circles[circleId]!;
-    if (c.admin != uid) throw StateError('403');
-    c.mode = 'off';
-    c.wraps.clear();
-  }
-
-  @override
   Future<int> submitWraps(String circleId, int epoch, List<Map<String, dynamic>> wraps) async {
     final FakeCircle c = s.circles[circleId]!;
     if (!c.members.contains(uid)) throw StateError('404');
@@ -474,6 +466,7 @@ class FakeE2eeClient implements E2eeApi {
     if (c.admin != uid) throw StateError('403');
     final DeviceKey d = s.findActive(body['device_id'] as String)!;
     final bool self = d.userId == uid;
+    if (s.approved(d, circleId)) return; // idempotent, like the server
     if (self && !(c.creator == uid && c.ownerApproval)) {
       throw StateError("You're the only admin. Make another member an admin so they can approve this phone, or turn on owner approval for this circle.");
     }

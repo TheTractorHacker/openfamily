@@ -56,6 +56,7 @@ import 'inbox_screen.dart';
 import 'invite_screen.dart';
 import 'join_circle_screen.dart';
 import 'keep_alive_screen.dart';
+import '../widgets/battery_banner.dart';
 import 'circle_detail_screen.dart';
 import 'circles_screen.dart';
 import 'places_screen.dart';
@@ -1233,6 +1234,7 @@ class _MapScreenState extends State<MapScreen>
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
           const SyncStatusChip(),
+          const BatteryBanner(),
           InboxBanner(onOpen: _openInbox),
           ValueListenableBuilder<FollowUi?>(
             valueListenable: _followUi,

@@ -1248,53 +1248,21 @@ func (s *Server) E2EESubmitWraps(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "stored": n})
 }
 
-// E2EEDisable switches a circle back to the normal mode (circle admin) and
-// deletes its wraps. The epoch counter is kept so it can never repeat.
+// E2EEDisable used to switch a private circle back to the normal (plaintext)
+// mode. That is now refused outright: a private circle promised its members
+// that the server never sees their data in the clear, and a circle admin (or
+// anyone who took over an admin session) must not be able to withdraw that
+// promise on everyone's behalf. Members who want a normal circle create a new
+// one; nothing is deleted or downgraded by this call.
 func (s *Server) E2EEDisable(w http.ResponseWriter, r *http.Request) {
-	uid, m, ok := s.requireCircleAdmin(w, r)
+	_, _, ok := s.requireCircleAdmin(w, r)
 	if !ok {
 		return
 	}
-	if !s.allowKey(w, "e2eeadmin:user:"+uid, e2eeAdminOpPerUser, e2eeAdminOpWindow) {
-		return
-	}
-	var req signedAction
-	if !decodeE2EEBody(w, r, &req) {
-		return
-	}
-	tx, mode, cur, ok := s.e2eeCircleTx(w, r, m.CircleID)
-	if !ok {
-		return
-	}
-	defer tx.Rollback(r.Context())
-	if mode != "private" {
-		writeError(w, http.StatusConflict, "circle is not private")
-		return
-	}
-	if !s.verifyCircleAction(w, r, tx, e2ee.ActDisable, uid, m.CircleID, cur, "", nil, req) {
-		return
-	}
-	if _, err := tx.Exec(r.Context(), `DELETE FROM circle_key_wraps WHERE circle_id = $1`, m.CircleID); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to disable")
-		return
-	}
-	// The ciphertext is useless without the keys and must not outlive private mode.
-	if _, err := tx.Exec(r.Context(), `DELETE FROM e2ee_items WHERE circle_id = $1`, m.CircleID); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to disable")
-		return
-	}
-	if _, err := tx.Exec(r.Context(), `UPDATE circles SET e2ee_mode = 'off', e2ee_rekey_required = FALSE, e2ee_updated_at = now() WHERE id = $1`, m.CircleID); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to disable")
-		return
-	}
-	if err := tx.Commit(r.Context()); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to commit")
-		return
-	}
-	s.auditCircle(r.Context(), uid, m.CircleID, "e2ee.disabled", "private circle disabled", clientIP(r))
-	s.notifyCircleNormalMode(r.Context(), uid, m.CircleID)
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "mode": "off"})
+	writeError(w, http.StatusConflict, errPrivateCircleIsPermanent)
 }
+
+const errPrivateCircleIsPermanent = "a private circle cannot be switched back to normal mode; create a new circle instead"
 
 type approveReq struct {
 	DeviceID string `json:"device_id"`
@@ -1341,6 +1309,16 @@ func (s *Server) E2EEApproveDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	self := subjUser == uid
+	// Idempotent: a key that already counts as approved in this circle (first key of its user, or an
+	// earlier approval of it or of a key it descends from) needs nothing. Answering OK keeps a repeated
+	// tap, a retry after a lost answer, or a "repair" run from failing on the self-approval rule or
+	// adding a second key-log entry.
+	var already bool
+	if err := tx.QueryRow(ctx, `SELECT `+e2eeApprovedExpr("$2")+` FROM device_keys d WHERE d.device_id = $1`,
+		req.DeviceID, m.CircleID).Scan(&already); err == nil && already {
+		writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "self_approved": false, "already_approved": true})
+		return
+	}
 	if self && !s.checkSelfApproval(w, r, tx, uid, m.CircleID, req.stepUpFields) {
 		return
 	}

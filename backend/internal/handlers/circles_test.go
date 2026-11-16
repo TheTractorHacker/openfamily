@@ -131,7 +131,20 @@ func (e *circleEnv) createCircle(creator, name string, members ...string) string
 		inv := e.mustCode(creator, "POST", "/circles/"+id+"/invites", map[string]any{}, 201)
 		e.mustCode(m, "POST", "/circles/join", map[string]string{"code": inv["code"].(string)}, 200)
 	}
+	// Members read each other's history only from their join time on; these
+	// fixtures stand for long-standing circles, so backdate the joins.
+	e.backdateJoins(id)
 	return id
+}
+
+// backdateJoins makes every member of the circle a long-standing one (see
+// history_floor.go). Tests of the join-time rule set joined_at themselves.
+func (e *circleEnv) backdateJoins(circleID string) {
+	e.t.Helper()
+	if _, err := e.pool.Exec(context.Background(),
+		`UPDATE circle_members SET joined_at = now() - interval '200 days' WHERE circle_id = $1`, circleID); err != nil {
+		e.t.Fatal(err)
+	}
 }
 
 // A is in circle 1 only, B in 1 and 2, C in 2 only, D in none.

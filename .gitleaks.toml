@@ -1,0 +1,17 @@
+# Used automatically by gitleaks when run with --source at the repo root
+# (see .github/workflows/security.yml). Extends the default ruleset.
+title = "Orbitly gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Deterministic test fixtures and documentation examples only"
+paths = [
+  '''backend/internal/e2ee/testdata/.*''',
+  '''backend/internal/.*_test\.go$''',
+  '''web/test/.*''',
+  '''integrations/home_assistant/tests/.*''',
+]
+# Reviewed individual findings live in .gitleaksignore (commit-pinned
+# fingerprints), so real secrets elsewhere are still reported.

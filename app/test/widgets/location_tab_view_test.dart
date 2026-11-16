@@ -527,6 +527,9 @@ void main() {
       final _Calls c = _Calls();
       await tester.pumpWidget(_app(members: const <Member>[kSelf], calls: c));
       await tester.pumpAndSettle();
+      // The solo sheet opens at 60% so your own pin stays visible; the last button may need a scroll.
+      await tester.ensureVisible(find.text('Show code or QR instead'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Show code or QR instead'));
       await tester.pump();
       expect(c.log, contains('invite'));

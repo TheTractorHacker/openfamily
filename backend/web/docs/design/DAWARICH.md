@@ -10,6 +10,8 @@ need a decision. Dawarich is a self-hosted location-history viewer
 
 ## Behaviour
 
+- **Access and audit:** exporting is location access, so it requires `ADMIN_LOCATION_ACCESS=true`, writes audit entries, and never exports Private circles (see [Operator privacy controls](../privacy-controls.md)).
+
 - **Direction:** one-way push from Orbitly to Dawarich; nothing is read back.
 - **Configuration (admin only):** `PUT /api/admin/dawarich` stores `base_url`, optional `local_url` (LAN fallback tried only when the public address is unreachable), the API key, `enabled`, `send_unmapped`, and `backfill_days`. Per-user mappings (`dawarich_user_map`) give a member their own Dawarich account/key.
 - **Transport:** a background loop (`RunDawarichSync`, every minute) pushes batches of up to 500 points (max 20 batches per round) as GeoJSON `locations` with timestamp, accuracy, altitude, speed, battery, device name and device id, authenticated with `Authorization: Bearer <key>`.

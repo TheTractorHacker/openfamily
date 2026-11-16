@@ -7,6 +7,8 @@ package apkrelease
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -86,7 +88,15 @@ type cacheMeta struct {
 	AssetID int64  `json:"asset_id"`
 	TagName string `json:"tag_name"`
 	Name    string `json:"name"`
+	// SHA256 is the verified checksum of the cached file. A cache entry
+	// without one (written before checksums were enforced) is never reused:
+	// it is downloaded and verified again.
+	SHA256 string `json:"sha256,omitempty"`
 }
+
+// ErrChecksum means the downloaded file does not match the checksum the
+// release publishes, or the release publishes none. Nothing is cached or served.
+var ErrChecksum = errors.New("release asset failed checksum verification")
 
 // ReleaseInfo is the public metadata the admin panel shows for the latest APK
 // release. It deliberately omits the API asset URL: downloads continue through
@@ -201,19 +211,25 @@ func syncKind(ctx context.Context, opts Options, kind string) (string, error) {
 		return "", fmt.Errorf("create APK_DIR: %w", err)
 	}
 	dest := filepath.Join(opts.DestDir, cachedFile(kind))
-	if cacheFreshKind(opts.DestDir, kind, dest, asset.ID) {
+	dlCtx, cancelDL := context.WithTimeout(ctx, fetchTimeout)
+	defer cancelDL()
+	// The expected checksum is resolved on every sync (also for a cache hit):
+	// it is what proves the cached file is still the published one.
+	want, err := expectedSHA256(dlCtx, client, opts.Token, *rel, asset)
+	if err != nil {
+		return "", err
+	}
+	if cacheFreshKind(opts.DestDir, kind, dest, asset.ID) && cacheMatchesSHA(opts.DestDir, kind, dest, want) {
 		return dest, nil
 	}
 
-	dlCtx, cancelDL := context.WithTimeout(ctx, fetchTimeout)
-	defer cancelDL()
-	if err := downloadAsset(dlCtx, client, asset.URL, opts.Token, dest); err != nil {
+	if err := downloadAsset(dlCtx, client, asset.URL, opts.Token, dest, want); err != nil {
 		return "", err
 	}
-	meta := cacheMeta{AssetID: asset.ID, TagName: rel.TagName, Name: asset.Name}
+	meta := cacheMeta{AssetID: asset.ID, TagName: rel.TagName, Name: asset.Name, SHA256: want}
 	if metaErr := writeMetaFile(metaPath(opts.DestDir, kind), meta); metaErr != nil {
-		// The APK is usable even if the sidecar fails; the next sync will
-		// re-download.
+		// The file is verified and usable even if the sidecar fails; the next
+		// sync will re-download.
 		return dest, nil
 	}
 	return dest, nil
@@ -442,7 +458,86 @@ func pickLatestRelease(rels []release, has func([]asset) bool) (*release, error)
 	return nil, ErrNotFound
 }
 
-func downloadAsset(ctx context.Context, client *http.Client, assetURL, token, dest string) error {
+// cacheMatchesSHA re-hashes the cached file: a file tampered with on disk, or
+// cached before checksums were enforced, is not served.
+func cacheMatchesSHA(dir, kind, dest, want string) bool {
+	meta, err := readMetaFile(metaPath(dir, kind))
+	if err != nil || meta.SHA256 == "" || !strings.EqualFold(meta.SHA256, want) {
+		return false
+	}
+	f, err := os.Open(dest)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return false
+	}
+	return strings.EqualFold(hex.EncodeToString(h.Sum(nil)), want)
+}
+
+// expectedSHA256 resolves the checksum the release publishes for a: the
+// SHA256SUMS file, a "<asset>.sha256" sibling, and GitHub's own asset digest.
+// Every source that exists must agree; at least one must exist. Otherwise the
+// asset is refused (ErrChecksum): an unverifiable binary is never served.
+func expectedSHA256(ctx context.Context, client *http.Client, token string, rel release, a asset) (string, error) {
+	var found []string
+	if d := normalizeSHA(a.Digest); d != "" {
+		found = append(found, d)
+	}
+	for _, other := range rel.Assets {
+		isSums := Classify(other.Name) == KindChecksums
+		isSibling := strings.EqualFold(other.Name, a.Name+".sha256")
+		if (!isSums && !isSibling) || other.URL == "" {
+			continue
+		}
+		body, err := fetchSmallAsset(ctx, client, token, other.URL)
+		if err != nil {
+			return "", fmt.Errorf("%w: cannot read %s: %v", ErrChecksum, other.Name, err)
+		}
+		if isSums {
+			if h, ok := ParseChecksums(strings.NewReader(body))[a.Name]; ok {
+				found = append(found, h)
+			}
+			continue
+		}
+		if f := strings.Fields(body); len(f) > 0 {
+			if h := normalizeSHA(f[0]); h != "" {
+				found = append(found, h)
+			}
+		}
+	}
+	if len(found) == 0 {
+		return "", fmt.Errorf("%w: the release publishes no SHA-256 for %s", ErrChecksum, a.Name)
+	}
+	for _, h := range found[1:] {
+		if h != found[0] {
+			return "", fmt.Errorf("%w: the release's checksum sources disagree for %s", ErrChecksum, a.Name)
+		}
+	}
+	return found[0], nil
+}
+
+func fetchSmallAsset(ctx context.Context, client *http.Client, token, assetURL string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, assetURL, nil)
+	if err != nil {
+		return "", err
+	}
+	setGitHubHeaders(req, token, "application/octet-stream")
+	res, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("HTTP %d", res.StatusCode)
+	}
+	b, err := io.ReadAll(io.LimitReader(res.Body, 1<<20))
+	return string(b), err
+}
+
+func downloadAsset(ctx context.Context, client *http.Client, assetURL, token, dest, wantSHA string) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, assetURL, nil)
 	if err != nil {
 		return err
@@ -457,7 +552,7 @@ func downloadAsset(ctx context.Context, client *http.Client, assetURL, token, de
 	if res.StatusCode != http.StatusOK {
 		return fmt.Errorf("download github asset: HTTP %d", res.StatusCode)
 	}
-	return writeAtomic(dest, res.Body)
+	return writeAtomicVerified(dest, res.Body, wantSHA)
 }
 
 func setGitHubHeaders(req *http.Request, token, accept string) {
@@ -522,6 +617,10 @@ func writeMeta(dir string, meta cacheMeta) error {
 }
 
 func writeAtomic(dest string, r io.Reader) error {
+	return writeAtomicCheck(dest, r, nil)
+}
+
+func writeAtomicCheck(dest string, r io.Reader, verify func() error) error {
 	dir := filepath.Dir(dest)
 	tmp, err := os.CreateTemp(dir, ".apk-partial-*")
 	if err != nil {
@@ -540,5 +639,23 @@ func writeAtomic(dest string, r io.Reader) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
+	if verify != nil {
+		if err := verify(); err != nil {
+			return err
+		}
+	}
 	return os.Rename(tmpName, dest)
+}
+
+// writeAtomicVerified is writeAtomic that hashes the stream and renames it
+// into place only when the SHA-256 equals want. On mismatch nothing replaces
+// the existing cache file.
+func writeAtomicVerified(dest string, r io.Reader, want string) error {
+	h := sha256.New()
+	return writeAtomicCheck(dest, io.TeeReader(r, h), func() error {
+		if got := hex.EncodeToString(h.Sum(nil)); !strings.EqualFold(got, want) {
+			return fmt.Errorf("%w: downloaded file does not match the published SHA-256", ErrChecksum)
+		}
+		return nil
+	})
 }

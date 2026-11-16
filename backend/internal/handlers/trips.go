@@ -108,6 +108,15 @@ func (s *Server) ListTrips(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "range must be at most 31 days")
 		return
 	}
+	// Other members' trips only from the viewer's circle join time on.
+	if claims := middleware.ClaimsFromContext(r.Context()); claims != nil {
+		floor, err := s.historyFloorFor(r.Context(), claims.UserID, target)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to load trips")
+			return
+		}
+		from = clampFrom(from, floor)
+	}
 	limit := defaultTripListLimit
 	if v := r.URL.Query().Get("limit"); v != "" {
 		n, err := strconv.Atoi(v)
@@ -161,6 +170,10 @@ func (s *Server) GetTrip(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if ok, err := s.canViewSubject(r, claims.UserID, trip.UserID); err != nil || !ok {
+			writeError(w, http.StatusNotFound, "trip not found")
+			return
+		}
+		if !s.tripVisibleSinceJoin(r.Context(), claims.UserID, trip.UserID, trip.StartedAt) {
 			writeError(w, http.StatusNotFound, "trip not found")
 			return
 		}
@@ -240,6 +253,14 @@ func (s *Server) TripsSummary(w http.ResponseWriter, r *http.Request) {
 	if !valid {
 		writeError(w, http.StatusBadRequest, "period must be day, week or month")
 		return
+	}
+	if claims := middleware.ClaimsFromContext(r.Context()); claims != nil {
+		floor, err := s.historyFloorFor(r.Context(), claims.UserID, target)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to build summary")
+			return
+		}
+		from = clampFrom(from, floor)
 	}
 	threshold := defaultSpeedThresholdMps
 	if v := q.Get("speed_threshold_mps"); v != "" {

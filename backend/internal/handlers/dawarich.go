@@ -172,7 +172,7 @@ func (s *Server) dawarichPending(ctx context.Context, row dawarichRow) int64 {
 		LEFT JOIN dawarich_user_map m ON m.user_id = d.user_id
 		LEFT JOIN dawarich_cursor c ON c.device_id = l.device_id
 		WHERE l.ts > COALESCE(c.last_ts, COALESCE(m.since, $1))
-		  AND (l.e2ee_circle_id IS NULL OR e2ee_member_server_ok(l.e2ee_circle_id, d.user_id))
+		  AND l.e2ee_circle_id IS NULL
 		  AND ((m.user_id IS NOT NULL AND m.enabled) OR (m.user_id IS NULL AND $2))`,
 		row.Since, row.SendUnmapped && row.APIKey != "").Scan(&n)
 	return n
@@ -216,6 +216,10 @@ func (s *Server) AdminPutDawarich(w http.ResponseWriter, r *http.Request) {
 	var req dawarichPutRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	if req.Enabled && s.adminLocationDenied(r.Context(), claims.UserID, "", "tried to enable the Dawarich location export", clientIP(r)) {
+		writeError(w, http.StatusForbidden, "the Dawarich export reads members' locations; set ADMIN_LOCATION_ACCESS=true on the server to allow it")
 		return
 	}
 	base, err := normalizeDawarichURL(req.BaseURL)
@@ -272,7 +276,7 @@ func (s *Server) AdminPutDawarich(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.dawarichBO.reset() // new settings: try again now, not after the old backoff
-	s.logAudit(r.Context(), claims.UserID, "", "dawarich.settings_updated", "updated Dawarich sync settings", clientIP(r))
+	s.logAudit(r.Context(), claims.UserID, "", "dawarich.settings_updated", fmt.Sprintf("updated Dawarich sync settings (enabled=%t, send_unmapped=%t, backfill_days=%d)", req.Enabled, req.SendUnmapped, days), clientIP(r))
 	row, _, _ := s.readDawarich(r.Context())
 	writeJSON(w, http.StatusOK, s.dawarichJSON(r.Context(), row))
 }
@@ -401,6 +405,15 @@ func (s *Server) syncDawarichOnce(ctx context.Context, force bool) {
 	if err != nil || !ok || (!row.Enabled && !force) {
 		return
 	}
+	// The export reads every member's location history, which is exactly what
+	// ADMIN_LOCATION_ACCESS=false forbids the operator to do. Without the toggle
+	// nothing is sent (the denial is audited, throttled).
+	if !s.AdminLocationAccess {
+		if s.viewAudit == nil || s.viewAudit.Allow("dawarich-denied", 1, time.Hour) {
+			s.logAudit(ctx, "", "", "admin.location_denied", "Dawarich export skipped: ADMIN_LOCATION_ACCESS is off", "")
+		}
+		return
+	}
 	targets, err := s.dawarichTargets(ctx, row)
 	if err != nil {
 		slog.Warn("dawarich targets", "err", err)
@@ -453,6 +466,10 @@ func (s *Server) syncDawarichOnce(ctx context.Context, force bool) {
 	}
 	if !attempted {
 		return // everything is waiting for its retry time; keep what the admin sees
+	}
+	if total > 0 {
+		// Every export of member locations to a third-party system is audited.
+		s.logAudit(ctx, "", "", "admin.dawarich_export", fmt.Sprintf("exported %d location points to Dawarich (private-circle data is never included)", total), "")
 	}
 	// The row shows the worst state across destinations, including ones that
 	// were skipped this pass because they are still backing off.
@@ -543,7 +560,7 @@ func (s *Server) nextDawarichBatch(ctx context.Context, t dawarichTarget) ([]daw
 		JOIN users u ON u.id = d.user_id
 		LEFT JOIN dawarich_cursor c ON c.device_id = l.device_id
 		WHERE l.ts > COALESCE(c.last_ts, $1)
-		  AND (l.e2ee_circle_id IS NULL OR e2ee_member_server_ok(l.e2ee_circle_id, u.id))
+		  AND l.e2ee_circle_id IS NULL
 		  AND CASE WHEN $2::text = '' THEN NOT EXISTS (SELECT 1 FROM dawarich_user_map m WHERE m.user_id = u.id)
 		           ELSE u.id::text = $2::text END
 		ORDER BY l.ts ASC
@@ -654,6 +671,10 @@ func (s *Server) AdminPutDawarichUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
+	if req.Enabled && s.adminLocationDenied(r.Context(), claims.UserID, "", "tried to enable the Dawarich location export of a user", clientIP(r)) {
+		writeError(w, http.StatusForbidden, "the Dawarich export reads members' locations; set ADMIN_LOCATION_ACCESS=true on the server to allow it")
+		return
+	}
 	key := strings.TrimSpace(req.APIKey)
 	if len(key) > dawarichMaxKeyLen {
 		writeError(w, http.StatusBadRequest, "API key is too long")
@@ -708,7 +729,7 @@ func (s *Server) AdminPutDawarichUser(w http.ResponseWriter, r *http.Request) {
 			DELETE FROM dawarich_cursor WHERE device_id IN (SELECT id FROM devices WHERE user_id = $1)`, userID)
 	}
 	s.dawarichBO.reset()
-	s.logAudit(r.Context(), claims.UserID, "", "dawarich.user_mapped", "mapped a user to a Dawarich account", clientIP(r))
+	s.logAudit(r.Context(), claims.UserID, "", "dawarich.user_mapped", "mapped user "+userID+" to a Dawarich account", clientIP(r))
 	s.AdminListDawarichUsers(w, r)
 }
 

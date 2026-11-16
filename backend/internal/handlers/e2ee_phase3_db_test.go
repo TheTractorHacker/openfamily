@@ -31,6 +31,9 @@ func TestE2EEDawarichServerSyncSkipsPrivateCircles(t *testing.T) {
 		t.Fatalf("a private circle wrote %d plaintext location rows", after-before)
 	}
 	// Both targets (main account for "everyone else" and a per-person mapping) get nothing.
+	if err := e.srv.EnsureDawarichSchema(ctx); err != nil {
+		t.Fatal(err)
+	}
 	since := time.Now().Add(-48 * time.Hour)
 	for _, tgt := range []dawarichTarget{{Key: "k", Since: since}, {UserID: e.ids["B"], Key: "k", Since: since}} {
 		pts, err := e.srv.nextDawarichBatch(ctx, tgt)

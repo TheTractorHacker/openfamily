@@ -315,35 +315,6 @@ class _ServerJoinCardState extends State<ServerJoinCard> {
   }
 }
 
-/// Circle admin: one confirmation, then the circle leaves Private mode.
-Future<bool> confirmSwitchToNormal(BuildContext context, Circle c) async {
-  final bool? ok = await showDialog<bool>(
-    context: context,
-    builder: (BuildContext ctx) => AlertDialog(
-      title: const Text('Switch to normal mode?'),
-      content: Text(
-          'From now on the server keeps the locations of everyone in ${c.name} (readable), so maps, history and driving reports just work and everyone shows up again, even people on an old app.\n\n'
-          'The encrypted copies and key copies the server holds for this circle are deleted. Places and history that exist only on phones stay on those phones. Everyone in the circle is told. You can make the circle private again later.'),
-      actions: <Widget>[
-        TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
-        FilledButton(key: const Key('switch-normal-confirm'), onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Switch to normal mode')),
-      ],
-    ),
-  );
-  if (ok != true) return false;
-  try {
-    await E2eeApp.service.disableCircle(c.id);
-    DeliveryHints.circleById.remove(c.id);
-    ServerChoiceStore.changed.value++;
-    return true;
-  } catch (_) {
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not switch to normal mode. Check the connection and try again.')));
-    }
-    return false;
-  }
-}
-
 /// Soft "Update available" card (Settings): non-blocking, with the Play / APK hint.
 class UpdateCard extends StatelessWidget {
   const UpdateCard({super.key, this.serverHost = ''});

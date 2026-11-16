@@ -97,10 +97,10 @@ func (s *Server) redeemInviteCode(ctx context.Context, tx pgx.Tx, code string, c
 		return nil, "", "", err
 	}
 	if expiresAt != nil && time.Now().After(*expiresAt) {
-		return nil, "", "", &inviteError{msg: "invite code has expired"}
+		return nil, "", "", &inviteError{msg: inviteGenericMsg}
 	}
 	if uses >= maxUses {
-		return nil, "", "", &inviteError{msg: "invite code has already been used"}
+		return nil, "", "", &inviteError{msg: inviteGenericMsg}
 	}
 	if familyID == nil && !circleOK {
 		// A code for a circle that is not a legacy family: only
@@ -263,6 +263,9 @@ func (s *Server) JoinFamily(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "code is required")
 		return
 	}
+	if s.inviteLocked(w, normalizeCode(code), claims.UserID) {
+		return
+	}
 
 	tx, err := s.Pool.Begin(r.Context())
 	if err != nil {
@@ -289,6 +292,7 @@ func (s *Server) JoinFamily(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		var ie *inviteError
 		if errors.As(err, &ie) {
+			s.inviteFailed(normalizeCode(code), claims.UserID)
 			writeError(w, http.StatusBadRequest, ie.msg)
 		} else {
 			writeError(w, http.StatusInternalServerError, "failed to validate invite code")

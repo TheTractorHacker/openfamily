@@ -959,6 +959,9 @@ func (s *Server) JoinCircle(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "code is required")
 		return
 	}
+	if s.inviteLocked(w, code, uid) {
+		return
+	}
 
 	tx, err := s.Pool.Begin(r.Context())
 	if err != nil {
@@ -988,7 +991,8 @@ func (s *Server) JoinCircle(w http.ResponseWriter, r *http.Request) {
 		WHERE ic.code = $1 FOR UPDATE OF ic`, code,
 	).Scan(&inviteID, &circleID, &familyID, &role, &maxUses, &uses, &expiresAt)
 	if errors.Is(err, pgx.ErrNoRows) {
-		writeError(w, http.StatusBadRequest, "invalid invite code")
+		s.inviteFailed(code, uid)
+		writeError(w, http.StatusBadRequest, inviteGenericMsg)
 		return
 	}
 	if err != nil {
@@ -996,11 +1000,13 @@ func (s *Server) JoinCircle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if expiresAt != nil && time.Now().After(*expiresAt) {
-		writeError(w, http.StatusBadRequest, "invite code has expired")
+		s.inviteFailed(code, uid)
+		writeError(w, http.StatusBadRequest, inviteGenericMsg)
 		return
 	}
 	if uses >= maxUses {
-		writeError(w, http.StatusBadRequest, "invite code has already been used")
+		s.inviteFailed(code, uid)
+		writeError(w, http.StatusBadRequest, inviteGenericMsg)
 		return
 	}
 	if oldAppBlocksJoin(r.Context(), tx, circleID, uid) {

@@ -50,7 +50,8 @@ func (s *Server) reportDays(ctx context.Context, ids []string, per reportPeriod,
 		SELECT id::text, user_id::text, started_at, ended_at, COALESCE(distance_m, 0), COALESCE(max_speed_mps, 0), mode
 		FROM trips
 		WHERE user_id = ANY($1::uuid[]) AND mode = 'driving' AND started_at >= $2 AND started_at < $3
-		ORDER BY started_at DESC, id DESC`, ids, per.start, per.end)
+		  AND (started_at >= $4 OR user_id::text = $5)
+		ORDER BY started_at DESC, id DESC`, ids, per.start, per.end, per.floor, per.viewer)
 	if err != nil {
 		return nil, nil, err
 	}

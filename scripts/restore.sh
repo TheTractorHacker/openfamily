@@ -13,6 +13,8 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
+# shellcheck source=scripts/lib-crypt.sh
+. scripts/lib-crypt.sh
 
 file="${1:-}"
 yes="${2:-}"
@@ -39,8 +41,7 @@ case "$file" in
     [ -r "${BACKUP_PASSPHRASE_FILE:-}" ] || { echo "error: set BACKUP_PASSPHRASE_FILE to restore an encrypted backup" >&2; exit 2; }
     plain="$(mktemp)"; chmod 600 "$plain"
     trap 'rm -f "$plain"' EXIT
-    openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -pass "file:$BACKUP_PASSPHRASE_FILE" -in "$file" -out "$plain" \
-      || { echo "error: decryption failed (wrong passphrase?)" >&2; exit 1; }
+    of_decrypt "$BACKUP_PASSPHRASE_FILE" "$file" "$plain" || exit 1
     src="$plain" ;;
   *) src="$file" ;;
 esac

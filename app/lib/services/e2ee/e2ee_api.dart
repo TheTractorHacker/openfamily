@@ -17,7 +17,6 @@ abstract class E2eeApi {
   Future<List<DeviceKey>> pending(String circleId);
   Future<void> enable(String circleId, Map<String, dynamic> body);
   Future<void> bumpEpoch(String circleId, Map<String, dynamic> body);
-  Future<void> disable(String circleId, Map<String, dynamic> signedAction);
   Future<int> submitWraps(String circleId, int epoch, List<Map<String, dynamic>> wraps);
   Future<void> approve(String circleId, Map<String, dynamic> body);
   Future<({List<LogEntry> entries, LogHead head})> log(int after);
@@ -136,10 +135,6 @@ class ApiE2eeApi implements E2eeApi {
   @override
   Future<void> bumpEpoch(String circleId, Map<String, dynamic> body) =>
       ApiClient.post('/circles/$circleId/e2ee/epoch', body: body);
-
-  @override
-  Future<void> disable(String circleId, Map<String, dynamic> signedAction) =>
-      ApiClient.post('/circles/$circleId/e2ee/disable', body: signedAction);
 
   @override
   Future<int> submitWraps(String circleId, int epoch, List<Map<String, dynamic>> wraps) async {

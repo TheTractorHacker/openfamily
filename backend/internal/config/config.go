@@ -99,6 +99,12 @@ type Config struct {
 	// dart-define. Empty means the client should skip ntfy-specific hints.
 	NtfyBaseURL string
 
+	// NtfyAuthToken (NTFY_AUTH_TOKEN) is an ntfy access token the server sends
+	// as a bearer on every publish to NTFY_BASE_URL. Set it together with
+	// deny-all access on the ntfy server so topics cannot be read or spoofed
+	// by anyone who learns or guesses a name. See docs/push.md.
+	NtfyAuthToken string
+
 	// TileURL and SatelliteTileURL are raster {z}/{x}/{y} templates advertised
 	// on GET /config. Empty env uses the public OSM / Esri defaults. A provider
 	// API key belongs in the URL (query or path); /config is public, so treat
@@ -265,6 +271,7 @@ func Load() Config {
 		AdminLocationAccess:   getenvBool("ADMIN_LOCATION_ACCESS", false),
 		DirectPush:            getenvBool("DIRECT_PUSH", true),
 		NtfyBaseURL:           strings.TrimRight(getenv("NTFY_BASE_URL", ""), "/"),
+		NtfyAuthToken:         getenv("NTFY_AUTH_TOKEN", ""),
 		TileURL:               getenv("TILE_URL", DefaultTileURL),
 		SatelliteTileURL:      getenv("SATELLITE_TILE_URL", DefaultSatelliteTileURL),
 		MapStyleURL:           getenv("MAP_STYLE_URL", ""),

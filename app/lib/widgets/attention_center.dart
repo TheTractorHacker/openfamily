@@ -232,12 +232,6 @@ class _AttentionCardState extends State<AttentionCard> {
                   onPressed: _busy ? null : () => _run((AttentionContext c) => widget.actions.secondary(c, it)),
                   child: Text(it.secondary!),
                 ),
-              if (it.kind == AttentionKind.serverAdminSetup && it.data == true && it.circle != null)
-                TextButton(
-                  key: Key('attention-normal-${it.id}'),
-                  onPressed: _busy ? null : () => _run((AttentionContext c) => widget.actions.switchToNormal(c, it.circle!)),
-                  child: const Text('Switch to normal mode'),
-                ),
             ]),
           ),
         ]),
@@ -370,8 +364,6 @@ class AttentionActions {
 
   /// The existing add-server sheet (checks the server key, signs with this phone's key). True when done.
   Future<bool> useServer(AttentionContext c, Circle circle) async => await showAddServerSheet(c.sheet, circle: circle) == true;
-
-  Future<void> switchToNormal(AttentionContext c, Circle circle) => confirmSwitchToNormal(c.sheet, circle);
 
   Future<void> dismissAutoNotice(String circleId) => PrivateRuntime.instance.lanesService.store.dismissAutoNotice(circleId);
 

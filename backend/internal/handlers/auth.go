@@ -85,10 +85,14 @@ func (s *Server) Register(w http.ResponseWriter, r *http.Request) {
 	joinCircleRole := models.RoleMember
 	role := models.RoleMember
 	if req.InviteCode != "" {
+		if s.inviteLocked(w, normalizeCode(req.InviteCode), "") {
+			return
+		}
 		fid, cid, rl, err := s.redeemInviteCode(r.Context(), tx, req.InviteCode, true)
 		if err != nil {
 			var ie *inviteError
 			if errors.As(err, &ie) {
+				s.inviteFailed(normalizeCode(req.InviteCode), "")
 				writeError(w, http.StatusBadRequest, ie.msg)
 			} else {
 				writeError(w, http.StatusInternalServerError, "failed to validate invite code")

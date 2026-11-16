@@ -4,7 +4,7 @@
 
 import React from 'react'
 import L from 'leaflet'
-import { Circle, MapContainer, Marker, useMap, useMapEvents } from 'react-leaflet'
+import { Circle, CircleMarker, MapContainer, Marker, useMap, useMapEvents } from 'react-leaflet'
 import {
   ApiError,
   createAdminPlace,
@@ -84,6 +84,19 @@ function Fly({ target }: { target: { lat: number; lon: number; key: string } | n
     // Only when the key (selection) changes, not on every drag.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [target?.key])
+  return null
+}
+
+/** Frames every visible place whenever the set changes (filter, load, add, delete), never on a drag. */
+function FitPlaces({ points, resetKey }: { points: Array<[number, number]>; resetKey: string }) {
+  const map = useMap()
+  React.useEffect(() => {
+    if (points.length === 0) return
+    if (points.length === 1) map.setView(points[0], 15)
+    else map.fitBounds(L.latLngBounds(points), { padding: [48, 48], maxZoom: 16 })
+    // Only when the set of places changes, not on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [map, resetKey])
   return null
 }
 
@@ -268,6 +281,22 @@ export function PlacesPage() {
             <BaseMapLayer />
             <ClickCatcher active={adding} onPick={onPick} />
             <Fly target={fly} />
+            <FitPlaces
+              points={visible.map((p) => [p.lat, p.lon] as [number, number])}
+              resetKey={`${filterFamily}|${visible.map((p) => p.id).join(',')}`}
+            />
+            {/* A 150 m circle is a speck at city zoom: a pin dot keeps every place findable. */}
+            {visible
+              .filter((p) => p.id !== draft?.id)
+              .map((p) => (
+                <CircleMarker
+                  key={`dot-${p.id}`}
+                  center={[p.lat, p.lon]}
+                  radius={7}
+                  pathOptions={{ color: '#ffffff', weight: 2, fillColor: '#7c3aed', fillOpacity: 1 }}
+                  eventHandlers={{ click: () => select(p) }}
+                />
+              ))}
             {visible
               .filter((p) => p.id !== draft?.id && p.radius_meters)
               .map((p) => (
@@ -437,12 +466,35 @@ export function PlacesPage() {
                   {message.text}
                 </p>
               )}
+              {circlesQ.error && (
+                <p className="wb-error-text" role="status">
+                  Circles could not be loaded, so “Share with” only offers the whole group.{' '}
+                  <button type="button" className="wb-link-button" onClick={() => circlesQ.refetch()}>
+                    Retry
+                  </button>
+                </p>
+              )}
               {visible.length === 0 ? (
                 <EmptyState
-                  title="No places yet"
-                  description="Use “Add place”, then click the map to drop one."
+                  title={filterFamily ? 'No places in this group' : 'No places yet'}
+                  description={
+                    families.length === 0
+                      ? 'There are no groups yet. Create a group first, then add places to it.'
+                      : 'Use “Add place”, then click the map to drop one. Places that are shared with a private circle are listed here too.'
+                  }
+                  action={
+                    families.length > 0 ? (
+                      <Button size="sm" onClick={startAdd}>
+                        Add place
+                      </Button>
+                    ) : undefined
+                  }
                 />
               ) : (
+                <>
+                <p className="wb-help wb-places-count">
+                  {visible.length} {visible.length === 1 ? 'place' : 'places'}
+                </p>
                 <ul className="wb-places-list">
                   {visible.map((p) => (
                     <li key={p.id}>
@@ -457,6 +509,7 @@ export function PlacesPage() {
                     </li>
                   ))}
                 </ul>
+                </>
               )}
             </>
           )}

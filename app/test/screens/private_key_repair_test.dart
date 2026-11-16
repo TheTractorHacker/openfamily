@@ -23,7 +23,7 @@ void tall(WidgetTester t) {
 }
 
 void main() {
-  testWidgets('turning Private off with an unreadable key explains it and opens Encryption keys', (WidgetTester t) async {
+  testWidgets('a Private-circle action with an unreadable key explains it and opens Encryption keys', (WidgetTester t) async {
     tall(t);
     final FakeE2eeServer server = FakeE2eeServer();
     final FlakyVault v = FlakyVault();
@@ -37,7 +37,7 @@ void main() {
     await t.pumpWidget(MaterialApp(
       home: Builder(
         builder: (BuildContext c) => Scaffold(
-          body: TextButton(onPressed: () => showPrivateKeyProblem(c, err, turningOff: true), child: const Text('go')),
+          body: TextButton(onPressed: () => showPrivateKeyProblem(c, err), child: const Text('go')),
         ),
       ),
     ));
@@ -45,7 +45,7 @@ void main() {
     await t.pumpAndSettle();
     expect(find.textContaining("encryption key could not be read"), findsOneWidget);
     expect(find.textContaining('reach the server'), findsNothing);
-    expect(find.textContaining('Another admin of this circle can also turn Private off'), findsOneWidget);
+    expect(find.textContaining('Another admin'), findsNothing);
     await t.tap(find.text('Open Encryption keys'));
     await t.pumpAndSettle();
     expect(find.byType(EncryptionKeysScreen), findsOneWidget);

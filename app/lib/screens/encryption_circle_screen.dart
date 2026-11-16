@@ -248,6 +248,46 @@ class _EncryptionCircleScreenState extends State<EncryptionCircleScreen> {
     await _run(() => _svc.setOwnerApproval(widget.circle.id, true, password: auth.password, totpCode: auth.totp), 'Owner approval is on');
   }
 
+  /// "Repair encryption": re-publishes this phone's key, gets it approved (the owner approves their own phone after
+  /// the password), fetches the circle key and shares it with waiting members. Asks only for what a step needs.
+  Future<void> _repair() async {
+    setState(() => _busy = true);
+    try {
+      String? password, totp;
+      bool newKey = false;
+      RepairResult r = await _svc.repairOwnEncryption(widget.circle.id);
+      for (int i = 0; i < 3; i++) {
+        if (!mounted) return;
+        if (r.status == RepairStatus.needsPassword) {
+          final auth = await askOwnerStepUp(context,
+              title: 'Repair encryption?',
+              message: 'You created this circle, so you can approve this phone yourself. Confirm with your password. '
+                  'The other members are told.',
+              confirmLabel: 'Repair');
+          if (auth == null) return;
+          password = auth.password;
+          totp = auth.totp;
+        } else if (r.status == RepairStatus.needsNewKey && widget.circle.isAdmin && !newKey) {
+          final bool ok = await showDsConfirm(context,
+              title: 'Publish a new circle key?',
+              message: '${r.message}\n\nOlder locations and messages in this circle will not be readable on this phone.',
+              confirmLabel: 'Publish new key');
+          if (!ok) return;
+          newKey = true;
+        } else {
+          break;
+        }
+        r = await _svc.repairOwnEncryption(widget.circle.id, password: password, totpCode: totp, publishNewKeyIfLost: newKey);
+      }
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(r.message)));
+      await _load();
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(errorText(e))));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _approveAsOwner(DeviceKey key) async {
     final auth = await askOwnerStepUp(context,
         title: 'Approve this phone as owner?',
@@ -506,6 +546,19 @@ class _EncryptionCircleScreenState extends State<EncryptionCircleScreen> {
               ),
             ]),
           ],
+          const SizedBox(height: AppSpace.lg),
+          DsRowGroup(children: <Widget>[
+            DsListRow(
+              key: const Key('repair-encryption'),
+              leading: DsListRow.iconTile(context, Icons.build_circle_outlined),
+              title: 'Repair encryption',
+              subtitle: 'Use this if this phone cannot see this circle\'s members or locations',
+              info: 'Registers this phone\'s key again, gets it approved (the owner of the circle approves their own phone with their '
+                  'password) and asks for the circle key. Nothing is deleted.',
+              chevron: true,
+              onTap: _busy ? null : _repair,
+            ),
+          ]),
           const DsSectionHeader('Members', padding: EdgeInsets.fromLTRB(0, AppSpace.xl, 0, AppSpace.xs)),
           DsRowGroup(children: <Widget>[
             for (final CircleE2eeMember m in st.members)

@@ -84,8 +84,12 @@ type reportThresholds struct {
 
 type reportPeriod struct {
 	start, end, prevStart, prevEnd time.Time // [start,end) instants
-	startDay, endDay               string     // local calendar days, end inclusive
+	startDay, endDay               string    // local calendar days, end inclusive
 	prevStartDay, prevEndDay       string
+	// floor/viewer: other members' trips older than the viewer's join time in
+	// the circle are never counted (the viewer's own are).
+	floor  time.Time
+	viewer string
 }
 
 // computeReportPeriod resolves the week (Monday start) or month containing
@@ -170,10 +174,13 @@ func (s *Server) TripsReport(w http.ResponseWriter, r *http.Request) {
 		}
 		circleID = fam
 	}
-	if _, err := az.RequireMember(r.Context(), claims.UserID, circleID); err != nil {
+	mem, err := az.RequireMember(r.Context(), claims.UserID, circleID)
+	if err != nil {
 		circleAuthError(w, err)
 		return
 	}
+	// A new member reads other members' trips only from their own join time on.
+	per.floor, per.viewer = mem.JoinedAt, claims.UserID
 	vis, err := az.LocationVisibility(r.Context(), claims.UserID, []string{circleID})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load members")
@@ -206,7 +213,8 @@ func (s *Server) TripsReport(w http.ResponseWriter, r *http.Request) {
 		SELECT user_id::text, (started_at >= $3) AS cur, count(*), COALESCE(sum(distance_m), 0), COALESCE(max(max_speed_mps), 0)
 		FROM trips
 		WHERE user_id = ANY($1::uuid[]) AND mode = 'driving' AND started_at >= $2 AND started_at < $4
-		GROUP BY 1, 2`, ids, per.prevStart, per.start, per.end)
+		  AND (started_at >= $5 OR user_id::text = $6)
+		GROUP BY 1, 2`, ids, per.prevStart, per.start, per.end, per.floor, per.viewer)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load trips")
 		return
@@ -235,7 +243,8 @@ func (s *Server) TripsReport(w http.ResponseWriter, r *http.Request) {
 		SELECT user_id::text, kind, (started_at >= $3) AS cur, count(*)
 		FROM trip_events_effective
 		WHERE user_id = ANY($1::uuid[]) AND started_at >= $2 AND started_at < $4
-		GROUP BY 1, 2, 3`, ids, per.prevStart, per.start, per.end)
+		  AND (started_at >= $5 OR user_id::text = $6)
+		GROUP BY 1, 2, 3`, ids, per.prevStart, per.start, per.end, per.floor, per.viewer)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load events")
 		return
@@ -348,7 +357,7 @@ func (s *Server) TripEvents(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to authorize")
 		return
 	}
-	if !ok {
+	if !ok || !s.tripVisibleSinceJoin(r.Context(), claims.UserID, trip.UserID, trip.StartedAt) {
 		writeError(w, http.StatusNotFound, "trip not found")
 		return
 	}

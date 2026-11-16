@@ -26,7 +26,7 @@
 }
 .wb-places-map {
   position: relative;
-  min-height: 360px;
+  min-height: max(360px, calc(100dvh - 230px));
   min-width: 0;
   background: var(--surface);
   border: 1px solid var(--border);
@@ -35,7 +35,8 @@
   box-shadow: var(--shadow-sm);
   display: flex;
 }
-.wb-places-leaflet { flex: 1 1 auto; min-height: 360px; height: 100%; }
+.wb-places-leaflet { flex: 1 1 auto; min-height: 360px; }
+.wb-places-leaflet.leaflet-container { position: absolute; inset: 0; }
 .wb-places-leaflet.is-adding { cursor: crosshair; }
 .wb-places-hint {
   position: absolute;
@@ -92,4 +93,14 @@
 }
 @media (max-width: 900px) {
   .wb-places-body { grid-template-columns: 1fr; grid-auto-rows: minmax(320px, auto); }
+}
+.wb-places-count { margin: 0 0 var(--space-3); }
+.wb-link-button {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--accent-ink);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
 }

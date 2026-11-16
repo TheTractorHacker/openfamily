@@ -18,12 +18,26 @@ typedef ScreenOffsetToLatLng = LatLng Function(Offset offset);
 /// On-screen distance (logical pixels) within which two member bubbles are
 /// considered to visually overlap and therefore cluster. Sized to the
 /// diameter of a member bubble (~48 px) so bubbles that would overlap merge
-/// into a single count bubble.
-const double kClusterRadiusPx = 48.0;
+/// into a single count bubble. A bubble's avatar box is 58 px, so 60 px means
+/// two pins that would still touch merge instead of sitting half on top of each
+/// other.
+const double kClusterRadiusPx = 60.0;
 
 /// On-screen radius (logical pixels) of the fan-out ring used to separate
 /// clustered members so their bubbles never stack or overlap when expanded.
-const double kFanOutRadiusPx = 60.0;
+const double kFanOutRadiusPx = 64.0;
+
+/// Smallest centre-to-centre gap (logical px) between two fanned-out bubbles.
+const double kFanOutMinGapPx = 62.0;
+
+/// Ring radius that keeps [count] fanned-out bubbles [kFanOutMinGapPx] apart:
+/// the base radius for small groups, growing with the group so a big cluster
+/// never stacks its members.
+double fanOutRadiusFor(int count, {double base = kFanOutRadiusPx}) {
+  if (count < 2) return base;
+  final double needed = kFanOutMinGapPx / (2 * math.sin(math.pi / count));
+  return math.max(base, needed);
+}
 
 /// A group of members whose bubbles visually overlap at the current zoom.
 class MemberCluster {
@@ -168,10 +182,12 @@ List<BubblePlacement> placeBubbles(
       );
     } else if (expandedClusterIds.contains(cluster.id)) {
       final Offset centroid = _screenCentroid(cluster.members, toScreenOffset, pos);
+      final double ring =
+          fanOutRadiusFor(cluster.members.length, base: fanOutRadiusPx);
       for (int i = 0; i < cluster.members.length; i++) {
         final double angle = (2 * math.pi * i) / cluster.members.length;
         final Offset offset =
-            centroid + Offset.fromDirection(angle, fanOutRadiusPx);
+            centroid + Offset.fromDirection(angle, ring);
         placements.add(
           BubblePlacement(
             position: toLatLng(offset),

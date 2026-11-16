@@ -60,7 +60,7 @@ func TestRegisterDeviceReusesRow(t *testing.T) {
 		t.Fatalf("new install: %d %v", code, third)
 	}
 	// No install id (old app) but same UnifiedPush endpoint: reused.
-	p := map[string]any{"platform": "android", "name": "x", "unifiedpush_endpoint": "https://ntfy.sh/upabc123"}
+	p := map[string]any{"platform": "android", "name": "x", "unifiedpush_endpoint": "https://ntfy.sh/upA9x2K7mQ4zB"}
 	code, a := callAs(t, r, "POST", "/devices", fx.c, "", p)
 	code2, b := callAs(t, r, "POST", "/devices", fx.c, "", p)
 	if code != 201 || code2 != 200 || a["id"] != b["id"] || count() != 3 {

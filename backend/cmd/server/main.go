@@ -92,6 +92,7 @@ func main() {
 
 	mid.IngestKeyTTL = cfg.IngestKeyTTL
 	tm := auth.NewTokenManager(cfg.JWTSecret, cfg.AccessTokenTTL, cfg.RefreshTokenTTL)
+	push.ConfigureNtfy(cfg.NtfyBaseURL, cfg.NtfyAuthToken)
 	dispatcher := push.NewDispatcher(push.APNsConfig{
 		KeyFile:    cfg.APNsKeyFile,
 		KeyID:      cfg.APNsKeyID,

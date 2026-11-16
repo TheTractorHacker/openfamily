@@ -95,6 +95,9 @@ func (s *Server) resolveIPA(r *http.Request) (string, error) {
 	if err == nil {
 		return path, nil
 	}
+	if errors.Is(err, apkrelease.ErrChecksum) {
+		return "", err
+	}
 	if cached, cacheErr := latestFileExt(s.APKDir, ".ipa"); cacheErr == nil {
 		return cached, nil
 	}

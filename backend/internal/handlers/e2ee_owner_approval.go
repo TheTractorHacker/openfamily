@@ -110,7 +110,11 @@ func (s *Server) E2EESetOwnerApproval(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback(ctx)
-	if mode != "private" {
+	// The rule may be switched in a circle that is not Private yet. Otherwise a creator whose key was
+	// replaced (a reset phone is not approved in any circle, new ones included) could never turn Private on
+	// in a circle of their own: enabling needs an approved key, approving oneself needs this rule, and
+	// the rule needed a Private circle.
+	if mode != "private" && mode != "off" {
 		writeError(w, http.StatusConflict, "circle is not private")
 		return
 	}

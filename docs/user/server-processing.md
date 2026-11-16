@@ -118,8 +118,7 @@ Open the circle, **Encryption keys > Server processing > Server processing for t
 assistance**. From then on every member's phone keeps its data for the phones only. Copies the server already
 holds stay until you delete them: use **Delete all copies of this circle** on the Server processing screen.
 
-To stop using end-to-end encryption altogether, an admin can switch the circle to Normal in the circle settings.
-The server then keeps readable locations for everyone in that circle.
+A Private circle cannot be switched back to Normal: the encryption stays on once chosen. If something is wrong with the keys, use **Repair encryption** on the circle encryption screen (see [E2EE](../design/E2EE.md)).
 
 ## If you reset your encryption keys, or replace your phone
 

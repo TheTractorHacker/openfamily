@@ -148,6 +148,7 @@ func newDawarichTestEnv(t *testing.T, state func(key string) int) *dawarichTestE
 	e.clk = &fakeClock{t: time.Now().UTC().Truncate(time.Second)}
 	e.srv.dawarichBO.now = e.clk.now
 	e.srv.TM = auth.NewTokenManager("test-secret-test-secret-test-secret-00", time.Hour, time.Hour)
+	e.srv.AdminLocationAccess = true // the export reads members' locations; see TestDawarichExportNeedsAdminLocationAccess
 	if err := e.srv.EnsureDawarichSchema(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -362,5 +363,23 @@ func TestDawarichCancelledContextIsNotAFailure(t *testing.T) {
 	}
 	if n, _, _ := e.srv.dawarichBO.snapshot(""); n != 0 {
 		t.Fatalf("a cancelled request was counted as %d failures", n)
+	}
+}
+
+// Without ADMIN_LOCATION_ACCESS the export sends nothing and cannot be enabled.
+func TestDawarichExportNeedsAdminLocationAccess(t *testing.T) {
+	e := newDawarichTestEnv(t, func(string) int { return 200 })
+	ctx := context.Background()
+	e.saveSettings("main-key")
+	e.fix("A", time.Minute)
+	e.srv.AdminLocationAccess = false
+	e.srv.syncDawarichOnce(ctx, true)
+	if e.hits.Load() != 0 {
+		t.Fatalf("export ran without ADMIN_LOCATION_ACCESS (%d requests)", e.hits.Load())
+	}
+	e.srv.AdminLocationAccess = true
+	e.srv.syncDawarichOnce(ctx, true)
+	if e.hits.Load() == 0 {
+		t.Fatal("export did not run with ADMIN_LOCATION_ACCESS on")
 	}
 }

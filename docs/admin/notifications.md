@@ -17,6 +17,8 @@ NTFY_BASE_URL=https://push.example.com
 CADDYFILE=Caddyfile.with-push
 ```
 
+Also set `NTFY_AUTH_TOKEN` and run ntfy with deny-all access, see [Push notifications](../push.md#unifiedpush--ntfy-optional).
+
 Install the **ntfy** app on each phone. Details: [Push notifications](../push.md).
 
 ## iPhone: Apple push (APNs)

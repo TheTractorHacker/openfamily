@@ -4,13 +4,17 @@
 #
 # Usage: ./scripts/backup.sh [output-file]
 # Env:   BACKUP_KEEP=N  keep only the newest N automatic backups (default: keep all)
-#        BACKUP_PASSPHRASE_FILE=path  encrypt at rest (AES-256, PBKDF2) -> .dump.enc.
+#        BACKUP_PASSPHRASE_FILE=path  encrypt at rest -> .dump.enc
+#                      (authenticated: AES-256-CTR + HMAC-SHA256, format "OFBK2", see scripts/lib-crypt.sh;
+#                      old CBC backups stay restorable).
 #                      Backups contain location history: encrypt anything that leaves the host.
 # For scheduled and/or S3 backups use the `backup` compose service instead
 # (started by a plain docker compose up -d); see docs/backup-restore.md.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
+# shellcheck source=scripts/lib-crypt.sh
+. scripts/lib-crypt.sh
 
 mkdir -p backups
 chmod 700 backups
@@ -39,7 +43,7 @@ if [ ! -s "$tmp" ]; then
   exit 1
 fi
 if [ -n "${BACKUP_PASSPHRASE_FILE:-}" ]; then
-  openssl enc -aes-256-cbc -pbkdf2 -iter 600000 -salt -pass "file:$BACKUP_PASSPHRASE_FILE" -in "$tmp" -out "${tmp}.enc"
+  of_encrypt "$BACKUP_PASSPHRASE_FILE" "$tmp" "${tmp}.enc"
   mv "${tmp}.enc" "$tmp"
 fi
 mv "$tmp" "$out"
@@ -56,7 +60,7 @@ if [ -n "${BACKUP_PASSPHRASE_FILE:-}" ]; then
   keyout="${base}.server-key.tar.enc"
   if docker compose ps --status running --services 2>/dev/null | grep -qx api \
      && docker compose exec -T api tar -C /data/server-device -cf - . 2>/dev/null \
-        | openssl enc -aes-256-cbc -pbkdf2 -iter 600000 -salt -pass "file:$BACKUP_PASSPHRASE_FILE" -out "${keyout}.partial" \
+        | of_encrypt "$BACKUP_PASSPHRASE_FILE" - "${keyout}.partial" \
      && [ -s "${keyout}.partial" ]; then
     mv "${keyout}.partial" "$keyout"
     echo "Server key written: $keyout (encrypted; restore with scripts/restore-server-key.sh)"

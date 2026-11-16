@@ -1,0 +1,31 @@
+# Reviewed false positives (test fixtures, doc examples, config key names).
+# Format: commit:file:rule:line. Each was inspected; none is a real secret.
+6d03badb6ec8ed45934b3f80ada0504627735a62:backend/web/docs/design/E2EE.md:generic-api-key:516
+1ab0530fc6214716e217497f5f9ea6d6dc783a7e:backend/web/docs/design/E2EE.md:generic-api-key:516
+748768482223f087e979d4443e7d4a5dabc13a62:backend/web/docs/design/E2EE.md:generic-api-key:513
+456d53ec60d2a93036e4de9051083ab9d6ece370:backend/internal/atrest/atrest_test.go:generic-api-key:8
+828f081fcbbe440c7cc53d6c75903c7f81f4d43e:docs/design/E2EE.md:generic-api-key:505
+45a37d0bb9331a433c3082fb14bc21f83b7ecfcd:backend/internal/e2ee/testdata/lanes.json:generic-api-key:11
+45a37d0bb9331a433c3082fb14bc21f83b7ecfcd:backend/internal/e2ee/testdata/lanes.json:generic-api-key:19
+45a37d0bb9331a433c3082fb14bc21f83b7ecfcd:backend/internal/e2ee/testdata/lanes.json:generic-api-key:27
+45a37d0bb9331a433c3082fb14bc21f83b7ecfcd:backend/internal/e2ee/testdata/lanes.json:generic-api-key:352
+45a37d0bb9331a433c3082fb14bc21f83b7ecfcd:backend/internal/e2ee/testdata/lanes.json:generic-api-key:369
+45a37d0bb9331a433c3082fb14bc21f83b7ecfcd:backend/internal/e2ee/testdata/lanes.json:generic-api-key:386
+45a37d0bb9331a433c3082fb14bc21f83b7ecfcd:backend/internal/e2ee/testdata/lanes.json:generic-api-key:403
+45a37d0bb9331a433c3082fb14bc21f83b7ecfcd:backend/internal/e2ee/testdata/lanes.json:generic-api-key:420
+45a37d0bb9331a433c3082fb14bc21f83b7ecfcd:backend/internal/e2ee/testdata/lanes.json:generic-api-key:437
+45a37d0bb9331a433c3082fb14bc21f83b7ecfcd:backend/internal/e2ee/testdata/lanes.json:generic-api-key:454
+45a37d0bb9331a433c3082fb14bc21f83b7ecfcd:backend/internal/e2ee/testdata/lanes.json:generic-api-key:471
+45a37d0bb9331a433c3082fb14bc21f83b7ecfcd:backend/internal/e2ee/testdata/lanes.json:generic-api-key:488
+45a37d0bb9331a433c3082fb14bc21f83b7ecfcd:backend/internal/e2ee/testdata/lanes.json:generic-api-key:505
+45a37d0bb9331a433c3082fb14bc21f83b7ecfcd:backend/internal/e2ee/testdata/lanes.json:generic-api-key:522
+45a37d0bb9331a433c3082fb14bc21f83b7ecfcd:backend/internal/e2ee/testdata/lanes.json:generic-api-key:539
+981aaa662dca21dd0d5d02996de1cdd7ae38406a:web/test/age.test.mjs:age-secret-key:9
+dfe8eb1f3d528a86fca7d8b94fc9a6ac59497ddc:integrations/home_assistant/custom_components/openfamily/sensor.py:generic-api-key:76
+dfe8eb1f3d528a86fca7d8b94fc9a6ac59497ddc:integrations/home_assistant/custom_components/openfamily/sensor.py:generic-api-key:77
+dfe8eb1f3d528a86fca7d8b94fc9a6ac59497ddc:integrations/home_assistant/tests/fake_server.py:generic-api-key:10
+e35e488c29e7e59a27cfcfb22a4b7ccacb12f4ae:backend/internal/e2ee/testdata/vectors.json:generic-api-key:8
+e35e488c29e7e59a27cfcfb22a4b7ccacb12f4ae:backend/internal/e2ee/testdata/vectors.json:generic-api-key:21
+e35e488c29e7e59a27cfcfb22a4b7ccacb12f4ae:backend/internal/e2ee/testdata/vectors.json:generic-api-key:66
+4410b720d5fddea30b19f0c70904d3f0ccbec092:backend/internal/config/config_test.go:generic-api-key:32
+06ed4c0ef5a3253e655d2365bda911094740d66c:backend/internal/config/config_test.go:generic-api-key:32

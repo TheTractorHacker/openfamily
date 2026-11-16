@@ -378,15 +378,14 @@ func TestE2EECircleLifecycleAndEpochs(t *testing.T) {
 			}
 		}
 	}
-	// Disable keeps the epoch counter; re-enable continues from it.
+	// A private circle can never be disabled: not by a member (403), not by its
+	// admin (409); mode and epoch are untouched.
 	e.mustCode("B", "POST", "/circles/"+c+"/e2ee/disable", simpleAction(t, e2ee.ActDisable, b, c, 2, "", nil), 403)
-	e.mustCode("A", "POST", "/circles/"+c+"/e2ee/disable", simpleAction(t, e2ee.ActDisable, a, c, 2, "", nil), 200)
+	e.mustCode("A", "POST", "/circles/"+c+"/e2ee/disable", simpleAction(t, e2ee.ActDisable, a, c, 2, "", nil), 409)
 	st = e.mustCode("A", "GET", "/circles/"+c+"/e2ee", nil, 200)
-	if st["mode"] != "off" || st["epoch"].(float64) != 2 {
-		t.Fatalf("after disable: %v", st)
+	if st["mode"] != "private" || st["epoch"].(float64) != 2 {
+		t.Fatalf("after refused disable: %v", st)
 	}
-	e.mustCode("A", "POST", "/circles/"+c+"/e2ee/enable", epochBody(t, e2ee.ActEnable, c, 1, a, mkWrap(t, c, 1, a, a, key1)), 409)
-	e.mustCode("A", "POST", "/circles/"+c+"/e2ee/enable", epochBody(t, e2ee.ActEnable, c, 3, a, mkWrap(t, c, 3, a, a, key1)), 200)
 }
 
 func TestE2EEReplacementDeviceNeedsApproval(t *testing.T) {

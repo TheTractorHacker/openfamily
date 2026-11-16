@@ -9,7 +9,8 @@ How a circle admin invites family or friends with a code or link, and how they j
 
 ![Invite your people](../images/app/invite.png)
 
-Codes expire and can be revoked. A server admin can also see and revoke open
+Codes expire and can be revoked. A new member sees circle history only from the
+moment they join, not what was shared before. A server admin can also see and revoke open
 invites on the admin web **Groups** page. Never post an invite code in a
 public place.
 
@@ -31,6 +32,10 @@ If that email already has an account, nothing changes (the page looks the same o
 ### Server admins: add an account to a circle
 
 On the admin web **Circles** page, open a circle, choose an account under **Add an account…** and tap **Add**. Use this for an account you created yourself. Typing a code on the Groups page only ever joins the account you are signed in with.
+
+Too many wrong codes are locked out for a while (HTTP 429, "too many attempts"):
+per code, per signed-in person and across the whole server. Wait about 15
+minutes (an hour for the server-wide limit) before trying again.
 
 If the code is refused: check it was typed exactly, that it has not expired,
 and that you are on the correct server. Ask the admin for a fresh code.

@@ -104,6 +104,9 @@ func (e *tripEnv) user(name string, fam string) string {
 	e.must(e.pool.QueryRow(context.Background(),
 		`INSERT INTO users (email, name, password_hash, family_id) VALUES ($1,$2,'x',NULLIF($3,'')::uuid) RETURNING id::text`,
 		fmt.Sprintf("%s-%d@trips.test", name, time.Now().UnixNano()), name, fam).Scan(&id))
+	// long-standing member (history is readable only from the join time on)
+	_, err := e.pool.Exec(context.Background(), `UPDATE circle_members SET joined_at = now() - interval '200 days' WHERE user_id = $1`, id)
+	e.must(err)
 	return id
 }
 

@@ -2,6 +2,8 @@ package apkrelease
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -244,10 +246,11 @@ func TestSyncDownloadsAndCaches(t *testing.T) {
 			_ = json.NewEncoder(w).Encode([]release{{
 				TagName: "v0.1.0",
 				Assets: []asset{{
-					ID:   42,
-					Name: "openfamily-release.apk",
-					URL:  "http://" + r.Host + "/assets/42",
-					Size: 4,
+					ID:     42,
+					Name:   "openfamily-release.apk",
+					URL:    "http://" + r.Host + "/assets/42",
+					Size:   4,
+					Digest: sha256Hex("apk!"),
 				}},
 			}})
 		case r.URL.Path == "/assets/42":
@@ -308,9 +311,10 @@ func TestSyncRedownloadsWhenAssetChanges(t *testing.T) {
 			_ = json.NewEncoder(w).Encode([]release{{
 				TagName: "v0.1.0",
 				Assets: []asset{{
-					ID:   id,
-					Name: "openfamily-release.apk",
-					URL:  "http://" + r.Host + "/assets/" + strconv.FormatInt(id, 10),
+					ID:     id,
+					Name:   "openfamily-release.apk",
+					URL:    "http://" + r.Host + "/assets/" + strconv.FormatInt(id, 10),
+					Digest: sha256Hex("apk-" + strconv.FormatInt(id, 10)),
 				}},
 			}})
 		case strings.HasPrefix(r.URL.Path, "/assets/"):
@@ -521,5 +525,95 @@ func TestPickAPKAssetPrefersCombinedThenArm64(t *testing.T) {
 	})
 	if err != nil || got.ID != 3 {
 		t.Fatalf("arm64 should win without a combined APK, got %+v %v", got, err)
+	}
+}
+
+func sha256Hex(s string) string {
+	h := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(h[:])
+}
+
+// syncServer serves one release with the given extra assets and the given
+// body for the APK; sums is the SHA256SUMS content ("" = no such asset).
+func syncServer(t *testing.T, body, digest, sums string) (Options, *atomic.Int32) {
+	t.Helper()
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/acme/app/releases":
+			assets := []asset{{ID: 7, Name: "orbitly-0.1.0.apk", URL: "http://" + r.Host + "/assets/apk", Digest: digest}}
+			if sums != "" {
+				assets = append(assets, asset{ID: 8, Name: "SHA256SUMS.txt", URL: "http://" + r.Host + "/assets/sums"})
+			}
+			_ = json.NewEncoder(w).Encode([]release{{TagName: "v0.1.0", Assets: assets}})
+		case "/assets/apk":
+			hits.Add(1)
+			_, _ = io.WriteString(w, body)
+		case "/assets/sums":
+			_, _ = io.WriteString(w, sums)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return Options{Repo: "acme/app", DestDir: t.TempDir(), API: srv.URL, Client: srv.Client()}, &hits
+}
+
+func TestSyncVerifiesAgainstSHA256SUMS(t *testing.T) {
+	good := sha256Hex("real-apk") + "  orbitly-0.1.0.apk\n"
+	opts, _ := syncServer(t, "real-apk", "", good)
+	path, err := Sync(context.Background(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(path); string(b) != "real-apk" {
+		t.Fatalf("cache = %q", b)
+	}
+}
+
+func TestSyncRefusesChecksumMismatch(t *testing.T) {
+	sums := sha256Hex("real-apk") + "  orbitly-0.1.0.apk\n"
+	opts, _ := syncServer(t, "tampered-apk", "", sums)
+	if _, err := Sync(context.Background(), opts); !errors.Is(err, ErrChecksum) {
+		t.Fatalf("want ErrChecksum, got %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(opts.DestDir, cachedName)); err == nil {
+		t.Fatal("a mismatching file must not be cached")
+	}
+}
+
+func TestSyncRefusesWhenNoChecksumPublished(t *testing.T) {
+	opts, _ := syncServer(t, "apk", "", "")
+	if _, err := Sync(context.Background(), opts); !errors.Is(err, ErrChecksum) {
+		t.Fatalf("want ErrChecksum, got %v", err)
+	}
+}
+
+func TestSyncRefusesDisagreeingChecksumSources(t *testing.T) {
+	sums := sha256Hex("apk") + "  orbitly-0.1.0.apk\n"
+	opts, _ := syncServer(t, "apk", "sha256:"+sha256Hex("other"), sums)
+	if _, err := Sync(context.Background(), opts); !errors.Is(err, ErrChecksum) {
+		t.Fatalf("want ErrChecksum, got %v", err)
+	}
+}
+
+func TestSyncDetectsTamperedCache(t *testing.T) {
+	sums := sha256Hex("apk") + "  orbitly-0.1.0.apk\n"
+	opts, hits := syncServer(t, "apk", "", sums)
+	path, err := Sync(context.Background(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Sync(context.Background(), opts); err != nil || hits.Load() != 1 {
+		t.Fatalf("intact cache must be reused: err=%v hits=%d", err, hits.Load())
+	}
+	if err := os.WriteFile(path, []byte("evil"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Sync(context.Background(), opts); err != nil || hits.Load() != 2 {
+		t.Fatalf("tampered cache must be re-downloaded: err=%v hits=%d", err, hits.Load())
+	}
+	if b, _ := os.ReadFile(path); string(b) != "apk" {
+		t.Fatalf("cache not restored: %q", b)
 	}
 }

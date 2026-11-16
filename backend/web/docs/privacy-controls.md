@@ -20,6 +20,14 @@ that family's admins see it in `GET /audit`. Repeated identical reads inside a
 minute collapse into one row. Tests: `handlers/admin_location_policy_test.go`,
 `handlers/audit_view_test.go`.
 
+## Dawarich export
+
+The server-side Dawarich export (admin **Settings > Integrations**) reads member
+locations, so it follows the same switch: it needs `ADMIN_LOCATION_ACCESS=true`
+and is refused otherwise. Every export is written to the audit log, and
+Private circles are never exported by the server (it holds only ciphertext
+there). See [Dawarich](design/DAWARICH.md).
+
 ## Private (end-to-end encrypted) circles and admin access
 
 For a Private circle the server holds ciphertext only, so `ADMIN_LOCATION_ACCESS`

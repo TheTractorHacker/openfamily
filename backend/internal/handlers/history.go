@@ -162,6 +162,18 @@ func (s *Server) memberHistoryForViewer(ctx context.Context, viewerID, memberID 
 	if callerFamily != "" && callerFamily == targetFamily {
 		placesFamily = targetFamily
 	}
+	// A new circle member reads another member's history only from their own
+	// join time onward (their own history is never limited).
+	if viewerID != memberID {
+		floor, err := s.historyFloorIn(ctx, viewerID, shared)
+		if err != nil {
+			return historyOut{}, http.StatusInternalServerError, "failed to check sharing"
+		}
+		from = clampFrom(from, floor)
+		if !to.After(from) {
+			return historyOut{UserID: memberID, From: from, To: to, Trail: []trailPoint{}, Visits: []historyVisit{}}, http.StatusOK, ""
+		}
+	}
 	out, err := s.buildMemberHistory(ctx, memberID, placesFamily, from, to)
 	if err != nil {
 		return historyOut{}, http.StatusInternalServerError, "failed to load history"

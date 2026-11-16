@@ -8,6 +8,8 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
+# shellcheck source=scripts/lib-crypt.sh
+. scripts/lib-crypt.sh
 
 file="${1:-}"; yes="${2:-}"
 [ -n "$file" ] && [ -f "$file" ] || { echo "usage: $0 <file>.server-key.tar.enc [--yes]" >&2; exit 2; }
@@ -19,8 +21,7 @@ if [ "$yes" != "--yes" ]; then
 fi
 plain="$(mktemp)"; chmod 600 "$plain"
 trap 'rm -f "$plain"' EXIT
-openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -pass "file:$BACKUP_PASSPHRASE_FILE" -in "$file" -out "$plain" \
-  || { echo "error: decryption failed (wrong passphrase?)" >&2; exit 1; }
+of_decrypt "$BACKUP_PASSPHRASE_FILE" "$file" "$plain" || exit 1
 tar -tf "$plain" >/dev/null 2>&1 || { echo "error: the decrypted file is not an archive" >&2; exit 1; }
 echo "Stopping api..."
 docker compose stop api

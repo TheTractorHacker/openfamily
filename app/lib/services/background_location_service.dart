@@ -9,6 +9,7 @@ import 'package:background_locator_2/settings/locator_settings.dart';
 import 'package:battery_plus/battery_plus.dart';
 import 'package:geolocator/geolocator.dart'
     hide AndroidSettings, LocationAccuracy;
+import 'package:geolocator/geolocator.dart' as geo show LocationAccuracy;
 import 'package:http/http.dart' as http;
 
 import 'background_credential_store.dart';
@@ -103,6 +104,7 @@ Future<void> onHeartbeatTick() async {
     // does not need the network, but it runs AFTER the heartbeat so that a stuck platform call can never keep the
     // "last seen" heartbeat from going out.
     await _drainParkedOnTick(credentials);
+    await _probePositionIfQuiet();
     await _heartbeatSend(credentials);
     if (!ok) {
       await _stats.flush();
@@ -128,6 +130,45 @@ Future<void> onHeartbeatTick() async {
     unawaited(_stats.flush());
   }
 }
+
+/// When this tick finds no fix received for a few minutes (doze deferred the
+/// stream), asks for a one-shot position and feeds it through [onLocationUpdate],
+/// i.e. the same quality filter and send policy as a streamed fix. Android only;
+/// bounded in time; never throws.
+Future<void> _probePositionIfQuiet() async {
+  try {
+    final DateTime now = DateTime.now().toUtc();
+    if (!shouldProbePosition(
+        now: now, lastFixAt: _lastFixReceivedAt, isAndroid: Platform.isAndroid)) {
+      return;
+    }
+    final Position p = await Geolocator.getCurrentPosition(
+      locationSettings: const LocationSettings(
+        accuracy: geo.LocationAccuracy.medium,
+        timeLimit: _probeTimeout,
+      ),
+    ).timeout(_probeTimeout + const Duration(seconds: 5));
+    await onLocationUpdate(LocationDto.fromJson(probeFixJson(
+      latitude: p.latitude,
+      longitude: p.longitude,
+      accuracy: p.accuracy,
+      altitude: p.altitude,
+      speed: p.speed,
+      speedAccuracy: p.speedAccuracy,
+      heading: p.heading,
+      time: p.timestamp,
+      isMocked: p.isMocked,
+    )));
+  } catch (e) {
+    // No fix in time, no permission, plugin missing: the next tick tries again.
+    _stats.noteError('heartbeat_probe', e);
+  }
+}
+
+const Duration _probeTimeout = Duration(seconds: 20);
+
+/// When this isolate last received a fix (stream or probe).
+DateTime? _lastFixReceivedAt;
 
 /// Heartbeat-driven flush of aged held points, or a refresh of the freshest
 /// cached fix when nothing was sent for a while. Never throws.
@@ -448,6 +489,7 @@ Future<void> onLocationUpdate(LocationDto location) async {
   try {
     // Skip spoofed locations (Android mock-location detection).
     if (location.isMocked) return;
+    _lastFixReceivedAt = DateTime.now().toUtc();
     _stats.count(TrackCounter.received);
     DirectPushService.ensureRunningInBackground();
     _initCadence();

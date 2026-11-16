@@ -38,13 +38,14 @@ func TestDawarichExportNeverCarriesAPhoneLaneMember(t *testing.T) {
 		return out
 	}
 	got := users()
-	if !got[e.ids["A"]] || !got[e.ids["B"]] || got[e.ids["C"]] {
-		t.Fatalf("export reaches %v; want A and B but not the phone-lane member C", got)
+	// Private-circle data is never exported, not even for server-lane members.
+	if got[e.ids["A"]] || got[e.ids["B"]] || got[e.ids["C"]] {
+		t.Fatalf("export reaches %v; a private circle's members must never be exported", got)
 	}
 	// B opts out: the purge removes B's copies in the same transaction, so B leaves the export too.
 	e.setLane("B", e.b, "phone", 0, 200)
 	got = users()
-	if got[e.ids["B"]] || got[e.ids["C"]] || !got[e.ids["A"]] {
+	if got[e.ids["B"]] || got[e.ids["C"]] || got[e.ids["A"]] {
 		t.Fatalf("after B opted out the export reaches %v", got)
 	}
 	// ...and a later fix of B is refused by ingest, so it cannot be exported either.
@@ -92,8 +93,8 @@ func TestPlantedLocationOfPhoneLaneMemberIsNotExported(t *testing.T) {
 			aRows++
 		}
 	}
-	if aRows < 1 || cRows != 1 {
-		t.Fatalf("dawarich batch: server-lane rows %d (want >=1), C untagged rows %d (want 1)", aRows, cRows)
+	if aRows != 0 || cRows != 1 {
+		t.Fatalf("dawarich batch: private-circle rows %d (want 0), C untagged rows %d (want 1)", aRows, cRows)
 	}
 	hist, err := e.srv.loadHistoryPoints(ctx, e.ids["C"], now.Add(-time.Hour), now)
 	if err != nil {

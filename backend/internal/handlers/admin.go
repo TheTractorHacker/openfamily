@@ -270,18 +270,44 @@ func (s *Server) BootstrapPlatformAdmin(ctx context.Context, email, password str
 		return
 	}
 
-	// Promote an existing user (idempotent).
-	tag, err := s.Pool.Exec(ctx,
-		`UPDATE users SET platform_admin = TRUE, updated_at = now() WHERE lower(email) = $1`,
-		email)
-	if err != nil {
-		slog.Error("platform admin bootstrap failed", "email", email, "err", err)
+	// Promote an existing user (idempotent). There is no email verification,
+	// so an invitee could register the configured address before the operator
+	// does; promoting by email alone would hand them the server. An existing,
+	// not-yet-admin account is therefore promoted only when the operator proves
+	// control of it with the configured PLATFORM_ADMIN_PASSWORD (it must match
+	// that account's password). Already-promoted accounts are left as they are.
+	var existingID, existingHash string
+	var alreadyAdmin bool
+	err := s.Pool.QueryRow(ctx,
+		`SELECT id::text, password_hash, platform_admin FROM users WHERE lower(email) = $1`,
+		email).Scan(&existingID, &existingHash, &alreadyAdmin)
+	if err == nil {
+		if alreadyAdmin {
+			return
+		}
+		ok := false
+		if password != "" {
+			ok, _ = auth.VerifyPassword(password, existingHash)
+		}
+		if !ok {
+			slog.Error("platform admin bootstrap refused: an account with PLATFORM_ADMIN_EMAIL exists but is not a platform admin, and PLATFORM_ADMIN_PASSWORD does not match its password. Set PLATFORM_ADMIN_PASSWORD to that account's current password to promote it, or promote it from the admin panel with another admin",
+				"email", email)
+			s.logAudit(ctx, "", "", "admin.platform_admin_bootstrap_refused",
+				"refused to promote existing account "+email+": configured secret did not match", "")
+			return
+		}
+		if _, err := s.Pool.Exec(ctx,
+			`UPDATE users SET platform_admin = TRUE, updated_at = now() WHERE id = $1`, existingID); err != nil {
+			slog.Error("platform admin bootstrap failed", "email", email, "err", err)
+			return
+		}
+		slog.Info("platform admin promoted", "email", email)
+		s.logAudit(ctx, existingID, "", "admin.platform_admin_bootstrap",
+			"promoted "+email+" to platform admin via PLATFORM_ADMIN_EMAIL (secret verified)", "")
 		return
 	}
-	if tag.RowsAffected() > 0 {
-		slog.Info("platform admin promoted", "email", email)
-		s.logAudit(ctx, "", "", "admin.platform_admin_bootstrap",
-			"promoted "+email+" to platform admin via PLATFORM_ADMIN_EMAIL", "")
+	if !errors.Is(err, pgx.ErrNoRows) {
+		slog.Error("platform admin bootstrap failed", "email", email, "err", err)
 		return
 	}
 

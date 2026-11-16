@@ -23,6 +23,9 @@ Doing it by hand instead: copy `.env.example` to `.env` and set
 3. `APP_ENV=production` and `DB_SSL_DISABLE_OK=true` (see Database TLS below).
 4. `PLATFORM_ADMIN_EMAIL` and `PLATFORM_ADMIN_PASSWORD`. This creates the
    first admin and **closes open registration** (invite codes required).
+   If an account with `PLATFORM_ADMIN_EMAIL` already exists and is not yet an
+   admin, it is promoted only when `PLATFORM_ADMIN_PASSWORD` matches that
+   account's password; otherwise the promotion is refused and audited.
 
 ## Optional components (compose profiles)
 
