@@ -959,7 +959,7 @@ func (s *Server) JoinCircle(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "code is required")
 		return
 	}
-	if s.inviteLocked(w, code, uid) {
+	if s.inviteLocked(w, r, code, uid) {
 		return
 	}
 

@@ -263,7 +263,7 @@ func (s *Server) JoinFamily(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "code is required")
 		return
 	}
-	if s.inviteLocked(w, normalizeCode(code), claims.UserID) {
+	if s.inviteLocked(w, r, normalizeCode(code), claims.UserID) {
 		return
 	}
 

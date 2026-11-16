@@ -72,6 +72,11 @@ func (s *Server) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Guard before any DB resources are held (a storm delay may sleep here).
+	if req.InviteCode != "" && s.inviteLocked(w, r, normalizeCode(req.InviteCode), "") {
+		return
+	}
+
 	tx, err := s.Pool.Begin(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to begin transaction")
@@ -85,9 +90,6 @@ func (s *Server) Register(w http.ResponseWriter, r *http.Request) {
 	joinCircleRole := models.RoleMember
 	role := models.RoleMember
 	if req.InviteCode != "" {
-		if s.inviteLocked(w, normalizeCode(req.InviteCode), "") {
-			return
-		}
 		fid, cid, rl, err := s.redeemInviteCode(r.Context(), tx, req.InviteCode, true)
 		if err != nil {
 			var ie *inviteError

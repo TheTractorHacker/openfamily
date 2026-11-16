@@ -1,0 +1,1 @@
+Invite joins keep working during a flood of wrong codes, while guessing stays slow from any number of addresses. Sign-up no longer ties up the server while waiting.

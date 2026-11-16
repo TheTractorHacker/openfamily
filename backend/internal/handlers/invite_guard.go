@@ -33,10 +33,43 @@ func inviteUserKey(uid string) string { return "invite:fail:user:" + uid }
 
 const inviteGlobalKey = "invite:fail:global"
 
+// During a guessing storm every attempt passes through one gate, one at a time
+// with a delay, so the server-wide guess rate is capped (about 1.3/s) however
+// many addresses the attacker has. Valid joins queue behind it instead of being
+// refused; only when more than inviteStormQueue are already waiting does a new
+// arrival get a 429 (bounded memory, never a lock-out of the whole server).
+const inviteStormQueue = 32
+
+var (
+	inviteStormGate = make(chan struct{}, 1)
+	inviteStormWait = make(chan struct{}, inviteStormQueue)
+)
+
+func inviteStormPass(r *http.Request) bool {
+	select {
+	case inviteStormWait <- struct{}{}:
+	default:
+		return false
+	}
+	defer func() { <-inviteStormWait }()
+	select {
+	case inviteStormGate <- struct{}{}:
+	case <-r.Context().Done():
+		return false
+	}
+	defer func() { <-inviteStormGate }()
+	select {
+	case <-time.After(inviteStormDelay):
+		return true
+	case <-r.Context().Done():
+		return false
+	}
+}
+
 // inviteLocked answers 429 (generic text) when this code, this user, or the
 // server as a whole has used up its failed-redemption budget. It consumes
 // nothing. uid may be empty (sign-up).
-func (s *Server) inviteLocked(w http.ResponseWriter, code, uid string) bool {
+func (s *Server) inviteLocked(w http.ResponseWriter, r *http.Request, code, uid string) bool {
 	l := s.AuthLimit
 	if l == nil {
 		return false
@@ -50,7 +83,10 @@ func (s *Server) inviteLocked(w http.ResponseWriter, code, uid string) bool {
 	// attacker stop every legitimate join); during a guessing storm it only
 	// slows every attempt down.
 	if l.Exceeded(inviteGlobalKey, inviteFailGlobal, inviteFailGlobalWin) {
-		time.Sleep(inviteStormDelay)
+		if !inviteStormPass(r) {
+			writeError(w, http.StatusTooManyRequests, "too many attempts, try again later")
+			return true
+		}
 	}
 	return false
 }
