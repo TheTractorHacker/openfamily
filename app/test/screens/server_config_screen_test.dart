@@ -21,4 +21,23 @@ void main() {
     expect(find.text('Enter a valid HTTPS server URL.'), findsOneWidget);
     expect(ServerConfig.instance.isConfigured, isFalse);
   });
+
+  testWidgets('changing host while configured signs out first', (tester) async {
+    await ServerConfig.instance.setUrl('https://old.example.com');
+    int signOuts = 0;
+    String? urlAtSignOut;
+    await tester.pumpWidget(MaterialApp(
+      home: ServerConfigScreen(signOut: () async {
+        signOuts++;
+        urlAtSignOut = ServerConfig.instance.apiBaseUrl;
+      }),
+    ));
+    await tester.enterText(find.byType(TextField), 'https://new.example.com');
+    await tester.tap(find.text('Connect'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(signOuts, 1);
+    expect(urlAtSignOut, contains('old.example.com'));
+  });
 }

@@ -173,3 +173,64 @@ func TestHubWatchKeepsSocketOnCheckError(t *testing.T) {
 	}
 	c.close()
 }
+
+func TestHubCapUserSocketsClosesOldest(t *testing.T) {
+	h := newHub()
+	base := time.Now()
+	var cs []*wsClient
+	for i := 0; i < 5; i++ {
+		c := testWSClient()
+		c.since = base.Add(time.Duration(i) * time.Second)
+		h.register("fam", "u1", c)
+		cs = append(cs, c)
+	}
+	other := testWSClient()
+	h.register("fam", "u2", other)
+	h.capUserSockets("u1", 3)
+	if !wsClientClosed(cs[0]) || !wsClientClosed(cs[1]) {
+		t.Fatal("oldest sockets not closed")
+	}
+	if wsClientClosed(cs[2]) || wsClientClosed(cs[3]) || wsClientClosed(cs[4]) || wsClientClosed(other) {
+		t.Fatal("newer or foreign sockets closed")
+	}
+}
+
+func TestHubDisconnectSessionOnlyThatSid(t *testing.T) {
+	h := newHub()
+	a, b, admin, other := testWSClient(), testWSClient(), testWSClient(), testWSClient()
+	a.sid, b.sid, admin.sid, other.sid = "s1", "s2", "s1", "s1"
+	h.register("fam", "u1", a)
+	h.register("fam", "u1", b)
+	admin.userID = "u1"
+	h.registerAdmin(admin)
+	h.register("fam", "u2", other)
+	h.disconnectSession("u1", "s1")
+	if !wsClientClosed(a) || !wsClientClosed(admin) {
+		t.Fatal("session sockets not closed")
+	}
+	if wsClientClosed(b) || wsClientClosed(other) {
+		t.Fatal("other session/user socket closed")
+	}
+}
+
+func TestSubscribeLimiter(t *testing.T) {
+	var l subscribeLimiter
+	now := time.Now()
+	if w, _ := l.allow(now); w != 0 {
+		t.Fatal("first frame must pass")
+	}
+	// A quick second frame is delayed to the next slot, not dropped.
+	w, abuse := l.allow(now.Add(100 * time.Millisecond))
+	if abuse || w <= 0 || w > subscribeMinInterval {
+		t.Fatalf("second frame wait=%v abuse=%v, want delayed", w, abuse)
+	}
+	for i := 0; i < subscribeMaxStrikes; i++ {
+		_, abuse = l.allow(now.Add(110 * time.Millisecond))
+	}
+	if !abuse {
+		t.Fatal("flood did not trigger close")
+	}
+	if w, a := l.allow(now.Add(20 * time.Second)); w != 0 || a {
+		t.Fatal("frame after quiet interval must pass")
+	}
+}

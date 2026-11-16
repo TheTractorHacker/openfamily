@@ -14,11 +14,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5"
 	"github.com/TheTractorHacker/openfamily/backend/internal/circles"
 	"github.com/TheTractorHacker/openfamily/backend/internal/config"
 	"github.com/TheTractorHacker/openfamily/backend/internal/middleware"
+	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 )
 
 // "Share your live location with anyone": a revocable, expiring link whose
@@ -186,6 +186,21 @@ func (s *Server) DeleteShareLink(w http.ResponseWriter, r *http.Request) {
 	}
 	s.auditSharing(r, claims.UserID, "sharelink.revoke", "stopped share link "+id)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// revokeShareLinks ends every active public share link of a user.
+//
+// Rule: a public link is a bearer credential for the owner's live location, so
+// it must not outlive the credential events that already kill sessions, ingest
+// keys and sockets: password change, password reset and logout-all (a plain
+// single-device logout and per-session revoke leave links alone, as the owner
+// may be sharing deliberately from another device). Links are not tied to a
+// session, so we revoke all of them rather than try to attribute them.
+func (s *Server) revokeShareLinks(ctx context.Context, userID string) error {
+	_, err := s.Pool.Exec(ctx, `
+		UPDATE share_links SET revoked_at = now()
+		WHERE user_id = $1 AND revoked_at IS NULL`, userID)
+	return err
 }
 
 // purgeExpiredShareLinks drops links a week after they ended.

@@ -6,8 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"image"
-	_ "image/jpeg" // Register the JPEG decoder for image.DecodeConfig.
-	_ "image/png"  // Register the PNG decoder for image.DecodeConfig.
+	"image/jpeg"
+	"image/png"
 	"io"
 	"mime"
 	"net/http"
@@ -30,7 +30,47 @@ const (
 	// pixels. Both the width/height and total-pixel limits prevent image-bomb
 	// dimensions before any full image decode is attempted.
 	avatarMaxPixels int64 = 12_000_000
+	// Stricter cap for profile avatars (chat photos share validateAvatarUpload
+	// and keep the 12 MP limit). Checked from the header before any decode.
+	avatarProfileMaxPixels int64 = 4_000_000
+	avatarPutPerHour             = 20
 )
+
+// avatarDecodeSlots bounds concurrent full image decodes for avatar uploads so
+// a burst of highly compressible images cannot exhaust container memory.
+var avatarDecodeSlots = make(chan struct{}, 2)
+
+// prepareAvatar enforces the avatar pixel cap from the header, validates the
+// image, then re-encodes it so EXIF/GPS metadata and trailing data are not
+// stored (avatars are served to anonymous share-link viewers).
+func prepareAvatar(raw []byte, declaredContentType string) ([]byte, string, error) {
+	if cfg, _, err := image.DecodeConfig(bytes.NewReader(raw)); err == nil {
+		if int64(cfg.Width)*int64(cfg.Height) > avatarProfileMaxPixels {
+			return nil, "", errAvatarInvalidDimensions
+		}
+	}
+	avatarDecodeSlots <- struct{}{}
+	defer func() { <-avatarDecodeSlots }()
+
+	ct, err := validateAvatarUpload(raw, declaredContentType)
+	if err != nil {
+		return nil, "", err
+	}
+	img, _, err := image.Decode(bytes.NewReader(raw))
+	if err != nil {
+		return nil, "", errAvatarInvalidImage
+	}
+	var buf bytes.Buffer
+	if ct == "image/png" {
+		err = png.Encode(&buf, img)
+	} else {
+		err = jpeg.Encode(&buf, img, &jpeg.Options{Quality: 90})
+	}
+	if err != nil {
+		return nil, "", errAvatarInvalidImage
+	}
+	return buf.Bytes(), ct, nil
+}
 
 var (
 	errAvatarTooLarge               = errors.New("avatar image must not exceed 5 MiB")
@@ -443,6 +483,10 @@ func (s *Server) PutProfileAvatar(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !s.allowKey(w, "avatar:put:"+claims.UserID, avatarPutPerHour, time.Hour) {
+		return
+	}
+
 	declaredContentType, err := avatarContentType(r.Header.Get("Content-Type"))
 	if err != nil {
 		writeError(w, http.StatusUnsupportedMediaType, err.Error())
@@ -465,7 +509,7 @@ func (s *Server) PutProfileAvatar(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	contentType, err := validateAvatarUpload(avatar, declaredContentType)
+	avatar, contentType, err := prepareAvatar(avatar, declaredContentType)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return

@@ -31,11 +31,11 @@ type wsMember struct {
 	TS              *time.Time  `json:"ts"`
 	BatteryPct      *float64    `json:"battery_pct"`
 	// Charging: the phone was charging at its last report; omitted when unknown.
-	Charging        *bool       `json:"charging,omitempty"`
-	SpeedMPS        *float64    `json:"speed_mps"`
-	HeadingDeg      *float64    `json:"heading_deg"`
-	MotionState     *string     `json:"motion_state"`
-	AccuracyMeters  *float64    `json:"accuracy_meters"`
+	Charging       *bool    `json:"charging,omitempty"`
+	SpeedMPS       *float64 `json:"speed_mps"`
+	HeadingDeg     *float64 `json:"heading_deg"`
+	MotionState    *string  `json:"motion_state"`
+	AccuracyMeters *float64 `json:"accuracy_meters"`
 	// LastSeenAt is the most recent device heartbeat/ingest time across all of
 	// the member's devices. It can be newer than TS (the last stored
 	// position's timestamp) when the member is stationary and only heartbeats
@@ -96,6 +96,36 @@ type wsAvatarUpdate struct {
 	HasAvatar       bool       `json:"has_avatar"`
 	AvatarVersion   int64      `json:"avatar_version"`
 	AvatarUpdatedAt *time.Time `json:"avatar_updated_at"`
+}
+
+// Inbound subscribe frames: at most one per subscribeMinInterval per socket;
+// subscribeMaxStrikes over-rate frames close the socket.
+const (
+	subscribeMinInterval = time.Second
+	subscribeMaxStrikes  = 10
+)
+
+type subscribeLimiter struct {
+	last    time.Time
+	strikes int
+}
+
+// allow reserves a slot for a subscribe frame arriving at now. It returns how
+// long the caller must wait before applying the frame (0 when in budget), so
+// a quick circle switch is delayed rather than lost, and whether the socket
+// has flooded enough to be closed. Strikes reset after a quiet interval.
+func (l *subscribeLimiter) allow(now time.Time) (wait time.Duration, abuse bool) {
+	if d := now.Sub(l.last); d < subscribeMinInterval {
+		l.strikes++
+		if l.strikes >= subscribeMaxStrikes {
+			return 0, true
+		}
+		l.last = l.last.Add(subscribeMinInterval)
+		return l.last.Sub(now), false
+	}
+	l.strikes = 0
+	l.last = now
+	return 0, false
 }
 
 // Stream serves the live WebSocket stream at /ws/stream. It authenticates the
@@ -175,11 +205,17 @@ func (s *Server) Stream(w http.ResponseWriter, r *http.Request) {
 	conn.SetReadLimit(4096)
 
 	c := &wsClient{
-		conn: conn,
-		send: make(chan []byte, clientSendBuffer),
-		done: make(chan struct{}),
+		conn:  conn,
+		send:  make(chan []byte, clientSendBuffer),
+		done:  make(chan struct{}),
+		sid:   claims.SessionID,
+		since: time.Now(),
+	}
+	if claims.ExpiresAt != nil {
+		c.exp = claims.ExpiresAt.Time
 	}
 	s.hub.registerCircles(circleIDs, claims.UserID, c)
+	s.hub.capUserSockets(claims.UserID, maxSocketsPerUser)
 	s.noteWS(ctx, claims.UserID)
 	if aware {
 		s.hub.setSubscription(c, filter)
@@ -241,6 +277,7 @@ func (s *Server) Stream(w http.ResponseWriter, r *http.Request) {
 	// (including the ones writeLoop originates every 30s) are answered
 	// automatically by coder/websocket and never surface here. On disconnect
 	// or error the deferred cleanup unregisters the client and closes it.
+	var subLimit subscribeLimiter
 	for {
 		msgType, data, err := conn.Read(ctx)
 		if err != nil {
@@ -257,6 +294,21 @@ func (s *Server) Stream(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		if frame.Type == "subscribe" {
+			// One subscribe per second per socket; each costs ~6 queries.
+			// Excess frames are delayed (not dropped, so the last switch always
+			// wins); persistent flooding closes the socket.
+			wait, abuse := subLimit.allow(time.Now())
+			if abuse {
+				_ = conn.Close(websocket.StatusPolicyViolation, "too many subscribe frames")
+				return
+			}
+			if wait > 0 {
+				select {
+				case <-time.After(wait):
+				case <-ctx.Done():
+					return
+				}
+			}
 			s.handleSubscribe(ctx, c, claims.UserID, frame.CircleID)
 			continue
 		}
@@ -286,6 +338,9 @@ func (s *Server) Stream(w http.ResponseWriter, r *http.Request) {
 // membership, a backstop for any membership change that did not notify the hub
 // directly. A transient error leaves the socket as is.
 func (s *Server) circleStreamAuthorized(ctx context.Context, c *wsClient, userID string, version int) (bool, error) {
+	if ok, err := s.wsSessionValid(ctx, c); err != nil || !ok {
+		return false, err
+	}
 	var current int
 	err := s.Pool.QueryRow(ctx,
 		`SELECT token_version FROM users WHERE id = $1`, userID,

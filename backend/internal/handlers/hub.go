@@ -36,6 +36,12 @@ type wsClient struct {
 	// noLocation marks a platform-admin socket opened while admin location
 	// access is disabled: it never receives location-bearing frames.
 	noLocation bool
+	// exp is the expiry of the access token the socket was opened with and sid
+	// the refresh-session family it came from ("" on old tokens). The watcher
+	// closes the socket at exp or once the family is revoked.
+	exp   time.Time
+	sid   string
+	since time.Time
 }
 
 // close signals the writer goroutine to stop and closes the connection. It is
@@ -286,6 +292,100 @@ func (h *hub) disconnectFamilyUser(userID string) {
 	for _, c := range clients {
 		c.close()
 	}
+}
+
+// maxSocketsPerUser caps concurrent live streams (family or admin) per user.
+// Past it the oldest sockets are closed; legitimate clients use one or two.
+const maxSocketsPerUser = 8
+
+// capUserSockets closes the oldest sockets of userID beyond max. Called after
+// a new socket registered, so the newest connection always wins.
+func (h *hub) capUserSockets(userID string, max int) {
+	h.mu.Lock()
+	var all []*wsClient
+	for c := range h.familyUsers[userID] {
+		all = append(all, c)
+	}
+	for c := range h.admins {
+		if c.userID == userID {
+			all = append(all, c)
+		}
+	}
+	var drop []*wsClient
+	for len(all) > max {
+		oldest := 0
+		for i, c := range all {
+			if c.since.Before(all[oldest].since) {
+				oldest = i
+			}
+		}
+		drop = append(drop, all[oldest])
+		all = append(all[:oldest], all[oldest+1:]...)
+	}
+	for _, c := range drop {
+		h.unregisterFamilyClientLocked(c.familyID, c)
+		delete(h.admins, c)
+	}
+	h.mu.Unlock()
+	for _, c := range drop {
+		c.close()
+	}
+}
+
+// disconnectSession closes the sockets of userID that were opened with a token
+// from refresh family sid (session revoked, refresh token reuse detected).
+func (h *hub) disconnectSession(userID, sid string) {
+	if sid == "" {
+		return
+	}
+	h.mu.Lock()
+	var clients []*wsClient
+	for c := range h.familyUsers[userID] {
+		if c.sid == sid {
+			clients = append(clients, c)
+		}
+	}
+	for c := range h.admins {
+		if c.userID == userID && c.sid == sid {
+			clients = append(clients, c)
+		}
+	}
+	for _, c := range clients {
+		h.unregisterFamilyClientLocked(c.familyID, c)
+		delete(h.admins, c)
+	}
+	h.mu.Unlock()
+	for _, c := range clients {
+		c.close()
+	}
+}
+
+// dropSessionSockets is the Server-level, nil-hub-safe wrapper.
+func (s *Server) dropSessionSockets(userID, sid string) {
+	if s.hub != nil {
+		s.hub.disconnectSession(userID, sid)
+	}
+}
+
+// wsSessionValid reports whether the access token a socket was opened with is
+// still good: not past its exp, and (when it carries a sid) its refresh family
+// not revoked. A database error is transient and leaves the socket open.
+func (s *Server) wsSessionValid(ctx context.Context, c *wsClient) (bool, error) {
+	if !c.exp.IsZero() && !time.Now().Before(c.exp) {
+		return false, nil
+	}
+	if c.sid == "" {
+		return true, nil
+	}
+	var alive bool
+	err := s.Pool.QueryRow(ctx, `
+		SELECT EXISTS (SELECT 1 FROM refresh_sessions
+		               WHERE family_id = $1 AND user_id = $2 AND revoked_at IS NULL)`,
+		c.sid, c.userID).Scan(&alive)
+	if err != nil {
+		return false, err
+	}
+	return alive, nil
 }
 
 // disconnectUser closes every socket (family-scoped and platform-admin) that

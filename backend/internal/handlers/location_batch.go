@@ -85,6 +85,10 @@ func filterBatchPoints(points []batchPoint, now time.Time) (kept []batchPoint, r
 			rejected++
 			continue
 		}
+		if validateTelemetry(p.AccuracyMeters, p.AltitudeMeters, p.SpeedMPS, p.HeadingDeg, p.BatteryPct, p.MotionState, p.Source) != nil {
+			rejected++
+			continue
+		}
 		ts := p.TS
 		if ts == nil {
 			clone := now

@@ -26,7 +26,7 @@ import { ShareLinksPage } from './pages/ShareLinksPage'
 import { DocsPage } from './pages/DocsPage'
 import { EncryptionKeysPage } from './pages/EncryptionKeysPage'
 import { ROUTES, DEFAULT_ROUTE, routeFromHash, type RouteKey } from './lib/routes'
-import { clearTokens, getEmail, isAuthenticated, subscribeAuth } from './lib/auth'
+import { getEmail, isAuthenticated, signOut, subscribeAuth } from './lib/auth'
 import { useMe } from './lib/me'
 import { confirmLeave } from './lib/unsaved'
 import { useServerVersion } from './lib/serverVersion'
@@ -94,7 +94,7 @@ export default function App() {
   const navigate = React.useCallback((key: RouteKey) => open(`#/${key}`), [open])
 
   const logout = React.useCallback(() => {
-    clearTokens()
+    void signOut()
   }, [])
 
   if (!isAuthenticated()) {

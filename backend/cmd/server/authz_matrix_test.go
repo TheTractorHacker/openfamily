@@ -177,6 +177,8 @@ var publicRoutes = map[string]string{
 	"GET /integrations/ha/v1/places":   "scoped integration token (ofha_...); see TestAuthzMatrixHAAPI",
 	"GET /integrations/ha/v1/events":   "scoped integration token (ofha_...); see TestAuthzMatrixHAAPI",
 	"GET /join/{code}":                 "static invite landing page",
+	"GET /join":                        "static join entry page: a code box that redirects to /join/{code}, never touches the database",
+	"POST /join/{code}":                "web sign-up with an invite code: same Register path (rate limits, invite rules), no session issued",
 	"GET /privacy":                     "public privacy policy (store review, new members); static embedded text",
 	"GET /terms":                       "public terms of use; static embedded text",
 	"GET /invites/{code}/preview":      "public: privacy setup of the invited circle only; per-IP rate limit, generic 404",

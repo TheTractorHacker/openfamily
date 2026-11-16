@@ -174,9 +174,10 @@ func (s *Server) AdminAddCircleMember(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback(r.Context())
 
 	var familyBacked bool
+	var e2eeMode string
 	err = tx.QueryRow(r.Context(), `
-		SELECT EXISTS (SELECT 1 FROM families f WHERE f.id = c.id)
-		FROM circles c WHERE c.id = $1 AND `+circleLiveSQL+` FOR UPDATE OF c`, circleID).Scan(&familyBacked)
+		SELECT EXISTS (SELECT 1 FROM families f WHERE f.id = c.id), c.e2ee_mode
+		FROM circles c WHERE c.id = $1 AND `+circleLiveSQL+` FOR UPDATE OF c`, circleID).Scan(&familyBacked, &e2eeMode)
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, http.StatusNotFound, "circle not found or already ended")
 		return
@@ -185,14 +186,29 @@ func (s *Server) AdminAddCircleMember(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to load circle")
 		return
 	}
+	if e2eeMode == "private" {
+		// The server cannot grant membership of an end-to-end-encrypted circle: the members' phones
+		// would hand the circle key to the new account on first use. Members join by invite.
+		writeError(w, http.StatusConflict, "cannot add members to a private (end-to-end encrypted) circle; use an invite")
+		return
+	}
 	var primary *string
-	err = tx.QueryRow(r.Context(), `SELECT family_id::text FROM users WHERE id = $1 FOR UPDATE`, req.UserID).Scan(&primary)
+	var targetIsAdmin bool
+	err = tx.QueryRow(r.Context(), `SELECT family_id::text, platform_admin FROM users WHERE id = $1 FOR UPDATE`, req.UserID).Scan(&primary, &targetIsAdmin)
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, http.StatusNotFound, "user not found")
 		return
 	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load user")
+		return
+	}
+	if (req.UserID == claims.UserID || targetIsAdmin) && !s.AdminLocationAccess {
+		// Membership gives the ordinary member API the circle's live and historic locations, so an
+		// administrator account is placed like a location read, which this deployment has turned off.
+		_ = tx.Rollback(r.Context()) // release the row locks before the audit write needs them
+		s.adminLocationDenied(r.Context(), claims.UserID, "", "denied adding platform admin "+req.UserID+" to circle "+circleID, clientIP(r))
+		writeError(w, http.StatusForbidden, "platform admin location access is disabled; an admin account cannot be added to a circle")
 		return
 	}
 	var already bool

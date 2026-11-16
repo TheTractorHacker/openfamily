@@ -5,9 +5,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/TheTractorHacker/openfamily/backend/internal/auth"
 	"github.com/TheTractorHacker/openfamily/backend/internal/middleware"
+	"github.com/go-chi/chi/v5"
 )
 
 const maxUserAgentLen = 256
@@ -130,6 +130,7 @@ func (s *Server) RevokeSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "session not found")
 		return
 	}
+	s.dropSessionSockets(claims.UserID, id)
 	s.logAudit(r.Context(), claims.UserID, "", "auth.session_revoked", "revoked a session", clientIP(r))
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -160,6 +161,9 @@ func (s *Server) endAllSessions(r *http.Request, userID string) error {
 		return err
 	}
 	if err := s.revokeIngestKeys(r.Context(), userID); err != nil {
+		return err
+	}
+	if err := s.revokeShareLinks(r.Context(), userID); err != nil {
 		return err
 	}
 	s.dropUserSockets(userID)

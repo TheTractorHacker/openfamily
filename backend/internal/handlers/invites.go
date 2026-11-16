@@ -87,7 +87,7 @@ func (s *Server) redeemInviteCode(ctx context.Context, tx pgx.Tx, code string, c
 	err = tx.QueryRow(ctx, `
 		SELECT id, family_id, COALESCE(circle_id, family_id)::text, role, max_uses, uses, expires_at
 		FROM invite_codes ic WHERE code = $1
-		  AND NOT EXISTS (SELECT 1 FROM circles c WHERE c.id = COALESCE(ic.circle_id, ic.family_id) AND NOT `+circleLiveSQL+`)
+		  AND EXISTS (SELECT 1 FROM circles c WHERE c.id = COALESCE(ic.circle_id, ic.family_id) AND `+circleLiveSQL+`)
 		FOR UPDATE`, code,
 	).Scan(&id, &familyID, &circleID, &role, &maxUses, &uses, &expiresAt)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -234,7 +234,7 @@ func (s *Server) CreateFamilyInvite(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.logAudit(r.Context(), claims.UserID, familyID, "family.invite_created",
-		"created invite code "+ic.Code, clientIP(r))
+		"created invite code "+inviteCodeTail(ic.Code), clientIP(r))
 	writeJSON(w, http.StatusCreated, ic)
 }
 
@@ -380,7 +380,7 @@ func (s *Server) AdminCreateInvite(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.logAudit(r.Context(), claims.UserID, req.FamilyID, "admin.invite_created",
-		"created invite code "+ic.Code+" for family "+req.FamilyID, clientIP(r))
+		"created invite code "+inviteCodeTail(ic.Code)+" for family "+req.FamilyID, clientIP(r))
 	writeJSON(w, http.StatusCreated, ic)
 }
 
@@ -421,4 +421,13 @@ func (s *Server) AdminListInvites(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, invites)
+}
+
+// inviteCodeTail returns a masked form of an invite code for audit details:
+// the code is a bearer credential and must not be stored in clear text.
+func inviteCodeTail(code string) string {
+	if len(code) <= 4 {
+		return "****"
+	}
+	return "..." + code[len(code)-4:]
 }

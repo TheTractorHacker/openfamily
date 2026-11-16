@@ -125,11 +125,7 @@ func RecordAppVersion(pool *pgxpool.Pool) func(http.Handler) http.Handler {
 					}
 					if rec.due(c.UserID+"|"+ver+"|"+info.Platform, time.Now()) {
 						ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 2*time.Second)
-						_, _ = pool.Exec(ctx, `
-							INSERT INTO app_client_versions (user_id, app_version, platform)
-							VALUES ($1, $2, $3)
-							ON CONFLICT (user_id, app_version, platform) DO UPDATE SET last_seen = now()`,
-							c.UserID, ver, info.Platform)
+						_ = UpsertClientVersion(ctx, pool, c.UserID, ver, info.Platform)
 						cancel()
 					}
 				}
@@ -177,5 +173,29 @@ func TouchDeviceVersion(ctx context.Context, pool *pgxpool.Pool, userID, deviceI
 		UPDATE devices SET app_version = $3
 		WHERE id = $2::uuid AND user_id = $1 AND app_version IS DISTINCT FROM $3`,
 		userID, deviceID, version)
+	return err
+}
+
+// maxClientVersionRowsPerUser bounds app_client_versions growth per user: a
+// client can send any well-formed X-App-Version, so only the newest rows by
+// last_seen are kept.
+const maxClientVersionRowsPerUser = 20
+
+// UpsertClientVersion records (user, version, platform) and prunes the user's
+// oldest rows beyond maxClientVersionRowsPerUser.
+func UpsertClientVersion(ctx context.Context, pool *pgxpool.Pool, userID, ver, platform string) error {
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO app_client_versions (user_id, app_version, platform)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (user_id, app_version, platform) DO UPDATE SET last_seen = now()`,
+		userID, ver, platform); err != nil {
+		return err
+	}
+	_, err := pool.Exec(ctx, `
+		DELETE FROM app_client_versions
+		WHERE user_id = $1 AND (app_version, platform) NOT IN (
+			SELECT app_version, platform FROM app_client_versions
+			WHERE user_id = $1 ORDER BY last_seen DESC LIMIT $2)`,
+		userID, maxClientVersionRowsPerUser)
 	return err
 }

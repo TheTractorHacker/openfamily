@@ -294,6 +294,12 @@ func (s *Server) Refresh(w http.ResponseWriter, r *http.Request) {
 		if len(jti) > 8 {
 			jti = jti[:8]
 		}
+		if s.Pool != nil && claims.ID != "" {
+			var sid string
+			if s.Pool.QueryRow(r.Context(), `SELECT family_id FROM refresh_sessions WHERE jti = $1 AND user_id = $2`, claims.ID, user.ID).Scan(&sid) == nil {
+				s.dropSessionSockets(user.ID, sid)
+			}
+		}
 		s.logAudit(r.Context(), user.ID, "", "auth.refresh_reuse",
 			fmt.Sprintf("refresh token reuse detected; session family revoked (token age %s, jti %s, ua %q)",
 				age, jti, truncateUA(r.UserAgent())), clientIP(r))

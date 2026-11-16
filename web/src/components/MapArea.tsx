@@ -5,7 +5,7 @@
 // family-scoped endpoints the mobile apps use.
 
 import MapView from '../map/MapView'
-import { getAccessToken } from '../lib/auth'
+import { ensureFreshAccessToken, getAccessToken } from '../lib/auth'
 import { useMe } from '../lib/me'
 import './MapArea.css'
 
@@ -33,7 +33,7 @@ export function MapArea() {
 
   return (
     <div className="wb-maparea">
-      <MapView token={token} scope={isPlatformAdmin ? 'admin' : 'family'} />
+      <MapView token={token} getToken={ensureFreshAccessToken} scope={isPlatformAdmin ? 'admin' : 'family'} />
     </div>
   )
 }

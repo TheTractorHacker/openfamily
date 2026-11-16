@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:battery_plus/battery_plus.dart';
 import 'package:flutter/foundation.dart'
-    show TargetPlatform, defaultTargetPlatform, visibleForTesting;
+    show TargetPlatform, defaultTargetPlatform, debugPrint, visibleForTesting;
 import 'package:geolocator/geolocator.dart';
 
 import 'api_client.dart';
@@ -518,13 +518,34 @@ class LocationReporter {
 
   /// Routes the fix through the Private-circle uplink. True: also send the
   /// plaintext report (there is at least one standard circle, or none is private).
-  /// Never throws; on any failure the plaintext path is kept, which the server
-  /// refuses (409) for a user whose circles are all private, so nothing leaks.
-  Future<bool> _routePrivate(Map<String, dynamic> body) async {
+  /// Never throws; on failure it fails closed (no plaintext is sent).
+  Future<bool> _routePrivate(Map<String, dynamic> body) =>
+      routePrivateFailClosed(body, PrivateRuntime.instance.routeFix,
+          hasPrivateCircles: () async => (await PrivateRuntime.instance.privateCircles()).isNotEmpty);
+
+  /// Number of fixes withheld because private routing threw (diagnostics).
+  static int privateRouteFailures = 0;
+
+  /// Runs [route]; if it throws, the fix is NOT sent in plaintext when the user has a Private circle (or when that
+  /// cannot be told): a private circle must never leak coordinates. The fix is dropped and counted. A user with NO
+  /// private circle keeps reporting (a storage hiccup in the private layer must not stop ordinary tracking).
+  @visibleForTesting
+  static Future<bool> routePrivateFailClosed(
+    Map<String, dynamic> body,
+    Future<bool> Function(Map<String, dynamic>) route, {
+    Future<bool> Function()? hasPrivateCircles,
+  }) async {
     try {
-      return await PrivateRuntime.instance.routeFix(body);
-    } catch (_) {
-      return true;
+      return await route(body);
+    } catch (e) {
+      if (hasPrivateCircles != null) {
+        try {
+          if (!await hasPrivateCircles()) return true;
+        } catch (_) {/* cannot tell: fail closed */}
+      }
+      privateRouteFailures++;
+      debugPrint('private routing failed, fix withheld: ${e.runtimeType}');
+      return false;
     }
   }
 

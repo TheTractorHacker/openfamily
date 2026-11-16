@@ -254,6 +254,23 @@ func TestTripsEndToEndAndCrossFamily(t *testing.T) {
 	if code != 200 || len(lr.Trips) != 1 || lr.Trips[0].UserID != e.b1 {
 		t.Errorf("b1 own list leaked: %d %s", code, body)
 	}
+	// Sharing off hides the member from list, summary and detail, even inside the same family.
+	_, err = e.pool.Exec(ctx, `UPDATE circle_members SET sharing_enabled=false WHERE user_id=$1`, e.a1)
+	e.must(err)
+	if code, _ := e.get(e.a2, "/trips?user_id="+e.a1); code != http.StatusNotFound {
+		t.Errorf("sharing off list: %d", code)
+	}
+	if code, _ := e.get(e.a2, "/trips/summary?user_id="+e.a1); code != http.StatusNotFound {
+		t.Errorf("sharing off summary: %d", code)
+	}
+	if code, _ := e.get(e.a2, "/trips/"+tr.ID); code != http.StatusNotFound {
+		t.Errorf("sharing off detail: %d", code)
+	}
+	if code, _ := e.get(e.a1, "/trips/"+tr.ID); code != http.StatusOK {
+		t.Errorf("own detail: %d", code)
+	}
+	_, err = e.pool.Exec(ctx, `UPDATE circle_members SET sharing_enabled=true WHERE user_id=$1`, e.a1)
+	e.must(err)
 	if code, _ := e.get(e.a1, "/trips/not-a-uuid"); code != http.StatusNotFound {
 		t.Errorf("bad id: %d", code)
 	}

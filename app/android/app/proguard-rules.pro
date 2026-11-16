@@ -54,3 +54,9 @@
 # Keep Kotlin metadata for reflection-based libraries.
 -keep class kotlin.Metadata { *; }
 -dontwarn kotlin.**
+
+# Never log location data in release builds.
+-assumenosideeffects class android.util.Log {
+    public static int d(...);
+    public static int v(...);
+}

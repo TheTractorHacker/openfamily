@@ -197,6 +197,33 @@ func TestAdminAddCircleMember(t *testing.T) {
 	}
 }
 
+// A platform admin cannot enrol themselves (or another admin) while ADMIN_LOCATION_ACCESS is off,
+// and nobody can be added to a private (end-to-end encrypted) circle.
+func TestAdminAddCircleMemberRefusals(t *testing.T) {
+	e := adminOpsEnv(t)
+	ctx := context.Background()
+	c := e.createCircle("B", "Crew")
+	path := "/api/admin/circles/" + c + "/members"
+
+	e.mustCode("A", "POST", path, map[string]string{"user_id": e.ids["A"]}, 403) // own account
+	if _, err := e.pool.Exec(ctx, `UPDATE users SET platform_admin = TRUE WHERE id = $1`, e.ids["C"]); err != nil {
+		t.Fatal(err)
+	}
+	e.mustCode("A", "POST", path, map[string]string{"user_id": e.ids["C"]}, 403) // another admin
+	var n int
+	_ = e.pool.QueryRow(ctx, `SELECT count(*) FROM circle_members WHERE circle_id = $1 AND user_id IN ($2,$3)`, c, e.ids["A"], e.ids["C"]).Scan(&n)
+	if n != 0 {
+		t.Fatalf("admin accounts were added: %d", n)
+	}
+	e.srv.AdminLocationAccess = true
+	e.mustCode("A", "POST", path, map[string]string{"user_id": e.ids["A"]}, 200)
+
+	if _, err := e.pool.Exec(ctx, `UPDATE circles SET e2ee_mode = 'private' WHERE id = $1`, c); err != nil {
+		t.Fatal(err)
+	}
+	e.mustCode("A", "POST", path, map[string]string{"user_id": e.ids["D"]}, 409)
+}
+
 // The web form on /join/{code} signs a new person up through the same path as the app and puts them in the circle.
 func TestJoinSignUpCreatesAccountAndJoinsCircle(t *testing.T) {
 	e := adminOpsEnv(t)

@@ -8,11 +8,11 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5"
 	"github.com/TheTractorHacker/openfamily/backend/internal/auth"
 	"github.com/TheTractorHacker/openfamily/backend/internal/middleware"
 	"github.com/TheTractorHacker/openfamily/backend/internal/models"
+	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 )
 
 const (
@@ -80,6 +80,10 @@ func (s *Server) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := s.revokeIngestKeys(r.Context(), user.ID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to revoke device keys")
+		return
+	}
+	if err := s.revokeShareLinks(r.Context(), user.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to revoke share links")
 		return
 	}
 	s.dropUserSockets(user.ID)
@@ -290,6 +294,10 @@ func (s *Server) ResetPassword(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := s.revokeIngestKeys(r.Context(), userID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to revoke device keys")
+		return
+	}
+	if err := s.revokeShareLinks(r.Context(), userID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to revoke share links")
 		return
 	}
 	s.dropUserSockets(userID)

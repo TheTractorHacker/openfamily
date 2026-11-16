@@ -365,10 +365,8 @@ func TestTripEventsReportEndToEnd(t *testing.T) {
 		t.Errorf("sharing off events: %d", code)
 	}
 	code, body = get(e.a2, "/trips/"+tripID)
-	dr.Events = nil
-	_ = json.Unmarshal([]byte(body), &dr)
-	if len(dr.Events) != 0 || !strings.Contains(body, `"events":[]`) {
-		t.Errorf("sharing off detail leaks events: %d %s", code, body)
+	if code != http.StatusNotFound || strings.Contains(body, `"route"`) {
+		t.Errorf("sharing off detail leaks the trip: %d %s", code, body)
 	}
 	if code, own, _ := e.report(a3, "?start="+day); code != 200 || own.Totals.Events.Speeding != 1 {
 		t.Errorf("own report with sharing off: %d %+v", code, own.Totals)

@@ -119,6 +119,12 @@ export interface MapViewProps {
   members?: Member[];
   /** Access token; when set (and `members` omitted) the view fetches + streams its own data. */
   token?: string;
+  /**
+   * Resolves a fresh access token. Called before every WebSocket (re)connect:
+   * the server closes sockets at access-token expiry, so reconnecting with the
+   * originally captured token would be rejected with 401.
+   */
+  getToken?: () => Promise<string | null | undefined>;
   /** Base URL for the API + WebSocket. Defaults to the page origin. */
   apiBase?: string;
   /** Tile layer URL override (default: OpenStreetMap). */
@@ -222,12 +228,16 @@ export function MapView(props: MapViewProps): JSX.Element {
     groups: groupsProp,
     members: membersProp,
     token,
+    getToken,
     apiBase,
     tileUrl = DEFAULT_TILE_URL,
     className,
     initialCenter = [37.7749, -122.4194],
     initialZoom = 13,
   } = props;
+
+  const getTokenRef = useRef(getToken);
+  getTokenRef.current = getToken;
 
   // Self-managed mode = no shell-fed members (must have a token to fetch).
   const selfManaged = membersProp === undefined;
@@ -415,7 +425,16 @@ export function MapView(props: MapViewProps): JSX.Element {
     let retries = 0;
     const base = resolveBase(apiBase);
 
-    const connect = (): void => {
+    const connect = async (): Promise<void> => {
+      let wsToken = token;
+      if (getTokenRef.current) {
+        try {
+          wsToken = (await getTokenRef.current()) || token;
+        } catch {
+          // keep the captured token
+        }
+      }
+      if (cancelled) return;
       // 'admin' streams the platform-admin socket (live updates across ALL
       // families); 'family' streams the caller's own circle, matching /ws/stream
       // in the mobile apps. Frame shapes are identical.
@@ -424,7 +443,10 @@ export function MapView(props: MapViewProps): JSX.Element {
       try {
         // The access token is sent as the Sec-WebSocket-Protocol subprotocol,
         // matching the app's existing stream handshake.
-        ws = new WebSocket(url, token);
+        ws = new WebSocket(url, wsToken);
+        ws.onopen = () => {
+          retries = 0;
+        };
       } catch {
         scheduleReconnect();
         return;
@@ -479,7 +501,7 @@ export function MapView(props: MapViewProps): JSX.Element {
     const scheduleReconnect = (): void => {
       if (cancelled || retries >= 8) return;
       retries += 1;
-      reconnectTimer = setTimeout(connect, Math.min(4000 * retries, 20000));
+      reconnectTimer = setTimeout(() => void connect(), Math.min(4000 * retries, 20000));
     };
 
     async function load(): Promise<void> {
@@ -525,7 +547,7 @@ export function MapView(props: MapViewProps): JSX.Element {
         setFetchedPlaces(places);
         setLoading(false);
         retries = 0;
-        connect();
+        void connect();
 
         // A viewer opening the map usually wants current positions, and the
         // snapshot can only show what the database holds. Ask quiet members'

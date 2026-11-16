@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -31,4 +32,37 @@ func TestNormalizeInviteParamsDefaultsAndBounds(t *testing.T) {
 	if _, _, _, err := normalizeInviteParams("root", 1, 1); err == nil {
 		t.Error("invalid role accepted")
 	}
+}
+
+// A legacy invite (family_id only) must not bring a deleted circle back: the code is refused once the circle row is gone.
+func TestRedeemInviteRefusesDeletedCircle(t *testing.T) {
+	e := newCircleEnv(t)
+	ctx := context.Background()
+	c := e.createCircle("A", "Gone")
+	if _, err := e.pool.Exec(ctx, `INSERT INTO families (id, name) VALUES ($1, 'Gone') ON CONFLICT DO NOTHING`, c); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.pool.Exec(ctx, `INSERT INTO invite_codes (code, family_id, created_by, role, max_uses) VALUES ('LEGACYGONE1', $1, $2, 'member', 5)`, c, e.ids["A"]); err != nil {
+		t.Fatal(err)
+	}
+	try := func() error {
+		tx, err := e.pool.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tx.Rollback(ctx)
+		_, _, _, err = e.srv.redeemInviteCode(ctx, tx, "LEGACYGONE1", true)
+		return err
+	}
+	if err := try(); err != nil {
+		t.Fatalf("live circle: %v", err)
+	}
+	if _, err := e.pool.Exec(ctx, `DELETE FROM circles WHERE id = $1`, c); err != nil {
+		t.Fatal(err)
+	}
+	if err := try(); err == nil {
+		t.Fatal("legacy invite redeemed for a deleted circle")
+	}
+	_, _ = e.pool.Exec(ctx, `DELETE FROM invite_codes WHERE code = 'LEGACYGONE1'`)
+	_, _ = e.pool.Exec(ctx, `DELETE FROM families WHERE id = $1`, c)
 }

@@ -1,0 +1,1 @@
+Less battery while walking or standing still: points are sent together instead of one by one. Driving, live map and requests are unchanged. The Syncing chip only shows when something is stuck. Private circles never fall back to sending a location in the clear. Security fixes for sessions, share links and admin. Not tried on a real phone yet.

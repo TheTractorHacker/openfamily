@@ -441,6 +441,18 @@ class FamilyService {
     String? token;
     try {
       token = await TokenStorage.readAccessToken();
+      // The server closes sockets at access-token expiry, so a reconnect with
+      // the stored (now expired) token would be rejected with 401 in a loop
+      // on a phone with no other API traffic. Renew through the refresh token
+      // first; an offline/unreachable result keeps the stored token.
+      if (accessTokenNeedsRefresh(token, DateTime.now())) {
+        try {
+          await ApiClient.checkSession();
+          token = await TokenStorage.readAccessToken();
+        } catch (_) {
+          // keep the stored token
+        }
+      }
     } catch (_) {
       // Treat a secure-storage failure like a missing token: stay inside the
       // retry chain instead of throwing out of an async callback. A real
@@ -861,3 +873,22 @@ class FamilyService {
   }
 }
 
+/// Whether [token] (a JWT) is missing, unparseable, or expires within
+/// [skew] of [now]. Used to renew the access token before a socket reconnect.
+@visibleForTesting
+bool accessTokenNeedsRefresh(String? token, DateTime now,
+    {Duration skew = const Duration(seconds: 30)}) {
+  if (token == null) return false; // nothing to refresh; caller handles null
+  try {
+    final List<String> parts = token.split('.');
+    if (parts.length < 2) return true;
+    final Object? payload = jsonDecode(
+        utf8.decode(base64Url.decode(base64Url.normalize(parts[1]))));
+    final Object? exp = payload is Map ? payload['exp'] : null;
+    if (exp is! num) return true;
+    return DateTime.fromMillisecondsSinceEpoch(exp.toInt() * 1000)
+        .isBefore(now.add(skew));
+  } catch (_) {
+    return true;
+  }
+}

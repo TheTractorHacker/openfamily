@@ -59,6 +59,14 @@ func (s *Server) tripTarget(w http.ResponseWriter, r *http.Request, userID strin
 		writeError(w, status, msg)
 		return "", "", false
 	}
+	// Circle sharing rule: sharing off or paused hides the member whatever their legacy family says.
+	if ok, err := s.canViewSubject(r, claims.UserID, userID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load member")
+		return "", "", false
+	} else if !ok {
+		writeError(w, http.StatusNotFound, "member not found")
+		return "", "", false
+	}
 	return userID, targetFamily, true
 }
 
@@ -149,6 +157,10 @@ func (s *Server) GetTrip(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if _, _, allowed := familyHistoryAccess(callerFamily, targetFamily, found); !allowed {
+			writeError(w, http.StatusNotFound, "trip not found")
+			return
+		}
+		if ok, err := s.canViewSubject(r, claims.UserID, trip.UserID); err != nil || !ok {
 			writeError(w, http.StatusNotFound, "trip not found")
 			return
 		}

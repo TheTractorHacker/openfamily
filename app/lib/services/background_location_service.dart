@@ -635,15 +635,19 @@ PrivateRuntime _runtimeFor(_BackgroundCredentials c) =>
       },
     );
 
-/// Never throws. On failure the plaintext path is kept: the server refuses it
-/// (409) for a user whose circles are all private, so nothing readable leaves.
+/// Never throws. On failure the fix is withheld (NOT sent in plaintext) when the user has a Private circle or that
+/// cannot be told; a user with no private circle keeps reporting, so a hiccup in the private layer never stops
+/// ordinary tracking.
 Future<bool> _routePrivate(_BackgroundCredentials c, Map<String, dynamic> body) async {
+  final PrivateRuntime rt = _runtimeFor(c);
   try {
-    final PrivateRuntime rt = _runtimeFor(c);
     return await rt.routeFix(body);
   } catch (e) {
     _stats.noteError('route_private', e);
-    return true;
+    try {
+      if (!(await rt.privateCircles()).isNotEmpty) return true;
+    } catch (_) {/* cannot tell: fail closed */}
+    return false;
   }
 }
 

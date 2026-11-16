@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../services/api_client.dart';
+import '../services/auth_service.dart';
 import '../services/secure_url.dart';
 import '../services/server_config.dart';
 import '../services/tile_config.dart';
@@ -15,7 +16,10 @@ import 'privacy_policy_screen.dart';
 /// The user enters their Orbitly server URL, we ping `/healthz`, then
 /// persist it for API + WebSocket calls.
 class ServerConfigScreen extends StatefulWidget {
-  const ServerConfigScreen({super.key, this.allowCancel = false});
+  const ServerConfigScreen({super.key, this.allowCancel = false, this.signOut});
+
+  /// Sign-out used when the host changes (tests inject a fake).
+  final Future<void> Function()? signOut;
 
   /// When true, show a back control so Settings can return without saving.
   final bool allowCancel;
@@ -59,6 +63,14 @@ class _ServerConfigScreenState extends State<ServerConfigScreen> {
     });
     final String previous = ServerConfig.instance.apiBaseUrl;
     try {
+      // Tokens and the saved password were issued by the OLD host: never let
+      // them travel to a different one. Sign out before pointing elsewhere.
+      final String? nextNorm = normalizeHttpsBaseUrl(url);
+      final String? prevNorm =
+          previous.isEmpty ? null : normalizeHttpsBaseUrl(previous);
+      if (prevNorm != null && nextNorm != prevNorm) {
+        await (widget.signOut ?? AuthService.logout)();
+      }
       await ServerConfig.instance.setUrl(url);
       await ApiClient.healthz();
       await TileConfig.instance.refresh();

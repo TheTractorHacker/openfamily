@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"time"
 
@@ -85,6 +86,10 @@ func (s *Server) IngestLocation(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Lat < -90 || req.Lat > 90 || req.Lon < -180 || req.Lon > 180 {
 		writeError(w, http.StatusBadRequest, "lat/lon out of range")
+		return
+	}
+	if err := validateTelemetry(req.AccuracyMeters, req.AltitudeMeters, req.SpeedMPS, req.HeadingDeg, req.BatteryPct, req.MotionState, req.Source); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	ts := time.Now()
@@ -361,4 +366,57 @@ func nullIfEmpty(s string) any {
 		return nil
 	}
 	return s
+}
+
+
+// validateTelemetry bounds the optional telemetry fields of a location fix so
+// a member cannot store absurd floats or unbounded strings. Ranges are
+// generous (-1 is tolerated: platforms use it for "unknown").
+func validateTelemetry(accuracy, altitude, speed, heading, battery *float64, motionState, source string) error {
+	check := func(v *float64, lo, hi float64, name string) error {
+		if v == nil {
+			return nil
+		}
+		if math.IsNaN(*v) || math.IsInf(*v, 0) || *v < lo || *v > hi {
+			return fmt.Errorf("%s out of range", name)
+		}
+		return nil
+	}
+	if err := check(accuracy, -1, 100000, "accuracy_meters"); err != nil {
+		return err
+	}
+	if err := check(altitude, -1000, 20000, "altitude_meters"); err != nil {
+		return err
+	}
+	if err := check(speed, -1, 400, "speed_mps"); err != nil {
+		return err
+	}
+	if err := check(heading, -1, 360, "heading_deg"); err != nil {
+		return err
+	}
+	if err := check(battery, -1, 100, "battery_pct"); err != nil {
+		return err
+	}
+	if !validTelemetryLabel(motionState) {
+		return errors.New("invalid motion_state")
+	}
+	if !validTelemetryLabel(source) {
+		return errors.New("invalid source")
+	}
+	return nil
+}
+
+// validTelemetryLabel accepts empty or at most 32 chars of [A-Za-z0-9_ .-].
+func validTelemetryLabel(s string) bool {
+	if len(s) > 32 {
+		return false
+	}
+	for _, c := range s {
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == '_', c == '-', c == ' ', c == '.':
+		default:
+			return false
+		}
+	}
+	return true
 }

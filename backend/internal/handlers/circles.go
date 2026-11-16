@@ -866,7 +866,7 @@ func (s *Server) CreateCircleInvite(w http.ResponseWriter, r *http.Request) {
 			code, m.CircleID, uid, role, maxUses, expiresAt,
 		).Scan(&inv.ID, &inv.Code, &inv.CircleID, &inv.Role, &inv.MaxUses, &inv.Uses, &inv.ExpiresAt, &inv.CreatedAt)
 		if err == nil {
-			s.auditCircle(r.Context(), uid, m.CircleID, "circle.invite_created", "created invite code "+inv.Code, clientIP(r))
+			s.auditCircle(r.Context(), uid, m.CircleID, "circle.invite_created", "created invite code "+inviteCodeTail(inv.Code), clientIP(r))
 			writeJSON(w, http.StatusCreated, inv)
 			return
 		}

@@ -7,7 +7,8 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"runtime"
+	"os"
+	"strconv"
 	"strings"
 
 	"golang.org/x/crypto/argon2"
@@ -28,7 +29,18 @@ const MaxPasswordLength = 256
 
 // argonSlots bounds concurrent Argon2 computations: each holds 64 MiB, so an
 // unbounded burst of logins/registrations could exhaust memory.
-var argonSlots = make(chan struct{}, max(2, runtime.NumCPU()))
+//
+// The size must not follow the host CPU count (runtime.NumCPU ignores the
+// container limit): 8 slots x 64 MiB would fill a 512 MiB container. It
+// defaults to 2 and can be raised with ARGON_MAX_CONCURRENCY.
+var argonSlots = make(chan struct{}, argonConcurrency(os.Getenv("ARGON_MAX_CONCURRENCY")))
+
+func argonConcurrency(env string) int {
+	if n, err := strconv.Atoi(strings.TrimSpace(env)); err == nil && n >= 1 && n <= 64 {
+		return n
+	}
+	return 2
+}
 
 func argonIDKey(password, salt []byte, t, m uint32, p uint8, keyLen uint32) []byte {
 	argonSlots <- struct{}{}

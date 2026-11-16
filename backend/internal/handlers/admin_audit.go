@@ -327,6 +327,7 @@ func (s *Server) AdminRevokeSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to revoke session")
 		return
 	}
+	s.dropSessionSockets(target, id)
 	s.logAudit(r.Context(), claims.UserID, "", "admin.session_revoked",
 		"revoked a session of user "+target, clientIP(r))
 	w.WriteHeader(http.StatusNoContent)

@@ -726,7 +726,6 @@ class IsolateHolderService : MethodChannel.MethodCallHandler, LocationUpdateList
                     )
                 Handler(it.mainLooper)
                     .post {
-                        Log.d("plugin", "sendLocationEvent $result")
                         backgroundChannel.invokeMethod(Keys.BCM_SEND_LOCATION, result)
                     }
             }

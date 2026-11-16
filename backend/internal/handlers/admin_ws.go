@@ -21,9 +21,9 @@ import (
 // wsMember shape and adds the family tags.
 type adminWsMember struct {
 	wsMember
-	FamilyID   *string `json:"family_id,omitempty"`
-	FamilyName *string `json:"family_name,omitempty"`
-	KeepsDataOnPhone bool `json:"keeps_data_on_phone"`
+	FamilyID         *string `json:"family_id,omitempty"`
+	FamilyName       *string `json:"family_name,omitempty"`
+	KeepsDataOnPhone bool    `json:"keeps_data_on_phone"`
 }
 
 // AdminStream serves the platform-admin live WebSocket stream at /api/admin/ws.
@@ -97,9 +97,14 @@ func (s *Server) AdminStream(w http.ResponseWriter, r *http.Request) {
 	conn.SetReadLimit(4096)
 
 	c := &wsClient{
-		conn: conn,
-		send: make(chan []byte, clientSendBuffer),
-		done: make(chan struct{}),
+		conn:  conn,
+		send:  make(chan []byte, clientSendBuffer),
+		done:  make(chan struct{}),
+		sid:   claims.SessionID,
+		since: time.Now(),
+	}
+	if claims.ExpiresAt != nil {
+		c.exp = claims.ExpiresAt.Time
 	}
 	c.userID = claims.UserID
 	// With admin location access off (default) the socket still opens, for
@@ -111,7 +116,11 @@ func (s *Server) AdminStream(w http.ResponseWriter, r *http.Request) {
 		s.auditAdminView(r.Context(), claims.UserID, "", "opened live location stream for all families", clientIP(r))
 	}
 	s.hub.registerAdmin(c)
+	s.hub.capUserSockets(claims.UserID, maxSocketsPerUser)
 	go s.hub.watch(c, wsRevalidateInterval, func(ctx context.Context) (bool, error) {
+		if ok, err := s.wsSessionValid(ctx, c); err != nil || !ok {
+			return false, err
+		}
 		return s.adminStreamAuthorized(ctx, claims.UserID, claims.TokenVersion)
 	})
 	defer func() {
@@ -259,8 +268,8 @@ func (s *Server) adminMembersSnapshot(ctx context.Context) ([]adminWsMember, err
 				AccuracyMeters:  accuracy,
 				LastSeenAt:      lastSeenAt,
 			},
-			FamilyID:   familyID,
-			FamilyName: familyName,
+			FamilyID:         familyID,
+			FamilyName:       familyName,
 			KeepsDataOnPhone: keeps,
 		}
 		members = append(members, m)
