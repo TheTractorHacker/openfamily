@@ -1,0 +1,1 @@
+Invite joins can no longer be blocked for everyone by a flood of wrong guesses. Server runtime updated for a security fix.

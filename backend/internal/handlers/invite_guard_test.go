@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"time"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -42,8 +43,12 @@ func TestInviteGuardPerUserAndGlobal(t *testing.T) {
 	for i := 0; i < inviteFailGlobal; i++ {
 		g.AuthLimit.Record(inviteGlobalKey, inviteFailGlobalWin)
 	}
-	if !g.inviteLocked(httptest.NewRecorder(), "ANY22222", "") {
-		t.Fatal("global ceiling must lock")
+	start := time.Now()
+	if g.inviteLocked(httptest.NewRecorder(), "ANY22222", "") {
+		t.Fatal("global ceiling must slow attempts down, never lock valid redemptions out")
+	}
+	if time.Since(start) < inviteStormDelay {
+		t.Fatal("global ceiling must add a delay")
 	}
 }
 

@@ -20,7 +20,7 @@ Date: 2026-11. Scope: repository at v0.13.3 plus this branch. Not legal advice.
 | L3 | Dart license detection for the inventory is heuristic (license text matching, packages without a LICENSE file are the SDK ones). | Low | Re-run an inventory with `flutter pub deps` plus manual review on major dependency changes. |
 | S1 | `maplibre-gl` 5.24.0 had an open critical advisory (GHSA-jrc7-96c5-q579, DOM.sanitize bypass). | Admin map XSS vector if untrusted HTML reaches the sanitizer. | **Resolved**: upgraded to 6.16.0 (`npm audit --omit=dev --audit-level=high` reports 0 vulnerabilities; build and unit tests pass). The vector-style map path still wants an eyes-on check on a real style URL. |
 
-`govulncheck ./...` on the backend (Go 1.27.3, govulncheck v1.9.0): 0 vulnerabilities affecting called code; 3 advisories in required modules whose vulnerable code is not called.
+`govulncheck ./...` on the backend (Go 1.27.4, govulncheck v1.9.0): 0 vulnerabilities affecting called code; 3 advisories in required modules whose vulnerable code is not called.
 
 ## Checks
 

@@ -97,7 +97,7 @@ jobs:
           fetch-depth: 1
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: '1.27.3'
+          go-version: '1.27.4'
           cache-dependency-path: backend/go.sum # module + build cache restored by setup-go
       - name: Migrate test database
         run: go run ./cmd/migrate

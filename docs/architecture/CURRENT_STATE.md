@@ -3,7 +3,7 @@
 Evidence gathered by reading the tree and running the backend test suite. Anything not listed here was not verified.
 
 ## Stack
-- Backend: Go (`backend/`, go.mod says go 1.27.3), chi router, pgx, golang-migrate, coder/websocket. 24 SQL migrations.
+- Backend: Go (`backend/`, go.mod says go 1.27.4), chi router, pgx, golang-migrate, coder/websocket. 24 SQL migrations.
 - DB: `timescale/timescaledb-ha:pg16` (TimescaleDB + PostGIS image).
 - App: Flutter (`app/`), Android and iOS projects present, vendored `packages/background_locator_2`.
 - Web admin embedded in the API binary (`backend/web`).

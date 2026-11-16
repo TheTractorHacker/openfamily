@@ -12,7 +12,7 @@ import (
 // guessed code that is merely used-up or expired must not be distinguishable
 // from an unknown one. Failed redemptions are therefore also counted per code
 // (the same code cannot be hammered), per signed-in user, and across the whole
-// server (a distributed guess run hits a ceiling). Only FAILURES are charged,
+// server (a distributed guess run is slowed, never locked out). Only FAILURES are charged,
 // so legitimate joins are not slowed down. The in-memory limiter resets on
 // restart, like the other auth limiters.
 const (
@@ -21,6 +21,7 @@ const (
 	inviteFailGlobal    = 600
 	inviteFailWindow    = 15 * time.Minute
 	inviteFailGlobalWin = time.Hour
+	inviteStormDelay    = 750 * time.Millisecond
 )
 
 func inviteCodeKey(code string) string {
@@ -41,10 +42,15 @@ func (s *Server) inviteLocked(w http.ResponseWriter, code, uid string) bool {
 		return false
 	}
 	if l.Exceeded(inviteCodeKey(code), inviteFailPerCode, inviteFailWindow) ||
-		(uid != "" && l.Exceeded(inviteUserKey(uid), inviteFailPerUser, inviteFailWindow)) ||
-		l.Exceeded(inviteGlobalKey, inviteFailGlobal, inviteFailGlobalWin) {
+		(uid != "" && l.Exceeded(inviteUserKey(uid), inviteFailPerUser, inviteFailWindow)) {
 		writeError(w, http.StatusTooManyRequests, "too many attempts, try again later")
 		return true
+	}
+	// The server-wide ceiling never locks anyone out (that would let one
+	// attacker stop every legitimate join); during a guessing storm it only
+	// slows every attempt down.
+	if l.Exceeded(inviteGlobalKey, inviteFailGlobal, inviteFailGlobalWin) {
+		time.Sleep(inviteStormDelay)
 	}
 	return false
 }
