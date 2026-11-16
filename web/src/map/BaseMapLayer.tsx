@@ -94,9 +94,17 @@ export function BaseMapLayer({ rasterUrl }: { rasterUrl?: string }) {
         gl.addTo(map);
         gl.getContainer().style.zIndex = "0";
         const glMap = gl.getMaplibreMap();
-        // Style or tile fetch problems before first render => raster fallback.
-        timer = window.setTimeout(fail, 15000);
-        glMap.once("load", () => window.clearTimeout(timer));
+        // Style or tile fetch problems => raster fallback. "load" alone is not enough: the style can load while every
+        // tile is blocked or fails (a proxy, a blocked host, a GPU that cannot draw), which leaves a blank map. So the
+        // vector layer only counts as working once a vector tile has actually arrived.
+        timer = window.setTimeout(fail, 12000);
+        const onData = (e: { dataType?: string; tile?: unknown }) => {
+          if (e.dataType === "source" && e.tile) {
+            window.clearTimeout(timer);
+            glMap.off("data", onData);
+          }
+        };
+        glMap.on("data", onData);
         // Style document failed to load/parse => raster fallback.
         glMap.on("error", () => {
           if (!glMap.isStyleLoaded()) fail();

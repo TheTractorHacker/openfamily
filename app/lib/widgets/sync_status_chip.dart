@@ -10,7 +10,8 @@ import '../utils/member_status.dart' show formatClock;
 /// - Server unreachable: "Offline · last synced 9:02". The same state is an item
 ///   of the attention center, with the full sentence and "Try again".
 /// - Login ran out: "Signed out" (the attention center offers "Sign in").
-/// - Updates being sent: "Syncing…".
+/// - Updates being sent: nothing at first (sending in the background is normal); "Syncing…" only if they are still
+///   waiting after [syncingAfter], which means something is stuck.
 /// - Back and everything sent: "Up to date" for a few seconds, then it hides.
 /// - Normal operation: nothing at all.
 class SyncStatusChip extends StatefulWidget {
@@ -18,8 +19,12 @@ class SyncStatusChip extends StatefulWidget {
     super.key,
     this.reachability,
     this.upToDateFor = const Duration(seconds: 3),
+    this.syncingAfter = const Duration(seconds: 45),
     this.alwaysShow = false,
   });
+
+  /// How long updates may be on their way before the chip says so. A normal send takes seconds.
+  final Duration syncingAfter;
 
   /// Defaults to [ServerReachability.instance].
   final ServerReachability? reachability;
@@ -38,13 +43,23 @@ class _SyncStatusChipState extends State<SyncStatusChip> {
   late ServerReachability _r = widget.reachability ?? ServerReachability.instance;
   SyncState _last = SyncState.upToDate;
   bool _showUpToDate = false;
+  bool _syncingVisible = false;
   Timer? _hide;
+  Timer? _syncingTimer;
 
   @override
   void initState() {
     super.initState();
     _last = _r.state.value;
     _r.state.addListener(_onState);
+    if (_last == SyncState.syncing) _armSyncing();
+  }
+
+  void _armSyncing() {
+    _syncingTimer?.cancel();
+    _syncingTimer = Timer(widget.syncingAfter, () {
+      if (mounted && _r.state.value == SyncState.syncing) setState(() => _syncingVisible = true);
+    });
   }
 
   void _onState() {
@@ -59,6 +74,12 @@ class _SyncStatusChipState extends State<SyncStatusChip> {
       _showUpToDate = false;
       _hide?.cancel();
     }
+    if (now == SyncState.syncing) {
+      if (_last != SyncState.syncing) _armSyncing();
+    } else {
+      _syncingTimer?.cancel();
+      _syncingVisible = false;
+    }
     _last = now;
   }
 
@@ -66,6 +87,7 @@ class _SyncStatusChipState extends State<SyncStatusChip> {
   void dispose() {
     _r.state.removeListener(_onState);
     _hide?.cancel();
+    _syncingTimer?.cancel();
     super.dispose();
   }
 
@@ -79,6 +101,7 @@ class _SyncStatusChipState extends State<SyncStatusChip> {
         if (s == SyncState.upToDate && !_showUpToDate && !widget.alwaysShow) {
           return const SizedBox.shrink();
         }
+        if (s == SyncState.syncing && !_syncingVisible && !widget.alwaysShow) return const SizedBox.shrink();
         final ColorScheme cs = Theme.of(context).colorScheme;
         final bool signedOut = s == SyncState.signedOut;
         final bool down = s == SyncState.unreachable || signedOut;

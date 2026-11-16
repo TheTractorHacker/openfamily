@@ -145,7 +145,9 @@ void main() {
       await r.probeNow();
       await t.pump();
       expect(r.unreachable, isFalse);
-      expect(find.textContaining('Syncing'), findsOneWidget);
+      expect(find.textContaining('Syncing'), findsNothing, reason: 'sending in the background is normal: no chip at first');
+      await t.pump(const Duration(seconds: 46));
+      expect(find.textContaining('Syncing'), findsOneWidget, reason: 'still waiting after 45 s: now it says so');
       r.setPending(0);
       await t.pump();
       expect(find.text('Up to date'), findsOneWidget);
