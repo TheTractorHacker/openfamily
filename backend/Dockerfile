@@ -43,7 +43,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/backup 
 
 # Backup stage: pg_dump (matching the pinned Postgres 16) + the backup binary.
 # Build with: docker build -f backend/Dockerfile --target backup .
-FROM alpine:3.22@sha256:bfe7ceb9f09ec0566c48fb93356e45a47a00be5a1dd14fa5b909e7709c66b034 AS backup
+FROM alpine:3.24@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf AS backup
 RUN apk add --no-cache ca-certificates openssl tzdata postgresql16-client
 COPY scripts/distrust-compromised-cas.sh /usr/local/bin/distrust-compromised-cas
 RUN sh /usr/local/bin/distrust-compromised-cas && update-ca-certificates --fresh
@@ -54,7 +54,7 @@ ENTRYPOINT ["backup"]
 CMD ["daemon"]
 
 # Runtime stage
-FROM alpine:3.22@sha256:bfe7ceb9f09ec0566c48fb93356e45a47a00be5a1dd14fa5b909e7709c66b034
+FROM alpine:3.24@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf
 RUN apk add --no-cache ca-certificates openssl tzdata
 COPY scripts/distrust-compromised-cas.sh /usr/local/bin/distrust-compromised-cas
 RUN sh /usr/local/bin/distrust-compromised-cas && update-ca-certificates --fresh
