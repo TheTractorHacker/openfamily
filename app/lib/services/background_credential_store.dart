@@ -131,5 +131,8 @@ class BackgroundCredentialStore {
   static Future<void> saveIngestKey(String key) =>
       _storage.write(key: _ingestKeyKey, value: key);
 
+  /// Forgets the device id (the server no longer knows this device).
+  static Future<void> deleteDeviceId() => _storage.delete(key: _deviceIdKey);
+
   static Future<String?> readIngestKey() => _storage.read(key: _ingestKeyKey);
 }

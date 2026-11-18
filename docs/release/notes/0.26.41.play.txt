@@ -1,0 +1,1 @@
+Fixes the self-test error 'device not found': if the server forgot your phone, Orbitly now registers it again by itself and keeps sending your location, with no need to sign out and in.

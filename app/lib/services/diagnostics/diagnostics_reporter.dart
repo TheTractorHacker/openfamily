@@ -50,7 +50,13 @@ class DiagnosticsReporter {
       // store was cleared) has no id: register/look it up instead of giving up.
       final String id = (await TokenStorage.readDeviceId()) ?? await DeviceService.ensureRegistered();
       final Map<String, dynamic> b = body(f);
-      await ApiClient.put('/devices/$id/diagnostics', body: b);
+      try {
+        await ApiClient.put('/devices/$id/diagnostics', body: b);
+      } catch (e) {
+        final String? fresh = await DeviceService.recoverIfGone(e);
+        if (fresh == null) rethrow;
+        await ApiClient.put('/devices/$fresh/diagnostics', body: b);
+      }
       await prefs.setInt(_lastKey, now);
       final Object? v = b['app_version'];
       if (v is String) await prefs.setString(_versionKey, v);

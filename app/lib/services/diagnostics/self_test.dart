@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 
 import '../api_client.dart';
+import '../device_service.dart';
 import '../e2ee/e2ee_crypto.dart';
 import '../e2ee/e2ee_vault.dart';
 import '../e2ee/private_runtime.dart';
@@ -158,7 +159,15 @@ class SelfTest {
         await Future<void>.delayed(const Duration(seconds: 3));
         await PrivateRuntime.instance.flush();
       } else {
-        await ApiClient.post('/locations', body: body);
+        try {
+          await ApiClient.post('/locations', body: body);
+        } catch (e) {
+          // The server forgot this phone: register it again and retry once.
+          final String? fresh = await DeviceService.recoverIfGone(e);
+          if (fresh == null) rethrow;
+          body['device_id'] = fresh;
+          await ApiClient.post('/locations', body: body);
+        }
       }
       final DateTime t0 = DateTime.now();
       final dynamic res = await ApiClient.get('/me/diagnostics');

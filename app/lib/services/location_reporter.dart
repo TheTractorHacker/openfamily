@@ -487,6 +487,18 @@ class LocationReporter {
       if (e.status != 0) {
         _lastSentTs = ts;
       }
+      // "device not found": the server deleted this phone's device row. Register
+      // again so the next fixes (and this parked one) go out under a live id.
+      if (DeviceService.isDeviceGone(e)) {
+        try {
+          final String? fresh = await DeviceService.recoverIfGone(e);
+          if (fresh != null) {
+            _deviceId = fresh;
+            body['device_id'] = fresh;
+            _lastSentTs = null;
+          }
+        } catch (_) {}
+      }
       // Either way, park the report for offline backfill: a network failure
       // re-sends it verbatim; a rejection (e.g. a non-monotonic race with the
       // background reporter) is healed by the batch endpoint's relaxed

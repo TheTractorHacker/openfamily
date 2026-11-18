@@ -45,6 +45,21 @@ class DeviceService {
     }
   }
 
+  /// True when the server answered "device not found": the stored device id
+  /// points at a row that was deleted (removed from the account, or the server
+  /// was reset). Every upload with it keeps failing until the phone registers again.
+  static bool isDeviceGone(Object e) =>
+      e is ApiException && e.status == 404 && e.message.toLowerCase().contains('device not found');
+
+  /// Self-heal for [isDeviceGone]: forget the stale id and register this phone
+  /// again (same install id, so it re-attaches rather than stacking devices).
+  /// Returns the new device id, or null when [e] is not a gone-device answer.
+  static Future<String?> recoverIfGone(Object e) async {
+    if (!isDeviceGone(e)) return null;
+    await TokenStorage.clearDeviceId();
+    return ensureRegistered();
+  }
+
   static const String _installIdPref = 'install_id';
 
   /// A random id for THIS app install. Unlike the device id it is not erased

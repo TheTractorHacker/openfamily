@@ -723,6 +723,13 @@ class TokenStorage {
     await BackgroundCredentialStore.saveDeviceId(id);
   }
 
+  /// Forgets the device id in both stores, so the next [DeviceService.ensureRegistered]
+  /// registers this phone again. Used when the server says the device is gone.
+  static Future<void> clearDeviceId() async {
+    await _storage.delete(key: _deviceIdKey);
+    await BackgroundCredentialStore.deleteDeviceId();
+  }
+
   /// Returns the stored device id, or null if none.
   static Future<String?> readDeviceId() => _storage.read(key: _deviceIdKey);
 }
