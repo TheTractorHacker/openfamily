@@ -184,7 +184,7 @@ services:
     <<: *hardening
     # Pinned for reproducible installs. Bump deliberately (and take a backup
     # first: ./scripts/backup.sh) rather than tracking a moving tag.
-    image: timescale/timescaledb-ha:pg16.15-ts2.31.0@sha256:98f88217cb7be56655f842d9920f90d0b4893b67b3463f93084548b433ed5c93
+    image: timescale/timescaledb-ha:pg16.15-ts2.31.0@sha256:0ec512f75994967c7aef209db96162c84f2f083631c6f448e9e6d08fc61b0892
     # This image tunes max_connections down to 25 for a 1 GB container, which is LESS than the API's pool and
     # left nothing for backups and admin tools: under load the API was refused with "too many clients" and its
     # requests failed or hung. An explicit limit well above the API pool (DB_MAX_CONNS, default 15).
