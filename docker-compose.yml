@@ -241,7 +241,7 @@ services:
   ntfy:
     <<: *hardening
     profiles: ["push"]
-    image: binwiederhier/ntfy:v2.11.0@sha256:4a7d0f0adc6d5d9fc36e64ab55ef676e76e124a2bdd50ce115b6d9c1c7430294
+    image: binwiederhier/ntfy:v2.38.1@sha256:038da2be5e668fee6d36a62884eea48975e1b71c29a56964e5298c1b9165a573
     command: serve
     environment:
       # Public base URL the app uses to reach ntfy. Production must be https://
