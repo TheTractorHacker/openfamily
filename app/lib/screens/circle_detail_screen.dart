@@ -489,33 +489,67 @@ class _CircleDetailScreenState extends State<CircleDetailScreen> {
 
   Future<void> _rename() async {
     String draft = _circle.name;
-    final String? name = await showDialog<String>(
+    String? icon = _circle.icon;
+    final ({String name, String? icon})? edit = await showDialog<({String name, String? icon})>(
       context: context,
-      builder: (BuildContext ctx) => AlertDialog(
-        title: const Text('Rename circle'),
-        content: TextFormField(
-          initialValue: _circle.name,
-          autofocus: true,
-          onChanged: (String v) => draft = v,
-          decoration: const InputDecoration(
-              labelText: 'Circle name'),
+      builder: (BuildContext ctx) => StatefulBuilder(
+        builder: (BuildContext ctx, StateSetter setLocal) => AlertDialog(
+          title: const Text('Edit circle'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                TextFormField(
+                  initialValue: _circle.name,
+                  autofocus: true,
+                  onChanged: (String v) => draft = v,
+                  decoration: const InputDecoration(labelText: 'Circle name'),
+                ),
+                const SizedBox(height: AppSpace.lg),
+                const Text('Icon'),
+                const SizedBox(height: AppSpace.sm),
+                Wrap(
+                  spacing: AppSpace.sm,
+                  runSpacing: AppSpace.sm,
+                  children: <Widget>[
+                    for (final String e in kCircleIcons)
+                      Semantics(
+                        button: true,
+                        selected: e == icon,
+                        label: 'Icon $e',
+                        child: ChoiceChip(
+                          showCheckmark: e == icon,
+                          materialTapTargetSize: MaterialTapTargetSize.padded,
+                          label: SizedBox(
+                            width: 32,
+                            height: 32,
+                            child: Center(child: Text(e, style: const TextStyle(fontSize: 22))),
+                          ),
+                          selected: e == icon,
+                          onSelected: (_) => setLocal(() => icon = e),
+                        ),
+                      ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          actions: <Widget>[
+            TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Cancel')),
+            FilledButton(
+                onPressed: () => Navigator.of(ctx).pop((name: draft.trim(), icon: icon)),
+                child: const Text('Save')),
+          ],
         ),
-        actions: <Widget>[
-          TextButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('Cancel')),
-          FilledButton(
-              onPressed: () => Navigator.of(ctx).pop(draft.trim()),
-              child: const Text('Save')),
-        ],
       ),
     );
-    if (name == null || name.isEmpty || name == _circle.name || !mounted) {
-      return;
-    }
-    if (await _run(() => _service.updateCircle(_circle.id, name: name)) &&
-        mounted) {
-      setState(() => _circle = _circle.copyWith(name: name));
+    if (edit == null || edit.name.isEmpty || !mounted) return;
+    final String? newName = edit.name == _circle.name ? null : edit.name;
+    final String? newIcon = edit.icon == _circle.icon ? null : edit.icon;
+    if (newName == null && newIcon == null) return;
+    if (await _run(() => _service.updateCircle(_circle.id, name: newName, icon: newIcon)) && mounted) {
+      setState(() => _circle = _circle.copyWith(name: newName, icon: newIcon));
     }
   }
 
@@ -616,11 +650,14 @@ class _CircleDetailScreenState extends State<CircleDetailScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(_circle.name, overflow: TextOverflow.ellipsis),
+        title: Text(
+          (_circle.icon != null ? '${_circle.icon} ' : '') + _circle.name,
+          overflow: TextOverflow.ellipsis,
+        ),
         actions: <Widget>[
           if (_circle.isAdmin)
             IconButton(
-              tooltip: 'Rename circle',
+              tooltip: 'Edit circle name and icon',
               constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
               icon: const Icon(Icons.edit_outlined),
               onPressed: _busy ? null : _rename,

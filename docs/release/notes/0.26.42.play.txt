@@ -1,0 +1,1 @@
+You can now change the icon of an existing circle: open a circle you manage, tap the pencil, and pick a new icon or name. The icon also shows next to the circle name.

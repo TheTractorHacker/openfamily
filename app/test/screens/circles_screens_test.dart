@@ -79,6 +79,7 @@ class FakeCircleService implements CircleService {
   @override
   Future<void> updateCircle(String id, {String? name, String? icon}) async {
     calls.add('update:$name');
+    if (icon != null) calls.add('icon:$icon');
   }
 
   @override
@@ -184,6 +185,22 @@ void main() {
     // Server refused turning it back on; stays paused (reload returns the
     // server's view, which the fake still reports as sharing -> rolled back).
     expect(find.text('nope'), findsOneWidget);
+  });
+
+  testWidgets('an admin can change an existing circle icon', (WidgetTester tester) async {
+    final FakeCircleService svc = FakeCircleService();
+    await tester.pumpWidget(_app(CircleDetailScreen(circle: _circle(svc, 0), service: svc)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Edit circle name and icon'));
+    await tester.pumpAndSettle();
+    expect(find.text('Icon'), findsOneWidget);
+    await tester.tap(find.bySemanticsLabel('Icon 🐶'));
+    await tester.pump();
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    expect(svc.calls, contains('icon:🐶'));
+    expect(svc.calls.where((String c) => c.startsWith('update:') && c != 'update:null'), isEmpty);
+    expect(find.textContaining('🐶'), findsWidgets);
   });
 
   testWidgets('admin sees management controls; member does not',
